@@ -1,0 +1,42 @@
+name: Daily SOT Audit
+
+on:
+  schedule:
+    - cron: '0 18 * * *'  # 매일 18:00 UTC (한국 03:00)
+  workflow_dispatch:       # 수동 실행 가능
+
+jobs:
+  daily-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Daily SOT Audit
+        run: |
+          echo "=== Daily SOT Audit ==="
+          echo "날짜: $(date '+%Y-%m-%d')"
+
+          # SOT/index.md 줄 수 확인
+          lines=$(wc -l < SOT/index.md)
+          echo "SOT/index.md 줄 수: $lines"
+          if [ "$lines" -gt 20 ]; then
+            echo "⚠️  SOT/index.md가 너무 깁니다 ($lines줄). 15줄 이내로 압축하세요."
+          fi
+
+          # 오래된 inbox 파일 확인 (3일 이상)
+          old_inbox=$(find SOT/inbox -name "*.md" -mtime +3 2>/dev/null | wc -l)
+          if [ "$old_inbox" -gt 0 ]; then
+            echo "⚠️  SOT/inbox/에 3일 이상 된 파일이 $old_inbox개 있습니다. daily로 압축하세요."
+          fi
+
+          echo "Daily audit 완료"
+
+      - name: Check for new incidents
+        run: |
+          # 최근 24시간 내 새 incident 파일 확인
+          new_incidents=$(find SOT/incidents -name "INC-*.md" -mtime -1 2>/dev/null | wc -l)
+          echo "최근 24시간 내 새 incident: $new_incidents개"
+          if [ "$new_incidents" -gt 0 ]; then
+            echo "💡 새 incident가 있습니다. incidents-to-rule skill 실행을 고려하세요."
+            find SOT/incidents -name "INC-*.md" -mtime -1
+          fi

@@ -1,0 +1,41 @@
+# agents.yml — 활성 에이전트 레지스트리
+# 새 에이전트는 promote-agent 프로세스를 거쳐 사람이 승인한 후에만 추가한다.
+
+agents:
+  - name: feature-builder
+    status: active
+    role: "기존 코드베이스에 새 기능을 추가하거나 버그를 수정한다"
+    file: ".claude/agents/feature-builder.md"
+    triggers: [add-feature workflow, fix-bug workflow]
+    added: "2026-03-17"
+
+  - name: service-builder
+    status: active
+    role: "새 서비스나 모듈의 초기 구조를 설계하고 생성한다"
+    file: ".claude/agents/service-builder.md"
+    triggers: [build-from-scratch workflow]
+    added: "2026-03-17"
+
+  - name: reviewer
+    status: active
+    role: "코드 품질을 검토하고, 문제 패턴을 감지해 incident 초안을 작성한다"
+    file: ".claude/agents/reviewer.md"
+    triggers: [PR 리뷰 요청, feature-builder 작업 완료 후]
+    added: "2026-03-17"
+
+  - name: researcher
+    status: active
+    role: "기술 결정을 위한 정보를 조사하고 구조화된 결과를 제공한다"
+    file: ".claude/agents/researcher.md"
+    triggers: [research-task workflow]
+    added: "2026-03-17"
+
+  - name: docs-writer
+    status: active
+    role: "코드베이스의 문서를 작성하고 최신 상태로 유지한다"
+    file: ".claude/agents/docs-writer.md"
+    triggers: [문서 작성/업데이트 요청]
+    added: "2026-03-17"
+
+# candidates: []   # 승인 대기 에이전트
+# inactive: []     # 비활성 에이전트 (히스토리 보존)

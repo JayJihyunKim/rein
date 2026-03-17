@@ -1,0 +1,26 @@
+.env
+.env.*
+!.env.example
+secrets/
+*.local
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+.next/
+*.egg-info/
+.DS_Store
+mlruns/
+*.pt
+*.pth
+*.pkl
+data/raw/
+data/processed/
+
+# Claude Code 로컬 설정 (공유 불가)
+.claude/settings.local.json
