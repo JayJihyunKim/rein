@@ -38,11 +38,41 @@ repo/
 └── .github/workflows/           ← GitHub Actions 자동화
 ```
 
+## 새 프로젝트에 적용하기
+
+### 방법 A: 템플릿으로 새 프로젝트 생성
+```bash
+gh repo create my-project \
+  --template JayJihyunKim/claude-code-ai-native \
+  --private --clone
+cd my-project
+```
+
+### 방법 B: 기존 프로젝트에 복사
+```bash
+gh repo clone JayJihyunKim/claude-code-ai-native /tmp/ai-native-template
+cp -r /tmp/ai-native-template/.claude  /path/to/your-project/
+cp -r /tmp/ai-native-template/SOT     /path/to/your-project/
+cp -r /tmp/ai-native-template/.github /path/to/your-project/
+cp    /tmp/ai-native-template/AGENTS.md /path/to/your-project/
+rm -rf /tmp/ai-native-template
+```
+
+### 방법 C: Git remote 머지 (템플릿 업데이트 추적)
+```bash
+cd /path/to/your-project
+git remote add template git@github.com:JayJihyunKim/claude-code-ai-native.git
+git fetch template
+git merge template/main --allow-unrelated-histories
+```
+
+> 상세한 커스터마이징 방법은 [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md)를 참고하세요.
+
 ## 빠른 시작
 
 ```bash
-# 1. AGENTS.md와 .claude/CLAUDE.md를 프로젝트에 맞게 수정
-# 2. SOT/index.md에 프로젝트 현재 상태 작성
+# 1. SOT/index.md에 프로젝트 현재 상태 작성
+# 2. AGENTS.md와 .claude/CLAUDE.md를 프로젝트에 맞게 수정
 # 3. Claude Code 실행
 claude
 ```
