@@ -36,6 +36,30 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 
 ---
 
+## SOT 운영 규칙
+
+### 세션 시작 시 (자동 정리)
+1. `SOT/index.md` 읽기
+2. `SOT/inbox/`에 **어제 이전** 파일이 있으면 → `SOT/daily/YYYY-MM-DD.md`로 압축 요약 → inbox 원본 삭제
+3. `SOT/daily/`에 **지난주 이전** 파일이 있으면 → `SOT/weekly/YYYY-WNN.md`로 재요약 → daily 원본 삭제
+
+### 작업 완료 시 (inbox 기록)
+- 작업 1개를 완료할 때마다 `SOT/inbox/YYYY-MM-DD-작업명.md`에 기록한다
+- 포맷:
+  ```
+  # [작업명]
+  - 날짜: YYYY-MM-DD
+  - 유형: feat | fix | refactor | research | docs
+  - 변경 파일: [목록]
+  - 요약: [1~3줄]
+  ```
+- 비정상 종료에 대비하여, 세션 종료가 아닌 **작업 완료 시점**에 즉시 기록한다
+
+### 세션 종료 시
+- `SOT/index.md`를 최신 상태로 갱신한다
+
+---
+
 ## 중요 원칙 (항상 적용)
 
 - 작업 시작 전 반드시 DoD를 명시한다
