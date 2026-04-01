@@ -73,7 +73,10 @@ git merge template/main --allow-unrelated-histories
 ```bash
 # 1. SOT/index.md에 프로젝트 현재 상태 작성
 # 2. AGENTS.md와 .claude/CLAUDE.md를 프로젝트에 맞게 수정
-# 3. Claude Code 실행
+# 3. Stitch MCP 연결 (UI 디자인 스킬 사용 시)
+cp .claude/settings.local.json.example .claude/settings.local.json
+# settings.local.json에 본인의 STITCH_API_KEY 입력
+# 4. Claude Code 실행
 claude
 ```
 
@@ -102,8 +105,36 @@ Before editing:
 | 3단계 | 1~2주차 | rules/, skills/, hooks/ |
 | 4단계 | 1달 후 | .github/workflows/ 자동화 |
 
+## 포함된 스킬
+
+### 프로젝트 운영 스킬
+| 스킬 | 역할 |
+|------|------|
+| `repo-audit` | 저장소 상태 점검 |
+| `pr-review-fixer` | PR 리뷰 코멘트 자동 수정 |
+| `incidents-to-rule` | incident → AGENTS.md 규칙 후보 생성 |
+| `incidents-to-agent` | 반복 패턴 → 에이전트 후보 생성 |
+| `changelog-writer` | CHANGELOG 자동 작성 |
+| `promote-agent` | 에이전트 후보 승격 |
+
+### Stitch UI 디자인 스킬 (Stitch MCP 필요)
+| 스킬 | 역할 |
+|------|------|
+| `stitch-design` | 디자인 시스템 총괄, 프롬프트 강화 |
+| `stitch-loop` | 바톤 패턴 멀티페이지 자동 생성 |
+| `design-md` | 프로젝트 → DESIGN.md 추출 |
+| `enhance-prompt` | 모호한 UI 요청 → 정교한 프롬프트 변환 |
+| `react-components` | 디자인 → React 컴포넌트 코드 변환 |
+| `shadcn-ui` | shadcn/ui 컴포넌트 통합 가이드 |
+| `taste-design` | 프리미엄 안티제네릭 디자인 기준 |
+| `remotion` | 워크스루 영상 생성 |
+
+> Stitch 스킬은 호출 시에만 로드되므로 미사용 시 컨텍스트를 차지하지 않습니다.
+> Stitch MCP 없이도 `enhance-prompt`, `taste-design`, `shadcn-ui`는 독립적으로 사용 가능합니다.
+
 ## 참고 저장소
 
 - [agentsmd/agents.md](https://agents.md) — AGENTS.md 계층 구조
 - [getsentry/sentry](https://github.com/getsentry/sentry) — 실사용 AGENTS.md 예시
 - [anthropics/skills](https://github.com/anthropics/skills) — skill 정의 방식
+- [google-labs-code/stitch-skills](https://github.com/google-labs-code/stitch-skills) — Stitch UI 디자인 스킬

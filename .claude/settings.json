@@ -23,7 +23,8 @@
       "Bash(mkdir *)",
       "Bash(touch *)",
       "Bash(cp *)",
-      "Bash(mv *)"
+      "Bash(mv *)",
+      "mcp__StitchMCP__*"
     ],
     "ask": [
       "Bash(git push *)",
@@ -39,6 +40,15 @@
       "Read(./secrets/**)",
       "Read(~/.ssh/**)"
     ]
+  },
+  "mcpServers": {
+    "StitchMCP": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/stitch-mcp@latest"],
+      "env": {
+        "STITCH_API_KEY": "${STITCH_API_KEY}"
+      }
+    }
   },
   "hooks": {
     "PostToolUse": [

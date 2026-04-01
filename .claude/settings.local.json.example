@@ -1,0 +1,5 @@
+{
+  "env": {
+    "STITCH_API_KEY": "YOUR_STITCH_API_KEY_HERE"
+  }
+}
