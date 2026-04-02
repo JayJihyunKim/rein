@@ -38,10 +38,12 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 
 ## SOT 운영 규칙
 
-### 세션 시작 시 (자동 정리)
+### 세션 시작 시 (hook이 자동 실행)
 1. `SOT/index.md` 읽기
-2. `SOT/inbox/`에 **어제 이전** 파일이 있으면 → `SOT/daily/YYYY-MM-DD.md`로 압축 요약 → inbox 원본 삭제
-3. `SOT/daily/`에 **지난주 이전** 파일이 있으면 → `SOT/weekly/YYYY-WNN.md`로 재요약 → daily 원본 삭제
+2. `pre-edit-dod-gate.sh`가 세션 첫 Edit/Write 시 자동으로 아래를 수행:
+   - `SOT/inbox/`에 **어제 이전** 파일 → `SOT/daily/YYYY-MM-DD.md`로 병합 → inbox 원본 삭제
+   - `SOT/daily/`에 **7일 이전** 파일 → `SOT/weekly/YYYY-WNN.md`로 병합 → daily 원본 삭제
+   - 하루 1회만 실행 (마커 파일로 중복 방지)
 
 ### 작업 완료 시 (inbox 기록)
 - 작업 1개를 완료할 때마다 `SOT/inbox/YYYY-MM-DD-작업명.md`에 기록한다
