@@ -118,3 +118,42 @@
 - 작업 흐름(즉시): 수정 → 재시도 → 작업 계속
 - 학습 흐름(비동기): 로그 누적 → 임계값 도달 시 규칙 승격
 - 두 흐름은 독립적. 작업 재개를 학습 완료까지 기다리지 않음
+
+---
+
+## Rev 5 (2026-04-02) — Codex 검토 반영: 미사용 이벤트 활용 + 추가 gate
+
+### 문제
+- Rev 4에서 "hook으로 더 강제할 규칙은 거의 없다"고 판단
+- Codex(gpt-5.4) 검토 결과: **틀림**. Stop 이벤트, PreToolUse/Bash의 commit gate 등 미활용 메커니즘이 있음
+
+### Codex 피드백 요약
+1. Codex 리뷰 강제: git commit 시 review stamp 파일 검사로 hook 차단 **가능**
+2. inbox 기록 강제: Stop hook에서 오늘 날짜 inbox 파일 없으면 세션 종료 차단 **가능**
+3. index.md 갱신: Stop hook에서 mtime 검사로 정상 종료 시 차단 **가능** (비정상 종료는 불가)
+
+### 추가/변경 사항
+
+#### 1. Codex 리뷰 stamp gate (pre-bash-guard.sh 강화)
+- Before: git commit 시 메시지 포맷만 검증
+- After: git commit 시 `SOT/dod/.codex-reviewed` stamp 파일 존재 + 1시간 이내 여부 검사
+- stamp 없거나 만료 → exit 2 차단
+- stamp는 Codex 리뷰 완료 후 `touch SOT/dod/.codex-reviewed`로 생성
+
+#### 2. Stop 이벤트 활용 (stop-session-gate.sh 신규)
+- Before: Rev 2에서 "Stop은 비정상 종료 시 미실행이라 사용 안 함"으로 제거
+- After: 정상 종료 gate로 복원. 비정상 종료는 한계로 수용
+- 검사 항목: 오늘 날짜 inbox 파일 존재 + index.md 오늘 수정 여부
+- 미충족 시 exit 2로 세션 종료 차단
+
+#### 3. 적용 후 커버리지 변화
+| 규칙 | Rev 4 | Rev 5 | 방식 |
+|------|-------|-------|------|
+| Codex 리뷰 | ~40% (prompt) | ~85% (stamp gate) | pre-bash-guard |
+| inbox 기록 | ~50% (prompt) | ~80% (Stop gate) | stop-session-gate |
+| index.md 갱신 | ~40% (prompt) | ~75% (Stop gate) | stop-session-gate |
+
+#### 4. 알려진 한계 (변경 없음)
+- 비정상 종료 시 Stop hook 미실행
+- stamp를 수동 touch로 우회 가능 (악의적 우회)
+- 최종 보장은 git pre-commit hook + CI 필요

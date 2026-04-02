@@ -43,6 +43,27 @@ if echo "$COMMAND" | grep -qE "git (merge|rebase|am)"; then
   exit 0
 fi
 
+# --- Codex 리뷰 stamp 검사 (git commit 시) ---
+if echo "$COMMAND" | grep -qE "git commit"; then
+  REVIEW_STAMP="$PROJECT_DIR/SOT/dod/.codex-reviewed"
+  if [ ! -f "$REVIEW_STAMP" ]; then
+    echo "BLOCKED: Codex 코드 리뷰가 실행되지 않았습니다." >&2
+    echo "커밋 전에 /codex 스킬로 코드 리뷰를 실행하세요." >&2
+    echo "리뷰 완료 후 SOT/dod/.codex-reviewed 파일이 생성되어야 합니다." >&2
+    log_block "Codex 리뷰 미실행" "$COMMAND"
+    exit 2
+  else
+    # stamp가 1시간(3600초) 이내인지 확인 (오래된 stamp 방지)
+    STAMP_AGE=$(( $(date +%s) - $(stat -f %m "$REVIEW_STAMP" 2>/dev/null || stat -c %Y "$REVIEW_STAMP" 2>/dev/null || echo 0) ))
+    if [ "$STAMP_AGE" -gt 3600 ]; then
+      echo "BLOCKED: Codex 리뷰 stamp가 1시간 이상 경과했습니다. 다시 리뷰를 실행하세요." >&2
+      log_block "Codex 리뷰 stamp 만료" "$COMMAND"
+      exit 2
+    fi
+    # 커밋 성공 후 stamp 삭제 (1회성)는 post hook에서 처리하거나 다음 DoD 작성 시 초기화
+  fi
+fi
+
 # git commit 감지 → 메시지 포맷 검증
 if echo "$COMMAND" | grep -qE "git commit"; then
   # HEREDOC 커밋 (cat <<'EOF' ... EOF) 에서 첫 줄 추출
