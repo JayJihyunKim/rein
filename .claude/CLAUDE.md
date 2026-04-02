@@ -60,9 +60,23 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 
 ---
 
-## 중요 원칙 (항상 적용)
+## 강제 작업 시퀀스 (hook이 위반을 차단합니다)
 
-- 작업 시작 전 반드시 DoD를 명시한다
-- Self-review 없이 작업을 완료로 표시하지 않는다
-- 빠뜨린 규칙이 있으면 `SOT/incidents/` 초안을 즉시 작성한다
-- `SOT/index.md`는 세션 종료 시 최신 상태로 갱신한다
+아래 순서를 반드시 따른다. Hook이 도구 호출을 차단(exit 2)하므로 건너뛸 수 없다.
+
+1. **READ** `SOT/index.md` — 항상 첫 번째
+2. **WRITE** `SOT/dod/dod-[작업명].md` — 소스 코드 편집 전 필수
+   → `pre-edit-dod-gate.sh`가 DoD 파일 없으면 Edit/Write/MultiEdit를 차단함
+   → DoD는 inbox과 분리. inbox은 "작업 완료 기록", dod는 "작업 시작 전 기준"
+3. **IMPLEMENT** — 소스 코드 편집 가능
+4. **SELF-REVIEW** — AGENTS.md §5 항목을 명시적으로 답변
+5. **WRITE** `SOT/inbox/YYYY-MM-DD-[작업명].md` — 작업 완료 기록
+   → 비정상 종료 대비. 세션 종료가 아닌 작업 완료 시점에 즉시 기록
+6. **UPDATE** `SOT/index.md` — 세션 종료 전
+
+**차단 시 행동 규칙**:
+- hook이 차단(exit 2)하면 작업을 멈추지 않는다
+- 차단 이유를 확인하고, 원인을 수정한 뒤 즉시 재시도한다
+- 차단 로그는 hook이 `SOT/incidents/blocks.log`에 자동 기록한다
+- 같은 위반 2회 누적 시 `incidents-to-rule` 실행을 권장받는다
+- 같은 위반 3회 누적 시 `incidents-to-agent` 실행을 권장받는다
