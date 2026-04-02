@@ -69,10 +69,14 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
    → `pre-edit-dod-gate.sh`가 DoD 파일 없으면 Edit/Write/MultiEdit를 차단함
    → DoD는 inbox과 분리. inbox은 "작업 완료 기록", dod는 "작업 시작 전 기준"
 3. **IMPLEMENT** — 소스 코드 편집 가능
-4. **SELF-REVIEW** — AGENTS.md §5 항목을 명시적으로 답변
-5. **WRITE** `SOT/inbox/YYYY-MM-DD-[작업명].md` — 작업 완료 기록
+4. **CODEX REVIEW** — 구현 완료 후 반드시 Codex로 코드 리뷰 실행
+   → `/codex` 스킬로 변경된 파일에 대해 리뷰 요청
+   → 리뷰 결과에서 수정 필요 사항이 있으면 반드시 반영
+5. **FIX** — Codex 리뷰 결과 반영하여 코드 수정
+6. **SELF-REVIEW** — AGENTS.md §5 항목을 명시적으로 답변
+7. **WRITE** `SOT/inbox/YYYY-MM-DD-[작업명].md` — 작업 완료 기록
    → 비정상 종료 대비. 세션 종료가 아닌 작업 완료 시점에 즉시 기록
-6. **UPDATE** `SOT/index.md` — 세션 종료 전
+8. **UPDATE** `SOT/index.md` — 세션 종료 전
 
 **차단 시 행동 규칙**:
 - hook이 차단(exit 2)하면 작업을 멈추지 않는다
