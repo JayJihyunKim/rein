@@ -43,9 +43,11 @@ repo/
 ### 설치
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JayJihyunKim/claude-code-ai-native/main/scripts/claude-init.sh \
-  -o /usr/local/bin/claude-init && chmod +x /usr/local/bin/claude-init
+gh api repos/JayJihyunKim/claude-code-ai-native/contents/scripts/claude-init.sh \
+  --jq '.content' | base64 -d > /usr/local/bin/claude-init && chmod +x /usr/local/bin/claude-init
 ```
+
+> `gh` CLI가 필요합니다. (`brew install gh && gh auth login`)
 
 ### 새 프로젝트 생성
 
