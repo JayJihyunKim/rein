@@ -17,7 +17,7 @@ warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 
 VERSION="0.1.0"
-TEMPLATE_REPO="${CLAUDE_TEMPLATE_REPO:-https://github.com/jihyun/claude-code-ai-native.git}"
+TEMPLATE_REPO="${CLAUDE_TEMPLATE_REPO:-https://github.com/JayJihyunKim/claude-code-ai-native.git}"
 
 # ---------------------------------------------------------------------------
 # Temp dir + cleanup
