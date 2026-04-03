@@ -40,30 +40,49 @@ repo/
 
 ## 새 프로젝트에 적용하기
 
-### 방법 A: 템플릿으로 새 프로젝트 생성
+### 설치
+
 ```bash
-gh repo create my-project \
-  --template JayJihyunKim/claude-code-ai-native \
-  --private --clone
-cd my-project
+curl -fsSL https://raw.githubusercontent.com/JayJihyunKim/claude-code-ai-native/main/scripts/claude-init.sh \
+  -o /usr/local/bin/claude-init && chmod +x /usr/local/bin/claude-init
 ```
 
-### 방법 B: 기존 프로젝트에 복사
+### 새 프로젝트 생성
+
 ```bash
-gh repo clone JayJihyunKim/claude-code-ai-native /tmp/ai-native-template
-cp -r /tmp/ai-native-template/.claude  /path/to/your-project/
-cp -r /tmp/ai-native-template/SOT     /path/to/your-project/
-cp -r /tmp/ai-native-template/.github /path/to/your-project/
-cp    /tmp/ai-native-template/AGENTS.md /path/to/your-project/
-rm -rf /tmp/ai-native-template
+claude-init new my-project
+cd my-project && git init
 ```
 
-### 방법 C: Git remote 머지 (템플릿 업데이트 추적)
+템플릿의 `.claude/`, `SOT/`, `AGENTS.md`가 자동으로 복사되고 `{{PROJECT_NAME}}`이 프로젝트명으로 치환됩니다.
+
+### 기존 프로젝트에 병합
+
 ```bash
-cd /path/to/your-project
-git remote add template git@github.com:JayJihyunKim/claude-code-ai-native.git
-git fetch template
-git merge template/main --allow-unrelated-histories
+cd existing-project
+claude-init merge
+```
+
+이미 존재하는 파일은 `[overwrite / skip / diff]` 프롬프트로 하나씩 확인합니다.
+
+### 템플릿 업데이트
+
+```bash
+cd existing-project
+claude-init update
+```
+
+템플릿 레포의 최신 버전과 비교하여 변경된 파일만 업데이트합니다. 동일한 파일은 건너뛰고, 다른 파일만 프롬프트로 확인합니다.
+
+### 환경변수
+
+| 변수 | 설명 | 기본값 |
+|------|------|--------|
+| `CLAUDE_TEMPLATE_REPO` | 템플릿 Git 레포 URL | `https://github.com/JayJihyunKim/claude-code-ai-native.git` |
+
+Fork하거나 별도 템플릿 레포를 사용하려면:
+```bash
+CLAUDE_TEMPLATE_REPO="https://github.com/my-org/my-template.git" claude-init new my-project
 ```
 
 > 상세한 커스터마이징 방법은 [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md)를 참고하세요.
