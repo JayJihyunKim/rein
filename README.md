@@ -79,11 +79,11 @@ claude-init update
 
 | 변수 | 설명 | 기본값 |
 |------|------|--------|
-| `CLAUDE_TEMPLATE_REPO` | 템플릿 Git 레포 URL | `https://github.com/JayJihyunKim/claude-code-ai-native.git` |
+| `CLAUDE_TEMPLATE_REPO` | 템플릿 Git 레포 URL | `git@github.com:JayJihyunKim/claude-code-ai-native.git` |
 
 Fork하거나 별도 템플릿 레포를 사용하려면:
 ```bash
-CLAUDE_TEMPLATE_REPO="https://github.com/my-org/my-template.git" claude-init new my-project
+CLAUDE_TEMPLATE_REPO="git@github.com:my-org/my-template.git" claude-init new my-project
 ```
 
 > 상세한 커스터마이징 방법은 [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md)를 참고하세요.
