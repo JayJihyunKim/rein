@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Colors (disabled if not a terminal)
+if [[ -t 2 ]]; then
+  GREEN='\033[0;32m'
+  YELLOW='\033[0;33m'
+  RED='\033[0;31m'
+  BOLD='\033[1m'
+  NC='\033[0m'
+else
+  GREEN='' YELLOW='' RED='' BOLD='' NC=''
+fi
+
+info()  { echo -e "${GREEN}$*${NC}" >&2; }
+warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
+error() { echo -e "${RED}Error: $*${NC}" >&2; }
+
 VERSION="0.1.0"
 TEMPLATE_REPO="${CLAUDE_TEMPLATE_REPO:-https://github.com/jihyun/claude-code-ai-native.git}"
 
@@ -31,7 +46,7 @@ clone_template() {
   TMPDIR_PATH="$(mktemp -d)"
   trap cleanup EXIT
 
-  echo "Cloning template from $TEMPLATE_REPO ..." >&2
+  info "Cloning template from $TEMPLATE_REPO ..."
   git clone --depth 1 --quiet "$TEMPLATE_REPO" "$TMPDIR_PATH/template" >&2
 
   TEMPLATE_DIR="$TMPDIR_PATH/template"
@@ -163,7 +178,7 @@ prompt_conflict() {
 
   # Non-interactive fallback
   if ! _has_tty; then
-    echo "Warning: no tty available; skipping '$rel_path'" >&2
+    warn "no tty available; skipping '$rel_path'"
     echo "skip"
     return
   fi
@@ -283,7 +298,7 @@ cmd_new() {
   local dest_dir="$project_name"
 
   if [[ -e "$dest_dir" ]]; then
-    echo "Error: directory '$dest_dir' already exists." >&2
+    error "directory '$dest_dir' already exists."
     exit 1
   fi
 
@@ -302,11 +317,11 @@ cmd_new() {
   substitute_vars "$dest_dir" "$project_name"
 
   echo ""
-  echo "Created project '$project_name' with $file_count files."
+  info "Created project '$project_name' with $file_count files."
   echo ""
-  echo "Next steps:"
-  echo "  cd $project_name"
-  echo "  git init"
+  info "Next steps:"
+  info "  cd $project_name"
+  info "  git init"
 }
 
 # ---------------------------------------------------------------------------
@@ -316,7 +331,7 @@ cmd_new() {
 cmd_merge() {
   # Accept both .git directory (normal repo) and .git file (worktree/submodule)
   if [[ ! -e ".git" ]]; then
-    echo "Error: not a git repository (no .git found in current directory)." >&2
+    error "not a git repository (no .git found in current directory)."
     exit 1
   fi
 
@@ -349,12 +364,13 @@ cmd_merge() {
           overwrite)
             copy_file "$TEMPLATE_DIR" "$PWD" "$rel_path"
             overwritten=$((overwritten + 1))
+            echo -e "  ${YELLOW}Overwritten${NC}: $rel_path" >&2
             ;;
           skip)
             skipped=$((skipped + 1))
             ;;
           quit)
-            echo "Aborted by user."
+            info "Aborted by user."
             exit 0
             ;;
         esac
@@ -363,6 +379,7 @@ cmd_merge() {
       # New file — copy without prompting
       copy_file "$TEMPLATE_DIR" "$PWD" "$rel_path"
       added=$((added + 1))
+      echo -e "  ${GREEN}Added${NC}: $rel_path" >&2
     fi
   done < <(list_copy_files "$TEMPLATE_DIR")
 
@@ -370,7 +387,7 @@ cmd_merge() {
   substitute_vars "$PWD" "$project_name"
 
   echo ""
-  echo "Done! Added: $added, Overwritten: $overwritten, Skipped/Identical: $skipped"
+  info "Done! Added: $added, Overwritten: $overwritten, Skipped/Identical: $skipped"
 }
 
 # ---------------------------------------------------------------------------
@@ -385,7 +402,7 @@ main() {
   case "$1" in
     new)
       if [[ $# -lt 2 ]]; then
-        echo "Error: project name required" >&2
+        error "project name required"
         echo "Usage: claude-init new <project-name>" >&2
         exit 1
       fi
@@ -404,7 +421,7 @@ main() {
       usage
       ;;
     *)
-      echo "Error: unknown command '$1'" >&2
+      error "unknown command '$1'"
       usage
       exit 1
       ;;
