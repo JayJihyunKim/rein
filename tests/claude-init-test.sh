@@ -22,12 +22,12 @@ assert_eq() {
   local actual="$3"
   if [[ "$expected" == "$actual" ]]; then
     echo "  PASS: $description"
-    ((PASS++))
+    PASS=$((PASS + 1))
   else
     echo "  FAIL: $description"
     echo "        expected: $expected"
     echo "        actual:   $actual"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
   fi
 }
 
@@ -37,12 +37,12 @@ assert_contains() {
   local haystack="$3"
   if [[ "$haystack" == *"$needle"* ]]; then
     echo "  PASS: $description"
-    ((PASS++))
+    PASS=$((PASS + 1))
   else
     echo "  FAIL: $description"
     echo "        expected to contain: $needle"
     echo "        actual output:       $haystack"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
   fi
 }
 
@@ -51,11 +51,11 @@ assert_file_exists() {
   local path="$2"
   if [[ -f "$path" ]]; then
     echo "  PASS: $description"
-    ((PASS++))
+    PASS=$((PASS + 1))
   else
     echo "  FAIL: $description"
     echo "        file not found: $path"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
   fi
 }
 
@@ -64,11 +64,11 @@ assert_dir_exists() {
   local path="$2"
   if [[ -d "$path" ]]; then
     echo "  PASS: $description"
-    ((PASS++))
+    PASS=$((PASS + 1))
   else
     echo "  FAIL: $description"
     echo "        directory not found: $path"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
   fi
 }
 
@@ -77,11 +77,11 @@ assert_file_missing() {
   local path="$2"
   if [[ ! -e "$path" ]]; then
     echo "  PASS: $description"
-    ((PASS++))
+    PASS=$((PASS + 1))
   else
     echo "  FAIL: $description"
     echo "        expected to be absent but found: $path"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
   fi
 }
 
@@ -91,12 +91,12 @@ assert_exit_code() {
   local actual_code="$3"
   if [[ "$expected_code" == "$actual_code" ]]; then
     echo "  PASS: $description"
-    ((PASS++))
+    PASS=$((PASS + 1))
   else
     echo "  FAIL: $description"
     echo "        expected exit code: $expected_code"
     echo "        actual exit code:   $actual_code"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
   fi
 }
 
