@@ -43,9 +43,7 @@ repo/
 ### 설치
 
 ```bash
-gh api repos/JayJihyunKim/claude-code-ai-native/contents/scripts/claude-init.sh \
-  --jq '.content' | base64 -d | sudo tee /usr/local/bin/claude-init > /dev/null \
-  && sudo chmod +x /usr/local/bin/claude-init
+gh api repos/JayJihyunKim/claude-code-ai-native/contents/scripts/claude-init.sh --jq '.content' | base64 -d | sudo tee /usr/local/bin/claude-init > /dev/null && sudo chmod +x /usr/local/bin/claude-init
 ```
 
 > `gh` CLI가 필요합니다. (`brew install gh && gh auth login`)
