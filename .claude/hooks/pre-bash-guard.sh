@@ -43,24 +43,53 @@ if echo "$COMMAND" | grep -qE "git (merge|rebase|am)"; then
   exit 0
 fi
 
-# --- Codex 리뷰 stamp 검사 (git commit 시) ---
-if echo "$COMMAND" | grep -qE "git commit"; then
+# --- Codex 리뷰 stamp 공통 검사 함수 ---
+check_review_stamp() {
+  local context="$1"  # "test" 또는 "commit"
   REVIEW_STAMP="$PROJECT_DIR/SOT/dod/.codex-reviewed"
+  DOD_DIR="$PROJECT_DIR/SOT/dod"
+
+  # DoD 파일이 없으면 (작업 중이 아니면) 검사 스킵
+  DOD_EXISTS=false
+  if [ -d "$DOD_DIR" ]; then
+    for f in "$DOD_DIR"/dod-*.md; do
+      [ -f "$f" ] || continue
+      DOD_EXISTS=true
+      break
+    done
+  fi
+  [ "$DOD_EXISTS" = false ] && return 0
+
   if [ ! -f "$REVIEW_STAMP" ]; then
     echo "BLOCKED: Codex 코드 리뷰가 실행되지 않았습니다." >&2
-    echo "커밋 전에 /codex 스킬로 코드 리뷰를 실행하세요." >&2
+    echo "${context} 전에 /codex 스킬로 코드 리뷰를 실행하세요." >&2
     echo "리뷰 완료 후 SOT/dod/.codex-reviewed 파일이 생성되어야 합니다." >&2
-    log_block "Codex 리뷰 미실행" "$COMMAND"
+    log_block "Codex 리뷰 미실행 (${context})" "$COMMAND"
+    return 1
+  fi
+
+  # stamp가 1시간(3600초) 이내인지 확인 (오래된 stamp 방지)
+  STAMP_AGE=$(( $(date +%s) - $(stat -f %m "$REVIEW_STAMP" 2>/dev/null || stat -c %Y "$REVIEW_STAMP" 2>/dev/null || echo 0) ))
+  if [ "$STAMP_AGE" -gt 3600 ]; then
+    echo "BLOCKED: Codex 리뷰 stamp가 1시간 이상 경과했습니다. 다시 리뷰를 실행하세요." >&2
+    log_block "Codex 리뷰 stamp 만료 (${context})" "$COMMAND"
+    return 1
+  fi
+
+  return 0
+}
+
+# --- Codex 리뷰 stamp 검사 (테스트 실행 시) ---
+if echo "$COMMAND" | grep -qE "(pytest|jest|vitest|mocha|npm run test|npm test|yarn test|pnpm test|python -m pytest|npx jest|npx vitest)"; then
+  if ! check_review_stamp "테스트 실행"; then
     exit 2
-  else
-    # stamp가 1시간(3600초) 이내인지 확인 (오래된 stamp 방지)
-    STAMP_AGE=$(( $(date +%s) - $(stat -f %m "$REVIEW_STAMP" 2>/dev/null || stat -c %Y "$REVIEW_STAMP" 2>/dev/null || echo 0) ))
-    if [ "$STAMP_AGE" -gt 3600 ]; then
-      echo "BLOCKED: Codex 리뷰 stamp가 1시간 이상 경과했습니다. 다시 리뷰를 실행하세요." >&2
-      log_block "Codex 리뷰 stamp 만료" "$COMMAND"
-      exit 2
-    fi
-    # 커밋 성공 후 stamp 삭제 (1회성)는 post hook에서 처리하거나 다음 DoD 작성 시 초기화
+  fi
+fi
+
+# --- Codex 리뷰 stamp 검사 (git commit 시) ---
+if echo "$COMMAND" | grep -qE "git commit"; then
+  if ! check_review_stamp "커밋"; then
+    exit 2
   fi
 fi
 
