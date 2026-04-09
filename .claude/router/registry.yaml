@@ -1,0 +1,342 @@
+# Smart Router — 메타데이터 레지스트리
+# 각 에이전트/스킬/MCP의 매칭 조건을 선언한다.
+# auto_generated: true인 항목은 description에서 자동 추출된 것.
+# confidence: 자동 생성 신뢰도 (0~1). 사용자 보정 시 1.0으로 상승.
+
+# ============================================================
+# Layer 1: 프로젝트 에이전트
+# ============================================================
+
+- id: agent:feature-builder
+  layer: agent
+  keywords: [기능, 구현, 추가, 수정, 버그, fix, feature, implement, 리팩토링, refactor]
+  file_patterns: ["src/**", "app/**", "services/**", "apps/**", "lib/**"]
+  task_types: [add-feature, fix-bug]
+  domains: [backend, frontend, python, typescript, general]
+  priority: 0.8
+  requires: []
+  conflicts: [agent:service-builder]
+  auto_generated: false
+  confidence: 1.0
+
+- id: agent:service-builder
+  layer: agent
+  keywords: [새 서비스, 새 모듈, 새 앱, 초기 구조, scaffold, 생성, create service]
+  file_patterns: []
+  task_types: [build-from-scratch]
+  domains: [backend, frontend, python, typescript, general]
+  priority: 0.8
+  requires: []
+  conflicts: [agent:feature-builder]
+  auto_generated: false
+  confidence: 1.0
+
+- id: agent:reviewer
+  layer: agent
+  keywords: [리뷰, review, 코드 리뷰, PR, 품질, 검토, incident]
+  file_patterns: []
+  task_types: []
+  domains: [general]
+  priority: 0.7
+  requires: []
+  conflicts: []
+  auto_generated: false
+  confidence: 1.0
+
+- id: agent:researcher
+  layer: agent
+  keywords: [조사, 비교, research, investigate, 라이브러리, 프레임워크, 아키텍처, 트렌드]
+  file_patterns: []
+  task_types: [research-task]
+  domains: [general]
+  priority: 0.7
+  requires: []
+  conflicts: []
+  auto_generated: false
+  confidence: 1.0
+
+- id: agent:docs-writer
+  layer: agent
+  keywords: [문서, 문서화, README, changelog, 가이드, documentation, docs]
+  file_patterns: ["*.md", "docs/**"]
+  task_types: []
+  domains: [general]
+  priority: 0.7
+  requires: []
+  conflicts: []
+  auto_generated: false
+  confidence: 1.0
+
+# ============================================================
+# Layer 3: SuperClaude 스킬 (구현/도메인 특화만)
+# ============================================================
+
+# --- 디버깅/품질 ---
+
+- id: skill:systematic-debugging
+  layer: skill
+  keywords: [버그, bug, error, 에러, 실패, failure, 디버깅, debug, stack trace, 예외]
+  file_patterns: []
+  task_types: [fix-bug]
+  domains: [general]
+  priority: 0.8
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.9
+
+- id: skill:test-driven-development
+  layer: skill
+  keywords: [테스트, TDD, test, 단위테스트, coverage, 커버리지, pytest, jest]
+  file_patterns: ["*.test.*", "*.spec.*", "tests/**", "__tests__/**"]
+  task_types: [add-feature, fix-bug]
+  domains: [general]
+  priority: 0.7
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.9
+
+- id: skill:verification-before-completion
+  layer: skill
+  keywords: [검증, verify, 확인, 완료, completion, 테스트 통과]
+  file_patterns: []
+  task_types: [add-feature, fix-bug, build-from-scratch]
+  domains: [general]
+  priority: 0.6
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.8
+
+# --- 프론트엔드 ---
+
+- id: skill:frontend-design
+  layer: skill
+  keywords: [UI, 프론트엔드, frontend, 컴포넌트, component, 페이지, page, 디자인, 인터페이스]
+  file_patterns: ["*.tsx", "*.jsx", "*.vue", "*.svelte", "components/**", "pages/**", "app/**/*.tsx"]
+  task_types: [add-feature, build-from-scratch]
+  domains: [frontend]
+  priority: 0.8
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.8
+
+- id: skill:shadcn-ui
+  layer: skill
+  keywords: [shadcn, ui 라이브러리, 컴포넌트 라이브러리, radix, tailwind 컴포넌트]
+  file_patterns: ["components/ui/**", "*.tsx"]
+  task_types: [add-feature]
+  domains: [frontend]
+  priority: 0.6
+  requires: [skill:frontend-design]
+  conflicts: []
+  auto_generated: true
+  confidence: 0.7
+
+# --- 백엔드 ---
+
+- id: skill:api-design-principles
+  layer: skill
+  keywords: [API, REST, GraphQL, 엔드포인트, endpoint, 라우터, router, 스키마]
+  file_patterns: ["*/routers/**", "*/routes/**", "*/api/**", "*/schemas/**"]
+  task_types: [add-feature, build-from-scratch]
+  domains: [backend]
+  priority: 0.7
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.8
+
+- id: skill:architecture-patterns
+  layer: skill
+  keywords: [아키텍처, architecture, 클린, hexagonal, DDD, 도메인, 레이어]
+  file_patterns: ["*/domain/**", "*/application/**", "*/infrastructure/**"]
+  task_types: [build-from-scratch]
+  domains: [backend]
+  priority: 0.6
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.7
+
+# --- 언어 특화 ---
+
+- id: skill:python-pro
+  layer: skill
+  keywords: [python, 파이썬, decorator, async, generator, pytest, pip, poetry]
+  file_patterns: ["*.py", "pyproject.toml", "requirements*.txt"]
+  task_types: [add-feature, fix-bug, build-from-scratch]
+  domains: [python, backend]
+  priority: 0.7
+  requires: []
+  conflicts: [skill:typescript-pro, skill:javascript-pro]
+  auto_generated: true
+  confidence: 0.9
+
+- id: skill:typescript-pro
+  layer: skill
+  keywords: [typescript, 타입스크립트, type, interface, generic, tsx]
+  file_patterns: ["*.ts", "*.tsx", "tsconfig.json"]
+  task_types: [add-feature, fix-bug, build-from-scratch]
+  domains: [typescript, frontend, backend]
+  priority: 0.7
+  requires: []
+  conflicts: [skill:python-pro]
+  auto_generated: true
+  confidence: 0.9
+
+- id: skill:javascript-pro
+  layer: skill
+  keywords: [javascript, 자바스크립트, ES6, async, promise, node]
+  file_patterns: ["*.js", "*.mjs", "*.cjs"]
+  task_types: [add-feature, fix-bug]
+  domains: [javascript, frontend, backend]
+  priority: 0.6
+  requires: []
+  conflicts: [skill:python-pro]
+  auto_generated: true
+  confidence: 0.9
+
+# --- 인프라/배포 ---
+
+- id: skill:mcp-builder
+  layer: skill
+  keywords: [MCP, 서버, model context protocol, tool, 플러그인]
+  file_patterns: ["*/mcp/**", "mcp-*.py", "mcp-*.ts"]
+  task_types: [build-from-scratch]
+  domains: [backend]
+  priority: 0.7
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.8
+
+# --- 조사/문서 ---
+
+- id: skill:sc:research
+  layer: skill
+  keywords: [조사, research, 검색, search, 분석, 최신, 트렌드, 비교]
+  file_patterns: []
+  task_types: [research-task]
+  domains: [general]
+  priority: 0.7
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.8
+
+- id: skill:sc:document
+  layer: skill
+  keywords: [문서, documentation, README, API 문서, 가이드]
+  file_patterns: ["*.md", "docs/**"]
+  task_types: []
+  domains: [general]
+  priority: 0.6
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.8
+
+# --- 코드 품질 ---
+
+- id: skill:simplify
+  layer: skill
+  keywords: [간소화, simplify, 리팩토링, refactor, 중복, 정리, cleanup]
+  file_patterns: []
+  task_types: [add-feature, fix-bug]
+  domains: [general]
+  priority: 0.5
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.7
+
+- id: skill:webapp-testing
+  layer: skill
+  keywords: [E2E, 브라우저 테스트, playwright, 통합 테스트, UI 테스트, 스크린샷]
+  file_patterns: ["*.test.ts", "*.spec.ts", "e2e/**", "playwright/**"]
+  task_types: [add-feature]
+  domains: [frontend]
+  priority: 0.6
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.8
+
+# ============================================================
+# Layer 4: MCP 서버
+# ============================================================
+
+- id: mcp:context7
+  layer: mcp
+  keywords: [라이브러리, 프레임워크, 공식 문서, documentation, import, require, API, SDK, 패키지]
+  file_patterns: ["package.json", "pyproject.toml", "requirements*.txt", "*.config.*"]
+  task_types: [add-feature, fix-bug, build-from-scratch, research-task]
+  domains: [general]
+  priority: 0.7
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.9
+
+- id: mcp:sequential
+  layer: mcp
+  keywords: [분석, 디버깅, 아키텍처, 설계, 복합, 다단계, 추론, 시스템, 성능, 병목]
+  file_patterns: []
+  task_types: [fix-bug, research-task]
+  domains: [general]
+  priority: 0.6
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.8
+
+- id: mcp:playwright
+  layer: mcp
+  keywords: [브라우저, E2E, 스크린샷, UI 테스트, 접근성, WCAG, 폼, 클릭, 렌더링]
+  file_patterns: ["*.tsx", "*.jsx", "*.vue", "pages/**", "components/**", "e2e/**"]
+  task_types: [add-feature]
+  domains: [frontend]
+  priority: 0.6
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.8
+
+- id: mcp:tavily
+  layer: mcp
+  keywords: [검색, 웹 검색, 최신 정보, 트렌드, 뉴스, 현재, 실시간, 리서치]
+  file_patterns: []
+  task_types: [research-task]
+  domains: [general]
+  priority: 0.7
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.9
+
+- id: mcp:serena
+  layer: mcp
+  keywords: [심볼, 리네임, 참조, LSP, 프로젝트 메모리, 세션, 대규모 코드베이스]
+  file_patterns: []
+  task_types: [add-feature, fix-bug]
+  domains: [general]
+  priority: 0.5
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.7
+
+- id: mcp:stitch
+  layer: mcp
+  keywords: [디자인, 디자인 시스템, 화면 생성, 스크린, UI 생성, 프로토타입]
+  file_patterns: [".stitch/**", "DESIGN.md"]
+  task_types: [build-from-scratch, add-feature]
+  domains: [frontend]
+  priority: 0.6
+  requires: []
+  conflicts: []
+  auto_generated: true
+  confidence: 0.7
