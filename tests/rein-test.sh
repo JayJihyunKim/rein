@@ -139,6 +139,18 @@ assert_file_missing ".claude/settings.local.json should not exist"      "$projec
 assert_file_missing ".claude/plans/ should not exist"                   "$project_dir/.claude/plans"
 
 # ---------------------------------------------------------------------------
+# Test: new command creates security layer files
+# ---------------------------------------------------------------------------
+echo ""
+echo "Test: new command creates security layer files"
+assert_file_exists  ".claude/security/profile.yaml exists"             "$project_dir/.claude/security/profile.yaml"
+assert_file_exists  ".claude/security/maturity.yaml exists"            "$project_dir/.claude/security/maturity.yaml"
+assert_file_exists  ".claude/security/rules/base.md exists"            "$project_dir/.claude/security/rules/base.md"
+assert_file_exists  ".claude/agents/security-reviewer.md exists"       "$project_dir/.claude/agents/security-reviewer.md"
+assert_file_missing ".claude/security/rules/standard.md should not exist" "$project_dir/.claude/security/rules/standard.md"
+assert_file_missing ".claude/security/rules/strict.md should not exist"   "$project_dir/.claude/security/rules/strict.md"
+
+# ---------------------------------------------------------------------------
 # Test: new fails if dir exists
 # ---------------------------------------------------------------------------
 echo ""
