@@ -17,7 +17,7 @@ warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 
 VERSION="0.1.0"
-TEMPLATE_REPO="${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/claude-code-ai-native.git}"
+TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
 # Temp dir + cleanup
@@ -280,14 +280,15 @@ substitute_vars() {
 usage() {
   cat <<'EOF'
 Usage:
-  claude-init new <project-name>   Create a new project from template
-  claude-init merge                Merge template into current project
-  claude-init update               Update current project from template
-  claude-init --version            Show version
-  claude-init --help               Show this help
+  rein new <project-name>   Create a new project from template
+  rein merge                Merge template into current project
+  rein update               Update current project from template
+  rein --version            Show version
+  rein --help               Show this help
 
 Environment:
-  CLAUDE_TEMPLATE_REPO   Override template repository URL
+  REIN_TEMPLATE_REPO       Override template repository URL
+  CLAUDE_TEMPLATE_REPO     (deprecated) Alias for REIN_TEMPLATE_REPO
 EOF
 }
 
@@ -404,7 +405,7 @@ main() {
     new)
       if [[ $# -lt 2 ]]; then
         error "project name required"
-        echo "Usage: claude-init new <project-name>" >&2
+        echo "Usage: rein new <project-name>" >&2
         exit 1
       fi
       cmd_new "$2"
@@ -416,7 +417,7 @@ main() {
       cmd_merge
       ;;
     --version|-v)
-      echo "claude-init $VERSION"
+      echo "rein $VERSION"
       ;;
     --help|-h)
       usage

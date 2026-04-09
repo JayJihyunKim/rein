@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-CLAUDE_INIT="$SCRIPT_DIR/scripts/claude-init.sh"
+REIN_CLI="$SCRIPT_DIR/scripts/rein.sh"
 TEST_DIR="$(mktemp -d)"
 PASS=0
 FAIL=0
@@ -105,7 +105,7 @@ assert_exit_code() {
 # ---------------------------------------------------------------------------
 echo ""
 echo "Test: --help"
-help_output="$("$CLAUDE_INIT" --help 2>&1 || true)"
+help_output="$("$REIN_CLI" --help 2>&1 || true)"
 assert_contains "--help output contains 'Usage'" "Usage" "$help_output"
 
 # ---------------------------------------------------------------------------
@@ -113,8 +113,8 @@ assert_contains "--help output contains 'Usage'" "Usage" "$help_output"
 # ---------------------------------------------------------------------------
 echo ""
 echo "Test: --version"
-version_output="$("$CLAUDE_INIT" --version 2>&1 || true)"
-assert_contains "--version output contains 'claude-init'" "claude-init" "$version_output"
+version_output="$("$REIN_CLI" --version 2>&1 || true)"
+assert_contains "--version output contains 'rein'" "rein" "$version_output"
 
 # ---------------------------------------------------------------------------
 # Test: new command
@@ -126,7 +126,7 @@ mkdir -p "$new_dir"
 # Run inside the temp dir so the project is created there
 (
   cd "$new_dir"
-  "$CLAUDE_INIT" new test-project > /dev/null 2>&1
+  "$REIN_CLI" new test-project > /dev/null 2>&1
 )
 project_dir="$new_dir/test-project"
 assert_file_exists  ".claude/CLAUDE.md exists"                          "$project_dir/.claude/CLAUDE.md"
@@ -147,7 +147,7 @@ collision_dir="$TEST_DIR/collision-test"
 mkdir -p "$collision_dir"
 mkdir -p "$collision_dir/existing-project"
 set +e
-( cd "$collision_dir" && "$CLAUDE_INIT" new existing-project > /dev/null 2>&1 )
+( cd "$collision_dir" && "$REIN_CLI" new existing-project > /dev/null 2>&1 )
 collision_exit=$?
 set -e
 assert_exit_code "exit code is 1 when target dir already exists" 1 "$collision_exit"
@@ -164,7 +164,7 @@ mkdir -p "$merge_dir"
   git init -q
   git config user.email "test@example.com"
   git config user.name "Test"
-  "$CLAUDE_INIT" merge > /dev/null 2>&1
+  "$REIN_CLI" merge > /dev/null 2>&1
 )
 assert_file_exists ".claude/CLAUDE.md exists after merge"               "$merge_dir/.claude/CLAUDE.md"
 assert_file_exists ".claude/hooks/pre-edit-dod-gate.sh exists"         "$merge_dir/.claude/hooks/pre-edit-dod-gate.sh"
@@ -178,7 +178,7 @@ echo "Test: merge fails outside git repo"
 no_git_dir="$TEST_DIR/no-git-test"
 mkdir -p "$no_git_dir"
 set +e
-( cd "$no_git_dir" && "$CLAUDE_INIT" merge > /dev/null 2>&1 )
+( cd "$no_git_dir" && "$REIN_CLI" merge > /dev/null 2>&1 )
 merge_exit=$?
 set -e
 assert_exit_code "merge exits with code 1 outside a git repo" 1 "$merge_exit"
@@ -195,7 +195,7 @@ mkdir -p "$update_dir"
   git init -q
   git config user.email "test@example.com"
   git config user.name "Test"
-  "$CLAUDE_INIT" update > /dev/null 2>&1
+  "$REIN_CLI" update > /dev/null 2>&1
 )
 assert_file_exists ".claude/CLAUDE.md exists after update" "$update_dir/.claude/CLAUDE.md"
 
