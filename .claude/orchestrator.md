@@ -51,6 +51,105 @@ Agent Teams 사용 시:
 
 ---
 
+## 스마트 라우팅 절차
+
+DoD 작성 완료 후, 구현 시작 전에 아래를 수행한다.
+
+### 실행 시점
+- **트리거**: DoD 파일(`SOT/dod/dod-*.md`) 작성 완료 직후
+- **목적**: 최적의 에이전트 + 스킬 + MCP 조합을 추천하여 사용자 확인
+
+### 절차
+
+1. **신호 추출**: DoD 파일에서 아래 4가지 신호를 추출
+   - 키워드: 작업명, 완료 기준, 요약에서 핵심 단어
+   - 파일 패턴: 변경 대상 파일의 확장자와 경로
+   - 작업 유형: add-feature | fix-bug | build-from-scratch | research-task
+   - SOT 컨텍스트: `SOT/index.md`의 현재 상태, 블로커
+
+2. **매칭 점수 계산**: `.claude/router/registry.yaml`의 각 항목과 점수 계산
+   ```
+   총점 = (키워드 매칭 x 0.4) + (파일 패턴 매칭 x 0.3) + (작업 유형 매칭 x 0.2) + (SOT 컨텍스트 x 0.1)
+   ```
+
+3. **조합 생성**:
+   - 에이전트: 점수 최상위 1개 (필수)
+   - 스킬: 점수 0.5 이상 중 상위 3개까지
+   - MCP: 점수 0.5 이상 중 상위 2개까지
+   - conflicts 검사: 충돌 항목 제거
+   - requires 검사: 필수 의존 항목 추가
+
+4. **사용자 확인**: 아래 형식으로 추천 조합을 제시
+   ```
+   [라우팅] 작업: "[DoD 작업명]"
+
+   추천 조합:
+     에이전트: [에이전트명] ([워크플로우명])
+     스킬:    [스킬1], [스킬2]
+     MCP:     [MCP1], [MCP2]
+
+     근거:
+     - [매칭 근거 1]
+     - [매칭 근거 2]
+
+   이 조합으로 진행할까요? (수정하려면 말씀해 주세요)
+   ```
+
+5. **수정 사항 기록**: 사용자가 수정하면 `.claude/router/overrides.yaml`에 기록
+6. **승인된 조합으로 작업 진행**
+
+### overrides.yaml 기록 형식
+
+```yaml
+- date: YYYY-MM-DD
+  dod: "dod-[작업명].md"
+  pattern:
+    keywords: [매칭된 키워드]
+    file_patterns: [매칭된 파일 패턴]
+    task_type: [작업 유형]
+  modification:
+    removed: [제거된 항목 id]
+    added: [추가된 항목 id]
+  reason: "사용자가 말한 수정 이유 (있으면)"
+```
+
+### 새 스킬/MCP 자동 감지
+
+라우터 실행 시 현재 설치된 스킬/MCP 목록과 registry.yaml을 비교한다.
+새로 발견된 항목이 있으면:
+1. description을 파싱하여 메타데이터 자동 생성
+2. confidence를 0.5로 시작
+3. 사용자에게 "[새 항목]이 감지되어 레지스트리에 추가했습니다" 알림
+
+### 작업 완료 후 피드백 기록
+
+작업 완료 시 `.claude/router/feedback-log.yaml`에 아래를 추가한다:
+
+```yaml
+- date: YYYY-MM-DD
+  dod: "dod-[작업명].md"
+  recommended:
+    agent: [에이전트 id]
+    skills: [스킬 id 목록]
+    mcp: [MCP id 목록]
+  user_modified:
+    removed: [제거된 id]
+    added: [추가된 id]
+  outcome: success | partial | failed
+  notes: "특이사항"
+```
+
+### 자동 보정 규칙
+
+| 조건 | 행동 |
+|------|------|
+| 같은 패턴에서 동일 수정 3회 | registry.yaml 점수 자동 조정 |
+| 특정 조합 성공률 90%+ (5회 이상) | confidence를 0.9로 승격 |
+| 특정 조합 실패율 50%+ (3회 이상) | 경고 표시, 대안 우선 추천 |
+| 새 항목 추가 후 첫 5회 사용 | confidence 0.5에서 시작, 점진 상승 |
+
+---
+
 ## 에이전트 추가 파이프라인
 
 ```

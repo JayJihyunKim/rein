@@ -70,18 +70,24 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 2. **WRITE** `SOT/dod/dod-[작업명].md` — 소스 코드 편집 전 필수
    → `pre-edit-dod-gate.sh`가 DoD 파일 없으면 Edit/Write/MultiEdit를 차단함
    → DoD는 inbox과 분리. inbox은 "작업 완료 기록", dod는 "작업 시작 전 기준"
-3. **IMPLEMENT** — 소스 코드 편집 가능
-4. **CODEX REVIEW** — 구현 완료 후 반드시 Codex로 코드 리뷰 실행
+3. **ROUTE** — 스마트 라우터로 최적 조합 추천 → 사용자 확인
+   → `.claude/orchestrator.md`의 "스마트 라우팅 절차"를 따른다
+   → `.claude/router/registry.yaml`에서 메타데이터 매칭
+   → 에이전트 1개 + 스킬 최대 3개 + MCP 최대 2개 조합 추천
+   → 사용자 승인 후 다음 단계 진행 (수정 시 overrides.yaml에 기록)
+4. **IMPLEMENT** — 승인된 조합의 에이전트/스킬/MCP를 활용하여 소스 코드 편집
+5. **CODEX REVIEW** — 구현 완료 후 반드시 Codex로 코드 리뷰 실행
    → `/codex` 스킬로 변경된 파일에 대해 리뷰 요청
    → 리뷰 완료 후 `touch SOT/dod/.codex-reviewed`로 stamp 생성
    → `pre-bash-guard.sh`가 테스트 명령 실행 시 stamp 없으면 차단함 (exit 2)
-5. **FIX** — Codex 리뷰 결과 반영하여 코드 수정
-6. **TEST** — 테스트 실행 (리뷰 stamp가 있어야 실행 가능)
-7. **SELF-REVIEW** — AGENTS.md §5 항목을 명시적으로 답변
-8. **WRITE** `SOT/inbox/YYYY-MM-DD-[작업명].md` — 작업 완료 기록
+6. **FIX** — Codex 리뷰 결과 반영하여 코드 수정
+7. **TEST** — 테스트 실행 (리뷰 stamp가 있어야 실행 가능)
+8. **SELF-REVIEW** — AGENTS.md §5 항목을 명시적으로 답변
+9. **WRITE** `SOT/inbox/YYYY-MM-DD-[작업명].md` — 작업 완료 기록
    → `stop-session-gate.sh`가 세션 종료 시 inbox 기록 없으면 차단함 (exit 2)
-9. **UPDATE** `SOT/index.md` — 세션 종료 전
-   → `stop-session-gate.sh`가 세션 종료 시 index.md 미갱신이면 차단함 (exit 2)
+   → 라우팅 피드백을 `.claude/router/feedback-log.yaml`에도 기록
+10. **UPDATE** `SOT/index.md` — 세션 종료 전
+    → `stop-session-gate.sh`가 세션 종료 시 index.md 미갱신이면 차단함 (exit 2)
 
 **차단 시 행동 규칙**:
 - hook이 차단(exit 2)하면 작업을 멈추지 않는다
