@@ -16,7 +16,7 @@ info()  { echo -e "${GREEN}$*${NC}" >&2; }
 warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
