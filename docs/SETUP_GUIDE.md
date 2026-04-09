@@ -1,6 +1,6 @@
 # AI-Native 프레임워크 적용 가이드
 
-> 이 문서는 `claude-code-ai-native` 템플릿을 새 프로젝트에 적용하는 방법을 설명합니다.
+> 이 문서는 Rein 프레임워크를 새 프로젝트에 적용하는 방법을 설명합니다.
 
 ---
 
@@ -45,7 +45,7 @@
 ```bash
 # GitHub CLI로 템플릿 기반 새 레포 생성 + 로컬 클론
 gh repo create my-project \
-  --template JayJihyunKim/claude-code-ai-native \
+  --template JayJihyunKim/rein \
   --private --clone
 
 cd my-project
@@ -55,19 +55,19 @@ cd my-project
 
 ```bash
 # 1. 템플릿 임시 클론
-gh repo clone JayJihyunKim/claude-code-ai-native /tmp/ai-native-template
+gh repo clone JayJihyunKim/rein /tmp/rein-template
 
 # 2. 핵심 파일 복사
-cp -r /tmp/ai-native-template/.claude  /path/to/your-project/
-cp -r /tmp/ai-native-template/SOT     /path/to/your-project/
-cp -r /tmp/ai-native-template/.github /path/to/your-project/
-cp    /tmp/ai-native-template/AGENTS.md /path/to/your-project/
+cp -r /tmp/rein-template/.claude  /path/to/your-project/
+cp -r /tmp/rein-template/SOT     /path/to/your-project/
+cp -r /tmp/rein-template/.github /path/to/your-project/
+cp    /tmp/rein-template/AGENTS.md /path/to/your-project/
 
 # 3. .gitignore에 추가 (기존 .gitignore가 있다면 병합)
-cat /tmp/ai-native-template/.gitignore >> /path/to/your-project/.gitignore
+cat /tmp/rein-template/.gitignore >> /path/to/your-project/.gitignore
 
 # 4. 정리
-rm -rf /tmp/ai-native-template
+rm -rf /tmp/rein-template
 ```
 
 ### 방법 C: Git remote로 머지 (템플릿 업데이트 추적 가능)
@@ -75,7 +75,7 @@ rm -rf /tmp/ai-native-template
 ```bash
 cd /path/to/your-project
 
-git remote add template git@github.com:JayJihyunKim/claude-code-ai-native.git
+git remote add template git@github.com:JayJihyunKim/rein.git
 git fetch template
 git merge template/main --allow-unrelated-histories
 # 충돌 해결 후 커밋
