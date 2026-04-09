@@ -1,6 +1,0 @@
-# Hook 기반 규칙 강제화 시스템 구현
-
-- 날짜: 2026-04-02
-- 유형: feat
-- 변경 파일: pre-bash-guard.sh, post-edit-lint.sh, pre-edit-dod-gate.sh(신규), settings.json, CLAUDE.md, hook-enforcement.md, hook-enforcement-revisions.md, SOT/dod/, blocks.log
-- 요약: CLAUDE.md 규칙 위반 방지를 위한 3계층 강제화 시스템(Hook/Gate/Prompt) 구현. exit 2 차단, DoD gate, 차단 로그 자동 기록 + 학습 루프 연결.
