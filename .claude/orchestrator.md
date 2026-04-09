@@ -13,6 +13,7 @@
 | 새 서비스 생성 | `build-from-scratch.md` | `service-builder` | 해당 언어 디렉토리 |
 | 기술 조사 | `research-task.md` | `researcher` | — |
 | 코드 리뷰 | — | `reviewer` | — |
+| 보안 리뷰 | — | `security-reviewer` | — |
 | 문서 작성 | — | `docs-writer` | — |
 
 ---
