@@ -66,6 +66,7 @@ COPY_TARGETS=(
   ".claude/agents"
   ".claude/registry"
   ".claude/skills"
+  ".claude/security"
   ".github/workflows"
   "AGENTS.md"
 )

@@ -110,6 +110,7 @@ Incident 파일 포맷:
 | reviewer | 코드리뷰 + incident 초안 작성 전담 | `.claude/agents/reviewer.md` |
 | researcher | 기술 조사 및 문서 수집 전담 | `.claude/agents/researcher.md` |
 | docs-writer | 문서화 및 changelog 작성 전담 | `.claude/agents/docs-writer.md` |
+| security-reviewer | 보안 취약점 탐지 및 수정 제안 전담 | `.claude/agents/security-reviewer.md` |
 
 ### 새 에이전트 추가 기준 (3가지 모두 충족 시만)
 1. 동일 작업 유형에서 기존 에이전트의 self-review 실패가 **3회 이상** 반복

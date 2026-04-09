@@ -36,3 +36,10 @@ JWT_SECRET=
 ## Claude Code 권한
 - `.env`, `secrets/**` 파일은 settings.json `deny`에 명시
 - 위험 Bash 명령어는 `pre-bash-guard.sh` hook으로 차단
+
+## Security Layer 연동
+
+보안 레벨별 상세 규칙은 `.claude/security/rules/` 디렉토리에서 관리한다:
+- **현재 레벨**: `.claude/security/profile.yaml`의 `security_level` 참조
+- **규칙 파일**: `.claude/security/rules/{level}.md`
+- 보안 리뷰는 `security-reviewer` 에이전트가 위 규칙을 기준으로 수행한다

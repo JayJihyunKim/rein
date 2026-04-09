@@ -1,0 +1,44 @@
+# .claude/security/maturity.yaml
+# Rein Security Layer — 성숙도 엔진 설정
+#
+# 세션 시작 시 SOT/index.md 읽은 직후 profile.yaml과 함께 체크한다.
+# 조건 충족 시 사용자에게 업그레이드를 제안한다.
+
+upgrade_triggers:
+  base_to_standard:
+    min_conditions: 2
+    conditions:
+      - metric: commits
+        threshold: ">= 50"
+        collect: "git rev-list --count HEAD"
+      - metric: source_files
+        threshold: ">= 30"
+        collect: "find src app lib services -type f -name '*.py' -o -name '*.ts' -o -name '*.js' -o -name '*.go' -o -name '*.java' 2>/dev/null | wc -l"
+      - metric: external_deps
+        threshold: ">= 5"
+        collect: "cat package.json requirements.txt pyproject.toml 2>/dev/null | grep -cE '\"[^\"]+\":|==|>='"
+      - metric: has_api_endpoints
+        threshold: true
+        collect: "grep -rlE '(app\\.(get|post|put|delete|patch)|@router|@app\\.route|express\\.Router)' src app lib services 2>/dev/null | head -1"
+      - metric: age_days
+        threshold: ">= 14"
+        collect: "profile.yaml created_at diff"
+
+  standard_to_strict:
+    min_conditions: 2
+    conditions:
+      - metric: commits
+        threshold: ">= 200"
+        collect: "git rev-list --count HEAD"
+      - metric: has_auth
+        threshold: true
+        collect: "grep -rlE '(auth|login|jwt|session|passport|oauth)' src app lib services 2>/dev/null | head -1"
+      - metric: has_database
+        threshold: true
+        collect: "grep -rlE '(database|\\bdb\\b|sql|orm|prisma|sqlalchemy|mongoose|sequelize)' src app lib services 2>/dev/null | head -1"
+      - metric: has_user_input
+        threshold: true
+        collect: "grep -rlE '(request\\.body|req\\.params|req\\.query|form\\.data|request\\.form)' src app lib services 2>/dev/null | head -1"
+      - metric: age_days
+        threshold: ">= 30"
+        collect: "profile.yaml created_at diff"

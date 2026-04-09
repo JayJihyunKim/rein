@@ -79,14 +79,17 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 5. **CODEX REVIEW** — 구현 완료 후 반드시 Codex로 코드 리뷰 실행
    → `/codex` 스킬로 변경된 파일에 대해 리뷰 요청
    → 리뷰 완료 후 `touch SOT/dod/.codex-reviewed`로 stamp 생성
-   → `pre-bash-guard.sh`가 테스트 명령 실행 시 stamp 없으면 차단함 (exit 2)
-6. **FIX** — Codex 리뷰 결과 반영하여 코드 수정
-7. **TEST** — 테스트 실행 (리뷰 stamp가 있어야 실행 가능)
-8. **SELF-REVIEW** — AGENTS.md §5 항목을 명시적으로 답변
-9. **WRITE** `SOT/inbox/YYYY-MM-DD-[작업명].md` — 작업 완료 기록
-   → `stop-session-gate.sh`가 세션 종료 시 inbox 기록 없으면 차단함 (exit 2)
-   → 라우팅 피드백을 `.claude/router/feedback-log.yaml`에도 기록
-10. **UPDATE** `SOT/index.md` — 세션 종료 전
+6. **SECURITY REVIEW** — Codex 리뷰 완료 후 보안 리뷰 실행
+   → `security-reviewer` 에이전트가 `.claude/security/profile.yaml`의 보안 레벨 기준으로 리뷰
+   → 리뷰 완료 후 `touch SOT/dod/.security-reviewed`로 stamp 생성
+   → `pre-bash-guard.sh`가 테스트/커밋 시 두 stamp 모두 없으면 차단함 (exit 2)
+7. **FIX** — Codex 리뷰 + 보안 리뷰 결과 반영하여 코드 수정
+8. **TEST** — 테스트 실행 (두 리뷰 stamp가 모두 있어야 실행 가능)
+9. **SELF-REVIEW** — AGENTS.md §5 항목을 명시적으로 답변
+10. **WRITE** `SOT/inbox/YYYY-MM-DD-[작업명].md` — 작업 완료 기록
+    → `stop-session-gate.sh`가 세션 종료 시 inbox 기록 없으면 차단함 (exit 2)
+    → 라우팅 피드백을 `.claude/router/feedback-log.yaml`에도 기록
+11. **UPDATE** `SOT/index.md` — 세션 종료 전
     → `stop-session-gate.sh`가 세션 종료 시 index.md 미갱신이면 차단함 (exit 2)
 
 **차단 시 행동 규칙**:
