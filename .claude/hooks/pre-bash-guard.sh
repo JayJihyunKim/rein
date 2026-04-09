@@ -43,10 +43,11 @@ if echo "$COMMAND" | grep -qE "git (merge|rebase|am)"; then
   exit 0
 fi
 
-# --- Codex 리뷰 stamp 공통 검사 함수 ---
+# --- Codex 리뷰 + 보안 리뷰 stamp 공통 검사 함수 ---
 check_review_stamp() {
   local context="$1"  # "test" 또는 "commit"
   REVIEW_STAMP="$PROJECT_DIR/SOT/dod/.codex-reviewed"
+  SECURITY_STAMP="$PROJECT_DIR/SOT/dod/.security-reviewed"
   DOD_DIR="$PROJECT_DIR/SOT/dod"
 
   # DoD 파일이 없으면 (작업 중이 아니면) 검사 스킵
@@ -60,6 +61,7 @@ check_review_stamp() {
   fi
   [ "$DOD_EXISTS" = false ] && return 0
 
+  # --- Codex 리뷰 stamp 검사 ---
   if [ ! -f "$REVIEW_STAMP" ]; then
     echo "BLOCKED: Codex 코드 리뷰가 실행되지 않았습니다." >&2
     echo "${context} 전에 /codex 스킬로 코드 리뷰를 실행하세요." >&2
@@ -68,11 +70,28 @@ check_review_stamp() {
     return 1
   fi
 
-  # stamp가 1시간(3600초) 이내인지 확인 (오래된 stamp 방지)
+  # Codex stamp 만료 검사 (1시간)
   STAMP_AGE=$(( $(date +%s) - $(stat -f %m "$REVIEW_STAMP" 2>/dev/null || stat -c %Y "$REVIEW_STAMP" 2>/dev/null || echo 0) ))
   if [ "$STAMP_AGE" -gt 3600 ]; then
     echo "BLOCKED: Codex 리뷰 stamp가 1시간 이상 경과했습니다. 다시 리뷰를 실행하세요." >&2
     log_block "Codex 리뷰 stamp 만료 (${context})" "$COMMAND"
+    return 1
+  fi
+
+  # --- 보안 리뷰 stamp 검사 ---
+  if [ ! -f "$SECURITY_STAMP" ]; then
+    echo "BLOCKED: 보안 리뷰가 실행되지 않았습니다." >&2
+    echo "Codex 리뷰 후 security-reviewer 에이전트를 실행하세요." >&2
+    echo "리뷰 완료 후 SOT/dod/.security-reviewed 파일이 생성되어야 합니다." >&2
+    log_block "보안 리뷰 미실행 (${context})" "$COMMAND"
+    return 1
+  fi
+
+  # 보안 stamp 만료 검사 (1시간)
+  SEC_STAMP_AGE=$(( $(date +%s) - $(stat -f %m "$SECURITY_STAMP" 2>/dev/null || stat -c %Y "$SECURITY_STAMP" 2>/dev/null || echo 0) ))
+  if [ "$SEC_STAMP_AGE" -gt 3600 ]; then
+    echo "BLOCKED: 보안 리뷰 stamp가 1시간 이상 경과했습니다. 다시 보안 리뷰를 실행하세요." >&2
+    log_block "보안 리뷰 stamp 만료 (${context})" "$COMMAND"
     return 1
   fi
 
