@@ -1,6 +1,6 @@
-# Claude Code AI-Native Repo Template
+# Rein — AI Native Development Framework
 
-이 저장소는 **AI Native** 방식으로 Claude Code를 운영하기 위한 템플릿입니다.
+> Rein in your AI — 규칙·게이트·훅으로 AI의 고삐를 쥐는 프레임워크
 
 ## AI Native란?
 
@@ -43,7 +43,7 @@ repo/
 ### 설치
 
 ```bash
-gh api repos/JayJihyunKim/claude-code-ai-native/contents/scripts/claude-init.sh --jq '.content' | base64 -d | sudo tee /usr/local/bin/claude-init > /dev/null && sudo chmod +x /usr/local/bin/claude-init
+gh api repos/JayJihyunKim/rein/contents/scripts/rein.sh --jq '.content' | base64 -d | sudo tee /usr/local/bin/rein > /dev/null && sudo chmod +x /usr/local/bin/rein
 ```
 
 > `gh` CLI가 필요합니다. (`brew install gh && gh auth login`)
@@ -51,7 +51,7 @@ gh api repos/JayJihyunKim/claude-code-ai-native/contents/scripts/claude-init.sh 
 ### 새 프로젝트 생성
 
 ```bash
-claude-init new my-project
+rein new my-project
 cd my-project && git init
 ```
 
@@ -61,7 +61,7 @@ cd my-project && git init
 
 ```bash
 cd existing-project
-claude-init merge
+rein merge
 ```
 
 이미 존재하는 파일은 `[overwrite / skip / diff]` 프롬프트로 하나씩 확인합니다.
@@ -70,7 +70,7 @@ claude-init merge
 
 ```bash
 cd existing-project
-claude-init update
+rein update
 ```
 
 템플릿 레포의 최신 버전과 비교하여 변경된 파일만 업데이트합니다. 동일한 파일은 건너뛰고, 다른 파일만 프롬프트로 확인합니다.
@@ -79,11 +79,12 @@ claude-init update
 
 | 변수 | 설명 | 기본값 |
 |------|------|--------|
-| `CLAUDE_TEMPLATE_REPO` | 템플릿 Git 레포 URL | `git@github.com:JayJihyunKim/claude-code-ai-native.git` |
+| `REIN_TEMPLATE_REPO` | 템플릿 Git 레포 URL | `git@github.com:JayJihyunKim/rein.git` |
+| `CLAUDE_TEMPLATE_REPO` | (deprecated) `REIN_TEMPLATE_REPO`의 별칭 | — |
 
 Fork하거나 별도 템플릿 레포를 사용하려면:
 ```bash
-CLAUDE_TEMPLATE_REPO="git@github.com:my-org/my-template.git" claude-init new my-project
+REIN_TEMPLATE_REPO="git@github.com:my-org/my-template.git" rein new my-project
 ```
 
 > 상세한 커스터마이징 방법은 [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md)를 참고하세요.

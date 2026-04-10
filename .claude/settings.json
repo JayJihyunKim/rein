@@ -38,7 +38,10 @@
       "Read(./.env)",
       "Read(./.env.*)",
       "Read(./secrets/**)",
-      "Read(~/.ssh/**)"
+      "Read(~/.ssh/**)",
+      "Read(./**/credentials.json)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)"
     ]
   },
   "mcpServers": {
