@@ -37,7 +37,7 @@ if [ -z "$FILE_PATHS" ]; then
   exit 0
 fi
 
-SOURCE_EXT_PATTERN='\.(ts|tsx|js|jsx|py|sh|yml|yaml|json|toml|css|scss|html)$'
+SOURCE_EXT_PATTERN='\.(ts|tsx|js|jsx|py|sh|yml|yaml|json|toml|css|scss|html|sql|go|rs|java|kt|rb)$'
 FOUND_SOURCE=false
 
 while IFS= read -r FILE_PATH; do
@@ -52,6 +52,13 @@ while IFS= read -r FILE_PATH; do
 
   # 소스 코드 확장자 확인
   if echo "$FILE_PATH" | grep -qE "$SOURCE_EXT_PATTERN"; then
+    FOUND_SOURCE=true
+    break
+  fi
+
+  # Dockerfile (확장자 없음) 처리
+  BASENAME=$(basename "$FILE_PATH")
+  if [ "$BASENAME" = "Dockerfile" ] || echo "$BASENAME" | grep -qE "^Dockerfile\."; then
     FOUND_SOURCE=true
     break
   fi
