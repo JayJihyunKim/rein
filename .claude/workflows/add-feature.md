@@ -46,7 +46,7 @@
 ### Step 6: 완료 검증
 ```
 [ ] DoD 항목 전체 체크
-[ ] Self-review (AGENTS.md §5 기준)
+[ ] Self-review (AGENTS.md §6 기준)
 [ ] 빠뜨린 규칙 → SOT/incidents/ 초안 작성
 [ ] SOT/index.md 갱신
 ```
