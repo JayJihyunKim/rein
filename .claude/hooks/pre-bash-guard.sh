@@ -61,6 +61,31 @@ check_review_stamp() {
   fi
   [ "$DOD_EXISTS" = false ] && return 0
 
+  # --- .review-pending 검증 (코드 편집 후 리뷰 필수) ---
+  REVIEW_PENDING="$PROJECT_DIR/SOT/dod/.review-pending"
+  if [ -f "$REVIEW_PENDING" ]; then
+    if [ ! -f "$REVIEW_STAMP" ]; then
+      echo "BLOCKED: 코드 변경 후 codex 리뷰가 실행되지 않았습니다." >&2
+      echo "/codex 스킬로 코드 리뷰를 실행하세요." >&2
+      log_block "코드 편집 후 리뷰 미실행 (${context})" "$COMMAND"
+      return 1
+    fi
+
+    # .codex-reviewed가 .review-pending보다 최신인지 검증
+    PENDING_TIME=$(stat -f %m "$REVIEW_PENDING" 2>/dev/null || stat -c %Y "$REVIEW_PENDING" 2>/dev/null || echo 0)
+    REVIEW_TIME=$(stat -f %m "$REVIEW_STAMP" 2>/dev/null || stat -c %Y "$REVIEW_STAMP" 2>/dev/null || echo 0)
+    if [ "$REVIEW_TIME" -lt "$PENDING_TIME" ]; then
+      echo "BLOCKED: 리뷰 이후 코드가 다시 수정되었습니다. codex 리뷰를 재실행하세요." >&2
+      log_block "리뷰 후 코드 재수정 (${context})" "$COMMAND"
+      return 1
+    fi
+  fi
+
+  # --- escalated_to_human 감지 시 경고 (차단하지 않음) ---
+  if grep -q "resolution: escalated_to_human" "$REVIEW_STAMP" 2>/dev/null; then
+    echo "WARNING: 코드 리뷰가 사람 에스컬레이션 상태입니다. 수동 확인 후 진행하세요." >&2
+  fi
+
   # --- Codex 리뷰 stamp 검사 ---
   if [ ! -f "$REVIEW_STAMP" ]; then
     echo "BLOCKED: Codex 코드 리뷰가 실행되지 않았습니다." >&2
@@ -142,6 +167,13 @@ if echo "$COMMAND" | grep -qE "git commit"; then
   fi
 fi
 
+# --- .env 파일 읽기 차단 (cat, python 등으로 우회 방지) ---
+if echo "$COMMAND" | grep -qE "(cat|head|tail|less|more|python[23]?|node)\s+.*\.env"; then
+  echo "BLOCKED: .env 파일을 Bash로 읽는 것은 허용되지 않습니다." >&2
+  log_block ".env Bash 읽기 시도" "$COMMAND"
+  exit 2
+fi
+
 # --- .env 파일 커밋 방지 ---
 if echo "$COMMAND" | grep -qE "git add"; then
   if echo "$COMMAND" | grep -qE "git add (-A|\.(\s|$|\|)|\.env)"; then
@@ -164,7 +196,7 @@ if echo "$COMMAND" | grep -qE "git commit.*-[a-z]*a[a-z]*m"; then
 fi
 
 # --- 확인 요청: 파괴적 git 명령어 ---
-if echo "$COMMAND" | grep -qiE "git (reset --hard|push --force|push.*-f )"; then
+if echo "$COMMAND" | grep -qiE "git (reset --hard|push --force|push.*-f( |$)|checkout -- |restore )"; then
   echo "CONFIRM: 파괴적 git 명령어가 감지되었습니다." >&2
   exit 2
 fi

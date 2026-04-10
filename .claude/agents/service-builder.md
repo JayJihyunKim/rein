@@ -35,6 +35,8 @@ description: 새 서비스, 모듈, 앱을 처음부터 생성. 디렉토리 구
 ## 완료 기준
 ```
 [ ] build-from-scratch workflow DoD 전체 충족
+[ ] codex 리뷰 실행 완료 (.codex-reviewed stamp 존재)
+[ ] 리뷰 후 추가 수정 시 재리뷰 완료
 [ ] 서비스가 실제 실행됨
 [ ] 기본 테스트 통과
 [ ] 하위 AGENTS.md 작성됨

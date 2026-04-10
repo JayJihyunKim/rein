@@ -76,6 +76,24 @@
 
 ---
 
+## 5-1. 코드 리뷰 필수 규칙 (sub-agent 포함)
+
+- 소스 코드(.ts, .py, .sh, .json 등)를 수정한 **모든 에이전트(sub-agent 포함)**는 작업 완료 전 반드시 codex 리뷰를 실행한다
+- codex 리뷰: `/codex` 스킬 호출 → `SOT/dod/.codex-reviewed` stamp 생성
+- codex 실패(에러/타임아웃) 시에만 sonnet 폴백 허용 — 그 외 사유로 sonnet 리뷰 대체 금지
+- sonnet 폴백 시 stamp에 `fallback_reason` 기록 필수
+- 리뷰 없이 결과를 반환하거나 테스트/커밋 시도 시 hook이 차단함 (exit 2)
+- 리뷰 후 추가 코드 수정 시 `.review-pending` 재생성 → 재리뷰 필수
+
+### 리뷰 에스컬레이션 규칙
+- **High 이슈** → 수정 후 codex 재리뷰 (필수)
+- **Medium만 + 수정 3줄 초과** → codex 재리뷰
+- **Medium만 + 수정 3줄 이하** → sonnet 셀프리뷰 (stamp에 `reviewer: self-review`)
+- **Low만** → sonnet 셀프리뷰
+- **3회차에도 High 잔존** → 사람에게 에스컬레이션 (stamp에 `resolution: escalated_to_human`)
+
+---
+
 ## 6. Self-review 기준
 
 코드 제출 전 스스로 아래를 점검한다:

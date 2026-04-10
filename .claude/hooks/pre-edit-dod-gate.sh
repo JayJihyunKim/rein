@@ -48,7 +48,7 @@ esac
 # --- 소스 디렉토리 한정 gate ---
 IS_SOURCE=false
 case "$FILE_PATH" in
-  */src/*|*/app/*|*/services/*|*/apps/*|*/lib/*|*/components/*|*/hooks/*|*/store/*|*/types/*|*/models/*|*/schemas/*|*/repositories/*|*/routers/*|*/alembic/*)
+  */src/*|*/app/*|*/services/*|*/apps/*|*/lib/*|*/components/*|*/hooks/*|*/store/*|*/types/*|*/models/*|*/schemas/*|*/repositories/*|*/routers/*|*/alembic/*|*/scripts/*|scripts/*)
     IS_SOURCE=true
     ;;
 esac

@@ -16,7 +16,7 @@ info()  { echo -e "${GREEN}$*${NC}" >&2; }
 warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 
-VERSION="0.3.0"
+VERSION="0.4.0"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
@@ -301,6 +301,12 @@ EOF
 cmd_new() {
   local project_name="$1"
   local dest_dir="$project_name"
+
+  # 경로 검증: 상대/절대 경로 탈출 방지
+  if [[ "$project_name" == *..* ]] || [[ "$project_name" == /* ]] || [[ "$project_name" == */* ]]; then
+    error "project name must be a simple directory name (no '..', '/', or absolute paths)."
+    exit 1
+  fi
 
   if [[ -e "$dest_dir" ]]; then
     error "directory '$dest_dir' already exists."
