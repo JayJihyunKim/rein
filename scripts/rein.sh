@@ -67,8 +67,13 @@ COPY_TARGETS=(
   ".claude/registry"
   ".claude/skills"
   ".claude/security"
+  ".claude/router"
   ".github/workflows"
   "AGENTS.md"
+  "apps/web/AGENTS.md"
+  "ml/AGENTS.md"
+  "services/api/AGENTS.md"
+  "docs/SETUP_GUIDE.md"
 )
 
 SOT_DIRS=(
