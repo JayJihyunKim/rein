@@ -61,6 +61,26 @@ check_review_stamp() {
   fi
   [ "$DOD_EXISTS" = false ] && return 0
 
+  # --- .review-pending 검증 (코드 편집 후 리뷰 필수) ---
+  REVIEW_PENDING="$PROJECT_DIR/SOT/dod/.review-pending"
+  if [ -f "$REVIEW_PENDING" ]; then
+    if [ ! -f "$REVIEW_STAMP" ]; then
+      echo "BLOCKED: 코드 변경 후 codex 리뷰가 실행되지 않았습니다." >&2
+      echo "/codex 스킬로 코드 리뷰를 실행하세요." >&2
+      log_block "코드 편집 후 리뷰 미실행 (${context})" "$COMMAND"
+      return 1
+    fi
+
+    # .codex-reviewed가 .review-pending보다 최신인지 검증
+    PENDING_TIME=$(stat -f %m "$REVIEW_PENDING" 2>/dev/null || stat -c %Y "$REVIEW_PENDING" 2>/dev/null || echo 0)
+    REVIEW_TIME=$(stat -f %m "$REVIEW_STAMP" 2>/dev/null || stat -c %Y "$REVIEW_STAMP" 2>/dev/null || echo 0)
+    if [ "$REVIEW_TIME" -lt "$PENDING_TIME" ]; then
+      echo "BLOCKED: 리뷰 이후 코드가 다시 수정되었습니다. codex 리뷰를 재실행하세요." >&2
+      log_block "리뷰 후 코드 재수정 (${context})" "$COMMAND"
+      return 1
+    fi
+  fi
+
   # --- Codex 리뷰 stamp 검사 ---
   if [ ! -f "$REVIEW_STAMP" ]; then
     echo "BLOCKED: Codex 코드 리뷰가 실행되지 않았습니다." >&2
