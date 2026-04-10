@@ -33,8 +33,11 @@ repo/
 │   ├── workflows/               ← 작업 유형별 절차
 │   ├── agents/                  ← 역할별 에이전트 정의
 │   ├── skills/                  ← 특정 시점에 호출되는 스킬
+│   ├── security/                ← 보안 프로필 및 성숙도 설정
+│   ├── router/                  ← 스마트 라우터 설정
 │   └── hooks/                   ← 라이프사이클 자동화 스크립트
 ├── SOT/                         ← 증거 저장소 (상태/결정/사고 기록)
+├── docs/SETUP_GUIDE.md          ← 프레임워크 적용 가이드
 └── .github/workflows/           ← GitHub Actions 자동화
 ```
 

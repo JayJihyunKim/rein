@@ -152,7 +152,7 @@ Claude Code가 세션 시작 시 자동으로 읽는 순서:
 ```
 1. .claude/CLAUDE.md          — 자동 로드 (진입점, @import 허브)
 2. AGENTS.md                  — 전역 실행 규칙
-3. 작업 디렉토리의 nearest AGENTS.md — 언어/프레임워크별 규칙 (예: services/api/AGENTS.md)
+3. 작업 디렉토리의 nearest AGENTS.md — 언어/프레임워크별 규칙 (예: src/api/AGENTS.md)
 4. SOT/index.md               — 현재 프로젝트 상태 (5~15줄)
 ```
 
@@ -245,17 +245,9 @@ Claude Code가 세션 시작 시 자동으로 읽는 순서:
 
 ### 2단계: 에이전트 & 워크플로우 조정 (1주차)
 
-#### 2-1. 하위 AGENTS.md 수정
+#### 2-1. 하위 AGENTS.md 작성
 
-프로젝트의 실제 기술 스택에 맞게 하위 AGENTS.md를 수정합니다.
-
-**템플릿에 포함된 하위 AGENTS.md 3개:**
-
-| 파일 | 용도 | 수정 방법 |
-|------|------|-----------|
-| `apps/web/AGENTS.md` | Next.js/TypeScript 규칙 | 프론트엔드 스택에 맞게 수정 |
-| `services/api/AGENTS.md` | Python/FastAPI 규칙 | 백엔드 스택에 맞게 수정 |
-| `ml/AGENTS.md` | ML 파이프라인 규칙 | ML이 없으면 삭제 |
+프로젝트의 소스 디렉토리마다 하위 AGENTS.md를 작성합니다. Claude Code는 작업 디렉토리에서 가장 가까운 AGENTS.md를 자동으로 로드합니다.
 
 **하위 AGENTS.md 필수 포함 항목:**
 - 기술 스택 (언어, 프레임워크, 버전)
@@ -264,23 +256,159 @@ Claude Code가 세션 시작 시 자동으로 읽는 순서:
 - 코딩 규칙 (언어/프레임워크 특화)
 - 금지 패턴
 
-**새 디렉토리에 AGENTS.md 추가 예시:**
+프로젝트 구조에 맞게 아래 예시 중 필요한 것을 복사하여 사용하세요.
+
+<details>
+<summary><b>예시 A: Next.js / TypeScript 프론트엔드</b> (클릭하여 펼치기)</summary>
 
 ```markdown
-# services/payment/AGENTS.md — 결제 서비스 규칙
+# frontend/AGENTS.md — Next.js / TypeScript 규칙
+
+> 이 파일은 frontend/ 디렉토리 작업 시 자동으로 로드된다.
+> 전역 AGENTS.md를 상속하며, 여기서는 Next.js/TypeScript 특화 규칙만 추가한다.
 
 ## 기술 스택
+- **Framework**: Next.js 15 (App Router)
 - **Language**: TypeScript 5.x
-- **Framework**: Express.js
-- **Testing**: Jest
+- **Styling**: Tailwind CSS + shadcn/ui
+- **State**: Zustand (전역) / React Query (서버 상태)
+- **Testing**: Vitest + Testing Library
+- **Lint**: ESLint + Prettier
 
 ## 실행 명령어
-npm run dev / npm test / npm run lint
+npm run dev        # 개발 서버
+npm run build      # 프로덕션 빌드
+npm run test       # 테스트 실행
+npm run lint       # ESLint 실행
+npm run type-check # TypeScript 타입 검사
+
+## 디렉토리 구조
+app/           # Next.js App Router 페이지
+components/    # 재사용 가능한 UI 컴포넌트
+  ui/          # shadcn/ui 기반 기본 컴포넌트
+  [feature]/   # 기능별 컴포넌트
+hooks/         # 커스텀 React hooks
+lib/           # 유틸리티 함수
+store/         # Zustand 상태 관리
+types/         # TypeScript 타입 정의
+
+## TypeScript 규칙
+- `any` 타입 사용 금지 — `unknown` 또는 구체 타입 사용
+- 컴포넌트 props는 반드시 interface로 정의
+- API 응답 타입은 `types/` 폴더에 중앙 관리
+- `as` 타입 단언은 최소화 (불가피한 경우 주석으로 이유 설명)
+
+## 컴포넌트 규칙
+- 서버 컴포넌트와 클라이언트 컴포넌트를 명확히 분리
+- 클라이언트 컴포넌트는 파일 상단에 `'use client'` 필수
+- 컴포넌트 파일명: PascalCase (`UserCard.tsx`)
+- 한 파일에 한 컴포넌트 (default export)
 
 ## 금지 패턴
-- PG사 API 키 하드코딩 금지
-- 결제 금액 부동소수점 계산 금지 → BigInt 또는 정수(원 단위) 사용
+- `pages/` 디렉토리 사용 금지 (App Router 전용)
+- `useEffect`로 데이터 패칭 금지 → React Query 사용
+- 인라인 스타일 (`style={{}}`) 금지 → Tailwind 클래스 사용
+- `console.log` 운영 코드 방치 금지
 ```
+</details>
+
+<details>
+<summary><b>예시 B: Python / FastAPI 백엔드</b> (클릭하여 펼치기)</summary>
+
+```markdown
+# api/AGENTS.md — Python API 규칙
+
+> 이 파일은 api/ 디렉토리 작업 시 자동으로 로드된다.
+> 전역 AGENTS.md를 상속하며, 여기서는 Python/FastAPI 특화 규칙만 추가한다.
+
+## 기술 스택
+- **Language**: Python 3.12+
+- **Framework**: FastAPI
+- **ORM**: SQLAlchemy 2.x (async)
+- **Validation**: Pydantic v2
+- **Testing**: pytest + httpx
+- **Lint**: Ruff + mypy
+
+## 실행 명령어
+uvicorn main:app --reload      # 개발 서버
+pytest                         # 테스트 실행
+ruff check . --fix             # Lint 수정
+ruff format .                  # 코드 포맷
+mypy .                         # 타입 검사
+
+## 디렉토리 구조
+app/
+  routers/       # API 라우터 (기능별 분리)
+  models/        # SQLAlchemy 모델
+  schemas/       # Pydantic 스키마 (request/response)
+  services/      # 비즈니스 로직
+  repositories/  # DB 접근 계층
+  core/          # 설정, 의존성, 미들웨어
+tests/
+  unit/
+  integration/
+alembic/         # DB 마이그레이션
+
+## Python 코딩 규칙
+- 타입 힌트 필수 (모든 함수 파라미터 및 반환값)
+- async/await 일관 사용 (sync 함수와 혼용 금지)
+- Pydantic 모델로 모든 외부 입력 검증
+- 의존성 주입은 FastAPI `Depends()` 활용
+- DB 쿼리는 Repository 계층에서만
+
+## 금지 패턴
+- 직접 SQL 문자열 조합 금지 → SQLAlchemy ORM 또는 파라미터화 쿼리
+- 라우터에 비즈니스 로직 작성 금지 → services/ 계층으로 분리
+- 전역 변수로 상태 관리 금지
+- `print()` 디버그 코드 방치 금지 → `logging` 모듈 사용
+```
+</details>
+
+<details>
+<summary><b>예시 C: ML 파이프라인</b> (클릭하여 펼치기)</summary>
+
+```markdown
+# ml/AGENTS.md — ML 파이프라인 규칙
+
+> 이 파일은 ml/ 디렉토리 작업 시 자동으로 로드된다.
+> 전역 AGENTS.md를 상속하며, 여기서는 ML 파이프라인 특화 규칙만 추가한다.
+
+## 기술 스택
+- **Language**: Python 3.12+
+- **ML Framework**: PyTorch / scikit-learn
+- **실험 추적**: MLflow 또는 Weights & Biases
+- **데이터 버저닝**: DVC
+- **Testing**: pytest
+
+## 실행 명령어
+python train.py --config configs/default.yaml   # 학습
+python evaluate.py --model [checkpoint]          # 평가
+dvc repro                                        # 파이프라인 재실행
+pytest tests/                                    # 테스트
+
+## 디렉토리 구조
+configs/          # 실험 설정 파일 (YAML)
+data/             # 데이터 (DVC로 버전 관리)
+  raw/
+  processed/
+models/           # 모델 정의
+pipelines/        # 학습/평가 파이프라인
+notebooks/        # 탐색적 분석 (실험용만)
+tests/
+
+## ML 코딩 규칙
+- 모든 실험은 설정 파일(YAML)로 관리 — 하드코딩된 하이퍼파라미터 금지
+- 학습 결과는 MLflow/W&B에 반드시 로깅
+- 재현 가능성: 랜덤 시드 고정 및 설정 파일에 기록
+- 데이터 버전은 DVC로 관리 (raw 데이터 Git 커밋 금지)
+
+## 금지 패턴
+- Jupyter Notebook에 운영 코드 작성 금지 (탐색용만)
+- 학습 데이터 Git 직접 커밋 금지
+- 실험 결과를 파일명으로만 관리 금지 (`model_v3_final.pt` 등)
+- 랜덤 시드 미설정 학습 금지
+```
+</details>
 
 #### 2-2. 에이전트 조정
 
@@ -616,11 +744,11 @@ promote-agent skill 실행 → 사람 승인
 | 3단계 | 1~2주차 | `rules/`, `hooks/` |
 | 4단계 | 1달 후 | `.github/workflows/` |
 
-### Q: 우리 프로젝트는 모노레포가 아닌데요?
+### Q: 하위 AGENTS.md는 어떻게 만드나요?
 
-`apps/web/`, `services/api/`, `ml/` 디렉토리는 예시입니다. 프로젝트 구조에 맞게 삭제하고, 실제 소스 디렉토리에 하위 `AGENTS.md`를 배치하세요.
+SETUP_GUIDE의 [2단계: 하위 AGENTS.md 작성](#2-1-하위-agentsmd-작성)에 프론트엔드/백엔드/ML 예시가 있습니다. 프로젝트의 소스 디렉토리에 맞게 복사하여 사용하세요.
 
-단일 서비스 프로젝트라면:
+단일 서비스 프로젝트라면 하위 AGENTS.md 없이 전역 AGENTS.md에 규칙을 통합해도 됩니다:
 ```
 my-project/
 ├── AGENTS.md          ← 전역 규칙 + 언어별 규칙 포함
