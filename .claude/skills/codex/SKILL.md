@@ -11,7 +11,7 @@ description: Use when the user asks to run Codex CLI (codex exec, codex resume) 
 
 1. **Codex 리뷰 실행** — 아래 "Running a Task" 절차에 따라 codex exec로 리뷰 실행
 2. **성공 시** — stamp 생성 후 종료
-3. **실패 시 (에러/타임아웃)** — sonnet 폴백 리뷰 실행 (code-reviewer agent, model: sonnet)
+3. **실패 시 (에러/타임아웃)** — sonnet 폴백 리뷰 실행 (reviewer agent, model: sonnet)
 4. **폴백 성공 시** — stamp에 fallback_reason 기록 후 종료
 5. **폴백도 실패 시** — 작업 중단, 사용자에게 보고
 
