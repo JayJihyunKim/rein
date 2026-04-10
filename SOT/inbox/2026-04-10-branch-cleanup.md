@@ -1,0 +1,16 @@
+# 브랜치 정리 + v0.3.0 릴리즈
+- 날짜: 2026-04-10
+- 유형: refactor
+- 변경 파일:
+  - scripts/rein.sh (VERSION 0.3.0, COPY_TARGETS 수정)
+  - docs/SETUP_GUIDE.md (서브프로젝트 AGENTS.md 예시 통합)
+  - README.md (폴더 구조 업데이트)
+  - apps/web/AGENTS.md, ml/AGENTS.md, services/api/AGENTS.md (삭제)
+  - docs/, tests/, .github/workflows/ 등 main에서 정리
+- 요약:
+  - dev/main 브랜치 워크플로우 확립 (dev=개발, main=템플릿)
+  - main에서 비템플릿 파일 제거, 사용자 제공 파일만 유지
+  - 서브프로젝트 AGENTS.md를 SETUP_GUIDE 접이식 예시로 통합
+  - COPY_TARGETS에 router, SETUP_GUIDE 추가
+  - 불필요 브랜치 삭제 (feat/rein-naming, feature/claude-init, feature/security-layer)
+  - rein new/merge/update 전체 테스트 통과
