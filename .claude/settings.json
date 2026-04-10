@@ -47,14 +47,20 @@
   "mcpServers": {
     "StitchMCP": {
       "command": "npx",
-      "args": ["-y", "@anthropic-ai/stitch-mcp@latest"],
-      "env": {
-        "STITCH_API_KEY": "${STITCH_API_KEY}"
-      }
+      "args": ["@_davideast/stitch-mcp", "proxy"]
     }
   },
   "hooks": {
     "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/inbox-compress.sh"
+          }
+        ]
+      },
       {
         "matcher": "Bash",
         "hooks": [

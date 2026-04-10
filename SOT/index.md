@@ -7,16 +7,15 @@
 
 ## 현재 상태
 
-- **프로젝트**: Rein (AI Native Development Framework)
-- **최근 완료**: Security Layer 구현 (보안 리뷰어 에이전트, stamp 게이트, 성숙도 엔진, rein init 통합)
+- **프로젝트**: (프로젝트 이름)
+- **최근 완료**: (최근 완료된 작업)
 - **진행 중**: 없음
-- **블로커**: GitHub 레포 리네임 수동 작업 필요 (Settings → Repository name → `rein`)
+- **블로커**: 없음
 
 ## 주의사항
 
 - hook 차단은 `exit 2`만 유효 (`exit 1`은 통과됨)
 - Bash를 통한 파일 수정은 DoD gate를 우회함 (알려진 한계)
-- 테스트/커밋 시 `.codex-reviewed` + `.security-reviewed` 두 stamp 모두 필요
 
 ---
-*마지막 갱신: 2026-04-09*
+*마지막 갱신: YYYY-MM-DD*

@@ -85,7 +85,7 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
    → `pre-bash-guard.sh`가 테스트/커밋 시 두 stamp 모두 없으면 차단함 (exit 2)
 7. **FIX** — Codex 리뷰 + 보안 리뷰 결과 반영하여 코드 수정
 8. **TEST** — 테스트 실행 (두 리뷰 stamp가 모두 있어야 실행 가능)
-9. **SELF-REVIEW** — AGENTS.md §5 항목을 명시적으로 답변
+9. **SELF-REVIEW** — AGENTS.md §6 항목을 명시적으로 답변
 10. **WRITE** `SOT/inbox/YYYY-MM-DD-[작업명].md` — 작업 완료 기록
     → `stop-session-gate.sh`가 세션 종료 시 inbox 기록 없으면 차단함 (exit 2)
     → 라우팅 피드백을 `.claude/router/feedback-log.yaml`에도 기록
