@@ -81,6 +81,11 @@ check_review_stamp() {
     fi
   fi
 
+  # --- escalated_to_human 감지 시 경고 (차단하지 않음) ---
+  if grep -q "resolution: escalated_to_human" "$REVIEW_STAMP" 2>/dev/null; then
+    echo "WARNING: 코드 리뷰가 사람 에스컬레이션 상태입니다. 수동 확인 후 진행하세요." >&2
+  fi
+
   # --- Codex 리뷰 stamp 검사 ---
   if [ ! -f "$REVIEW_STAMP" ]; then
     echo "BLOCKED: Codex 코드 리뷰가 실행되지 않았습니다." >&2

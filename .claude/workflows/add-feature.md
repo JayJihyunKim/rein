@@ -36,13 +36,17 @@
 [ ] 에러 처리 포함
 ```
 
-### Step 5: Codex 코드 리뷰 (필수 — codex 우선, sonnet 폴백)
+### Step 5: Codex 코드 리뷰 (필수 — 에스컬레이션 규칙 적용)
 ```
 [ ] /codex 스킬로 변경된 파일에 대해 리뷰 실행
 [ ] codex 실패(에러/타임아웃) 시에만 sonnet 폴백 리뷰 실행
-[ ] 리뷰 결과의 수정사항 반영
-[ ] 수정사항 반영 후 .review-pending 재생성 시 재리뷰 실행
-[ ] stamp(SOT/dod/.codex-reviewed)에 reviewer, fallback_reason 기록 확인
+[ ] 리뷰 결과 심각도 판별 후 에스컬레이션 규칙 적용:
+    - High 이슈 → 수정 후 codex 재리뷰
+    - Medium + 수정 3줄 초과 → codex 재리뷰
+    - Medium + 수정 3줄 이하 → sonnet 셀프리뷰
+    - Low만 → sonnet 셀프리뷰
+    - 3회차에도 High → 사람 에스컬레이션
+[ ] stamp에 reviewer, review_round, resolution 기록 확인
 [ ] .review-pending 삭제 확인
 ```
 

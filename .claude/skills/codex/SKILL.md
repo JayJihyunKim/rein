@@ -17,6 +17,21 @@ description: Use when the user asks to run Codex CLI (codex exec, codex resume) 
 
 **중요**: "codex 리뷰 결과가 부족해서" 등은 폴백 사유가 아님. 에러/타임아웃만 폴백 허용.
 
+## 리뷰 에스컬레이션 규칙
+
+리뷰 결과에 따라 다음 행동을 결정한다:
+
+| 리뷰 결과 | 수정 규모 | 다음 행동 |
+|-----------|----------|----------|
+| High 이슈 있음 | 무관 | 수정 후 **codex 재리뷰** |
+| Medium만 있음 | > 3줄 | 수정 후 **codex 재리뷰** |
+| Medium만 있음 | ≤ 3줄 | 수정 후 **sonnet 셀프리뷰** |
+| Low만 있음 | 무관 | 수정 후 **sonnet 셀프리뷰** |
+| 이슈 없음 | — | **통과** (stamp 생성) |
+| 3회차에도 High | — | **사람에게 에스컬레이션** |
+
+**sonnet 셀프리뷰**: 변경 diff를 직접 확인하고, stamp에 `reviewer: self-review` 기록.
+
 ## Stamp 생성
 
 리뷰 완료 후 반드시 stamp 파일을 생성한다:
@@ -27,6 +42,9 @@ reviewer: codex
 timestamp: $(date -u +%Y-%m-%dT%H:%M:%S)
 fallback_reason: none
 files_reviewed: [변경 파일 수]
+review_round: [N번째 리뷰]
+resolution: passed
+remaining_issues: none
 STAMP
 ```
 
@@ -37,6 +55,37 @@ reviewer: sonnet-fallback
 timestamp: $(date -u +%Y-%m-%dT%H:%M:%S)
 fallback_reason: codex_timeout
 files_reviewed: [변경 파일 수]
+review_round: [N번째 리뷰]
+resolution: passed
+remaining_issues: none
+STAMP
+```
+
+Sonnet 셀프리뷰 시:
+```bash
+cat > SOT/dod/.codex-reviewed << STAMP
+reviewer: self-review
+timestamp: $(date -u +%Y-%m-%dT%H:%M:%S)
+fallback_reason: none
+files_reviewed: [변경 파일 수]
+review_round: [N번째 리뷰]
+resolution: passed
+remaining_issues: none
+prior_reviewer: codex
+prior_max_severity: [medium 또는 low]
+STAMP
+```
+
+사람 에스컬레이션 시:
+```bash
+cat > SOT/dod/.codex-reviewed << STAMP
+reviewer: codex
+timestamp: $(date -u +%Y-%m-%dT%H:%M:%S)
+fallback_reason: none
+files_reviewed: [변경 파일 수]
+review_round: 3
+resolution: escalated_to_human
+remaining_issues: [잔존 이슈 요약]
 STAMP
 ```
 
