@@ -302,6 +302,12 @@ cmd_new() {
   local project_name="$1"
   local dest_dir="$project_name"
 
+  # 경로 검증: 상대/절대 경로 탈출 방지
+  if [[ "$project_name" == *..* ]] || [[ "$project_name" == /* ]] || [[ "$project_name" == */* ]]; then
+    error "project name must be a simple directory name (no '..', '/', or absolute paths)."
+    exit 1
+  fi
+
   if [[ -e "$dest_dir" ]]; then
     error "directory '$dest_dir' already exists."
     exit 1

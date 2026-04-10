@@ -46,23 +46,22 @@ if [ -d "$DAILY_DIR" ]; then
   WEEK_AGO=$(date -v-7d +%Y-%m-%d 2>/dev/null || date -d '7 days ago' +%Y-%m-%d 2>/dev/null)
 
   if [ -n "$WEEK_AGO" ]; then
-    WEEK_NUM=$(date +%Y-W%V)
-    WEEKLY_FILE="$WEEKLY_DIR/${WEEK_NUM}.md"
-    WEEKLY_MERGED=false
-
     for f in "$DAILY_DIR"/*.md; do
       [ -f "$f" ] || continue
       FNAME=$(basename "$f" .md)
       echo "$FNAME" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' || continue
       [ "$FNAME" \< "$WEEK_AGO" ] || continue
 
+      # weekly 파일명을 daily 파일의 날짜 기반으로 생성 (현재 날짜 기준 아님)
+      FILE_WEEK_NUM=$(date -j -f "%Y-%m-%d" "$FNAME" +%G-W%V 2>/dev/null \
+        || date -d "$FNAME" +%G-W%V 2>/dev/null \
+        || echo "unknown-week")
+      WEEKLY_FILE="$WEEKLY_DIR/${FILE_WEEK_NUM}.md"
+
       mkdir -p "$WEEKLY_DIR"
-      if [ "$WEEKLY_MERGED" = false ]; then
-        if [ ! -f "$WEEKLY_FILE" ]; then
-          echo "# Weekly Summary: $WEEK_NUM" > "$WEEKLY_FILE"
-          echo "" >> "$WEEKLY_FILE"
-        fi
-        WEEKLY_MERGED=true
+      if [ ! -f "$WEEKLY_FILE" ]; then
+        echo "# Weekly Summary: $FILE_WEEK_NUM" > "$WEEKLY_FILE"
+        echo "" >> "$WEEKLY_FILE"
       fi
       echo "---" >> "$WEEKLY_FILE"
       echo "## $FNAME" >> "$WEEKLY_FILE"
