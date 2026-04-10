@@ -303,8 +303,8 @@ cmd_new() {
   local dest_dir="$project_name"
 
   # 경로 검증: 상대/절대 경로 탈출 방지
-  if [[ "$project_name" == *..* ]] || [[ "$project_name" == /* ]]; then
-    error "project name must not contain '..' or start with '/'."
+  if [[ "$project_name" == *..* ]] || [[ "$project_name" == /* ]] || [[ "$project_name" == */* ]]; then
+    error "project name must be a simple directory name (no '..', '/', or absolute paths)."
     exit 1
   fi
 

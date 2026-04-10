@@ -53,8 +53,8 @@ if [ -d "$DAILY_DIR" ]; then
       [ "$FNAME" \< "$WEEK_AGO" ] || continue
 
       # weekly 파일명을 daily 파일의 날짜 기반으로 생성 (현재 날짜 기준 아님)
-      FILE_WEEK_NUM=$(date -j -f "%Y-%m-%d" "$FNAME" +%Y-W%V 2>/dev/null \
-        || date -d "$FNAME" +%Y-W%V 2>/dev/null \
+      FILE_WEEK_NUM=$(date -j -f "%Y-%m-%d" "$FNAME" +%G-W%V 2>/dev/null \
+        || date -d "$FNAME" +%G-W%V 2>/dev/null \
         || echo "unknown-week")
       WEEKLY_FILE="$WEEKLY_DIR/${FILE_WEEK_NUM}.md"
 
