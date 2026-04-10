@@ -162,6 +162,13 @@ if echo "$COMMAND" | grep -qE "git commit"; then
   fi
 fi
 
+# --- .env 파일 읽기 차단 (cat, python 등으로 우회 방지) ---
+if echo "$COMMAND" | grep -qE "(cat|head|tail|less|more|python[23]?|node)\s+.*\.env"; then
+  echo "BLOCKED: .env 파일을 Bash로 읽는 것은 허용되지 않습니다." >&2
+  log_block ".env Bash 읽기 시도" "$COMMAND"
+  exit 2
+fi
+
 # --- .env 파일 커밋 방지 ---
 if echo "$COMMAND" | grep -qE "git add"; then
   if echo "$COMMAND" | grep -qE "git add (-A|\.(\s|$|\|)|\.env)"; then
@@ -184,7 +191,7 @@ if echo "$COMMAND" | grep -qE "git commit.*-[a-z]*a[a-z]*m"; then
 fi
 
 # --- 확인 요청: 파괴적 git 명령어 ---
-if echo "$COMMAND" | grep -qiE "git (reset --hard|push --force|push.*-f )"; then
+if echo "$COMMAND" | grep -qiE "git (reset --hard|push --force|push.*-f( |$)|checkout -- |restore )"; then
   echo "CONFIRM: 파괴적 git 명령어가 감지되었습니다." >&2
   exit 2
 fi
