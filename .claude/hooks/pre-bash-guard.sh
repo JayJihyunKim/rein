@@ -23,6 +23,16 @@ log_block() {
   fi
 }
 
+# Portable mtime extractor: returns epoch seconds.
+# macOS uses BSD stat (-f %m), Linux/WSL/Git Bash/Cygwin use GNU stat (-c %Y).
+_mtime() {
+  if [ "$(uname)" = "Darwin" ]; then
+    stat -f %m "$1" 2>/dev/null || echo 0
+  else
+    stat -c %Y "$1" 2>/dev/null || echo 0
+  fi
+}
+
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input', {}).get('command', ''))" 2>/dev/null)
 
@@ -72,8 +82,8 @@ check_review_stamp() {
     fi
 
     # .codex-reviewed가 .review-pending보다 최신인지 검증
-    PENDING_TIME=$(stat -f %m "$REVIEW_PENDING" 2>/dev/null || stat -c %Y "$REVIEW_PENDING" 2>/dev/null || echo 0)
-    REVIEW_TIME=$(stat -f %m "$REVIEW_STAMP" 2>/dev/null || stat -c %Y "$REVIEW_STAMP" 2>/dev/null || echo 0)
+    PENDING_TIME=$(_mtime "$REVIEW_PENDING")
+    REVIEW_TIME=$(_mtime "$REVIEW_STAMP")
     if [ "$REVIEW_TIME" -lt "$PENDING_TIME" ]; then
       echo "BLOCKED: 리뷰 이후 코드가 다시 수정되었습니다. codex 리뷰를 재실행하세요." >&2
       log_block "리뷰 후 코드 재수정 (${context})" "$COMMAND"
@@ -87,19 +97,12 @@ check_review_stamp() {
   fi
 
   # --- Codex 리뷰 stamp 검사 ---
+  # 시간 기반 TTL 은 제거 — .review-pending 비교가 "코드 변경 후 재리뷰" 를 정확히 담당한다
   if [ ! -f "$REVIEW_STAMP" ]; then
     echo "BLOCKED: Codex 코드 리뷰가 실행되지 않았습니다." >&2
     echo "${context} 전에 /codex 스킬로 코드 리뷰를 실행하세요." >&2
     echo "리뷰 완료 후 SOT/dod/.codex-reviewed 파일이 생성되어야 합니다." >&2
     log_block "Codex 리뷰 미실행 (${context})" "$COMMAND"
-    return 1
-  fi
-
-  # Codex stamp 만료 검사 (1시간)
-  STAMP_AGE=$(( $(date +%s) - $(stat -f %m "$REVIEW_STAMP" 2>/dev/null || stat -c %Y "$REVIEW_STAMP" 2>/dev/null || echo 0) ))
-  if [ "$STAMP_AGE" -gt 3600 ]; then
-    echo "BLOCKED: Codex 리뷰 stamp가 1시간 이상 경과했습니다. 다시 리뷰를 실행하세요." >&2
-    log_block "Codex 리뷰 stamp 만료 (${context})" "$COMMAND"
     return 1
   fi
 
@@ -112,13 +115,6 @@ check_review_stamp() {
     return 1
   fi
 
-  # 보안 stamp 만료 검사 (1시간)
-  SEC_STAMP_AGE=$(( $(date +%s) - $(stat -f %m "$SECURITY_STAMP" 2>/dev/null || stat -c %Y "$SECURITY_STAMP" 2>/dev/null || echo 0) ))
-  if [ "$SEC_STAMP_AGE" -gt 3600 ]; then
-    echo "BLOCKED: 보안 리뷰 stamp가 1시간 이상 경과했습니다. 다시 보안 리뷰를 실행하세요." >&2
-    log_block "보안 리뷰 stamp 만료 (${context})" "$COMMAND"
-    return 1
-  fi
 
   return 0
 }

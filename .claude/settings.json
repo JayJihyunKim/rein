@@ -91,6 +91,10 @@
           {
             "type": "command",
             "command": ".claude/hooks/post-edit-review-gate.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/post-edit-index-sync-inbox.sh"
           }
         ]
       }

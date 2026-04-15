@@ -12,14 +12,22 @@ DOD_DIR="$PROJECT_DIR/SOT/dod"
 INBOX_DIR="$PROJECT_DIR/SOT/inbox"
 CACHE_KEY=$(echo "${PROJECT_DIR}" | md5 -q 2>/dev/null || echo "${PROJECT_DIR}" | md5sum 2>/dev/null | cut -c1-8)
 
+# Portable mtime extractor: returns epoch seconds.
+# macOS uses BSD stat (-f %m), Linux/WSL/Git Bash/Cygwin use GNU stat (-c %Y).
+_mtime() {
+  if [ "$(uname)" = "Darwin" ]; then
+    stat -f %m "$1" 2>/dev/null || echo 0
+  else
+    stat -c %Y "$1" 2>/dev/null || echo 0
+  fi
+}
+
 # 캐시 키에 dod/inbox 디렉토리의 최신 mtime 을 혼입 (Codex 리뷰 완화책):
 # inbox 파일이 생기는 순간 디렉토리 mtime 이 갱신되어 캐시가 즉시 무효화됨.
 DIR_MTIME=$(
   {
-    stat -f %m "$DOD_DIR" 2>/dev/null
-    stat -f %m "$INBOX_DIR" 2>/dev/null
-    stat -c %Y "$DOD_DIR" 2>/dev/null
-    stat -c %Y "$INBOX_DIR" 2>/dev/null
+    _mtime "$DOD_DIR"
+    _mtime "$INBOX_DIR"
   } | sort -nr | head -1
 )
 CACHE="/tmp/.claude-dod-${CACHE_KEY}-${DIR_MTIME:-0}"
@@ -71,7 +79,7 @@ fi
 
 # --- 캐시 확인 ---
 if [ -f "$CACHE" ]; then
-  CACHE_AGE=$(( $(date +%s) - $(stat -f %m "$CACHE" 2>/dev/null || stat -c %Y "$CACHE" 2>/dev/null || echo 0) ))
+  CACHE_AGE=$(( $(date +%s) - $(_mtime "$CACHE") ))
   if [ "$CACHE_AGE" -lt "$CACHE_TTL" ]; then
     exit 0
   fi
