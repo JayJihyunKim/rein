@@ -158,6 +158,14 @@ Before editing:
 
 ## 버전 히스토리
 
+### v0.4.3 (2026-04-15) — hotfix: stop-session-gate 데드락 근본 해소
+- **fix**: `post-edit-index-sync-inbox.sh` (v0.4.1) 의 한계 해소 — 해당 훅은 `SOT/index.md` 편집 시에만 발동해서, 데드락 상황에서 사용자가 index.md 를 건드리지 않으면 작동 안 하던 precondition 실패
+- **feat**: `stop-session-gate.sh` 에 git 활동 감지 추가 — 오늘 커밋 OR tracked 파일 modified/staged 가 있으면 inbox 없어도 WARNING + 통과 (순수 untracked 파일은 노이즈 필터링으로 인정 안 함)
+- **feat**: `REIN_BYPASS_STOP_GATE=1` 환경변수 탈출구 — 극단 상황용 escape hatch, 사용 시 `SOT/incidents/blocks.log` 에 자동 감사 기록
+- **feat**: 차단 메시지에 4 가지 해결 방법 구체 명시
+- **test**: `tests/hooks/test-stop-gate-deadlock.sh` 신규 9 케이스 — 데드락 재현 + 해소 + 회귀 방지
+- **note**: v0.4.1 `post-edit-index-sync-inbox.sh` 는 여전히 유용하며 (정상 워크플로우에서 작동) 함께 사용됨
+
 ### v0.4.2 (2026-04-15) — pre-bash-guard 커밋 메시지 검증 3 버그 수정
 - **fix**: 복합 명령 (`<commit-cmd> -m "..." && <tag-cmd> -m "..."`) 에서 tag 의 `-m` 을 commit 의 `-m` 으로 오인해 false block 발생하던 문제 수정
 - **fix**: `$(cat <<'EOF' ... EOF)` heredoc 방식 메시지가 sed 추출 실패로 검사 자체가 스킵되어 어떤 메시지든 통과되던 silent bypass 차단
