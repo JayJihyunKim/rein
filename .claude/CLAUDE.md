@@ -67,7 +67,7 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 아래 순서를 반드시 따른다. Hook이 도구 호출을 차단(exit 2)하므로 건너뛸 수 없다.
 
 1. **READ** `SOT/index.md` — 항상 첫 번째
-2. **WRITE** `SOT/dod/dod-[작업명].md` — 소스 코드 편집 전 필수
+2. **WRITE** `SOT/dod/dod-YYYY-MM-DD-<slug>.md` — 소스 코드 편집 전 필수 (날짜=작업 시작일, slug=영문 kebab-case, AGENTS.md §2 규칙 준수)
    → `pre-edit-dod-gate.sh`가 DoD 파일 없으면 Edit/Write/MultiEdit를 차단함
    → DoD는 inbox과 분리. inbox은 "작업 완료 기록", dod는 "작업 시작 전 기준"
 3. **ROUTE** — 스마트 라우터로 최적 조합 추천 → 사용자 확인

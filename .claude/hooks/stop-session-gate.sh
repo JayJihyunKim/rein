@@ -8,6 +8,7 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 INBOX_DIR="$PROJECT_DIR/SOT/inbox"
+DOD_DIR="$PROJECT_DIR/SOT/dod"
 INDEX_FILE="$PROJECT_DIR/SOT/index.md"
 TODAY=$(date +%Y-%m-%d)
 
@@ -36,6 +37,29 @@ if [ -f "$INDEX_FILE" ]; then
   if [ "$INDEX_DATE" != "$TODAY" ]; then
     MISSING="${MISSING}\n- SOT/index.md가 오늘 갱신되지 않았습니다."
   fi
+fi
+
+# --- 14일 이상 미완료 DoD 경고 (차단하지 않음) ---
+STALE_DAYS=14
+NOW_EPOCH=$(date +%s)
+
+if [ -d "$DOD_DIR" ]; then
+  for f in "$DOD_DIR"/dod-[0-9]*.md; do
+    [ -f "$f" ] || continue
+    FILE_DATE=$(basename "$f" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1)
+    [ -z "$FILE_DATE" ] && continue
+
+    FILE_EPOCH=$(date -j -f "%Y-%m-%d" "$FILE_DATE" +%s 2>/dev/null \
+               || date -d "$FILE_DATE" +%s 2>/dev/null)
+    [ -z "$FILE_EPOCH" ] && continue
+
+    AGE_DAYS=$(( (NOW_EPOCH - FILE_EPOCH) / 86400 ))
+    if [ "$AGE_DAYS" -ge "$STALE_DAYS" ]; then
+      echo "WARNING: 다음 DoD가 ${AGE_DAYS}일 이상 미완료 상태입니다:" >&2
+      echo "  - $(basename "$f")" >&2
+      echo "완료 기록을 남기거나 불필요하면 삭제하세요." >&2
+    fi
+  done
 fi
 
 # --- 결과 판정 ---

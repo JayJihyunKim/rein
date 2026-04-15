@@ -9,8 +9,20 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BLOCKS_LOG="$PROJECT_DIR/SOT/incidents/blocks.log"
 DOD_DIR="$PROJECT_DIR/SOT/dod"
+INBOX_DIR="$PROJECT_DIR/SOT/inbox"
 CACHE_KEY=$(echo "${PROJECT_DIR}" | md5 -q 2>/dev/null || echo "${PROJECT_DIR}" | md5sum 2>/dev/null | cut -c1-8)
-CACHE="/tmp/.claude-dod-${CACHE_KEY}"
+
+# 캐시 키에 dod/inbox 디렉토리의 최신 mtime 을 혼입 (Codex 리뷰 완화책):
+# inbox 파일이 생기는 순간 디렉토리 mtime 이 갱신되어 캐시가 즉시 무효화됨.
+DIR_MTIME=$(
+  {
+    stat -f %m "$DOD_DIR" 2>/dev/null
+    stat -f %m "$INBOX_DIR" 2>/dev/null
+    stat -c %Y "$DOD_DIR" 2>/dev/null
+    stat -c %Y "$INBOX_DIR" 2>/dev/null
+  } | sort -nr | head -1
+)
+CACHE="/tmp/.claude-dod-${CACHE_KEY}-${DIR_MTIME:-0}"
 CACHE_TTL=300  # 5분
 
 log_block() {
@@ -65,13 +77,33 @@ if [ -f "$CACHE" ]; then
   fi
 fi
 
-# --- DoD 파일 존재 확인 ---
+# --- Pending DoD 판정 (inbox-매칭 기반) ---
+# pending = 신 포맷 dod 파일 존재 AND 같은 slug 의 inbox 파일 없음
 DOD_FOUND=false
 if [ -d "$DOD_DIR" ]; then
-  for f in "$DOD_DIR"/dod-*.md; do
-    [ -f "$f" ] || continue
-    FILE_AGE=$(( $(date +%s) - $(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0) ))
-    if [ "$FILE_AGE" -lt 14400 ]; then
+  for dod_file in "$DOD_DIR"/dod-*.md; do
+    [ -f "$dod_file" ] || continue
+    fname=$(basename "$dod_file")
+
+    # 신 포맷만 처리 (레거시는 별도 스윕)
+    echo "$fname" | grep -q '^dod-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-' || continue
+
+    slug=$(echo "$fname" | sed 's/^dod-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-//' | sed 's/\.md$//')
+
+    # inbox/ 에 slug 완전 일치하는 파일이 있는지
+    matched=false
+    if [ -d "$INBOX_DIR" ]; then
+      for inbox_file in "$INBOX_DIR"/[0-9]*.md; do
+        [ -f "$inbox_file" ] || continue
+        inbox_slug_val=$(basename "$inbox_file" .md | sed 's/^[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-//')
+        if [ "$inbox_slug_val" = "$slug" ]; then
+          matched=true
+          break
+        fi
+      done
+    fi
+
+    if [ "$matched" = false ]; then
       DOD_FOUND=true
       break
     fi
@@ -82,8 +114,8 @@ if [ "$DOD_FOUND" = true ]; then
   touch "$CACHE"
   exit 0
 else
-  echo "BLOCKED: DoD 파일이 없습니다." >&2
-  echo "소스 코드를 편집하기 전에 먼저 SOT/dod/dod-[작업명].md를 작성하세요." >&2
-  log_block "DoD 파일 미존재" "$FILE_PATH"
+  echo "BLOCKED: 미완료 DoD 파일이 없습니다." >&2
+  echo "소스 코드를 편집하기 전에 먼저 SOT/dod/dod-$(date +%Y-%m-%d)-<slug>.md 를 작성하세요." >&2
+  log_block "미완료 DoD 없음" "$FILE_PATH"
   exit 2
 fi
