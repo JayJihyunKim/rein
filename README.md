@@ -158,6 +158,14 @@ Before editing:
 
 ## 버전 히스토리
 
+### v0.4.2 (2026-04-15) — pre-bash-guard 커밋 메시지 검증 3 버그 수정
+- **fix**: 복합 명령 (`<commit-cmd> -m "..." && <tag-cmd> -m "..."`) 에서 tag 의 `-m` 을 commit 의 `-m` 으로 오인해 false block 발생하던 문제 수정
+- **fix**: `$(cat <<'EOF' ... EOF)` heredoc 방식 메시지가 sed 추출 실패로 검사 자체가 스킵되어 어떤 메시지든 통과되던 silent bypass 차단
+- **fix**: conventional commits scope 표기법 (`fix(auth):`, `chore(sot):`) 거부되던 정규식 확장
+- **refactor**: 추출 로직을 신규 helper `.claude/hooks/lib/extract-commit-msg.py` 로 분리. escape-aware separator + heredoc marker 정밀 매칭
+- **fix**: helper 또는 python3 누락 시 BLOCK (또 다른 silent bypass 차단)
+- **test**: `tests/hooks/test-commit-msg.sh` 신규 23 케이스 — 전체 55/55 통과
+
 ### v0.4.1 (2026-04-15) — hotfix
 - **fix**: `stat -f` / `stat -c` 폴백 체인이 Linux GNU stat 에서 동작하지 않아 `pre-edit-dod-gate.sh`, `pre-bash-guard.sh`, `inbox-compress.sh` 훅이 Linux 사용자 전원에게 블록되던 문제 수정. `uname` 기반 `_mtime()` 헬퍼로 교체 (macOS=BSD, Linux/WSL/Git Bash/Cygwin=GNU)
 - **feat**: 신규 `post-edit-index-sync-inbox.sh` 훅 — `SOT/index.md` 편집 시 훅 프로세스가 직접 오늘자 inbox 를 생성. 3rd party 플러그인(`gateguard-fact-force` 등)이 Claude Write 도구의 새 파일 생성을 차단할 때 발생하는 `stop-session-gate` 데드락 자동 해소

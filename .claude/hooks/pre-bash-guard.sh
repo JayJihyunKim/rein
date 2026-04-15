@@ -133,28 +133,48 @@ if echo "$COMMAND" | grep -qE "git commit"; then
   fi
 fi
 
-# git commit 감지 → 메시지 포맷 검증
+# 커밋 메시지 포맷 검증 (python3 helper 기반, 복합 명령 + heredoc + scope 지원)
+# - 복합 명령에서 첫 "commit" 토큰 이후 구간만 분석 (다음 구분자 &&, ||, ;, | 전까지)
+#   → 복합 명령의 tag 쪽 -m 을 오인하지 않음
+# - heredoc 본문의 첫 줄을 multiline regex 로 정확히 추출
+#   → $(cat <<'EOF' ... EOF) 형태 메시지도 올바로 검사됨
+# - conventional commits scope 표기법 허용: type(scope)?: description
+# 추출 로직 자체는 .claude/hooks/lib/extract-commit-msg.py 에 분리 (bash 의
+# $(cmd <<HEREDOC) + `|| true` 파서 한계를 피하기 위함).
 if echo "$COMMAND" | grep -qE "git commit"; then
-  # HEREDOC 커밋 (cat <<'EOF' ... EOF) 에서 첫 줄 추출
-  COMMIT_MSG=$(echo "$COMMAND" | sed -n "s/.*<<['\"]\\{0,1\\}EOF['\"]\\{0,1\\}//p" | head -1 | sed 's/^[[:space:]]*//')
-
-  # -m "..." 또는 --message "..." 에서 추출
-  if [ -z "$COMMIT_MSG" ]; then
-    COMMIT_MSG=$(echo "$COMMAND" | grep -oE '(-m|--message)[[:space:]]+"[^"]*"' | head -1 | sed 's/^[^"]*"//;s/"$//')
+  EXTRACT_SCRIPT="$SCRIPT_DIR/lib/extract-commit-msg.py"
+  # Helper 누락은 fail-open 으로 두지 않는다. heredoc 우회와 같은 silent
+  # bypass 를 막기 위해, helper 가 없거나 python3 가 동작하지 않으면 BLOCK.
+  if [ ! -f "$EXTRACT_SCRIPT" ]; then
+    echo "BLOCKED: 커밋 메시지 검증 helper 가 없습니다." >&2
+    echo "  expected: $EXTRACT_SCRIPT" >&2
+    echo "  rein 설치/업데이트가 누락된 상태입니다 — rein update 를 실행하세요." >&2
+    log_block "commit msg helper 누락" "$EXTRACT_SCRIPT"
+    exit 2
   fi
-  if [ -z "$COMMIT_MSG" ]; then
-    COMMIT_MSG=$(echo "$COMMAND" | grep -oE "(-m|--message)[[:space:]]+'[^']*'" | head -1 | sed "s/^[^']*'//;s/'$//")
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "BLOCKED: python3 가 PATH 에 없습니다 (커밋 메시지 검증 필수 의존성)." >&2
+    log_block "python3 누락 (commit msg)" "$COMMAND"
+    exit 2
+  fi
+  COMMIT_MSG=$(python3 "$EXTRACT_SCRIPT" "$COMMAND" 2>/dev/null)
+  EXTRACT_RC=$?
+  if [ "$EXTRACT_RC" -ne 0 ]; then
+    echo "BLOCKED: 커밋 메시지 추출이 실패했습니다 (helper exit=$EXTRACT_RC)." >&2
+    log_block "commit msg helper 실패" "$EXTRACT_SCRIPT"
+    exit 2
   fi
 
   if [ -n "$COMMIT_MSG" ]; then
-    # 첫 줄만 검사
-    FIRST_LINE=$(echo "$COMMIT_MSG" | head -1 | sed 's/^[[:space:]]*//')
+    FIRST_LINE=$(printf '%s' "$COMMIT_MSG" | head -1 | sed 's/^[[:space:]]*//')
     if [ -n "$FIRST_LINE" ]; then
-      if ! echo "$FIRST_LINE" | grep -qE "^(feat|fix|docs|refactor|test|chore): .+"; then
+      if ! echo "$FIRST_LINE" | grep -qE "^(feat|fix|docs|refactor|test|chore)(\([a-zA-Z0-9_-]+\))?: .+"; then
         # Co-Authored-By 라인은 면제
         if ! echo "$FIRST_LINE" | grep -qE "^Co-Authored-By:"; then
           echo "BLOCKED: 커밋 메시지 형식이 올바르지 않습니다." >&2
-          echo "형식: [type]: [설명]  (type: feat|fix|docs|refactor|test|chore)" >&2
+          echo "형식: <type>(<scope>)?: <설명>" >&2
+          echo "  type: feat|fix|docs|refactor|test|chore" >&2
+          echo "  scope: 영문/숫자/언더스코어/하이픈 (선택)" >&2
           log_block "커밋 메시지 포맷 위반" "$FIRST_LINE"
           exit 2
         fi
