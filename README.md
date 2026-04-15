@@ -241,6 +241,16 @@ Before editing:
 
 > 상세 변경 이력은 `git log main --oneline` 을 참조하세요.
 
+## 호환성 주의
+
+### ⚠️ `everything-claude-code` 플러그인 사용 금지
+
+`everything-claude-code` Claude Code 플러그인 (>= 1.9.0) 의 `gateguard-fact-force` 훅은 Rein 환경과 **호환되지 않습니다**. 함께 설치하면 Edit/Write/Bash 가 전부 deadlock 됩니다.
+
+- **원인**: gateguard 가 `CLAUDE_SESSION_ID` / `ECC_SESSION_ID` 미설정 시 `pid-${ppid}` 를 fallback 세션 ID 로 사용. Claude Code 는 tool 호출마다 새 node subprocess 를 spawn 하므로 PID 가 매번 달라져 state 파일이 매번 새로 생성되고, 직전 "checked" 기록을 못 읽어 **매 호출이 "첫 실행"으로 판정 → 영원히 deny**.
+- **중복 기능**: Rein 은 이미 `pre-bash-guard.sh` + `pre-edit-dod-gate.sh` 로 동등한 fact-forcing + DoD gate 를 제공하므로 gateguard 가 있을 이유가 없습니다.
+- **조치**: `/plugin` 으로 `everything-claude-code` 언인스톨 후 `~/.claude/plugins/cache/everything-claude-code/`, `~/.gateguard/` 제거. 업스트림 수정 (PR) 전까지는 함께 쓰지 마세요.
+
 ## 참고 저장소
 
 - [agentsmd/agents.md](https://agents.md) — AGENTS.md 계층 구조

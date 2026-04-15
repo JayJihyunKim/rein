@@ -778,3 +778,17 @@ my-project/
 ### Q: 팀원들도 이 프레임워크를 같이 쓸 수 있나요?
 
 네. `.claude/settings.local.json`을 제외한 모든 설정이 Git에 커밋됩니다. 팀원이 Claude Code를 실행하면 동일한 규칙이 자동 적용됩니다. 개인 설정은 `settings.local.json`에 작성하고 `.gitignore`에 포함되어 있습니다.
+
+### Q: `everything-claude-code` 플러그인을 함께 써도 되나요?
+
+**쓰지 마세요.** `everything-claude-code` (>= 1.9.0) 의 `gateguard-fact-force` 훅은 Rein 환경에서 deadlock 을 유발합니다.
+
+- **증상**: 세션 시작 직후 모든 Edit/Write/Bash 호출이 `[Fact-Forcing Gate] Quote the user's current instruction verbatim` 메시지로 계속 차단되어 진행 불가.
+- **원인**: gateguard 가 `CLAUDE_SESSION_ID` / `ECC_SESSION_ID` 미설정 시 `pid-${ppid}` 를 fallback 세션 ID 로 사용합니다. Claude Code 는 tool 호출마다 새 node subprocess 를 spawn 하므로 PID 가 매번 달라져 state 파일이 새로 생성되고, 직전 "checked" 기록을 읽지 못해 **매 호출이 "첫 실행"으로 판정되어 영원히 deny** 됩니다. `~/.gateguard/` 에 PID 다른 state 파일이 세션당 수십 개 누적되는 것으로 재현 확인 가능.
+- **중복 기능**: Rein 은 `.claude/hooks/pre-bash-guard.sh` + `pre-edit-dod-gate.sh` 로 동등한 fact-forcing / DoD gate 를 이미 제공합니다. gateguard 를 따로 쓸 이유가 없습니다.
+- **조치**:
+  1. `/plugin` 명령으로 `everything-claude-code` 언인스톨
+  2. 캐시 정리: `rm -rf ~/.claude/plugins/cache/everything-claude-code ~/.gateguard`
+  3. Claude Code 세션 재시작
+
+업스트림 (`zunoworks/gateguard`) 이 PID fallback 을 보다 안정적인 식별자 (예: `CLAUDE_SESSION_ID` 필수화, tty 기반, parent-chain 기반) 로 교체할 때까지는 병용 불가입니다.
