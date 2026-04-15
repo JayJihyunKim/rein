@@ -139,6 +139,12 @@ if [ -d "$DOD_DIR" ]; then
   done
 fi
 
+# --- Incidents 집계 (Python) ---
+if command -v python3 >/dev/null 2>&1; then
+  python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+    --project-dir "$PROJECT_DIR" 2>&1 || true
+fi
+
 # --- 결과 판정 ---
 if [ -n "$MISSING" ]; then
   echo "BLOCKED: 세션 종료 전 완료되지 않은 항목이 있습니다." >&2

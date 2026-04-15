@@ -7,15 +7,25 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BLOCKS_LOG="$PROJECT_DIR/SOT/incidents/blocks.log"
+BLOCKS_LOG_JSONL="$PROJECT_DIR/SOT/incidents/blocks.jsonl"
 
 log_block() {
   local reason="$1"
   local target="$2"
-  mkdir -p "$(dirname "$BLOCKS_LOG")"
-  echo "$(date -u +%Y-%m-%dT%H:%M:%S)|pre-bash-guard|$reason|$target" >> "$BLOCKS_LOG"
+  mkdir -p "$(dirname "$BLOCKS_LOG_JSONL")"
+  python3 - "pre-bash-guard" "$reason" "$target" <<'PY' >> "$BLOCKS_LOG_JSONL"
+import json, sys
+from datetime import datetime, timezone
+print(json.dumps({
+  "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+  "hook": sys.argv[1],
+  "reason": sys.argv[2],
+  "target": sys.argv[3],
+}, ensure_ascii=False))
+PY
 
   local count
-  count=$(grep -c "pre-bash-guard|$reason" "$BLOCKS_LOG" 2>/dev/null || echo 0)
+  count=$(grep -c '"pre-bash-guard"' "$BLOCKS_LOG_JSONL" 2>/dev/null || echo 0)
   if [ "$count" -ge 3 ]; then
     echo "WARNING: 동일 위반 ${count}회 누적. incidents-to-agent 실행을 권장합니다." >&2
   elif [ "$count" -ge 2 ]; then

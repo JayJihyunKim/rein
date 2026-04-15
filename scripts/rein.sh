@@ -16,7 +16,7 @@ info()  { echo -e "${GREEN}$*${NC}" >&2; }
 warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 
-VERSION="0.4.3"
+VERSION="0.6.0"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
@@ -114,6 +114,379 @@ list_copy_files() {
 }
 
 # ---------------------------------------------------------------------------
+# Manifest tracking (.claude/.rein-manifest.json)
+#
+# The manifest records every file rein installs into a project so that
+# subsequent updates can:
+#   1) detect user modifications (compare on-disk sha256 vs manifest sha256)
+#   2) detect files that were removed from the template since last update
+#      (set difference between current template files and manifest files)
+#
+# The manifest enables the `--prune` flag to safely delete deprecated files
+# that the user has not modified, while preserving anything they touched.
+# ---------------------------------------------------------------------------
+manifest_path() {
+  echo "$1/.claude/.rein-manifest.json"
+}
+
+# manifest_sha256(file): portable sha256 of a file. Empty string on failure.
+manifest_sha256() {
+  local f="$1"
+  [[ -f "$f" ]] || { echo ""; return; }
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$f" 2>/dev/null | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$f" 2>/dev/null | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$f" 2>/dev/null | awk '{print $NF}'
+  else
+    echo ""
+  fi
+}
+
+# manifest_generate(project_dir, template_dir)
+# Build/refresh the manifest from the project_dir, using template_dir to
+# enumerate which files belong to rein. Preserves `installed_at` and
+# per-file `added_in` from any pre-existing manifest.
+manifest_generate() {
+  local project_dir="$1"
+  local template_dir="$2"
+  local mf
+  mf=$(manifest_path "$project_dir")
+
+  local list_file
+  list_file=$(mktemp)
+  # Track files copied via list_copy_files (rein-managed code/config).
+  #
+  # SCOPE NOTE: SOT/ files are intentionally NOT tracked in the manifest:
+  #   - SOT/index.md is a starter file that the project owner immediately
+  #     customizes; treating it as rein-tracked would mean prune sees it as
+  #     "removed from template" (because list_copy_files excludes SOT/) and
+  #     would attempt to delete it.
+  #   - SOT/<sub>/.gitkeep files are harmless directory markers; tracking
+  #     them would create the same false-positive prune target.
+  # The manifest contract is therefore: "tracks every rein-managed file
+  # under list_copy_files()". SOT/ is user state, not rein-managed.
+  while IFS= read -r -d '' rel_path; do
+    local dest="$project_dir/$rel_path"
+    if [[ -f "$dest" ]]; then
+      printf '%s\t%s\n' "$rel_path" "$(manifest_sha256 "$dest")" >> "$list_file"
+    fi
+  done < <(list_copy_files "$template_dir")
+
+  python3 - "$mf" "$VERSION" "$list_file" <<'PYEOF'
+import json, os, sys, datetime
+
+mf, version, list_file = sys.argv[1], sys.argv[2], sys.argv[3]
+
+prev = {}
+prev_files = {}
+prev_installed_at = None
+if os.path.exists(mf):
+    try:
+        with open(mf) as f:
+            prev = json.load(f)
+        prev_files = prev.get("files", {}) or {}
+        prev_installed_at = prev.get("installed_at")
+    except Exception:
+        pass
+
+files = {}
+with open(list_file) as f:
+    for line in f:
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        parts = line.split("\t", 1)
+        if len(parts) != 2:
+            continue
+        rel, sha = parts
+        added_in = prev_files.get(rel, {}).get("added_in", version)
+        files[rel] = {"sha256": sha, "added_in": added_in}
+
+now = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+manifest = {
+    "schema_version": "1",
+    "rein_version": version,
+    "installed_at": prev_installed_at or now,
+    "updated_at": now,
+    "files": files,
+}
+
+os.makedirs(os.path.dirname(mf), exist_ok=True)
+with open(mf, "w") as f:
+    json.dump(manifest, f, indent=2, sort_keys=True)
+    f.write("\n")
+PYEOF
+  rm -f "$list_file"
+}
+
+# manifest_validate(project_dir)
+# Returns 0 if manifest exists and is parseable with schema_version=1,
+# 1 if missing, 2 if corrupt or unsupported schema.
+manifest_validate() {
+  local mf
+  mf=$(manifest_path "$1")
+  [[ -f "$mf" ]] || return 1
+  python3 - "$mf" <<'PYEOF' >/dev/null 2>&1 || return 2
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+assert d.get("schema_version") == "1", "unsupported schema"
+assert isinstance(d.get("files", {}), dict), "files must be object"
+PYEOF
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Prune (deprecated-file removal)
+#
+# Logic: compare manifest's tracked files vs the current template's file list.
+# Files present in manifest but absent in template are "removal candidates".
+# For each candidate:
+#   - if dest does not exist: skip (already removed)
+#   - if dest sha256 == manifest sha256: SAFE delete
+#   - if dest sha256 != manifest sha256: USER MODIFIED — preserve + warn
+#
+# In dry-run mode (default) only the classification is printed.
+# In confirm mode, safe candidates are backed up to .rein-prune-backup-<ts>/
+# and then removed; the manifest is regenerated to reflect the new state.
+#
+# Files matched by .gitignore are always preserved (extra safety net).
+# ---------------------------------------------------------------------------
+prune_impl() {
+  local project_dir="$1"
+  local template_dir="$2"
+  local confirm="$3"           # "true" | "false"
+  local manifest_override="${4:-}"  # optional: path to a snapshot manifest to
+                                    # use instead of project_dir's current one
+                                    # (cmd_merge passes the pre-merge snapshot
+                                    # so prune sees the OLD file set).
+
+  local mf
+  if [[ -n "$manifest_override" && -f "$manifest_override" ]]; then
+    mf="$manifest_override"
+  else
+    mf=$(manifest_path "$project_dir")
+    # Validate only when using the live manifest. A snapshot from cmd_merge
+    # has already been validated implicitly (it was a copy of a prior file).
+    local mv_rc=0
+    manifest_validate "$project_dir" || mv_rc=$?
+    if [[ "$mv_rc" -ne 0 ]]; then
+      case "$mv_rc" in
+        1) warn "No manifest found — prune disabled until next 'rein update'." ;;
+        2) error "Manifest is corrupt or has unsupported schema; refusing to prune." ;;
+        *) error "Manifest validation failed with code $mv_rc" ;;
+      esac
+      return 0
+    fi
+  fi
+
+  # Build current template file list
+  local cur_list
+  cur_list=$(mktemp)
+  while IFS= read -r -d '' rel_path; do
+    printf '%s\n' "$rel_path" >> "$cur_list"
+  done < <(list_copy_files "$template_dir")
+
+  # Have python compute the candidate set, classify each, and emit actions
+  local plan
+  plan=$(mktemp)
+  python3 - "$mf" "$cur_list" "$project_dir" "$plan" <<'PYEOF'
+import json, os, sys, hashlib, subprocess
+
+mf, cur_list_path, project_dir, plan_path = sys.argv[1:5]
+
+# Resolve project_dir to an absolute, canonical form so containment checks
+# are reliable.
+project_dir_abs = os.path.realpath(project_dir)
+
+with open(mf) as f:
+    manifest = json.load(f)
+
+prev = set((manifest.get("files") or {}).keys())
+cur = set()
+with open(cur_list_path) as f:
+    for line in f:
+        line = line.rstrip("\n")
+        if line:
+            cur.add(line)
+
+candidates = sorted(prev - cur)
+
+def sha256(path):
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+def is_gitignored(path):
+    try:
+        rc = subprocess.call(
+            ["git", "check-ignore", "-q", path],
+            cwd=project_dir_abs,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return rc == 0
+    except Exception:
+        return False
+
+def is_safe_relpath(rel):
+    """Reject paths that escape the project. Manifest entries must be:
+    - Non-empty
+    - Not absolute
+    - No '..' segments after normalization
+    - Resolved path must be strictly under project_dir
+    """
+    if not rel or os.path.isabs(rel):
+        return False
+    norm = os.path.normpath(rel)
+    if norm.startswith("..") or os.path.isabs(norm):
+        return False
+    parts = norm.split(os.sep)
+    if any(p == ".." for p in parts):
+        return False
+    full = os.path.realpath(os.path.join(project_dir_abs, norm))
+    # Must live under project_dir_abs (and not BE project_dir_abs itself).
+    try:
+        common = os.path.commonpath([project_dir_abs, full])
+    except ValueError:
+        return False
+    return common == project_dir_abs and full != project_dir_abs
+
+with open(plan_path, "w") as out:
+    for rel in candidates:
+        if not is_safe_relpath(rel):
+            out.write(f"UNSAFE\t{rel}\trefusing to touch path outside project\n")
+            continue
+        full = os.path.join(project_dir_abs, rel)
+        recorded = (manifest["files"].get(rel) or {}).get("sha256", "")
+        if not os.path.exists(full):
+            out.write(f"GONE\t{rel}\n")
+            continue
+        # Reject symlinks at the leaf (defense in depth — a symlink could
+        # point outside even if the rel path looks fine)
+        if os.path.islink(full):
+            out.write(f"UNSAFE\t{rel}\tsymlink not allowed\n")
+            continue
+        if is_gitignored(full):
+            out.write(f"IGNORED\t{rel}\n")
+            continue
+        actual = sha256(full)
+        if actual is None:
+            out.write(f"ERROR\t{rel}\tcannot read\n")
+            continue
+        if actual == recorded:
+            out.write(f"SAFE\t{rel}\t{recorded}\n")
+        else:
+            out.write(f"MODIFIED\t{rel}\n")
+PYEOF
+
+  rm -f "$cur_list"
+
+  # Read plan, emit user-facing report, optionally execute
+  local safe_count=0 modified_count=0 gone_count=0 ignored_count=0
+  local backup_dir=""
+  # backup_dir is created via mktemp below (after the report header) so that
+  # the directory name is unpredictable. See M2 fix.
+
+  # M2 fix: use mktemp -d so the backup dir name is unpredictable, blocking
+  # symlink-planting attacks against a guessed timestamp.
+  if [[ "$confirm" == "true" ]]; then
+    backup_dir=$(mktemp -d "$project_dir/.rein-prune-backup-XXXXXXXX") || {
+      error "Failed to create backup directory under $project_dir"
+      return 1
+    }
+  fi
+
+  echo "" >&2
+  echo -e "${BOLD}Prune analysis${NC}" >&2
+  echo "  manifest: $mf" >&2
+  echo "  mode:     $([[ "$confirm" == "true" ]] && echo 'CONFIRM (will delete)' || echo 'DRY-RUN (no changes)')" >&2
+  echo "" >&2
+
+  local unsafe_count=0
+  while IFS=$'\t' read -r kind rel rest; do
+    case "$kind" in
+      SAFE)
+        safe_count=$((safe_count + 1))
+        if [[ "$confirm" == "true" ]]; then
+          # TOCTOU re-check: confirm sha256 is STILL the recorded value
+          # immediately before deleting. The python plan recorded the
+          # expected sha as `rest`. If the file changed since classification,
+          # downgrade to MODIFIED and skip.
+          local now_sha
+          now_sha=$(manifest_sha256 "$project_dir/$rel")
+          if [[ "$now_sha" != "$rest" ]]; then
+            modified_count=$((modified_count + 1))
+            safe_count=$((safe_count - 1))
+            echo -e "  ${GREEN}PRESERVED${NC}: $rel  (modified after planning — TOCTOU guard)" >&2
+            continue
+          fi
+          # M1 fix: explicitly reject symlinks at the leaf right before cp/rm,
+          # in case a concurrent attacker swapped the file for a symlink
+          # between the python plan and this point. Without this, `cp` would
+          # follow the symlink and read the target's content into the backup
+          # (an information-disclosure window, bounded by sha collision).
+          if [[ -L "$project_dir/$rel" ]]; then
+            unsafe_count=$((unsafe_count + 1))
+            safe_count=$((safe_count - 1))
+            echo -e "  ${RED}REFUSED${NC}: $rel  (symlink appeared after planning — refusing)" >&2
+            continue
+          fi
+          mkdir -p "$backup_dir/$(dirname "$rel")"
+          # cp -P (no-dereference) is defensive even though we just checked
+          # the leaf is not a symlink. It also disables hardlink resolution
+          # via -P on platforms where that matters.
+          cp -P "$project_dir/$rel" "$backup_dir/$rel"
+          rm -f "$project_dir/$rel"
+          echo -e "  ${RED}DELETED${NC}: $rel  (backup: ${backup_dir##*/})" >&2
+        else
+          echo -e "  ${YELLOW}WOULD-DELETE${NC}: $rel" >&2
+        fi
+        ;;
+      MODIFIED)
+        modified_count=$((modified_count + 1))
+        echo -e "  ${GREEN}PRESERVED${NC}: $rel  (user-modified)" >&2
+        ;;
+      GONE)
+        gone_count=$((gone_count + 1))
+        ;;
+      IGNORED)
+        ignored_count=$((ignored_count + 1))
+        echo -e "  ${GREEN}PRESERVED${NC}: $rel  (gitignored)" >&2
+        ;;
+      UNSAFE)
+        unsafe_count=$((unsafe_count + 1))
+        echo -e "  ${RED}REFUSED${NC}: $rel  ($rest)" >&2
+        ;;
+      ERROR)
+        echo -e "  ${RED}ERROR${NC}: $rel  ($rest)" >&2
+        ;;
+    esac
+  done < "$plan"
+
+  rm -f "$plan"
+
+  echo "" >&2
+  echo -e "${BOLD}Summary${NC}: deleted=$safe_count, preserved-modified=$modified_count, preserved-ignored=$ignored_count, already-gone=$gone_count, refused-unsafe=$unsafe_count" >&2
+
+  if [[ "$confirm" == "true" && "$safe_count" -gt 0 ]]; then
+    info "Backup written to: $backup_dir"
+    # Regenerate manifest to reflect deletions
+    manifest_generate "$project_dir" "$template_dir"
+  elif [[ "$confirm" != "true" && "$safe_count" -gt 0 ]]; then
+    echo "" >&2
+    info "Run 'rein update --prune --confirm' to actually delete the $safe_count file(s) above."
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # copy_file(template_dir, dest_dir, rel_path)
 # ---------------------------------------------------------------------------
 copy_file() {
@@ -158,9 +531,11 @@ scaffold_sot() {
 }
 
 # ---------------------------------------------------------------------------
-# Interactive conflict resolution
+# Interactive conflict resolution + CLI flags
 # ---------------------------------------------------------------------------
-ALL_OVERWRITE=false
+ALL_OVERWRITE=false   # set by [a]ll-overwrite prompt OR --all/--yes flag
+PRUNE_MODE=false      # set by --prune flag
+PRUNE_CONFIRM=false   # set by --confirm flag (only meaningful with --prune)
 
 # _has_tty(): returns 0 if /dev/tty is available and readable
 _has_tty() {
@@ -283,15 +658,27 @@ substitute_vars() {
 usage() {
   cat <<'EOF'
 Usage:
-  rein new <project-name>   Create a new project from template
-  rein merge                Merge template into current project
-  rein update               Update current project from template
-  rein --version            Show version
-  rein --help               Show this help
+  rein new <project-name>           Create a new project from template
+  rein merge [flags]                Merge template into current project
+  rein update [flags]               Update current project from template
+  rein --version                    Show version
+  rein --help                       Show this help
+
+Flags (merge / update):
+  --all, --yes                      Auto-overwrite every conflict (CI friendly)
+  --prune                           Dry-run: show files removed from template
+  --prune --confirm                 Actually delete unmodified deprecated files
+                                    (creates .rein-prune-backup-<ts>/ first)
 
 Environment:
-  REIN_TEMPLATE_REPO       Override template repository URL
-  CLAUDE_TEMPLATE_REPO     (deprecated) Alias for REIN_TEMPLATE_REPO
+  REIN_TEMPLATE_REPO                Override template repository URL
+  CLAUDE_TEMPLATE_REPO              (deprecated) Alias for REIN_TEMPLATE_REPO
+
+Manifest:
+  rein tracks installed files in .claude/.rein-manifest.json so that updates
+  can detect user modifications and prune deprecated files safely. The
+  manifest is created/refreshed on every 'rein new', 'rein merge', and
+  'rein update'. User-modified files (sha256 mismatch) are never pruned.
 EOF
 }
 
@@ -327,6 +714,9 @@ cmd_new() {
   scaffold_sot "$dest_dir" "$TEMPLATE_DIR" "false"
   substitute_vars "$dest_dir" "$project_name"
 
+  # Generate initial manifest so future updates can prune safely
+  manifest_generate "$dest_dir" "$TEMPLATE_DIR"
+
   echo ""
   info "Created project '$project_name' with $file_count files."
   echo ""
@@ -352,7 +742,9 @@ cmd_merge() {
   # clone_template sets global TEMPLATE_DIR; do NOT use command substitution
   clone_template
 
-  ALL_OVERWRITE=false
+  # ALL_OVERWRITE may have been set by --all/--yes flag in main(); preserve
+  # that. Only reset to false if it has not been set explicitly.
+  : "${ALL_OVERWRITE:=false}"
 
   local added=0
   local overwritten=0
@@ -399,6 +791,70 @@ cmd_merge() {
 
   echo ""
   info "Done! Added: $added, Overwritten: $overwritten, Skipped/Identical: $skipped"
+
+  # ---- Prune (must run BEFORE manifest_generate) ----
+  # Why this order: prune compares the OLD manifest (from the previous
+  # install/update — recording what was tracked before this run) against the
+  # NEW template's file list. If we regenerated the manifest first, the old
+  # tracked files would be lost and prune would have nothing to compare.
+  if [[ "$PRUNE_MODE" == "true" ]]; then
+    local snapshot=""
+    local live_mf
+    live_mf=$(manifest_path "$PWD")
+    if [[ -f "$live_mf" ]]; then
+      snapshot=$(mktemp)
+      cp "$live_mf" "$snapshot"
+    fi
+    prune_impl "$PWD" "$TEMPLATE_DIR" "$PRUNE_CONFIRM" "$snapshot"
+    [[ -n "$snapshot" && -f "$snapshot" ]] && rm -f "$snapshot"
+  fi
+
+  # Refresh manifest so it reflects post-merge (and post-prune) state
+  manifest_generate "$PWD" "$TEMPLATE_DIR"
+}
+
+# ---------------------------------------------------------------------------
+# parse_flags(args...)
+# Sets ALL_OVERWRITE / PRUNE_MODE / PRUNE_CONFIRM globals based on flags
+# present in the remaining args. Unknown flags trigger an error.
+# Positional args (e.g. project name) are not accepted here — caller must
+# have already shifted past them.
+# ---------------------------------------------------------------------------
+parse_flags() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all|--yes)
+        ALL_OVERWRITE=true
+        ;;
+      --prune)
+        PRUNE_MODE=true
+        ;;
+      --confirm)
+        PRUNE_CONFIRM=true
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*)
+        error "unknown flag '$1'"
+        usage
+        exit 1
+        ;;
+      *)
+        error "unexpected argument '$1'"
+        usage
+        exit 1
+        ;;
+    esac
+    shift
+  done
+
+  # Validate combinations
+  if [[ "$PRUNE_CONFIRM" == "true" && "$PRUNE_MODE" != "true" ]]; then
+    error "--confirm requires --prune"
+    exit 1
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -414,15 +870,18 @@ main() {
     new)
       if [[ $# -lt 2 ]]; then
         error "project name required"
-        echo "Usage: rein new <project-name>" >&2
+        echo "Usage: rein new <project-name> [--all]" >&2
         exit 1
       fi
-      cmd_new "$2"
+      shift
+      local project_name="$1"
+      shift
+      parse_flags "$@"
+      cmd_new "$project_name"
       ;;
-    merge)
-      cmd_merge
-      ;;
-    update)
+    merge|update)
+      shift
+      parse_flags "$@"
       cmd_merge
       ;;
     --version|-v)
@@ -439,4 +898,8 @@ main() {
   esac
 }
 
-main "$@"
+# Only invoke main when executed directly. Tests can source this file with
+# REIN_SOURCED=1 to load all functions without triggering main.
+if [[ "${REIN_SOURCED:-0}" != "1" ]]; then
+  main "$@"
+fi

@@ -95,6 +95,20 @@
           {
             "type": "command",
             "command": ".claude/hooks/post-edit-index-sync-inbox.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/post-write-spec-review-gate.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start-load-sot.sh"
           }
         ]
       }

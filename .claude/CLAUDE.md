@@ -12,7 +12,13 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 1. 이 파일 (`.claude/CLAUDE.md`) — 자동 로드
 2. `/AGENTS.md` — 전역 실행 규칙
 3. 작업 디렉토리의 nearest `AGENTS.md` — 언어/프레임워크별 규칙
-4. `/SOT/index.md` — 현재 프로젝트 상태 (5~15줄)
+4. **SessionStart 훅 (`session-start-load-sot.sh`)** 이 다음을 자동 주입:
+   - `SOT/index.md` 전량
+   - `SOT/inbox/*.md` 전량 (오늘 진행 중 작업)
+   - `SOT/daily/*.md` 전량 (최근 7일 이내)
+   - `SOT/weekly/*.md` 최근 4주 (ISO 주 기준 역산)
+   - `SOT/dod/.spec-reviews/*.pending` 이 있으면 "⚠️ 미해결 spec review" 요약
+   - 용량 예산: 기본 65536 바이트. 초과 시 제목만 표시 (REIN_BUDGET_BYTES 로 조정)
 
 작업 유형에 따라 추가 로드:
 - 워크플로우: `.claude/workflows/[relevant].md`

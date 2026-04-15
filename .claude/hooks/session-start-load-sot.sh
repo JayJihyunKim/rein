@@ -1,0 +1,200 @@
+#!/bin/bash
+# Hook: SessionStart
+# SOT 프로젝트 상태를 세션 시작 시 에이전트 컨텍스트로 주입.
+#
+# 출력: stdout → Claude Code 가 additionalContext 로 흡수
+# 실패해도 세션은 계속됨 (항상 exit 0)
+#
+# 환경변수:
+#   REIN_NOW       — 기준 시각 (YYYY-MM-DD). 미설정 시 현재 시각. 테스트용
+#   REIN_BUDGET_BYTES — 총 누적 바이트 상한 (기본 65536). 초과 시 이후 파일은 제목만
+
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+BUDGET_BYTES="${REIN_BUDGET_BYTES:-65536}"
+USED_BYTES=0
+TRUNCATED=false
+
+# REIN_NOW 를 date 명령에 주입할 형식으로 정규화
+now_week_offset() {
+  # $1 = weeks ago (0,1,2,3)
+  local i="$1"
+  if [ -n "${REIN_NOW:-}" ]; then
+    # 고정 시각 기준
+    date -j -v-${i}w -f "%Y-%m-%d" "$REIN_NOW" +%G-W%V 2>/dev/null \
+      || date -d "$REIN_NOW ${i} weeks ago" +%G-W%V 2>/dev/null
+  else
+    date -v-${i}w +%G-W%V 2>/dev/null \
+      || date -d "${i} weeks ago" +%G-W%V 2>/dev/null
+  fi
+}
+
+# 파일 크기 계산 (macOS/Linux 호환)
+file_size() {
+  stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || echo 0
+}
+
+emit_file_block() {
+  # $1 = 파일 경로 (프로젝트 루트 기준 상대 경로)
+  local rel="$1"
+  local abs="$PROJECT_DIR/$rel"
+  [ -f "$abs" ] || return 0
+
+  local sz
+  sz=$(file_size "$abs")
+
+  # 예산 초과 시 제목만 출력
+  if [ "$((USED_BYTES + sz))" -gt "$BUDGET_BYTES" ]; then
+    echo "### $rel (${sz}B, truncated — budget reached)"
+    echo
+    TRUNCATED=true
+    return 0
+  fi
+
+  echo "### $rel"
+  echo '```markdown'
+  cat "$abs"
+  echo '```'
+  echo
+  USED_BYTES=$((USED_BYTES + sz))
+}
+
+cd "$PROJECT_DIR" || exit 0
+
+echo "## SOT 세션 시작 컨텍스트"
+echo
+echo "> 자동 로드: index.md + inbox 전량 + daily 전량 + weekly 최근 4주"
+echo "> 예산: ${BUDGET_BYTES}B (초과 시 이후 파일은 제목만 표시)"
+echo
+
+# 0. B2 pending spec review 요약 (있을 때만)
+SPEC_REVIEWS_DIR="$PROJECT_DIR/SOT/dod/.spec-reviews"
+if [ -d "$SPEC_REVIEWS_DIR" ]; then
+  PENDING_COUNT=0
+  PENDING_LIST=""
+  for marker in "$SPEC_REVIEWS_DIR"/*.pending; do
+    [ -f "$marker" ] || continue
+    PATH_LINE=$(grep '^path=' "$marker" | cut -d= -f2- || true)
+    PENDING_COUNT=$((PENDING_COUNT + 1))
+    PENDING_LIST="${PENDING_LIST}  - ${PATH_LINE}"$'\n'
+  done
+  if [ "$PENDING_COUNT" -gt 0 ]; then
+    echo "### ⚠️ 미해결 spec review: ${PENDING_COUNT}건"
+    echo '```'
+    printf '%s' "$PENDING_LIST"
+    echo '```'
+    echo "소스 편집 전 \`/codex\` 로 리뷰하거나 대체 경로로 해소 필요."
+    echo
+  fi
+fi
+
+# 미처리 incident 요약 + gate stamp 관리
+INCIDENTS_DIR="$PROJECT_DIR/SOT/incidents"
+STAMP_FILE="$PROJECT_DIR/SOT/dod/.incident-review-pending"
+
+if command -v python3 >/dev/null 2>&1 && [ -d "$INCIDENTS_DIR" ]; then
+  PENDING=$(python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+    --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null || echo 0)
+
+  if [ "$PENDING" -gt 0 ]; then
+    echo "### 미처리 incident: ${PENDING}건"
+    echo
+    echo "**첫 source 편집 시도가 차단됩니다.** \`incidents-to-rule\` 스킬 호출 + AskUserQuestion 으로 처리하세요."
+    echo
+    mkdir -p "$(dirname "$STAMP_FILE")"
+    touch "$STAMP_FILE"
+  else
+    rm -f "$STAMP_FILE"
+  fi
+fi
+
+# 1. index.md
+emit_file_block "SOT/index.md"
+
+# 2. inbox 전량
+if [ -d "SOT/inbox" ]; then
+  for f in SOT/inbox/*.md; do
+    [ -f "$f" ] || continue
+    emit_file_block "$f"
+  done
+fi
+
+# 3. daily 전량
+if [ -d "SOT/daily" ]; then
+  for f in SOT/daily/*.md; do
+    [ -f "$f" ] || continue
+    emit_file_block "$f"
+  done
+fi
+
+# 4. weekly: 최근 4주
+if [ -d "SOT/weekly" ]; then
+  WEEKS=()
+  for i in 0 1 2 3; do
+    W=$(now_week_offset "$i")
+    [ -n "$W" ] && WEEKS+=("$W")
+  done
+  for w in "${WEEKS[@]}"; do
+    emit_file_block "SOT/weekly/${w}.md"
+  done
+fi
+
+if [ "$TRUNCATED" = true ]; then
+  echo "> ⚠️ 예산 초과로 일부 파일이 제목만 표시됨. REIN_BUDGET_BYTES 로 상한 조정 가능."
+fi
+
+# Skill/MCP 인벤토리 스캔 + 가이드 출력 (D)
+# BEGIN D skill-mcp
+SKILL_GUIDE="$PROJECT_DIR/.claude/cache/skill-mcp-guide.md"
+SKILL_REGEN_STAMP="$PROJECT_DIR/.claude/cache/.skill-mcp-regen-pending"
+SKILL_GUIDE_MAX_BYTES=6144  # 6KB cap, B1 65536 의 약 10%
+
+if command -v python3 >/dev/null 2>&1 && [ -f "$PROJECT_DIR/scripts/rein-scan-skill-mcp.py" ]; then
+  # 스캐너 결과를 임시 파일에 저장 후 검증
+  SCAN_TMP=$(mktemp)
+  if python3 "$PROJECT_DIR/scripts/rein-scan-skill-mcp.py" \
+       --project-dir "$PROJECT_DIR" --scan > "$SCAN_TMP" 2>/dev/null \
+     && python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$SCAN_TMP" 2>/dev/null; then
+    NEEDS_REGEN=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print("yes" if d.get("needs_regen") else "no")' "$SCAN_TMP")
+  else
+    NEEDS_REGEN="unknown"
+  fi
+  rm -f "$SCAN_TMP"
+
+  if [ -f "$SKILL_GUIDE" ]; then
+    GUIDE_SIZE=$(stat -f %z "$SKILL_GUIDE" 2>/dev/null || stat -c %s "$SKILL_GUIDE" 2>/dev/null || echo 0)
+    echo "### Skill/MCP 활용 가이드"
+    if [ "$GUIDE_SIZE" -gt "$SKILL_GUIDE_MAX_BYTES" ]; then
+      head -c "$SKILL_GUIDE_MAX_BYTES" "$SKILL_GUIDE"
+      echo
+      echo "> ⚠️ 가이드가 ${GUIDE_SIZE}B (${SKILL_GUIDE_MAX_BYTES}B 초과) — truncated"
+    else
+      cat "$SKILL_GUIDE"
+    fi
+    echo
+  fi
+
+  case "$NEEDS_REGEN" in
+    yes)
+      echo "### 🔄 skill/MCP 인벤토리 변경 감지"
+      echo "AGENTS.md 규칙: 첫 turn 에 LLM 호출하여 \`.claude/cache/skill-mcp-guide.md\` 재생성 필요"
+      echo
+      mkdir -p "$(dirname "$SKILL_REGEN_STAMP")"
+      touch "$SKILL_REGEN_STAMP"
+      ;;
+    no)
+      rm -f "$SKILL_REGEN_STAMP"
+      ;;
+    unknown)
+      echo "### ⚠️ skill/MCP 스캔 실패"
+      echo "rein-scan-skill-mcp.py 출력이 손상됨. 수동 점검 필요."
+      echo
+      ;;
+  esac
+fi
+# END D skill-mcp
+
+exit 0

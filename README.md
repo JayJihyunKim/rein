@@ -158,6 +158,35 @@ Before editing:
 
 ## 버전 히스토리
 
+### v0.6.0 (2026-04-15) — Session infra 5 개선안 (B1+B2+C+D + A1)
+- **feat (B1)**: 신규 `session-start-load-sot.sh` — SessionStart 훅이 `SOT/index.md`, `inbox/`, `daily/`, `weekly/` (최근 4주) 를 세션 시작 시 자동 컨텍스트 주입. `REIN_BUDGET_BYTES=65536` 용량 예산 + 초과 시 `truncated` 마커. `REIN_NOW` 로 기준 시각 주입 가능
+- **feat (B2)**: 신규 `post-write-spec-review-gate.sh` — canonical 경로 (`docs/**/specs/**`, `docs/**/plans/**`, `specs/**`, `plans/**`) 의 설계 문서 Write/Edit 시 pending 마커 자동 생성. `pre-edit-dod-gate` 확장으로 소스 편집 시도 시 미리뷰 spec 이 있으면 차단 (self-heal 포함)
+- **feat (B2)**: 신규 `scripts/rein-mark-spec-reviewed.sh` — `/codex` 또는 대체 리뷰어가 리뷰 완료 후 per-spec stamp 등록
+- **feat (C)**: 신규 `scripts/rein-aggregate-incidents.py` — Python 기반 incidents 자동 집계. `fcntl.flock` + `tempfile.mkstemp + os.replace` 로 lock-safe + atomic. 재발 (>= 2회) 시 `SOT/incidents/auto-<hook>-<hash>.md` 생성/갱신
+- **feat (C)**: `blocks.log` → JSONL (`blocks.jsonl`) 포맷 전환. pipe/newline/한글 특수문자 안전
+- **feat (C)**: `scripts/rein-migrate-blocks-log.py` — 1회성 legacy 변환
+- **feat (C)**: `stop-session-gate.sh` 확장 — 자동 aggregate 호출
+- **feat (C)**: `pre-edit-dod-gate.sh` 확장 — `.incident-review-pending` stamp + self-heal + 1회성 파일 기반 바이패스 (`.skip-incident-gate`)
+- **feat (C)**: `.claude/skills/incidents-to-rule/SKILL.md` 갱신 — 신규 frontmatter 포맷 + legacy INC-NNN opt-in 양쪽 지원
+- **feat (D)**: 신규 `scripts/rein-scan-skill-mcp.py` — 사용자 + 프로젝트 skill/MCP 인벤토리 자동 스캔 (hashlib.sha1 canonical hash)
+- **feat (D)**: `session-start-load-sot.sh` 확장 — 6KB 캡 가이드 출력 + 변경 감지 시 `.skill-mcp-regen-pending` stamp + SessionStart 알림
+- **feat (D)**: `pre-edit-dod-gate.sh` 확장 — 최신 mtime active dod 1건의 `## 활용 skill/MCP` 섹션 검증 (경고만)
+- **feat (D)**: AGENTS.md 에 가이드 재생성 최소 템플릿 추가 (섹션 순서, 6KB 캡, 추측 금지, 사용자 메모 보존)
+- **fix (A1)**: `pre-bash-guard.sh` 의 1시간 stamp TTL 제거 — `.review-pending` 비교만으로 "리뷰 이후 코드 수정" 판정
+- **feat**: `docs/superpowers/specs/` 에 각 개선안 설계 문서 4개 (B1, B2, C, D). 모두 Codex 리뷰 반영
+- **feat**: `docs/superpowers/plans/` 에 DoD 회전 구현 계획 + dev 머지 검증 계획
+- **feat**: `docs/superpowers/reports/` 에 실전 검증 보고서
+- **test**: 신규 4 suite (test-session-start, test-spec-review-gate, test-incidents-automation, test-skill-mcp-inventory) — 70 케이스 전체 통과. `run-all.sh` 합계 134/134 + cli 25/25 = 159/159 PASSED
+- **test**: dogfood 실전 검증 10 Phase 전부 통과 (migration / scan / SessionStart / gate / self-heal 사이클 / 통합)
+
+### v0.5.0 (2026-04-15) — manifest tracking + prune
+- **feat**: `scripts/rein.sh` 에 `.claude/.rein-manifest.json` 기반 manifest tracking 시스템 도입. `rein new`, `rein merge`, `rein update` 가 모든 설치 파일을 추적하고 사용자 수정 여부를 sha256 으로 판정
+- **feat**: `rein merge --prune` / `rein update --prune` — 템플릿에서 제거된 deprecated 파일을 사용자 프로젝트에서 안전하게 정리. 사용자 수정 파일 (sha256 mismatch) 은 절대 삭제하지 않음
+- **feat**: `--prune --confirm` 실제 삭제 모드 — 백업 디렉토리 `.rein-prune-backup-<timestamp>/` 에 먼저 이동
+- **security**: path traversal / 절대경로 / leaf symlink 거부. `cp -P` + 즉시 leaf symlink 재검사 (정보 노출 윈도우 차단)
+- **security**: backup dir 이름에 `mktemp -d` 사용 (timestamp 예측 차단)
+- **test**: `tests/cli/test-manifest-prune.sh` 신규 25 케이스 — parse_flags 조합 / scope / heredoc / path traversal / leaf symlink / cmd_merge-prune-manifest_generate 통합 / .gitignore 보호 / v0.4.x 마이그레이션
+
 ### v0.4.3 (2026-04-15) — hotfix: stop-session-gate 데드락 근본 해소
 - **fix**: `post-edit-index-sync-inbox.sh` (v0.4.1) 의 한계 해소 — 해당 훅은 `SOT/index.md` 편집 시에만 발동해서, 데드락 상황에서 사용자가 index.md 를 건드리지 않으면 작동 안 하던 precondition 실패
 - **feat**: `stop-session-gate.sh` 에 git 활동 감지 추가 — 오늘 커밋 OR tracked 파일 modified/staged 가 있으면 inbox 없어도 WARNING + 통과 (순수 untracked 파일은 노이즈 필터링으로 인정 안 함)

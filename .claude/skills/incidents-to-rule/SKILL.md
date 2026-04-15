@@ -15,6 +15,42 @@ triggers:
 ## 입력
 - `SOT/incidents/{target}.md` 또는 `SOT/incidents/` 전체
 
+## 입력 포맷
+
+### 신규 자동 생성 포맷 (`auto-*.md`)
+```markdown
+---
+status: "pending"
+pattern_hash: "3f4a8b2c9d1e5f6a"
+hook: "pre-bash-guard"
+reason: "파이프 쉘 실행"
+count: "5"
+first_seen: "2026-04-10T14:23:10"
+last_seen_at: "2026-04-15T09:17:45"
+---
+
+# Incident: pre-bash-guard / 파이프 쉘 실행
+
+## 예시 (최근 최대 5건)
+...
+```
+
+**처리 규칙**:
+- `auto-*.md` 파일은 frontmatter `status: pending` 인 것만 처리
+- `status: processed` 또는 `status: declined` 는 건너뜀
+- 처리 완료 후 해당 파일의 frontmatter `status` 를 `processed` 또는 `declined` 로 갱신
+
+### 레거시 포맷 (`INC-NNN.md`)
+```markdown
+# INC-001: [제목]
+...
+```
+
+**처리 규칙**:
+- 레거시 `INC-NNN.md` 는 `SOT/incidents/legacy/` 디렉토리에 있을 때만 처리 (opt-in)
+- 루트 `SOT/incidents/` 의 frontmatter 없는 `.md` 파일은 무시 (gate 영구 발동 방지)
+- 레거시 파일을 처리하려면 `SOT/incidents/legacy/` 로 이동 후 스킬 호출
+
 ## 실행 절차
 
 ### Step 1: Incident 수집

@@ -39,12 +39,101 @@
 - `SOT/dod/` 안에서 임의 시점에 slug 는 고유해야 한다. 같은 slug 가 이미 있으면 새 작업은 `-2`, `-3` 접미사로 충돌을 피한다
 - 과거에 완료되어 아카이브된 slug 는 자유롭게 재사용 가능 (회전 로직이 과거 daily 를 탐색하지 않는다)
 
+### 설계 문서 작성 & 리뷰 규칙
+
+#### Canonical 경로
+
+설계 문서(spec, plan 등)는 반드시 다음 경로 중 하나에 작성한다:
+
+- `docs/**/specs/**.md` (예: `docs/superpowers/specs/foo-design.md`)
+- `docs/**/plans/**.md`
+- `docs/specs/**.md` / `docs/plans/**.md`
+- `specs/**.md` / `plans/**.md` (루트)
+
+이 경로에 `.md` 파일을 Write/Edit 하면 `post-write-spec-review-gate` 훅이 pending review 마커를 자동 생성한다.
+
+#### 리뷰 강제
+
+**설계 문서 작성 직후, 구현으로 넘어가기 전에 반드시 `/codex` 스킬로 리뷰를 실행하고 per-spec stamp 를 등록한다:**
+
+```bash
+# 1. /codex 스킬로 리뷰 실행
+/codex <spec 경로>
+
+# 2. 리뷰 완료 후 per-spec stamp 등록
+bash scripts/rein-mark-spec-reviewed.sh docs/specs/foo.md codex
+```
+
+리뷰가 해소되지 않은 상태에서 소스 파일(`src/`, `app/`, `scripts/` 등)을 편집하려 하면 `pre-edit-dod-gate` 가 차단한다.
+
+#### `/codex` 장애 시 Fallback
+
+1. **대체 리뷰어**: `superpowers:code-reviewer` 스킬 또는 `general-purpose` 에이전트에게 리뷰 요청 후:
+   ```bash
+   bash scripts/rein-mark-spec-reviewed.sh docs/specs/foo.md code-reviewer
+   ```
+
+2. **사용자 수동 리뷰**: 사람이 검토 후:
+   ```bash
+   bash scripts/rein-mark-spec-reviewed.sh docs/specs/foo.md human
+   ```
+
+3. **긴급 1회 바이패스** (incidents.log 에 기록됨, 1회만 사용 가능):
+   ```bash
+   echo 'reason=hotfix for production bug XYZ' > SOT/dod/.skip-spec-gate
+   # 다음 Edit/Write 가 통과되며 파일은 자동 삭제
+   ```
+
+#### Spec 파일 이동/리네임
+
+pending 마커는 원래 경로를 기억한다. 이동/리네임 후 gate 가 "원 경로 파일 없음" 을 BLOCKED 로 판정하므로:
+
+1. 새 경로에 한 번 Write 를 수행 → 새 마커 자동 생성
+2. 기존 마커 수동 삭제 (`rm SOT/dod/.spec-reviews/<old-hash>.pending`)
+
+자동 해소는 조용한 리뷰 우회 경로이므로 금지.
+
+#### Canonical 외 경로
+
+훅이 감지하지 못하므로 **메인테이너가 수동으로** `/codex` 리뷰를 거쳐야 한다. 품질 위험은 사용자 책임.
+
 ---
 
 ## 3. 상호작용 규칙
 
 - **질문 후 답변 대기**: "~할까요?", "진행할까?" 등 확인 질문을 던졌으면 사용자 답변을 받기 전까지 실행하지 않는다. 질문과 실행이 같은 응답에 공존하면 안 된다.
 - **승인 후 실행**: 빌드, 배포, 삭제, push 등 비가역적 작업은 반드시 사용자의 명시적 승인("해", "진행해", "좋아") 후에만 실행한다.
+
+### Skill/MCP 활용 강제
+
+세션 시작 시 `Skill/MCP 활용 가이드` 섹션이 컨텍스트에 자동 주입된다 (D 시스템). 작업 시작 전에:
+
+1. **반드시** 가이드를 먼저 참조해 적합한 skill/MCP 조합을 선택한다
+2. DoD 작성 시 `## 활용 skill/MCP` 섹션을 포함해 어떤 도구를 쓸지 명시한다
+3. 변경 감지(`🔄 skill/MCP 인벤토리 변경 감지`) flag 가 있으면 첫 turn 에 LLM 호출해 `.claude/cache/skill-mcp-guide.md` 를 재생성한다
+
+### 가이드 재생성 절차 (최소 템플릿)
+
+`.claude/cache/.skill-mcp-regen-pending` stamp 가 있을 때 첫 turn 에 수행:
+
+1. 현재 인벤토리 (`.claude/cache/skill-mcp-inventory.json`) 읽기
+2. 기존 가이드(`skill-mcp-guide.md`) 가 있으면 **사용자 수동 메모는 보존** — frontmatter 또는 `<!-- USER NOTES -->` 블록은 그대로 복사
+3. 카테고리별 활용방안 markdown 을 **다음 순서 고정** 으로 작성:
+   1. **검색 / 정보 탐색** (Tavily, Context7, Sequential, WebFetch)
+   2. **코드 작성 / 편집** (Serena, Morphllm, Magic, Codex)
+   3. **디버깅 / 검증** (Chrome DevTools, Playwright, code-reviewer)
+   4. **작업 흐름** (brainstorming, writing-plans, TDD, incidents-to-rule)
+   5. **기본 권장 조합** (작업 유형 → 1순위 도구 표)
+4. **6KB 미만** 으로 작성. 초과 시 압축 재시도
+5. **인벤토리에 없는 도구는 추측 금지** — 실제 스캔된 skill/MCP 만 언급
+6. `.claude/cache/skill-mcp-guide.md` 에 Write 도구로 저장
+7. `.claude/cache/.skill-mcp-regen-pending` 삭제 (`rm`)
+8. **재생성 실패 시**: stamp 유지, stderr 에 사유 출력, 다음 세션에서 재시도
+9. 사용자에게 "가이드 갱신됨" 한 줄 알림
+
+### Cache 디렉토리
+
+`.claude/cache/` 는 git 추적 안 함 (`.gitignore` 에 등록). 사용자별 환경에 따라 다른 가이드가 생성됨.
 
 ---
 
