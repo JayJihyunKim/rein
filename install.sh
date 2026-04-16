@@ -33,6 +33,13 @@ REIN_EXEC="$REIN_BIN/rein"
 REIN_ENV="$REIN_HOME/env"
 REIN_RAW_URL="${REIN_INSTALL_URL:-https://raw.githubusercontent.com/JayJihyunKim/rein/main/scripts/rein.sh}"
 
+# reject_symlink(path) — abort if path is a symlink
+reject_symlink() {
+  if [[ -L "$1" ]]; then
+    error "Refusing to overwrite symlink at $1 — possible symlink attack"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # download_rein(target_path)
 # Downloads scripts/rein.sh from main to target_path.
@@ -64,6 +71,7 @@ download_rein() {
   fi
 
   chmod +x "$tmp"
+  reject_symlink "$dest"
   mv "$tmp" "$dest"
 }
 
@@ -73,6 +81,7 @@ download_rein() {
 # Idempotent — always overwrites (managed file, not user-edited).
 # ---------------------------------------------------------------------------
 write_env_file() {
+  reject_symlink "$REIN_ENV"
   cat > "$REIN_ENV" <<'EOF'
 #!/bin/sh
 # rein shell setup — managed file, do not edit manually
@@ -126,23 +135,33 @@ detect_shell_rc() {
 
 # ---------------------------------------------------------------------------
 # append_env_source(rc_path)
-# Appends `. "$HOME/.rein/env"` to rc_path if not already present.
+# Appends shell-appropriate PATH setup to rc_path.
+# Fish shell gets fish-compatible syntax; others get POSIX `. "$HOME/.rein/env"`.
 # Idempotent. Creates rc_path if missing.
 # ---------------------------------------------------------------------------
 append_env_source() {
   local rc="$1"
-  local line='. "$HOME/.rein/env"'
+  local is_fish=0
+  [[ "$rc" == *"/fish/"* ]] && is_fish=1
 
   [[ -f "$rc" ]] || {
     mkdir -p "$(dirname "$rc")"
     touch "$rc"
   }
 
-  if grep -qF "$line" "$rc"; then
-    return 0
+  if [[ $is_fish -eq 1 ]]; then
+    local fish_line='set -gx PATH "$HOME/.rein/bin" $PATH'
+    if grep -qF '.rein/bin' "$rc"; then
+      return 0
+    fi
+    printf '\n# Added by rein installer\n%s\n' "$fish_line" >> "$rc"
+  else
+    local line='. "$HOME/.rein/env"'
+    if grep -qF "$line" "$rc"; then
+      return 0
+    fi
+    printf '\n# Added by rein installer\n%s\n' "$line" >> "$rc"
   fi
-
-  printf '\n# Added by rein installer\n%s\n' "$line" >> "$rc"
 }
 
 # ---------------------------------------------------------------------------

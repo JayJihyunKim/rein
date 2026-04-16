@@ -15,6 +15,7 @@ fi
 info()  { echo -e "${GREEN}$*${NC}" >&2; }
 warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
+fatal() { echo -e "${RED}Fatal: $*${NC}" >&2; exit 1; }
 
 VERSION="0.7.0"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
@@ -156,34 +157,29 @@ self_update_apply() {
   local cli_path
   cli_path=$(current_cli_path)
 
-  [[ -f "$tmpl_rein" ]] || {
-    error "Template rein.sh not found at $tmpl_rein"
-    return 1
-  }
+  [[ -f "$tmpl_rein" ]] || fatal "Template rein.sh not found at $tmpl_rein"
 
   # Sanity check: new file must pass bash -n and have VERSION
   if ! bash -n "$tmpl_rein" 2>/dev/null; then
-    error "Template rein.sh has syntax errors, aborting self-update"
-    return 1
+    fatal "Template rein.sh has syntax errors, aborting self-update"
   fi
   if ! grep -q '^VERSION=' "$tmpl_rein"; then
-    error "Template rein.sh missing VERSION, aborting self-update"
-    return 1
+    fatal "Template rein.sh missing VERSION, aborting self-update"
   fi
 
   # Atomic replace: copy to sibling tmp, chmod, mv
   local tmp
-  tmp=$(mktemp "${cli_path}.XXXXXX")
+  tmp=$(mktemp "${cli_path}.XXXXXX") || {
+    fatal "mktemp failed for self-update at ${cli_path}"
+  }
   cp "$tmpl_rein" "$tmp" || {
     rm -f "$tmp"
-    error "Failed to copy new rein.sh to $tmp"
-    return 1
+    fatal "Failed to copy new rein.sh to $tmp"
   }
   chmod +x "$tmp"
   mv "$tmp" "$cli_path" || {
     rm -f "$tmp"
-    error "Failed to install new rein to $cli_path"
-    return 1
+    fatal "Failed to install new rein to $cli_path"
   }
 
   info "Self-updated: $cli_path"
@@ -216,8 +212,9 @@ migrate_old_install_notice() {
 # Returns 0 (yes) / 1 (no).
 # ---------------------------------------------------------------------------
 prompt_self_update() {
+  local template_dir="$1"
   local tv
-  tv=$(template_version "$TEMPLATE_DIR")
+  tv=$(template_version "$template_dir")
   info ""
   info "CLI update available: $VERSION -> $tv"
 
@@ -245,10 +242,33 @@ install_to_new_home() {
   local new_bin="$HOME/.rein/bin/rein"
   local new_env="$HOME/.rein/env"
 
-  mkdir -p "$HOME/.rein/bin"
-  cp "$tmpl_rein" "$new_bin"
-  chmod +x "$new_bin"
+  # Validate template before installing (mirrors self_update_apply checks)
+  if ! bash -n "$tmpl_rein" 2>/dev/null; then
+    warn "Template rein.sh has syntax errors, skipping migration install"
+    return 1
+  fi
+  if ! grep -q '^VERSION=' "$tmpl_rein"; then
+    warn "Template rein.sh missing VERSION, skipping migration install"
+    return 1
+  fi
 
+  mkdir -p "$HOME/.rein/bin"
+
+  # Atomic install: mktemp+mv (same as self_update_apply)
+  if [[ -L "$new_bin" ]]; then
+    warn "Refusing to overwrite symlink at $new_bin"
+    return 1
+  fi
+  local tmp
+  tmp=$(mktemp "${new_bin}.XXXXXX") || {
+    warn "mktemp failed for migration install"
+    return 1
+  }
+  cp "$tmpl_rein" "$tmp"
+  chmod +x "$tmp"
+  mv "$tmp" "$new_bin"
+
+  # KEEP IN SYNC WITH install.sh:write_env_file()
   cat > "$new_env" <<'EOF'
 #!/bin/sh
 # rein shell setup — managed file, do not edit manually
@@ -962,7 +982,7 @@ cmd_merge() {
   if [[ $_rein_rc -eq 1 ]]; then
     case "$_rein_action" in
       APPLY)
-        if prompt_self_update; then
+        if prompt_self_update "$TEMPLATE_DIR"; then
           self_update_apply "$TEMPLATE_DIR"
           export REIN_SELF_UPDATED=1
           info "Restarting with new version..."
@@ -1061,6 +1081,7 @@ parse_flags() {
     case "$1" in
       --all)
         ALL_OVERWRITE=true
+        export REIN_YES=1
         ;;
       --yes|-y)
         ALL_OVERWRITE=true
