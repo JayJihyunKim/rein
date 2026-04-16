@@ -11,6 +11,7 @@ BLOCKS_LOG="$PROJECT_DIR/SOT/incidents/blocks.log"
 BLOCKS_LOG_JSONL="$PROJECT_DIR/SOT/incidents/blocks.jsonl"
 DOD_DIR="$PROJECT_DIR/SOT/dod"
 INBOX_DIR="$PROJECT_DIR/SOT/inbox"
+SRC_EDIT_MARKER="$DOD_DIR/.session-has-src-edit"
 CACHE_KEY=$(echo "${PROJECT_DIR}" | md5 -q 2>/dev/null || echo "${PROJECT_DIR}" | md5sum 2>/dev/null | cut -c1-8)
 
 # Portable mtime extractor: returns epoch seconds.
@@ -91,6 +92,7 @@ fi
 if [ -f "$CACHE" ]; then
   CACHE_AGE=$(( $(date +%s) - $(_mtime "$CACHE") ))
   if [ "$CACHE_AGE" -lt "$CACHE_TTL" ]; then
+    touch "$SRC_EDIT_MARKER" 2>/dev/null
     exit 0
   fi
 fi
@@ -216,6 +218,7 @@ fi
 
 if [ "$DOD_FOUND" = true ]; then
   touch "$CACHE"
+  touch "$SRC_EDIT_MARKER" 2>/dev/null
   exit 0
 else
   echo "BLOCKED: 미완료 DoD 파일이 없습니다." >&2

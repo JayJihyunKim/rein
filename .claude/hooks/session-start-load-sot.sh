@@ -62,6 +62,9 @@ emit_file_block() {
   USED_BYTES=$((USED_BYTES + sz))
 }
 
+# 이전 세션 잔존 마커 초기화
+rm -f "$PROJECT_DIR/SOT/dod/.session-has-src-edit" 2>/dev/null
+
 cd "$PROJECT_DIR" || exit 0
 
 echo "## SOT 세션 시작 컨텍스트"

@@ -22,6 +22,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 INBOX_DIR="$PROJECT_DIR/SOT/inbox"
 DOD_DIR="$PROJECT_DIR/SOT/dod"
 INDEX_FILE="$PROJECT_DIR/SOT/index.md"
+SRC_EDIT_MARKER="$DOD_DIR/.session-has-src-edit"
 TODAY=$(date +%Y-%m-%d)
 
 # ---- 방어층 3: 비상 탈출 env var (with audit trail) ----
@@ -36,6 +37,11 @@ if [ "${REIN_BYPASS_STOP_GATE:-0}" = "1" ]; then
   mkdir -p "$(dirname "$BLOCKS_LOG")" 2>/dev/null || true
   echo "$(date -u +%Y-%m-%dT%H:%M:%S)|stop-session-gate|BYPASS_ENV|REIN_BYPASS_STOP_GATE=1" \
     >> "$BLOCKS_LOG" 2>/dev/null || true
+  exit 0
+fi
+
+# ---- QA 세션 감지: 소스 편집이 없었으면 inbox/index 요구 면제 ----
+if [ ! -f "$SRC_EDIT_MARKER" ]; then
   exit 0
 fi
 
