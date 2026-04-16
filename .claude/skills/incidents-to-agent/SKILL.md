@@ -14,7 +14,7 @@ triggers:
 3. 기존 에이전트 + 하위 AGENTS.md 조합으로 해결 **불가능**
 
 ## 입력
-- `SOT/incidents/` 전체 스캔
+- `trail/incidents/` 전체 스캔
 
 ## 실행 절차
 
@@ -34,7 +34,7 @@ triggers:
 ```
 
 ### Step 3: 후보 생성 (기준 충족 시만)
-`SOT/agent-candidates/{name}.md`:
+`trail/agent-candidates/{name}.md`:
 ```markdown
 # 에이전트 후보: {name}
 ## 역할 (한 문장): [역할]

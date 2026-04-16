@@ -1,0 +1,210 @@
+# Rein — AI Native Development Framework
+
+> Rein in your AI — Rules, gates, and hooks to keep AI agents consistent and accountable.
+
+**[한국어](README.md)** | English
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+## Why Rein?
+
+AI coding assistants (Claude Code, Cursor, Copilot, etc.) are powerful but **inconsistent**. They give different answers to the same question, forget project rules, and modify code without review.
+
+Rein solves this with **rule files + automatic gates + lifecycle hooks**:
+
+| | AI Assisted (Traditional) | AI Native (Rein) |
+|---|---|---|
+| How you instruct | "Write this function like this" | "Run this workflow" |
+| Quality standards | In developer's head | In files (AGENTS.md, rules/) |
+| When it fails | Re-prompt the output | Fix the **system** (rule files) |
+| Scalability | Human intervenes every time | Quality improves as rules accumulate |
+
+## Key Features
+
+### 1. Definition of Done (DoD) Gate
+
+Forces a **completion criteria file** before any source code edit. If you try to modify code without a DoD file, the hook blocks it.
+
+```
+trail/dod/dod-2026-04-16-auth-refactor.md  ← Write this first
+src/auth.ts                                 ← Then you can edit
+```
+
+### 2. Mandatory Code Review
+
+After implementation, code review is required before tests or commits are allowed. Running `git commit` or `pytest` without a review stamp is blocked.
+
+### 3. Evidence Store (trail/)
+
+Session records accumulate and rotate automatically:
+
+```
+trail/
+├── inbox/          ← Today's completed work logs
+├── daily/          ← Auto-merged after 7 days
+├── weekly/         ← Auto-merged after 4 weeks
+├── dod/            ← Definition of Done files
+├── incidents/      ← Hook block logs + auto-aggregation
+└── index.md        ← Current project state (5-15 lines)
+```
+
+### 4. Smart Router
+
+Automatically recommends the best combination of agents, skills, and MCPs based on task type.
+
+### 5. Self-Evolving Rules
+
+When the same problem repeats, it **automatically promotes to a rule**:
+- 2 occurrences → `incidents-to-rule` generates an AGENTS.md rule candidate
+- 3 occurrences → `incidents-to-agent` generates an agent candidate
+
+### 6. CLI Self-Update
+
+Running `rein update` updates both template files **and the CLI itself** to the latest version. No sudo required.
+
+---
+
+## Installation
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JayJihyunKim/rein/main/install.sh | bash
+```
+
+Installs to `$HOME/.rein/bin/rein`. **No sudo required.** After installation:
+
+```bash
+source ~/.rein/env
+rein --version
+```
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `rein new <project>` | Create a new project from template. Copies `.claude/`, `trail/`, `AGENTS.md` with `{{PROJECT_NAME}}` substitution |
+| `rein merge` | Merge template into existing project. Prompts `[overwrite / skip / diff]` on conflicts |
+| `rein update` | Update project from latest template. Skips identical files. Includes CLI self-update |
+| `rein update --yes` | Auto-approve all prompts (CI-friendly) |
+| `rein update --prune` | Detect files removed from template (dry-run) |
+| `rein update --prune --confirm` | Actually delete deprecated files (creates backup first) |
+| `rein --version` | Print version |
+| `rein --help` | Show help |
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `REIN_TEMPLATE_REPO` | Template Git repo URL | `git@github.com:JayJihyunKim/rein.git` |
+| `REIN_BUDGET_BYTES` | Trail loading budget at session start | `65536` |
+
+## Project Structure
+
+```
+repo/
+├── AGENTS.md                    ← Global execution rules
+├── .claude/
+│   ├── CLAUDE.md                ← Entry point + @import hub
+│   ├── settings.json            ← Hook + permission config
+│   ├── orchestrator.md          ← Smart router criteria
+│   ├── rules/                   ← Code style, testing, security rules
+│   ├── hooks/                   ← Lifecycle automation scripts
+│   ├── agents/                  ← Role-specific agent definitions
+│   ├── skills/                  ← On-demand skills
+│   └── workflows/               ← Task-type procedures
+├── trail/                       ← Evidence store
+├── REIN_SETUP_GUIDE.md          ← Detailed setup guide
+└── install.sh                   ← CLI installer
+```
+
+## Quick Start
+
+```bash
+# 1. Create project
+rein new my-project && cd my-project && git init
+
+# 2. Write current project state in trail/index.md
+# 3. Customize AGENTS.md for your project
+
+# 4. Run Claude Code — Rein automatically guides the workflow
+claude
+```
+
+> For detailed customization, see [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md).
+
+## Included Skills
+
+| Skill | Role |
+|-------|------|
+| `repo-audit` | Repository health check (stale rules, missing tests) |
+| `incidents-to-rule` | Repeated failures → auto-generate AGENTS.md rule candidates |
+| `incidents-to-agent` | Repeated patterns → generate agent candidates |
+| `promote-agent` | Promote agent candidate to active agent |
+| `changelog-writer` | Auto-generate CHANGELOG from Git history |
+| `pr-review-fixer` | Auto-apply PR review comments |
+
+**Stitch UI Design Skills** (requires Stitch MCP):
+
+| Skill | Role |
+|-------|------|
+| `stitch-design` | Design system management + prompt enhancement |
+| `stitch-loop` | Multi-page auto-generation |
+| `enhance-prompt` | Vague UI requests → precise prompts |
+| `react-components` | Design → React component conversion |
+
+> Stitch skills load on-demand and don't consume context when unused.
+
+## Compatibility Notes
+
+### `everything-claude-code` Plugin
+
+The `gateguard-fact-force` hook in `everything-claude-code` (>= 1.9.0) is incompatible with Rein. Installing both causes all Edit/Write/Bash operations to deadlock. Rein already provides equivalent functionality — remove the plugin.
+
+### Upgrading from v0.6.x
+
+Starting with v0.7.0, the CLI install path changed from `/usr/local/bin/rein` to `$HOME/.rein/bin/rein`. Run [install.sh](install.sh) once to migrate. After that, `rein update` handles self-updates automatically.
+
+## Version History
+
+### v0.7.0 (2026-04-16)
+- CLI install path moved to `$HOME/.rein/bin/rein` (no more sudo)
+- New `install.sh` installer + CLI self-update
+- `SOT/` renamed to `trail/`
+
+### v0.6.0 (2026-04-15)
+- Auto-load trail context at session start (SessionStart hook)
+- Design document review enforcement gate
+- Incidents auto-aggregation (JSONL + Python)
+- Skill/MCP inventory auto-scan
+
+### v0.5.0 (2026-04-15)
+- Manifest-based file tracking + `--prune` support
+- Symlink / path traversal security hardening
+
+### v0.4.x (2026-04-15)
+- Mandatory code review + escalation rules
+- Stop-session-gate deadlock resolution
+- Linux/macOS stat compatibility fix
+- Commit message validation improvements
+
+### v0.3.0
+- Smart router introduction
+
+### v0.2.0 (2026-04-09)
+- Security layer (per-project security levels)
+
+### v0.1.0
+- Initial release: CLI, DoD gate, stop-session gate, inbox rotation
+
+## Contributing
+
+Issues and PRs are welcome. Please review [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) to understand the framework structure before contributing.
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
+
+## References
+
+- [agentsmd/agents.md](https://agents.md) — AGENTS.md hierarchy
+- [getsentry/sentry](https://github.com/getsentry/sentry) — Real-world AGENTS.md example
+- [anthropics/skills](https://github.com/anthropics/skills) — Skill definitions

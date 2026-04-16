@@ -8,7 +8,7 @@
 [ ] 버그 증상 명확히 기술
 [ ] 재현 조건 파악 (입력값, 환경, 순서)
 [ ] 영향 범위 파악
-[ ] SOT/incidents/ 유사 버그 전례 확인
+[ ] trail/incidents/ 유사 버그 전례 확인
 ```
 
 ### Step 2: 재현
@@ -49,8 +49,8 @@
 
 ### Step 7: 완료
 ```
-[ ] SOT/incidents/INC-NNN.md 작성
-[ ] SOT/index.md 갱신
+[ ] trail/incidents/INC-NNN.md 작성
+[ ] trail/index.md 갱신
 ```
 
 ## 금지

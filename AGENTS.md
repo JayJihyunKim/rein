@@ -21,7 +21,7 @@
 모든 작업을 시작하기 전 아래를 순서대로 수행한다:
 
 ```
-[ ] SOT/index.md 읽기 — 현재 프로젝트 상태 파악
+[ ] trail/index.md 읽기 — 현재 프로젝트 상태 파악
 [ ] 해당 workflow 파일 읽기 — 절차 확인
 [ ] 해당 agent 파일 읽기 — 역할/완료 기준 확인
 [ ] Definition of Done 명시 — 작업 완료 기준 먼저 작성
@@ -31,12 +31,12 @@
 
 ### DoD 파일명 규칙
 
-- DoD 파일명은 `SOT/dod/dod-YYYY-MM-DD-<slug>.md` 형식을 지킨다 (zero-padded 날짜).
+- DoD 파일명은 `trail/dod/dod-YYYY-MM-DD-<slug>.md` 형식을 지킨다 (zero-padded 날짜).
   - 날짜는 **작업 시작일** 이다
-- 대응되는 완료 기록은 `SOT/inbox/YYYY-MM-DD-<slug>.md` (날짜는 **작업 완료일**)
+- 대응되는 완료 기록은 `trail/inbox/YYYY-MM-DD-<slug>.md` (날짜는 **작업 완료일**)
 - `<slug>` 는 소문자 kebab-case 영문·숫자·하이픈만 허용. 한글/공백 금지. 최대 50자 권장
 - dod 와 inbox 의 `<slug>` 부분은 완전 일치해야 한다 (회전 단계가 이것으로 매칭)
-- `SOT/dod/` 안에서 임의 시점에 slug 는 고유해야 한다. 같은 slug 가 이미 있으면 새 작업은 `-2`, `-3` 접미사로 충돌을 피한다
+- `trail/dod/` 안에서 임의 시점에 slug 는 고유해야 한다. 같은 slug 가 이미 있으면 새 작업은 `-2`, `-3` 접미사로 충돌을 피한다
 - 과거에 완료되어 아카이브된 slug 는 자유롭게 재사용 가능 (회전 로직이 과거 daily 를 탐색하지 않는다)
 
 ### 설계 문서 작성 & 리뷰 규칙
@@ -80,7 +80,7 @@ bash scripts/rein-mark-spec-reviewed.sh docs/specs/foo.md codex
 
 3. **긴급 1회 바이패스** (incidents.log 에 기록됨, 1회만 사용 가능):
    ```bash
-   echo 'reason=hotfix for production bug XYZ' > SOT/dod/.skip-spec-gate
+   echo 'reason=hotfix for production bug XYZ' > trail/dod/.skip-spec-gate
    # 다음 Edit/Write 가 통과되며 파일은 자동 삭제
    ```
 
@@ -89,7 +89,7 @@ bash scripts/rein-mark-spec-reviewed.sh docs/specs/foo.md codex
 pending 마커는 원래 경로를 기억한다. 이동/리네임 후 gate 가 "원 경로 파일 없음" 을 BLOCKED 로 판정하므로:
 
 1. 새 경로에 한 번 Write 를 수행 → 새 마커 자동 생성
-2. 기존 마커 수동 삭제 (`rm SOT/dod/.spec-reviews/<old-hash>.pending`)
+2. 기존 마커 수동 삭제 (`rm trail/dod/.spec-reviews/<old-hash>.pending`)
 
 자동 해소는 조용한 리뷰 우회 경로이므로 금지.
 
@@ -170,7 +170,7 @@ pending 마커는 원래 경로를 기억한다. 이동/리네임 후 gate 가 "
 [ ] Codex 코드 리뷰 실행 및 수정사항 반영 완료
 [ ] 관련 문서(주석, README) 업데이트
 [ ] Self-review 완료 — 내가 리뷰어라면 승인할 수 있는가?
-[ ] 빠뜨린 규칙이 있으면 SOT/incidents/ 초안 작성
+[ ] 빠뜨린 규칙이 있으면 trail/incidents/ 초안 작성
 ```
 
 ---
@@ -178,7 +178,7 @@ pending 마커는 원래 경로를 기억한다. 이동/리네임 후 gate 가 "
 ## 5-1. 코드 리뷰 필수 규칙 (sub-agent 포함)
 
 - 소스 코드(.ts, .py, .sh, .json 등)를 수정한 **모든 에이전트(sub-agent 포함)**는 작업 완료 전 반드시 codex 리뷰를 실행한다
-- codex 리뷰: `/codex` 스킬 호출 → `SOT/dod/.codex-reviewed` stamp 생성
+- codex 리뷰: `/codex` 스킬 호출 → `trail/dod/.codex-reviewed` stamp 생성
 - codex 실패(에러/타임아웃) 시에만 sonnet 폴백 허용 — 그 외 사유로 sonnet 리뷰 대체 금지
 - sonnet 폴백 시 stamp에 `fallback_reason` 기록 필수
 - 리뷰 없이 결과를 반환하거나 테스트/커밋 시도 시 hook이 차단함 (exit 2)
@@ -207,7 +207,7 @@ pending 마커는 원래 경로를 기억한다. 이동/리네임 후 gate 가 "
 
 ## 7. Incident 기록 규칙
 
-- 같은 실수가 **2회 이상** 반복되면 즉시 `SOT/incidents/INC-NNN.md` 작성
+- 같은 실수가 **2회 이상** 반복되면 즉시 `trail/incidents/INC-NNN.md` 작성
 - Incident 작성 후 `incidents-to-rule` skill 실행 → 규칙 후보 생성
 - **3회 이상** 반복되면 `incidents-to-agent` skill 실행 → 에이전트 후보 감지
 
@@ -248,27 +248,27 @@ Incident 파일 포맷:
 
 ---
 
-## 9. SOT 운영 규칙
+## 9. trail 운영 규칙
 
-- `SOT/index.md`: 프로젝트 현재 상태 **5~15줄** 유지 (매 세션 시작 시 읽는 유일한 상태 파일)
-- `SOT/inbox/`: 세션 원본 로그 저장 (daily에서 요약 후 삭제)
-- `SOT/daily/`: 하루 1회 압축 요약
-- `SOT/weekly/`: 주 1회 재요약
-- `SOT/decisions/`: 확정된 기술/운영 결정 (`DEC-NNN.md`)
-- `SOT/incidents/`: 실패 사례, 반복 문제 (`INC-NNN.md`)
+- `trail/index.md`: 프로젝트 현재 상태 **5~15줄** 유지 (매 세션 시작 시 읽는 유일한 상태 파일)
+- `trail/inbox/`: 세션 원본 로그 저장 (daily에서 요약 후 삭제)
+- `trail/daily/`: 하루 1회 압축 요약
+- `trail/weekly/`: 주 1회 재요약
+- `trail/decisions/`: 확정된 기술/운영 결정 (`DEC-NNN.md`)
+- `trail/incidents/`: 실패 사례, 반복 문제 (`INC-NNN.md`)
 
-**SOT 파일 규칙**
+**trail 파일 규칙**
 - 한 파일 = 한 사건, 한 결정, 한 회고
-- `SOT/inbox/`를 실행 컨텍스트에 직접 넣지 않는다
-- 같은 문제가 2회 이상 반복되면 SOT에만 두지 말고 즉시 이 파일에 규칙 추가
+- `trail/inbox/`를 실행 컨텍스트에 직접 넣지 않는다
+- 같은 문제가 2회 이상 반복되면 trail에만 두지 말고 즉시 이 파일에 규칙 추가
 
 ---
 
 ## 10. 컨텍스트 절감 전략
 
-- 작업 시 `SOT/index.md`만 읽고, 관련 incidents/decisions는 필요 시만 파일명 지정
-- 이 파일(AGENTS.md)은 숫자가 아닌 **원칙만** 유지 (숫자/상태는 SOT에)
-- 세션이 길어질 때: "현재 상태 요약해줘" 요청 후 `SOT/index.md` 갱신
+- 작업 시 `trail/index.md`만 읽고, 관련 incidents/decisions는 필요 시만 파일명 지정
+- 이 파일(AGENTS.md)은 숫자가 아닌 **원칙만** 유지 (숫자/상태는 trail에)
+- 세션이 길어질 때: "현재 상태 요약해줘" 요청 후 `trail/index.md` 갱신
 - Agent Teams 활용 시: 각 서브 에이전트는 독립 컨텍스트로 실행하여 메인 컨텍스트 보호
 
 ---

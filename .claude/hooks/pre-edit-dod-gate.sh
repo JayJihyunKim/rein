@@ -7,10 +7,10 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BLOCKS_LOG="$PROJECT_DIR/SOT/incidents/blocks.log"
-BLOCKS_LOG_JSONL="$PROJECT_DIR/SOT/incidents/blocks.jsonl"
-DOD_DIR="$PROJECT_DIR/SOT/dod"
-INBOX_DIR="$PROJECT_DIR/SOT/inbox"
+BLOCKS_LOG="$PROJECT_DIR/trail/incidents/blocks.log"
+BLOCKS_LOG_JSONL="$PROJECT_DIR/trail/incidents/blocks.jsonl"
+DOD_DIR="$PROJECT_DIR/trail/dod"
+INBOX_DIR="$PROJECT_DIR/trail/inbox"
 SRC_EDIT_MARKER="$DOD_DIR/.session-has-src-edit"
 CACHE_KEY=$(echo "${PROJECT_DIR}" | md5 -q 2>/dev/null || echo "${PROJECT_DIR}" | md5sum 2>/dev/null | cut -c1-8)
 
@@ -71,7 +71,7 @@ fi
 
 # --- 경로 기반 면제 ---
 case "$FILE_PATH" in
-  */.claude/*|*/SOT/*|*.gitkeep|*.gitignore)
+  */.claude/*|*/trail/*|*.gitkeep|*.gitignore)
     exit 0
     ;;
 esac
@@ -131,8 +131,8 @@ if [ -d "$DOD_DIR" ]; then
 fi
 
 # --- Spec review gate ---
-SKIP_SPEC_GATE="$PROJECT_DIR/SOT/dod/.skip-spec-gate"
-SPEC_REVIEWS_DIR="$PROJECT_DIR/SOT/dod/.spec-reviews"
+SKIP_SPEC_GATE="$PROJECT_DIR/trail/dod/.skip-spec-gate"
+SPEC_REVIEWS_DIR="$PROJECT_DIR/trail/dod/.spec-reviews"
 
 if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]; then
   UNRESOLVED_SPECS=false
@@ -222,7 +222,7 @@ if [ "$DOD_FOUND" = true ]; then
   exit 0
 else
   echo "BLOCKED: 미완료 DoD 파일이 없습니다." >&2
-  echo "소스 코드를 편집하기 전에 먼저 SOT/dod/dod-$(date +%Y-%m-%d)-<slug>.md 를 작성하세요." >&2
+  echo "소스 코드를 편집하기 전에 먼저 trail/dod/dod-$(date +%Y-%m-%d)-<slug>.md 를 작성하세요." >&2
   log_block "미완료 DoD 없음" "$FILE_PATH"
   exit 2
 fi

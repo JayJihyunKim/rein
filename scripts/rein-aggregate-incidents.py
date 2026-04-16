@@ -161,7 +161,7 @@ def next_suffix_path(incidents_dir: Path, hook: str, hash_: str):
 
 
 def aggregate(project_dir: Path):
-    incidents_dir = project_dir / "SOT/incidents"
+    incidents_dir = project_dir / "trail/incidents"
     blocks_jsonl = incidents_dir / "blocks.jsonl"
     watermark = incidents_dir / ".last-processed-line"
     lock_path = incidents_dir / ".aggregate.lock"
@@ -273,7 +273,7 @@ def aggregate(project_dir: Path):
 
 
 def count_pending(project_dir: Path) -> int:
-    incidents_dir = project_dir / "SOT/incidents"
+    incidents_dir = project_dir / "trail/incidents"
     if not incidents_dir.exists():
         return 0
     n = 0

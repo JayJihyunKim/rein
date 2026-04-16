@@ -12,7 +12,7 @@ description: 기술 조사 및 문서 수집 전담. 라이브러리 비교, 아
 - 아키텍처 패턴 조사
 - 외부 API/서비스 통합 방법 조사
 - 기술 트렌드 및 모범 사례 수집
-- 조사 결과 → `SOT/decisions/DEC-NNN.md` 기록
+- 조사 결과 → `trail/decisions/DEC-NNN.md` 기록
 
 ## 조사 원칙
 1. **공식 문서 우선**: 블로그보다 공식 문서 먼저
@@ -42,6 +42,6 @@ description: 기술 조사 및 문서 수집 전담. 라이브러리 비교, 아
 [ ] research-task workflow DoD 전체 충족
 [ ] 최소 3개 옵션 비교 (해당하는 경우)
 [ ] 권장 결론 명시
-[ ] SOT/decisions/DEC-NNN.md 기록
-[ ] SOT/index.md 갱신
+[ ] trail/decisions/DEC-NNN.md 기록
+[ ] trail/index.md 갱신
 ```

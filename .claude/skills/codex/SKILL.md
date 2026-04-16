@@ -37,7 +37,7 @@ description: Use when the user asks to run Codex CLI (codex exec, codex resume) 
 리뷰 완료 후 반드시 stamp 파일을 생성한다:
 
 ```bash
-cat > SOT/dod/.codex-reviewed << STAMP
+cat > trail/dod/.codex-reviewed << STAMP
 reviewer: codex
 timestamp: $(date -u +%Y-%m-%dT%H:%M:%S)
 fallback_reason: none
@@ -50,7 +50,7 @@ STAMP
 
 Sonnet 폴백 시:
 ```bash
-cat > SOT/dod/.codex-reviewed << STAMP
+cat > trail/dod/.codex-reviewed << STAMP
 reviewer: sonnet-fallback
 timestamp: $(date -u +%Y-%m-%dT%H:%M:%S)
 fallback_reason: codex_timeout
@@ -63,7 +63,7 @@ STAMP
 
 Sonnet 셀프리뷰 시:
 ```bash
-cat > SOT/dod/.codex-reviewed << STAMP
+cat > trail/dod/.codex-reviewed << STAMP
 reviewer: self-review
 timestamp: $(date -u +%Y-%m-%dT%H:%M:%S)
 fallback_reason: none
@@ -78,7 +78,7 @@ STAMP
 
 사람 에스컬레이션 시:
 ```bash
-cat > SOT/dod/.codex-reviewed << STAMP
+cat > trail/dod/.codex-reviewed << STAMP
 reviewer: codex
 timestamp: $(date -u +%Y-%m-%dT%H:%M:%S)
 fallback_reason: none
@@ -91,7 +91,7 @@ STAMP
 
 stamp 생성 후 .review-pending이 있으면 삭제한다:
 ```bash
-rm -f SOT/dod/.review-pending
+rm -f trail/dod/.review-pending
 ```
 
 ## Running a Task

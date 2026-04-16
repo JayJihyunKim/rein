@@ -108,7 +108,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/session-start-load-sot.sh"
+            "command": ".claude/hooks/session-start-load-trail.sh"
           }
         ]
       }

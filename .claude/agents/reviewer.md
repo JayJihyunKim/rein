@@ -10,7 +10,7 @@ description: 코드 리뷰 및 incident 초안 작성 전담. PR 리뷰, self-re
 ## 담당
 - PR 코드 리뷰
 - Self-review 지원 (feature-builder 요청 시)
-- Incident 초안 작성 (`SOT/incidents/INC-NNN.md`)
+- Incident 초안 작성 (`trail/incidents/INC-NNN.md`)
 - 반복 문제 패턴 감지 → `incidents-to-rule` skill 트리거
 
 ## 리뷰 체크리스트
@@ -58,6 +58,6 @@ description: 코드 리뷰 및 incident 초안 작성 전담. PR 리뷰, self-re
 ```
 [ ] 리뷰 체크리스트 전체 확인
 [ ] 발견된 모든 문제 코멘트 작성
-[ ] 필요시 SOT/incidents/ 초안 작성
+[ ] 필요시 trail/incidents/ 초안 작성
 [ ] incidents-to-rule skill 실행 여부 판단
 ```

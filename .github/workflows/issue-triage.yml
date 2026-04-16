@@ -49,12 +49,12 @@ jobs:
               });
             }
 
-            // SOT/incidents 후보 안내 코멘트 (bug인 경우)
+            // trail/incidents 후보 안내 코멘트 (bug인 경우)
             if (labels.includes('bug')) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: issue.number,
-                body: '🤖 이 이슈는 버그로 분류되었습니다.\n\n재현이 확인되면 `SOT/incidents/INC-NNN.md`에 기록해 주세요.'
+                body: '🤖 이 이슈는 버그로 분류되었습니다.\n\n재현이 확인되면 `trail/incidents/INC-NNN.md`에 기록해 주세요.'
               });
             }

@@ -11,7 +11,7 @@ triggers:
 > ⚠️ 사람이 승인을 요청한 시점에만 실행한다.
 
 ## 입력
-- `SOT/agent-candidates/{name}.md`
+- `trail/agent-candidates/{name}.md`
 
 ## 실행 절차
 
@@ -49,6 +49,6 @@ description: {역할 한 문장}
 ```
 [ ] .draft 확장자 제거
 [ ] registry status: active로 변경
-[ ] SOT/agent-candidates/{name}.md 완료 표시
-[ ] SOT/index.md 갱신
+[ ] trail/agent-candidates/{name}.md 완료 표시
+[ ] trail/index.md 갱신
 ```

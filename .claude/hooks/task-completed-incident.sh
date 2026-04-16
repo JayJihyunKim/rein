@@ -8,7 +8,7 @@
 cat << 'MSG'
 {
   "decision": "proceed",
-  "reason": "Task complete. Please verify: (1) Self-review done per AGENTS.md section 5 (2) Any missing rules drafted in SOT/incidents/ (3) SOT/index.md updated"
+  "reason": "Task complete. Please verify: (1) Self-review done per AGENTS.md section 5 (2) Any missing rules drafted in trail/incidents/ (3) trail/index.md updated"
 }
 MSG
 

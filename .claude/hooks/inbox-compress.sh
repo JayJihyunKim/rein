@@ -6,10 +6,10 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-INBOX_DIR="$PROJECT_DIR/SOT/inbox"
-DAILY_DIR="$PROJECT_DIR/SOT/daily"
-WEEKLY_DIR="$PROJECT_DIR/SOT/weekly"
-DOD_DIR="$PROJECT_DIR/SOT/dod"
+INBOX_DIR="$PROJECT_DIR/trail/inbox"
+DAILY_DIR="$PROJECT_DIR/trail/daily"
+WEEKLY_DIR="$PROJECT_DIR/trail/weekly"
+DOD_DIR="$PROJECT_DIR/trail/dod"
 CACHE_KEY=$(echo "${PROJECT_DIR}" | md5 -q 2>/dev/null || echo "${PROJECT_DIR}" | md5sum 2>/dev/null | cut -c1-8)
 COMPRESS_MARKER="/tmp/.claude-inbox-compressed-${CACHE_KEY}"
 

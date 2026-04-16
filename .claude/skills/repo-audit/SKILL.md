@@ -1,6 +1,6 @@
 ---
 name: repo-audit
-description: 저장소 전체 상태 점검. 오래된 규칙, 누락 테스트, 비활성 에이전트, SOT 일관성 확인.
+description: 저장소 전체 상태 점검. 오래된 규칙, 누락 테스트, 비활성 에이전트, trail 일관성 확인.
 triggers:
   - 주 1회 (GitHub Actions repo-audit.yml)
   - 수동: "저장소 상태 점검해줘"
@@ -23,11 +23,11 @@ triggers:
 [ ] 2주 이상 된 .draft 파일 처리 여부
 ```
 
-### 3. SOT 일관성 점검
+### 3. trail 일관성 점검
 ```
-[ ] SOT/index.md 최신 상태 (5~15줄)
-[ ] SOT/inbox/ 3일 이상 미압축 로그 확인
-[ ] SOT/incidents/ AGENTS.md 미승격 반복 패턴 확인
+[ ] trail/index.md 최신 상태 (5~15줄)
+[ ] trail/inbox/ 3일 이상 미압축 로그 확인
+[ ] trail/incidents/ AGENTS.md 미승격 반복 패턴 확인
 ```
 
 ### 4. 보안 점검

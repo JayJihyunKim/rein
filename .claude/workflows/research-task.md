@@ -16,7 +16,7 @@
 - [ ] 비교 대상 항목 전체 검토
 - [ ] 각 옵션 장단점 정리
 - [ ] 권장 결론 및 이유 명시
-- [ ] SOT/decisions/DEC-NNN.md에 기록
+- [ ] trail/decisions/DEC-NNN.md에 기록
 ```
 
 ### Step 3: 조사 수행
@@ -40,7 +40,7 @@
 
 ### Step 5: 결정 기록
 ```
-[ ] SOT/decisions/DEC-NNN.md 작성
+[ ] trail/decisions/DEC-NNN.md 작성
 [ ] 필요시 AGENTS.md 또는 하위 AGENTS.md에 반영
-[ ] SOT/index.md 갱신
+[ ] trail/index.md 갱신
 ```

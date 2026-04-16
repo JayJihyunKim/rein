@@ -1,6 +1,6 @@
 #!/bin/bash
 # Hook: SessionStart
-# SOT 프로젝트 상태를 세션 시작 시 에이전트 컨텍스트로 주입.
+# trail 프로젝트 상태를 세션 시작 시 에이전트 컨텍스트로 주입.
 #
 # 출력: stdout → Claude Code 가 additionalContext 로 흡수
 # 실패해도 세션은 계속됨 (항상 exit 0)
@@ -63,18 +63,18 @@ emit_file_block() {
 }
 
 # 이전 세션 잔존 마커 초기화
-rm -f "$PROJECT_DIR/SOT/dod/.session-has-src-edit" 2>/dev/null
+rm -f "$PROJECT_DIR/trail/dod/.session-has-src-edit" 2>/dev/null
 
 cd "$PROJECT_DIR" || exit 0
 
-echo "## SOT 세션 시작 컨텍스트"
+echo "## trail 세션 시작 컨텍스트"
 echo
 echo "> 자동 로드: index.md + inbox 전량 + daily 전량 + weekly 최근 4주"
 echo "> 예산: ${BUDGET_BYTES}B (초과 시 이후 파일은 제목만 표시)"
 echo
 
 # 0. B2 pending spec review 요약 (있을 때만)
-SPEC_REVIEWS_DIR="$PROJECT_DIR/SOT/dod/.spec-reviews"
+SPEC_REVIEWS_DIR="$PROJECT_DIR/trail/dod/.spec-reviews"
 if [ -d "$SPEC_REVIEWS_DIR" ]; then
   PENDING_COUNT=0
   PENDING_LIST=""
@@ -95,8 +95,8 @@ if [ -d "$SPEC_REVIEWS_DIR" ]; then
 fi
 
 # 미처리 incident 요약 + gate stamp 관리
-INCIDENTS_DIR="$PROJECT_DIR/SOT/incidents"
-STAMP_FILE="$PROJECT_DIR/SOT/dod/.incident-review-pending"
+INCIDENTS_DIR="$PROJECT_DIR/trail/incidents"
+STAMP_FILE="$PROJECT_DIR/trail/dod/.incident-review-pending"
 
 if command -v python3 >/dev/null 2>&1 && [ -d "$INCIDENTS_DIR" ]; then
   PENDING=$(python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
@@ -115,33 +115,33 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$INCIDENTS_DIR" ]; then
 fi
 
 # 1. index.md
-emit_file_block "SOT/index.md"
+emit_file_block "trail/index.md"
 
 # 2. inbox 전량
-if [ -d "SOT/inbox" ]; then
-  for f in SOT/inbox/*.md; do
+if [ -d "trail/inbox" ]; then
+  for f in trail/inbox/*.md; do
     [ -f "$f" ] || continue
     emit_file_block "$f"
   done
 fi
 
 # 3. daily 전량
-if [ -d "SOT/daily" ]; then
-  for f in SOT/daily/*.md; do
+if [ -d "trail/daily" ]; then
+  for f in trail/daily/*.md; do
     [ -f "$f" ] || continue
     emit_file_block "$f"
   done
 fi
 
 # 4. weekly: 최근 4주
-if [ -d "SOT/weekly" ]; then
+if [ -d "trail/weekly" ]; then
   WEEKS=()
   for i in 0 1 2 3; do
     W=$(now_week_offset "$i")
     [ -n "$W" ] && WEEKS+=("$W")
   done
   for w in "${WEEKS[@]}"; do
-    emit_file_block "SOT/weekly/${w}.md"
+    emit_file_block "trail/weekly/${w}.md"
   done
 fi
 

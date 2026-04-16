@@ -1,7 +1,7 @@
 # .claude/security/maturity.yaml
 # Rein Security Layer — 성숙도 엔진 설정
 #
-# 세션 시작 시 SOT/index.md 읽은 직후 profile.yaml과 함께 체크한다.
+# 세션 시작 시 trail/index.md 읽은 직후 profile.yaml과 함께 체크한다.
 # 조건 충족 시 사용자에게 업그레이드를 제안한다.
 
 upgrade_triggers:

@@ -14,9 +14,9 @@ from pathlib import Path
 
 def main():
     project = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
-    src = project / "SOT/incidents/blocks.log"
-    dst = project / "SOT/incidents/blocks.jsonl"
-    archive = project / "SOT/incidents/blocks.log.legacy"
+    src = project / "trail/incidents/blocks.log"
+    dst = project / "trail/incidents/blocks.jsonl"
+    archive = project / "trail/incidents/blocks.log.legacy"
 
     if not src.exists():
         print("no blocks.log to migrate", file=sys.stderr)

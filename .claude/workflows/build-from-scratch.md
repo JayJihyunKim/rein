@@ -7,7 +7,7 @@
 ```
 [ ] 서비스 목적 한 문장 정의
 [ ] 주요 기능 목록 (MVP 범위)
-[ ] 기술 스택 결정 → SOT/decisions/DEC-NNN.md에 기록
+[ ] 기술 스택 결정 → trail/decisions/DEC-NNN.md에 기록
 [ ] 외부 의존성 목록
 ```
 
@@ -42,8 +42,8 @@
 ```
 [ ] DoD 전체 충족
 [ ] 하위 AGENTS.md 작성 완료
-[ ] SOT/decisions/DEC-NNN.md 기록
-[ ] SOT/index.md 갱신
+[ ] trail/decisions/DEC-NNN.md 기록
+[ ] trail/index.md 갱신
 ```
 
 ## 기술 결정 기록 형식 (DEC-NNN.md)

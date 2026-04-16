@@ -12,16 +12,16 @@
 # - 차단 메시지에 구체적 해결 방법 3 가지 명시
 #
 # 이 변경은 v0.4.1 의 post-edit-index-sync-inbox.sh 훅이 가진
-# precondition 실패 (사용자가 SOT/index.md 를 편집하지 않으면 훅이
+# precondition 실패 (사용자가 trail/index.md 를 편집하지 않으면 훅이
 # 발동하지 않음) 를 근본적으로 우회하기 위한 것이다. stop-session-gate
 # 자체가 git 활동을 감지하므로 PostToolUse 훅 발동 여부와 무관하게
 # 데드락이 해소된다.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-INBOX_DIR="$PROJECT_DIR/SOT/inbox"
-DOD_DIR="$PROJECT_DIR/SOT/dod"
-INDEX_FILE="$PROJECT_DIR/SOT/index.md"
+INBOX_DIR="$PROJECT_DIR/trail/inbox"
+DOD_DIR="$PROJECT_DIR/trail/dod"
+INDEX_FILE="$PROJECT_DIR/trail/index.md"
 SRC_EDIT_MARKER="$DOD_DIR/.session-has-src-edit"
 TODAY=$(date +%Y-%m-%d)
 
@@ -30,10 +30,10 @@ TODAY=$(date +%Y-%m-%d)
 # 끝낼 escape hatch. 악용 방지를 위해 항상 WARNING 출력 + incidents 로그.
 if [ "${REIN_BYPASS_STOP_GATE:-0}" = "1" ]; then
   echo "WARNING: REIN_BYPASS_STOP_GATE=1 — stop gate bypassed." >&2
-  echo "  이 탈출구는 1회성 비상용입니다. 다음 세션에서 SOT/inbox/${TODAY}-*.md 에 작업 기록을 보충하세요." >&2
+  echo "  이 탈출구는 1회성 비상용입니다. 다음 세션에서 trail/inbox/${TODAY}-*.md 에 작업 기록을 보충하세요." >&2
   # Audit trail: bypass 사용 이력을 blocks.log 에 기록해 repo-audit 등에서
   # 추후 탐지 가능하도록 한다. 실패해도 조용히 통과 (exit 0 유지).
-  BLOCKS_LOG="$PROJECT_DIR/SOT/incidents/blocks.log"
+  BLOCKS_LOG="$PROJECT_DIR/trail/incidents/blocks.log"
   mkdir -p "$(dirname "$BLOCKS_LOG")" 2>/dev/null || true
   echo "$(date -u +%Y-%m-%dT%H:%M:%S)|stop-session-gate|BYPASS_ENV|REIN_BYPASS_STOP_GATE=1" \
     >> "$BLOCKS_LOG" 2>/dev/null || true
@@ -102,23 +102,23 @@ fi
 if [ "$INBOX_TODAY" = false ]; then
   if [ "$HAS_GIT_ACTIVITY" = true ]; then
     # git 활동이 실제 작업의 증거 — inbox 요구사항을 완화 (WARNING 출력)
-    echo "WARNING: SOT/inbox/${TODAY}-*.md 가 없지만 git 활동이 감지되어 통과합니다." >&2
+    echo "WARNING: trail/inbox/${TODAY}-*.md 가 없지만 git 활동이 감지되어 통과합니다." >&2
     echo "  근거: ${GIT_ACTIVITY_REASON}" >&2
-    echo "  다음 세션에서 SOT/inbox/${TODAY}-<작업명>.md 에 보충 기록 권장." >&2
+    echo "  다음 세션에서 trail/inbox/${TODAY}-<작업명>.md 에 보충 기록 권장." >&2
   else
-    MISSING="${MISSING}\n- SOT/inbox/${TODAY}-[작업명].md 가 없습니다. 작업 기록을 남겨주세요."
+    MISSING="${MISSING}\n- trail/inbox/${TODAY}-[작업명].md 가 없습니다. 작업 기록을 남겨주세요."
     if [ "$GIT_PROBE_FAILED" = true ]; then
       echo "NOTE: git 저장소 감지 실패 — git 활동 기반 완화가 적용되지 않았습니다." >&2
     fi
   fi
 fi
 
-# --- SOT/index.md 갱신 확인 ---
+# --- trail/index.md 갱신 확인 ---
 # 오늘 수정되었는지 (mtime 기준)
 if [ -f "$INDEX_FILE" ]; then
   INDEX_DATE=$(date -r "$INDEX_FILE" +%Y-%m-%d 2>/dev/null || stat -c %y "$INDEX_FILE" 2>/dev/null | cut -d' ' -f1)
   if [ "$INDEX_DATE" != "$TODAY" ]; then
-    MISSING="${MISSING}\n- SOT/index.md가 오늘 갱신되지 않았습니다."
+    MISSING="${MISSING}\n- trail/index.md가 오늘 갱신되지 않았습니다."
   fi
 fi
 
@@ -157,12 +157,12 @@ if [ -n "$MISSING" ]; then
   echo -e "$MISSING" >&2
   echo "" >&2
   echo "빠른 해결책 (상황에 맞게 선택):" >&2
-  echo "  1) SOT/index.md 를 편집 — post-edit-index-sync-inbox 훅이 설치돼 있으면" >&2
+  echo "  1) trail/index.md 를 편집 — post-edit-index-sync-inbox 훅이 설치돼 있으면" >&2
   echo "     오늘자 inbox 가 자동 생성됩니다 (v0.4.1+)" >&2
   echo "  2) 터미널에서 직접:" >&2
-  echo "     echo '# session note' > SOT/inbox/${TODAY}-session.md" >&2
+  echo "     echo '# session note' > trail/inbox/${TODAY}-session.md" >&2
   echo "  3) 비상 탈출 (감사 로그 남김): 다음 호출 앞에 REIN_BYPASS_STOP_GATE=1 을" >&2
-  echo "     설정하면 bypass 됩니다 (SOT/incidents/blocks.log 에 기록)" >&2
+  echo "     설정하면 bypass 됩니다 (trail/incidents/blocks.log 에 기록)" >&2
   echo "  4) 실제로 작업했다면 git 활동 (커밋 / staged / modified tracked file) 이" >&2
   echo "     감지되면 이 gate 는 자동으로 통과합니다 — 작업을 커밋하거나 staging 하세요" >&2
   exit 2

@@ -1,299 +1,210 @@
 # Rein — AI Native Development Framework
 
-> Rein in your AI — 규칙·게이트·훅으로 AI의 고삐를 쥐는 프레임워크
+> Rein in your AI — 규칙·게이트·훅으로 AI 에이전트의 고삐를 쥐는 프레임워크
 
-## AI Native란?
+[English](README.en.md) | **한국어**
 
-| 구분 | AI Assisted (기존) | AI Native (목표) |
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+## 왜 Rein 인가?
+
+AI 코딩 어시스턴트(Claude Code, Cursor, Copilot 등)는 강력하지만 **일관성이 없습니다**. 같은 질문에 다른 답을 하고, 프로젝트 규칙을 잊고, 리뷰 없이 코드를 수정합니다.
+
+Rein 은 이 문제를 **규칙 파일 + 자동 게이트 + 훅**으로 해결합니다:
+
+| 구분 | AI Assisted (기존) | AI Native (Rein) |
 |------|-------------------|-----------------|
 | 지시 방식 | "이 함수 이렇게 만들어줘" | "이 워크플로우를 실행해줘" |
-| 기준 위치 | 사람 머릿속 | 문서 파일 |
-| 실패 대응 | 출력물 다시 요청 | 원인 분석 후 규칙 문서 수정 |
+| 품질 기준 | 사람 머릿속 | 문서 파일 (AGENTS.md, rules/) |
+| 실패 대응 | 출력물 다시 요청 | 원인 분석 후 **규칙 문서 수정** |
 | 확장성 | 매번 사람이 개입 | 규칙이 쌓일수록 품질 자동 상승 |
 
-## 핵심 원칙
+## 핵심 기능
 
-1. 매 작업 시작 전에 **완료 기준(Definition of Done)을 먼저** 적는다
-2. 결과가 나쁘면 출력물이 아니라 **시스템(규칙 파일)을 수정**한다
-3. 같은 문제가 **2번 반복되면 즉시 AGENTS.md 규칙으로 승격**한다
-4. SOT는 읽는 저장소가 아니라 **증거 저장소**다
-5. 에이전트는 **역할 경계가 한 문장으로 설명될 때만** 분리한다
+### 1. Definition of Done (DoD) 게이트
 
-## 폴더 구조
+모든 소스 코드 편집 전에 **완료 기준 파일**을 먼저 작성하도록 강제합니다. DoD 없이 코드를 수정하면 훅이 차단합니다.
 
 ```
-repo/
-├── AGENTS.md                    ← 전역 실행 규칙 (source of truth)
-├── .claude/
-│   ├── CLAUDE.md                ← 진입점 + @import 허브
-│   ├── settings.json            ← 권한 및 동작 설정 (Hooks 포함)
-│   ├── orchestrator.md          ← 작업 유형별 라우팅 기준
-│   ├── registry/agents.yml      ← 활성 에이전트 목록
-│   ├── rules/                   ← 경로 스코프 규칙
-│   ├── workflows/               ← 작업 유형별 절차
-│   ├── agents/                  ← 역할별 에이전트 정의
-│   ├── skills/                  ← 특정 시점에 호출되는 스킬
-│   ├── security/                ← 보안 프로필 및 성숙도 설정
-│   ├── router/                  ← 스마트 라우터 설정
-│   └── hooks/                   ← 라이프사이클 자동화 스크립트
-├── SOT/                         ← 증거 저장소 (상태/결정/사고 기록)
-├── REIN_SETUP_GUIDE.md          ← 프레임워크 적용 가이드
-└── .github/workflows/           ← GitHub Actions 자동화
+trail/dod/dod-2026-04-16-auth-refactor.md  ← 먼저 작성
+src/auth.ts                                 ← 그 다음 편집 가능
 ```
 
-## 새 프로젝트에 적용하기
+### 2. 코드 리뷰 강제
 
-### 설치
+구현이 끝나면 반드시 코드 리뷰를 거쳐야 테스트와 커밋이 가능합니다. 리뷰 없이 `git commit`이나 `pytest`를 실행하면 차단됩니다.
+
+### 3. 증거 저장소 (trail/)
+
+세션 기록이 자동으로 쌓이고 회전됩니다:
+
+```
+trail/
+├── inbox/          ← 오늘 완료한 작업 기록
+├── daily/          ← 7일 지나면 자동 병합
+├── weekly/         ← 4주 지나면 자동 병합
+├── dod/            ← Definition of Done 파일
+├── incidents/      ← 훅 차단 로그 + 자동 집계
+└── index.md        ← 현재 프로젝트 상태 (5~15줄)
+```
+
+### 4. 스마트 라우터
+
+작업 유형에 따라 최적의 에이전트·스킬·MCP 조합을 자동 추천합니다.
+
+### 5. 자기 진화 시스템
+
+같은 문제가 2번 반복되면 **규칙으로 자동 승격**됩니다:
+- 2회 반복 → `incidents-to-rule` 스킬이 AGENTS.md 규칙 후보 생성
+- 3회 반복 → `incidents-to-agent` 스킬이 에이전트 후보 생성
+
+### 6. CLI 자가 업데이트
+
+`rein update` 실행 시 템플릿 파일뿐만 아니라 **CLI 자체도 최신 버전으로 자동 갱신**됩니다. sudo 불필요.
+
+---
+
+## 설치
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JayJihyunKim/rein/main/install.sh | bash
 ```
 
-설치 스크립트는 `$HOME/.rein/bin/rein` 에 CLI 를 설치하고 `$HOME/.rein/env` 를 생성합니다. 셸 rc (`.zshrc` / `.bashrc` / fish config) 에 `. "$HOME/.rein/env"` 한 줄이 추가됩니다 (프롬프트 확인 후). **sudo 불필요**.
-
-설치 후 바로 사용하려면:
+`$HOME/.rein/bin/rein` 에 설치됩니다. **sudo 불필요**. 설치 후:
 
 ```bash
 source ~/.rein/env
 rein --version
 ```
 
-비인터랙티브 (CI) 설치:
+## CLI 명령어
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/JayJihyunKim/rein/main/install.sh | REIN_INSTALL_YES=1 bash
-```
-
-### 새 프로젝트 생성
-
-```bash
-rein new my-project
-cd my-project && git init
-```
-
-템플릿의 `.claude/`, `SOT/`, `AGENTS.md`가 자동으로 복사되고 `{{PROJECT_NAME}}`이 프로젝트명으로 치환됩니다.
-
-### 기존 프로젝트에 병합
-
-```bash
-cd existing-project
-rein merge
-```
-
-이미 존재하는 파일은 `[overwrite / skip / diff]` 프롬프트로 하나씩 확인합니다.
-
-### 템플릿 업데이트
-
-```bash
-cd existing-project
-rein update
-```
-
-템플릿 레포의 최신 버전과 비교하여 변경된 파일만 업데이트합니다. 동일한 파일은 건너뛰고, 다른 파일만 프롬프트로 확인합니다.
+| 명령어 | 설명 |
+|--------|------|
+| `rein new <project>` | 템플릿에서 새 프로젝트 생성. `.claude/`, `trail/`, `AGENTS.md` 자동 복사 + `{{PROJECT_NAME}}` 치환 |
+| `rein merge` | 기존 프로젝트에 템플릿 병합. 충돌 시 `[overwrite / skip / diff]` 프롬프트 |
+| `rein update` | 템플릿 최신 버전으로 갱신. 동일 파일 스킵, CLI 자가 업데이트 포함 |
+| `rein update --yes` | 모든 프롬프트 자동 승인 (CI 용) |
+| `rein update --prune` | 템플릿에서 제거된 파일 감지 (dry-run) |
+| `rein update --prune --confirm` | 제거된 파일 실제 삭제 (백업 생성 후) |
+| `rein --version` | 버전 출력 |
+| `rein --help` | 도움말 |
 
 ### 환경변수
 
 | 변수 | 설명 | 기본값 |
 |------|------|--------|
 | `REIN_TEMPLATE_REPO` | 템플릿 Git 레포 URL | `git@github.com:JayJihyunKim/rein.git` |
-| `CLAUDE_TEMPLATE_REPO` | (deprecated) `REIN_TEMPLATE_REPO`의 별칭 | — |
+| `REIN_BUDGET_BYTES` | 세션 시작 시 trail 로딩 용량 예산 | `65536` |
 
-Fork하거나 별도 템플릿 레포를 사용하려면:
-```bash
-REIN_TEMPLATE_REPO="git@github.com:my-org/my-template.git" rein new my-project
+## 프로젝트 구조
+
 ```
-
-> 상세한 커스터마이징 방법은 [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md)를 참고하세요.
+repo/
+├── AGENTS.md                    ← 전역 실행 규칙
+├── .claude/
+│   ├── CLAUDE.md                ← 진입점 + @import 허브
+│   ├── settings.json            ← Hook + 권한 설정
+│   ├── orchestrator.md          ← 스마트 라우터 기준
+│   ├── rules/                   ← 코드 스타일, 테스트, 보안 규칙
+│   ├── hooks/                   ← 라이프사이클 자동화 스크립트
+│   ├── agents/                  ← 역할별 에이전트 정의
+│   ├── skills/                  ← 호출형 스킬
+│   └── workflows/               ← 작업 유형별 절차
+├── trail/                       ← 증거 저장소
+├── REIN_SETUP_GUIDE.md          ← 상세 적용 가이드
+└── install.sh                   ← CLI 설치 스크립트
+```
 
 ## 빠른 시작
 
 ```bash
-# 1. SOT/index.md에 프로젝트 현재 상태 작성
-# 2. AGENTS.md와 .claude/CLAUDE.md를 프로젝트에 맞게 수정
-# 3. Stitch MCP 연결 (UI 디자인 스킬 사용 시)
-cp .claude/settings.local.json.example .claude/settings.local.json
-# settings.local.json에 본인의 STITCH_API_KEY 입력
-# 4. Claude Code 실행
+# 1. 프로젝트 생성
+rein new my-project && cd my-project && git init
+
+# 2. trail/index.md 에 프로젝트 현재 상태 기입
+# 3. AGENTS.md 를 프로젝트에 맞게 수정
+
+# 4. Claude Code 실행 — rein 이 자동으로 작업 플로우를 가이드합니다
 claude
 ```
 
-### 작업 요청 프롬프트 형식
-```
-Task: [작업 설명]
-
-Definition of done:
-- [완료 기준 1]
-- [완료 기준 2]
-
-Before editing:
-- Summarize current patterns in the target area
-- List files you will change
-- Write a short plan (10 lines max)
-- Self-review
-- If any rule was missing, draft a SOT/incidents entry
-```
-
-## 단계별 도입 로드맵
-
-| 단계 | 시점 | 내용 |
-|------|------|------|
-| 1단계 | Day 1 | AGENTS.md, CLAUDE.md, settings.json, orchestrator.md, SOT/index.md |
-| 2단계 | 1주차 | workflows/, agents/, registry/agents.yml |
-| 3단계 | 1~2주차 | rules/, skills/, hooks/ |
-| 4단계 | 1달 후 | .github/workflows/ 자동화 |
+> 상세한 커스터마이징은 [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) 를 참고하세요.
 
 ## 포함된 스킬
 
-### 프로젝트 운영 스킬
 | 스킬 | 역할 |
 |------|------|
-| `repo-audit` | 저장소 상태 점검 |
-| `pr-review-fixer` | PR 리뷰 코멘트 자동 수정 |
-| `incidents-to-rule` | incident → AGENTS.md 규칙 후보 생성 |
+| `repo-audit` | 저장소 상태 점검 (오래된 규칙, 누락 테스트 감지) |
+| `incidents-to-rule` | 반복 실패 → AGENTS.md 규칙 후보 자동 생성 |
 | `incidents-to-agent` | 반복 패턴 → 에이전트 후보 생성 |
-| `changelog-writer` | CHANGELOG 자동 작성 |
-| `promote-agent` | 에이전트 후보 승격 |
+| `promote-agent` | 에이전트 후보를 정식 에이전트로 승격 |
+| `changelog-writer` | Git 히스토리 기반 CHANGELOG 자동 작성 |
+| `pr-review-fixer` | PR 리뷰 코멘트 자동 수정 적용 |
 
-### Stitch UI 디자인 스킬 (Stitch MCP 필요)
+**Stitch UI 디자인 스킬** (Stitch MCP 연결 시):
+
 | 스킬 | 역할 |
 |------|------|
-| `stitch-design` | 디자인 시스템 총괄, 프롬프트 강화 |
-| `stitch-loop` | 바톤 패턴 멀티페이지 자동 생성 |
-| `design-md` | 프로젝트 → DESIGN.md 추출 |
+| `stitch-design` | 디자인 시스템 총괄 + 프롬프트 강화 |
+| `stitch-loop` | 멀티페이지 자동 생성 |
 | `enhance-prompt` | 모호한 UI 요청 → 정교한 프롬프트 변환 |
-| `react-components` | 디자인 → React 컴포넌트 코드 변환 |
-| `shadcn-ui` | shadcn/ui 컴포넌트 통합 가이드 |
-| `taste-design` | 프리미엄 안티제네릭 디자인 기준 |
-| `remotion` | 워크스루 영상 생성 |
+| `react-components` | 디자인 → React 컴포넌트 변환 |
 
 > Stitch 스킬은 호출 시에만 로드되므로 미사용 시 컨텍스트를 차지하지 않습니다.
-> Stitch MCP 없이도 `enhance-prompt`, `taste-design`, `shadcn-ui`는 독립적으로 사용 가능합니다.
-
-## 버전 히스토리
-
-### v0.7.0 (2026-04-16) — CLI 자가 업데이트 + $HOME/.rein/ 전환
-- **feat**: 설치 경로 `/usr/local/bin/rein` → `$HOME/.rein/bin/rein` (rustup 패턴). sudo 완전 제거
-- **feat**: 신규 `install.sh` — `curl ... install.sh bash` one-liner 설치 스크립트. rc 파일 자동 감지 + 멱등 수정
-- **feat**: `~/.rein/env` — POSIX 호환 PATH 설정 파일. 셸 rc 에는 `. "$HOME/.rein/env"` 한 줄만 추가
-- **feat**: `rein update` 에 자가 업데이트 단계 추가 — 템플릿 VERSION 비교 후 확인 프롬프트 + `exec` 재실행으로 매끄럽게 최신 버전 전환
-- **feat**: 구 `/usr/local/bin/rein` 사용자 자동 감지 + 마이그레이션 안내 (sudo 는 사용자가 직접 실행)
-- **feat**: 신규 플래그 `rein update --yes`, `rein update --no-self-update`, 환경변수 `REIN_SELF_UPDATED`, `REIN_YES`, `REIN_NO_SELF_UPDATE`, `REIN_INSTALL_YES`
-- **test**: `tests/cli/test-install.sh` (6 케이스), `tests/cli/test-self-update.sh` (7 케이스)
-
-### v0.6.0 (2026-04-15) — Session infra 5 개선안 (B1+B2+C+D + A1)
-- **feat (B1)**: 신규 `session-start-load-sot.sh` — SessionStart 훅이 `SOT/index.md`, `inbox/`, `daily/`, `weekly/` (최근 4주) 를 세션 시작 시 자동 컨텍스트 주입. `REIN_BUDGET_BYTES=65536` 용량 예산 + 초과 시 `truncated` 마커. `REIN_NOW` 로 기준 시각 주입 가능
-- **feat (B2)**: 신규 `post-write-spec-review-gate.sh` — canonical 경로 (`docs/**/specs/**`, `docs/**/plans/**`, `specs/**`, `plans/**`) 의 설계 문서 Write/Edit 시 pending 마커 자동 생성. `pre-edit-dod-gate` 확장으로 소스 편집 시도 시 미리뷰 spec 이 있으면 차단 (self-heal 포함)
-- **feat (B2)**: 신규 `scripts/rein-mark-spec-reviewed.sh` — `/codex` 또는 대체 리뷰어가 리뷰 완료 후 per-spec stamp 등록
-- **feat (C)**: 신규 `scripts/rein-aggregate-incidents.py` — Python 기반 incidents 자동 집계. `fcntl.flock` + `tempfile.mkstemp + os.replace` 로 lock-safe + atomic. 재발 (>= 2회) 시 `SOT/incidents/auto-<hook>-<hash>.md` 생성/갱신
-- **feat (C)**: `blocks.log` → JSONL (`blocks.jsonl`) 포맷 전환. pipe/newline/한글 특수문자 안전
-- **feat (C)**: `scripts/rein-migrate-blocks-log.py` — 1회성 legacy 변환
-- **feat (C)**: `stop-session-gate.sh` 확장 — 자동 aggregate 호출
-- **feat (C)**: `pre-edit-dod-gate.sh` 확장 — `.incident-review-pending` stamp + self-heal + 1회성 파일 기반 바이패스 (`.skip-incident-gate`)
-- **feat (C)**: `.claude/skills/incidents-to-rule/SKILL.md` 갱신 — 신규 frontmatter 포맷 + legacy INC-NNN opt-in 양쪽 지원
-- **feat (D)**: 신규 `scripts/rein-scan-skill-mcp.py` — 사용자 + 프로젝트 skill/MCP 인벤토리 자동 스캔 (hashlib.sha1 canonical hash)
-- **feat (D)**: `session-start-load-sot.sh` 확장 — 6KB 캡 가이드 출력 + 변경 감지 시 `.skill-mcp-regen-pending` stamp + SessionStart 알림
-- **feat (D)**: `pre-edit-dod-gate.sh` 확장 — 최신 mtime active dod 1건의 `## 활용 skill/MCP` 섹션 검증 (경고만)
-- **feat (D)**: AGENTS.md 에 가이드 재생성 최소 템플릿 추가 (섹션 순서, 6KB 캡, 추측 금지, 사용자 메모 보존)
-- **fix (A1)**: `pre-bash-guard.sh` 의 1시간 stamp TTL 제거 — `.review-pending` 비교만으로 "리뷰 이후 코드 수정" 판정
-- **feat**: `docs/superpowers/specs/` 에 각 개선안 설계 문서 4개 (B1, B2, C, D). 모두 Codex 리뷰 반영
-- **feat**: `docs/superpowers/plans/` 에 DoD 회전 구현 계획 + dev 머지 검증 계획
-- **feat**: `docs/superpowers/reports/` 에 실전 검증 보고서
-- **test**: 신규 4 suite (test-session-start, test-spec-review-gate, test-incidents-automation, test-skill-mcp-inventory) — 70 케이스 전체 통과. `run-all.sh` 합계 134/134 + cli 25/25 = 159/159 PASSED
-- **test**: dogfood 실전 검증 10 Phase 전부 통과 (migration / scan / SessionStart / gate / self-heal 사이클 / 통합)
-
-### v0.5.0 (2026-04-15) — manifest tracking + prune
-- **feat**: `scripts/rein.sh` 에 `.claude/.rein-manifest.json` 기반 manifest tracking 시스템 도입. `rein new`, `rein merge`, `rein update` 가 모든 설치 파일을 추적하고 사용자 수정 여부를 sha256 으로 판정
-- **feat**: `rein merge --prune` / `rein update --prune` — 템플릿에서 제거된 deprecated 파일을 사용자 프로젝트에서 안전하게 정리. 사용자 수정 파일 (sha256 mismatch) 은 절대 삭제하지 않음
-- **feat**: `--prune --confirm` 실제 삭제 모드 — 백업 디렉토리 `.rein-prune-backup-<timestamp>/` 에 먼저 이동
-- **security**: path traversal / 절대경로 / leaf symlink 거부. `cp -P` + 즉시 leaf symlink 재검사 (정보 노출 윈도우 차단)
-- **security**: backup dir 이름에 `mktemp -d` 사용 (timestamp 예측 차단)
-- **test**: `tests/cli/test-manifest-prune.sh` 신규 25 케이스 — parse_flags 조합 / scope / heredoc / path traversal / leaf symlink / cmd_merge-prune-manifest_generate 통합 / .gitignore 보호 / v0.4.x 마이그레이션
-
-### v0.4.3 (2026-04-15) — hotfix: stop-session-gate 데드락 근본 해소
-- **fix**: `post-edit-index-sync-inbox.sh` (v0.4.1) 의 한계 해소 — 해당 훅은 `SOT/index.md` 편집 시에만 발동해서, 데드락 상황에서 사용자가 index.md 를 건드리지 않으면 작동 안 하던 precondition 실패
-- **feat**: `stop-session-gate.sh` 에 git 활동 감지 추가 — 오늘 커밋 OR tracked 파일 modified/staged 가 있으면 inbox 없어도 WARNING + 통과 (순수 untracked 파일은 노이즈 필터링으로 인정 안 함)
-- **feat**: `REIN_BYPASS_STOP_GATE=1` 환경변수 탈출구 — 극단 상황용 escape hatch, 사용 시 `SOT/incidents/blocks.log` 에 자동 감사 기록
-- **feat**: 차단 메시지에 4 가지 해결 방법 구체 명시
-- **test**: `tests/hooks/test-stop-gate-deadlock.sh` 신규 9 케이스 — 데드락 재현 + 해소 + 회귀 방지
-- **note**: v0.4.1 `post-edit-index-sync-inbox.sh` 는 여전히 유용하며 (정상 워크플로우에서 작동) 함께 사용됨
-
-### v0.4.2 (2026-04-15) — pre-bash-guard 커밋 메시지 검증 3 버그 수정
-- **fix**: 복합 명령 (`<commit-cmd> -m "..." && <tag-cmd> -m "..."`) 에서 tag 의 `-m` 을 commit 의 `-m` 으로 오인해 false block 발생하던 문제 수정
-- **fix**: `$(cat <<'EOF' ... EOF)` heredoc 방식 메시지가 sed 추출 실패로 검사 자체가 스킵되어 어떤 메시지든 통과되던 silent bypass 차단
-- **fix**: conventional commits scope 표기법 (`fix(auth):`, `chore(sot):`) 거부되던 정규식 확장
-- **refactor**: 추출 로직을 신규 helper `.claude/hooks/lib/extract-commit-msg.py` 로 분리. escape-aware separator + heredoc marker 정밀 매칭
-- **fix**: helper 또는 python3 누락 시 BLOCK (또 다른 silent bypass 차단)
-- **test**: `tests/hooks/test-commit-msg.sh` 신규 23 케이스 — 전체 55/55 통과
-
-### v0.4.1 (2026-04-15) — hotfix
-- **fix**: `stat -f` / `stat -c` 폴백 체인이 Linux GNU stat 에서 동작하지 않아 `pre-edit-dod-gate.sh`, `pre-bash-guard.sh`, `inbox-compress.sh` 훅이 Linux 사용자 전원에게 블록되던 문제 수정. `uname` 기반 `_mtime()` 헬퍼로 교체 (macOS=BSD, Linux/WSL/Git Bash/Cygwin=GNU)
-- **feat**: 신규 `post-edit-index-sync-inbox.sh` 훅 — `SOT/index.md` 편집 시 훅 프로세스가 직접 오늘자 inbox 를 생성. 3rd party 플러그인(`gateguard-fact-force` 등)이 Claude Write 도구의 새 파일 생성을 차단할 때 발생하는 `stop-session-gate` 데드락 자동 해소
-- **test**: `tests/hooks/` 32/32 통과 (신규 13개 — portability 6 + sync-inbox 7)
-
-### v0.4.0 (2026-04-15) — codex 리뷰 강제 + 에스컬레이션
-- **feat**: 신규 `post-edit-review-gate.sh` 훅 — Edit/Write 시 `.review-pending` 자동 추적
-- **feat**: `pre-bash-guard` 강화 — `.review-pending` 검증, `.env` 읽기 차단, `git checkout`/`git restore` 차단
-- **feat**: `codex` 스킬 폴백 체인 + 에스컬레이션 규칙 + stamp 메타데이터
-- **feat**: AGENTS.md §5-1 코드 리뷰 필수 규칙 + 에스컬레이션 기준
-- **fix**: 전체 코드 리뷰 지적사항 반영 (보안, DoD gate, 확장자, 경로 검증)
-
-### v0.3.0 — 스마트 라우터 + 템플릿 정리
-- **feat**: 스마트 라우터 도입 (`.claude/router/`) — DoD 내용과 에이전트/스킬/MCP description 매칭으로 최적 조합 자동 추천
-- **feat**: 서브프로젝트 AGENTS.md 계층 구조 가이드 (`REIN_SETUP_GUIDE.md` 통합)
-- **chore**: `COPY_TARGETS` 누락 파일 보강 (router, 서브프로젝트, SETUP_GUIDE)
-- **fix**: ISO week-year `%G` + 프로젝트명 슬래시 차단 (2차 Codex 리뷰 반영)
-- **fix**: inbox weekly 주차 계산 + `rein new` 경로 검증 + stitch-design 오타 수정
-
-### v0.2.0 (2026-04-09) — Security Layer
-- **feat**: 보안 레이어 도입 (`.claude/security/profile.yaml`) — 프로젝트별 보안 레벨 설정
-- **feat**: `security-reviewer` 에이전트 — Codex 리뷰 완료 후 자동 보안 리뷰
-- **feat**: 보안 레벨 기반 자동 리뷰 스탬프 시스템
-- **chore**: CLI 이름 변경 (`claude-init` → `rein`)
-
-### v0.1.0 — 최초 릴리즈
-- **feat**: `rein` CLI 기본 기능 (`new` / `merge` / `update`)
-- **feat**: AGENTS.md + `.claude/` 규칙·훅 스캐폴드
-- **feat**: DoD gate (`pre-edit-dod-gate.sh`) — 소스 편집 전 DoD 파일 필수
-- **feat**: Stop session gate — 세션 종료 전 inbox + index 갱신 필수
-- **feat**: Codex 코드 리뷰 필수 단계
-- **feat**: inbox → daily → weekly 자동 회전 훅
-- **feat**: Stitch MCP UI 디자인 스킬팩 8종
-
----
-
-> 상세 변경 이력은 `git log main --oneline` 을 참조하세요.
 
 ## 호환성 주의
 
-### ⚠️ `everything-claude-code` 플러그인 사용 금지
+### `everything-claude-code` 플러그인
 
-`everything-claude-code` Claude Code 플러그인 (>= 1.9.0) 의 `gateguard-fact-force` 훅은 Rein 환경과 **호환되지 않습니다**. 함께 설치하면 Edit/Write/Bash 가 전부 deadlock 됩니다.
+`everything-claude-code` (>= 1.9.0) 의 `gateguard-fact-force` 훅은 Rein 과 호환되지 않습니다. 함께 설치하면 모든 Edit/Write/Bash 가 deadlock 됩니다. Rein 이 동등한 기능을 이미 제공하므로 해당 플러그인은 제거하세요.
 
-- **원인**: gateguard 가 `CLAUDE_SESSION_ID` / `ECC_SESSION_ID` 미설정 시 `pid-${ppid}` 를 fallback 세션 ID 로 사용. Claude Code 는 tool 호출마다 새 node subprocess 를 spawn 하므로 PID 가 매번 달라져 state 파일이 매번 새로 생성되고, 직전 "checked" 기록을 못 읽어 **매 호출이 "첫 실행"으로 판정 → 영원히 deny**.
-- **중복 기능**: Rein 은 이미 `pre-bash-guard.sh` + `pre-edit-dod-gate.sh` 로 동등한 fact-forcing + DoD gate 를 제공하므로 gateguard 가 있을 이유가 없습니다.
-- **조치**: `/plugin` 으로 `everything-claude-code` 언인스톨 후 `~/.claude/plugins/cache/everything-claude-code/`, `~/.gateguard/` 제거. 업스트림 수정 (PR) 전까지는 함께 쓰지 마세요.
+### v0.6.x 이하에서 업그레이드
 
-### v0.6.x → v0.7.0 마이그레이션 (설치 경로 변경)
+v0.7.0 부터 CLI 설치 경로가 `/usr/local/bin/rein` → `$HOME/.rein/bin/rein` 으로 변경되었습니다. 기존 사용자는 [install.sh](install.sh) 를 한 번 실행하면 됩니다. 이후 `rein update` 가 자가 업데이트를 자동 처리합니다.
 
-v0.7.0 부터 rein CLI 는 `/usr/local/bin/rein` 대신 `$HOME/.rein/bin/rein` 에 설치됩니다. sudo 가 필요 없어지고, `rein update` 가 CLI 자신을 자동으로 갱신합니다.
+## 버전 히스토리
 
-**구버전 사용자 마이그레이션**:
+### v0.7.0 (2026-04-16)
+- CLI 설치 경로 `$HOME/.rein/bin/rein` 전환 (sudo 제거)
+- `install.sh` 신규 설치 스크립트 + CLI 자가 업데이트
+- `SOT/` → `trail/` 리네임
 
-1. 새 위치에 설치:
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/JayJihyunKim/rein/main/install.sh | bash
-   ```
-2. 구 파일 제거 (sudo 필요, 마지막으로 한 번):
-   ```bash
-   sudo rm /usr/local/bin/rein
-   ```
-3. 새 셸 세션 열기 또는 `source ~/.rein/env`
+### v0.6.0 (2026-04-15)
+- 세션 시작 시 trail 자동 로딩 (SessionStart 훅)
+- 설계 문서 리뷰 강제 게이트
+- incidents 자동 집계 (JSONL + Python)
+- skill/MCP 인벤토리 자동 스캔
 
-`rein update` 를 실행하면 자동으로 마이그레이션 안내가 표시됩니다.
+### v0.5.0 (2026-04-15)
+- manifest 기반 파일 추적 + `--prune` 지원
+- symlink / path traversal 보안 강화
 
-## 참고 저장소
+### v0.4.x (2026-04-15)
+- codex 리뷰 강제 + 에스컬레이션 규칙
+- stop-session-gate 데드락 해소
+- Linux/macOS stat 호환성 수정
+- 커밋 메시지 검증 개선
+
+### v0.3.0
+- 스마트 라우터 도입
+
+### v0.2.0 (2026-04-09)
+- 보안 레이어 도입 (프로젝트별 보안 레벨)
+
+### v0.1.0
+- 최초 릴리즈: CLI, DoD gate, stop-session gate, inbox 회전
+
+## Contributing
+
+이슈나 PR 은 환영합니다. [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) 에서 프레임워크 구조를 먼저 파악한 후 기여해 주세요.
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
+
+## 참고
 
 - [agentsmd/agents.md](https://agents.md) — AGENTS.md 계층 구조
 - [getsentry/sentry](https://github.com/getsentry/sentry) — 실사용 AGENTS.md 예시
-- [anthropics/skills](https://github.com/anthropics/skills) — skill 정의 방식
-- [google-labs-code/stitch-skills](https://github.com/google-labs-code/stitch-skills) — Stitch UI 디자인 스킬
+- [anthropics/skills](https://github.com/anthropics/skills) — skill 정의

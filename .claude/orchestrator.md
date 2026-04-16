@@ -57,7 +57,7 @@ Agent Teams 사용 시:
 DoD 작성 완료 후, 구현 시작 전에 아래를 수행한다.
 
 ### 실행 시점
-- **트리거**: DoD 파일(`SOT/dod/dod-*.md`) 작성 완료 직후
+- **트리거**: DoD 파일(`trail/dod/dod-*.md`) 작성 완료 직후
 - **목적**: 현재 환경에서 사용 가능한 에이전트 + 스킬 + MCP 조합을 동적으로 발견하여 추천
 
 ### 절차
@@ -72,7 +72,7 @@ DoD 작성 완료 후, 구현 시작 전에 아래를 수행한다.
    - 키워드: 작업명, 완료 기준, 요약에서 핵심 단어
    - 파일 패턴: 변경 대상 파일의 확장자와 경로
    - 작업 유형: add-feature | fix-bug | build-from-scratch | research-task
-   - SOT 컨텍스트: `SOT/index.md`의 현재 상태, 블로커
+   - trail 컨텍스트: `trail/index.md`의 현재 상태, 블로커
 
 3. **매칭**: 발견된 각 항목의 description을 DoD 신호와 대조
    - 각 항목의 description 텍스트에서 용도, 트리거 조건, 도메인을 분석
@@ -151,11 +151,11 @@ DoD 작성 완료 후, 구현 시작 전에 아래를 수행한다.
 ## 에이전트 추가 파이프라인
 
 ```
-SOT/incidents/ 축적 (동일 유형 3회 이상)
+trail/incidents/ 축적 (동일 유형 3회 이상)
         ↓
 incidents-to-agent SKILL 실행
         ↓ (기준 충족 시)
-SOT/agent-candidates/{name}.md 생성
+trail/agent-candidates/{name}.md 생성
         ↓
 promote-agent SKILL 실행
         ↓

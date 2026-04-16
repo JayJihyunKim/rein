@@ -22,7 +22,7 @@ description: 신규 기능 구현 및 버그 수정 전담. 기존 서비스/모
 ```
 [ ] AGENTS.md 전역 규칙 확인
 [ ] 해당 디렉토리 AGENTS.md 확인 (nearest-wins)
-[ ] SOT/index.md 현재 상태 확인
+[ ] trail/index.md 현재 상태 확인
 [ ] DoD 작성 완료
 [ ] 변경 파일 목록 작성
 [ ] 10줄 이내 계획 작성
@@ -43,5 +43,5 @@ description: 신규 기능 구현 및 버그 수정 전담. 기존 서비스/모
 [ ] 신규 기능에 테스트 추가됨
 [ ] lint/format 통과
 [ ] Self-review 완료
-[ ] 빠뜨린 규칙 → SOT/incidents/ 초안 작성
+[ ] 빠뜨린 규칙 → trail/incidents/ 초안 작성
 ```

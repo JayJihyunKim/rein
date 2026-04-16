@@ -1,0 +1,23 @@
+name: Mirror main to public repo
+
+# rein-dev (private) 의 main 브랜치가 push 되면
+# rein (public) 레포에 자동으로 미러링한다.
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to public repo
+        run: |
+          git remote add public https://x-access-token:${{ secrets.PUBLIC_REPO_TOKEN }}@github.com/JayJihyunKim/rein.git
+          git push public main --force

@@ -1,6 +1,6 @@
 ---
 name: incidents-to-rule
-description: SOT/incidents/ 파일을 분석해 AGENTS.md에 추가할 규칙 후보를 생성한다
+description: trail/incidents/ 파일을 분석해 AGENTS.md에 추가할 규칙 후보를 생성한다
 triggers:
   - reviewer가 incident draft 작성 직후 (자동)
   - daily audit 시 (하루 1회)
@@ -13,7 +13,7 @@ triggers:
 반복되는 실수와 실패 패턴을 분석해 AGENTS.md에 추가할 규칙 후보를 생성한다.
 
 ## 입력
-- `SOT/incidents/{target}.md` 또는 `SOT/incidents/` 전체
+- `trail/incidents/{target}.md` 또는 `trail/incidents/` 전체
 
 ## 입력 포맷
 
@@ -47,15 +47,15 @@ last_seen_at: "2026-04-15T09:17:45"
 ```
 
 **처리 규칙**:
-- 레거시 `INC-NNN.md` 는 `SOT/incidents/legacy/` 디렉토리에 있을 때만 처리 (opt-in)
-- 루트 `SOT/incidents/` 의 frontmatter 없는 `.md` 파일은 무시 (gate 영구 발동 방지)
-- 레거시 파일을 처리하려면 `SOT/incidents/legacy/` 로 이동 후 스킬 호출
+- 레거시 `INC-NNN.md` 는 `trail/incidents/legacy/` 디렉토리에 있을 때만 처리 (opt-in)
+- 루트 `trail/incidents/` 의 frontmatter 없는 `.md` 파일은 무시 (gate 영구 발동 방지)
+- 레거시 파일을 처리하려면 `trail/incidents/legacy/` 로 이동 후 스킬 호출
 
 ## 실행 절차
 
 ### Step 1: Incident 수집
 ```
-[ ] SOT/incidents/ 전체 파일 목록 확인
+[ ] trail/incidents/ 전체 파일 목록 확인
 [ ] 최신 순 정렬
 [ ] 미처리(규칙 미생성) incident 필터링
 ```
@@ -79,7 +79,7 @@ last_seen_at: "2026-04-15T09:17:45"
 ## 출력
 1. 규칙 후보 목록 (우선순위 순)
 2. AGENTS.md 수정 초안
-3. SOT/index.md 업데이트
+3. trail/index.md 업데이트
 
 ## 완료 기준
 ```

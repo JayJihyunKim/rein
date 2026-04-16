@@ -14,7 +14,7 @@ if [ -z "$SPEC_PATH" ] || [ -z "$REVIEWER" ]; then
 fi
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-SPEC_REVIEWS_DIR="$PROJECT_DIR/SOT/dod/.spec-reviews"
+SPEC_REVIEWS_DIR="$PROJECT_DIR/trail/dod/.spec-reviews"
 
 # 절대경로 정규화
 ABS_SPEC=$(python3 -c "import os,sys; print(os.path.abspath(sys.argv[1]))" "$SPEC_PATH" 2>/dev/null)

@@ -315,14 +315,14 @@ COPY_TARGETS=(
   "REIN_SETUP_GUIDE.md"
 )
 
-SOT_DIRS=(
-  "SOT/inbox"
-  "SOT/daily"
-  "SOT/weekly"
-  "SOT/decisions"
-  "SOT/dod"
-  "SOT/incidents"
-  "SOT/agent-candidates"
+TRAIL_DIRS=(
+  "trail/inbox"
+  "trail/daily"
+  "trail/weekly"
+  "trail/decisions"
+  "trail/dod"
+  "trail/incidents"
+  "trail/agent-candidates"
 )
 
 # ---------------------------------------------------------------------------
@@ -400,15 +400,15 @@ manifest_generate() {
   list_file=$(mktemp)
   # Track files copied via list_copy_files (rein-managed code/config).
   #
-  # SCOPE NOTE: SOT/ files are intentionally NOT tracked in the manifest:
-  #   - SOT/index.md is a starter file that the project owner immediately
+  # SCOPE NOTE: trail/ files are intentionally NOT tracked in the manifest:
+  #   - trail/index.md is a starter file that the project owner immediately
   #     customizes; treating it as rein-tracked would mean prune sees it as
-  #     "removed from template" (because list_copy_files excludes SOT/) and
+  #     "removed from template" (because list_copy_files excludes trail/) and
   #     would attempt to delete it.
-  #   - SOT/<sub>/.gitkeep files are harmless directory markers; tracking
+  #   - trail/<sub>/.gitkeep files are harmless directory markers; tracking
   #     them would create the same false-positive prune target.
   # The manifest contract is therefore: "tracks every rein-managed file
-  # under list_copy_files()". SOT/ is user state, not rein-managed.
+  # under list_copy_files()". trail/ is user state, not rein-managed.
   while IFS= read -r -d '' rel_path; do
     local dest="$project_dir/$rel_path"
     if [[ -f "$dest" ]]; then
@@ -744,30 +744,30 @@ copy_file() {
 }
 
 # ---------------------------------------------------------------------------
-# scaffold_sot(dest_dir, template_dir)
-# Creates SOT directory structure with .gitkeep files.
-# Copies SOT/index.md from template if it exists (in merge mode: only if the
+# scaffold_trail(dest_dir, template_dir)
+# Creates trail directory structure with .gitkeep files.
+# Copies trail/index.md from template if it exists (in merge mode: only if the
 # file does not already exist, to avoid silently destroying local state).
 # ---------------------------------------------------------------------------
-scaffold_sot() {
+scaffold_trail() {
   local dest_dir="$1"
   local template_dir="$2"
   local is_merge="${3:-false}"   # pass "true" for merge/update
 
-  for sot_dir in "${SOT_DIRS[@]}"; do
-    mkdir -p "$dest_dir/$sot_dir"
-    touch "$dest_dir/$sot_dir/.gitkeep"
+  for trail_dir in "${TRAIL_DIRS[@]}"; do
+    mkdir -p "$dest_dir/$trail_dir"
+    touch "$dest_dir/$trail_dir/.gitkeep"
   done
 
-  if [[ -f "$template_dir/SOT/index.md" ]]; then
-    mkdir -p "$dest_dir/SOT"
-    local dest_index="$dest_dir/SOT/index.md"
+  if [[ -f "$template_dir/trail/index.md" ]]; then
+    mkdir -p "$dest_dir/trail"
+    local dest_index="$dest_dir/trail/index.md"
     if [[ "$is_merge" == "true" && -f "$dest_index" ]]; then
-      # In merge mode, do not silently overwrite existing SOT/index.md.
+      # In merge mode, do not silently overwrite existing trail/index.md.
       # The file is managed by the project owner; leave it alone.
       :
     else
-      cp "$template_dir/SOT/index.md" "$dest_index"
+      cp "$template_dir/trail/index.md" "$dest_index"
     fi
   fi
 }
@@ -953,7 +953,7 @@ cmd_new() {
     file_count=$((file_count + 1))
   done < <(list_copy_files "$TEMPLATE_DIR")
 
-  scaffold_sot "$dest_dir" "$TEMPLATE_DIR" "false"
+  scaffold_trail "$dest_dir" "$TEMPLATE_DIR" "false"
   substitute_vars "$dest_dir" "$project_name"
 
   # Generate initial manifest so future updates can prune safely
@@ -1054,7 +1054,7 @@ cmd_merge() {
     fi
   done < <(list_copy_files "$TEMPLATE_DIR")
 
-  scaffold_sot "$PWD" "$TEMPLATE_DIR" "true"
+  scaffold_trail "$PWD" "$TEMPLATE_DIR" "true"
   substitute_vars "$PWD" "$project_name"
 
   echo ""

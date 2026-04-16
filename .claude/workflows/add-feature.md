@@ -5,7 +5,7 @@
 
 ### Step 1: 컨텍스트 파악
 ```
-[ ] SOT/index.md 읽기
+[ ] trail/index.md 읽기
 [ ] 변경 대상 디렉토리 현재 패턴 요약
 [ ] 관련 테스트 파일 위치 확인
 [ ] 의존성 있는 모듈 목록 작성
@@ -54,6 +54,6 @@
 ```
 [ ] DoD 항목 전체 체크
 [ ] Self-review (AGENTS.md §6 기준)
-[ ] 빠뜨린 규칙 → SOT/incidents/ 초안 작성
-[ ] SOT/index.md 갱신
+[ ] 빠뜨린 규칙 → trail/incidents/ 초안 작성
+[ ] trail/index.md 갱신
 ```

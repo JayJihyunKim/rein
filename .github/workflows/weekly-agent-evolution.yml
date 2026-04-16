@@ -16,7 +16,7 @@ jobs:
           echo "=== Weekly Agent Evolution Check ==="
           echo "날짜: $(date '+%Y-%m-%d')"
 
-          total=$(find SOT/incidents -name "INC-*.md" 2>/dev/null | wc -l)
+          total=$(find trail/incidents -name "INC-*.md" 2>/dev/null | wc -l)
           echo "전체 incident 수: $total"
 
           if [ "$total" -ge 3 ]; then
@@ -27,11 +27,11 @@ jobs:
 
       - name: Check agent candidates
         run: |
-          candidates=$(find SOT/agent-candidates -name "*.md" 2>/dev/null | grep -v ".gitkeep" | wc -l)
+          candidates=$(find trail/agent-candidates -name "*.md" 2>/dev/null | grep -v ".gitkeep" | wc -l)
           echo "대기 중인 에이전트 후보: $candidates개"
           if [ "$candidates" -gt 0 ]; then
             echo "⚠️  승인 대기 중인 에이전트 후보가 있습니다:"
-            find SOT/agent-candidates -name "*.md" 2>/dev/null | grep -v ".gitkeep"
+            find trail/agent-candidates -name "*.md" 2>/dev/null | grep -v ".gitkeep"
           fi
 
       - name: Check stale draft agents

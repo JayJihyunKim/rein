@@ -1,12 +1,12 @@
 #!/bin/bash
-# Hook: PostToolUse(Edit|Write|MultiEdit) - SOT/index.md 편집 시 inbox 자동 폴백 생성
+# Hook: PostToolUse(Edit|Write|MultiEdit) - trail/index.md 편집 시 inbox 자동 폴백 생성
 #
 # Purpose:
-#   rein 의 stop-session-gate.sh 는 세션 종료 시 오늘자 SOT/inbox 기록이 없으면 차단한다.
+#   rein 의 stop-session-gate.sh 는 세션 종료 시 오늘자 trail/inbox 기록이 없으면 차단한다.
 #   그러나 일부 3rd-party 훅(예: gateguard-fact-force)이 Claude 의 Write 도구를 통한
 #   신규 파일 생성을 차단하는 경우, 수동으로 inbox 파일을 만들 방법이 사라져 데드락이 발생한다.
 #
-#   이 훅은 SOT/index.md 가 편집되는 시점에 bash 프로세스(=비-Claude-tool 경로)로
+#   이 훅은 trail/index.md 가 편집되는 시점에 bash 프로세스(=비-Claude-tool 경로)로
 #   직접 쉘 리다이렉션으로 파일을 기록하여 데드락을 해제한다. fact-force 류의 훅은
 #   Claude 의 Write/Bash PreToolUse 만 가로채므로 이 경로는 차단되지 않는다.
 #
@@ -18,13 +18,13 @@ INPUT=$(cat 2>/dev/null || true)
 
 FILE_PATH=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('tool_input', {}).get('file_path', ''); sys.stdout.write(p.replace('\n','').replace('\r',''))" 2>/dev/null || true)
 
-# file_path 추출 실패 또는 SOT/index.md 가 아니면 즉시 종료.
+# file_path 추출 실패 또는 trail/index.md 가 아니면 즉시 종료.
 if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
 
 case "$FILE_PATH" in
-  */SOT/index.md|SOT/index.md) ;;
+  */trail/index.md|trail/index.md) ;;
   *) exit 0 ;;
 esac
 
@@ -36,7 +36,7 @@ if [ -z "$TODAY" ]; then
   exit 0
 fi
 
-INBOX_DIR="$PROJECT_DIR/SOT/inbox"
+INBOX_DIR="$PROJECT_DIR/trail/inbox"
 mkdir -p "$INBOX_DIR" 2>/dev/null || exit 0
 
 # 이미 오늘자 inbox 파일이 하나라도 있으면 수동 기록을 존중하고 종료.
@@ -74,7 +74,7 @@ TARGET_TMP="${TARGET}.tmp.$$"
 
 - 날짜: ${TODAY}
 - 유형: auto
-- 생성 트리거: SOT/index.md 업데이트 시 post-edit-index-sync-inbox 훅
+- 생성 트리거: trail/index.md 업데이트 시 post-edit-index-sync-inbox 훅
 - 자동 생성: 이 파일은 훅이 자동으로 만들었습니다. 필요 시 수동으로 보완하세요.
 
 ## 오늘 커밋
@@ -84,7 +84,7 @@ ${GIT_LOG}
 ${GIT_DIFF}
 
 ## 요약
-자세한 내용은 \`SOT/index.md\` 를 참조하세요. 이 파일은 fact-force 같은 3rd party 훅이 새 파일 생성을 차단해 수동 inbox 작성이 불가능한 상황을 자동 해소하기 위한 폴백입니다.
+자세한 내용은 \`trail/index.md\` 를 참조하세요. 이 파일은 fact-force 같은 3rd party 훅이 새 파일 생성을 차단해 수동 inbox 작성이 불가능한 상황을 자동 해소하기 위한 폴백입니다.
 EOF
 } > "$TARGET_TMP" 2>/dev/null
 if [ -s "$TARGET_TMP" ]; then

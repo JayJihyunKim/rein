@@ -1,12 +1,12 @@
 #!/bin/bash
 # Hook: PostToolUse(Edit/Write/MultiEdit) - 소스 코드 편집 시 리뷰 대기 상태 추적
 #
-# 소스 코드 파일 편집 시 SOT/dod/.review-pending 생성
-# SOT/, docs/, .md 파일은 제외 (규칙/문서 파일)
+# 소스 코드 파일 편집 시 trail/dod/.review-pending 생성
+# trail/, docs/, .md 파일은 제외 (규칙/문서 파일)
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-REVIEW_PENDING="$PROJECT_DIR/SOT/dod/.review-pending"
+REVIEW_PENDING="$PROJECT_DIR/trail/dod/.review-pending"
 
 INPUT=$(cat)
 
@@ -43,9 +43,9 @@ FOUND_SOURCE=false
 while IFS= read -r FILE_PATH; do
   [ -z "$FILE_PATH" ] && continue
 
-  # 제외 경로: SOT/, docs/, *.md 파일 (루트 상대경로도 매치)
+  # 제외 경로: trail/, docs/, *.md 파일 (루트 상대경로도 매치)
   case "$FILE_PATH" in
-    SOT/*|*/SOT/*|docs/*|*/docs/*|*.md)
+    trail/*|*/trail/*|docs/*|*/docs/*|*.md)
       continue
       ;;
   esac

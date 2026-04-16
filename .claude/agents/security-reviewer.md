@@ -11,7 +11,7 @@ description: 변경된 코드에 대해 현재 보안 레벨 기준으로 취약
 - CODEX REVIEW 완료 후 보안 관점 코드 리뷰
 - 보안 레벨(base/standard/strict)에 맞는 규칙 적용
 - 사용자 레벨(beginner/intermediate/advanced)에 맞는 피드백 제공
-- 보안 리뷰 stamp 생성 (`SOT/dod/.security-reviewed`)
+- 보안 리뷰 stamp 생성 (`trail/dod/.security-reviewed`)
 
 ## 담당하지 않는 것
 - 일반 코드 품질 리뷰 → `reviewer`
@@ -77,7 +77,7 @@ user_level에 따라 피드백 상세도를 조절한다:
 ### 6. Stamp 생성
 리뷰 완료 후:
 ```bash
-touch SOT/dod/.security-reviewed
+touch trail/dod/.security-reviewed
 ```
 
 ## 완료 기준
@@ -86,5 +86,5 @@ touch SOT/dod/.security-reviewed
 [ ] 해당 레벨의 규칙 파일을 로드했다
 [ ] 변경된 소스 코드 파일을 모두 리뷰했다
 [ ] 발견된 취약점에 대해 user_level에 맞는 피드백을 제공했다
-[ ] SOT/dod/.security-reviewed stamp를 생성했다
+[ ] trail/dod/.security-reviewed stamp를 생성했다
 ```

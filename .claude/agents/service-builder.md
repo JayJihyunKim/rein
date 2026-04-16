@@ -12,7 +12,7 @@ description: 새 서비스, 모듈, 앱을 처음부터 생성. 디렉토리 구
 - 진입점 및 기본 구조 코드 생성
 - 초기 테스트 구조 설정
 - 서비스별 하위 AGENTS.md 작성
-- 기술 결정 SOT/decisions/ 기록
+- 기술 결정 trail/decisions/ 기록
 
 ## 필수 생성 파일
 ```
@@ -40,6 +40,6 @@ description: 새 서비스, 모듈, 앱을 처음부터 생성. 디렉토리 구
 [ ] 서비스가 실제 실행됨
 [ ] 기본 테스트 통과
 [ ] 하위 AGENTS.md 작성됨
-[ ] SOT/decisions/DEC-NNN.md 기술 결정 기록됨
-[ ] SOT/index.md 갱신됨
+[ ] trail/decisions/DEC-NNN.md 기술 결정 기록됨
+[ ] trail/index.md 갱신됨
 ```

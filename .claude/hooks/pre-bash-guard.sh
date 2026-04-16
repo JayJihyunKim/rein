@@ -6,8 +6,8 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BLOCKS_LOG="$PROJECT_DIR/SOT/incidents/blocks.log"
-BLOCKS_LOG_JSONL="$PROJECT_DIR/SOT/incidents/blocks.jsonl"
+BLOCKS_LOG="$PROJECT_DIR/trail/incidents/blocks.log"
+BLOCKS_LOG_JSONL="$PROJECT_DIR/trail/incidents/blocks.jsonl"
 
 log_block() {
   local reason="$1"
@@ -66,9 +66,9 @@ fi
 # --- Codex 리뷰 + 보안 리뷰 stamp 공통 검사 함수 ---
 check_review_stamp() {
   local context="$1"  # "test" 또는 "commit"
-  REVIEW_STAMP="$PROJECT_DIR/SOT/dod/.codex-reviewed"
-  SECURITY_STAMP="$PROJECT_DIR/SOT/dod/.security-reviewed"
-  DOD_DIR="$PROJECT_DIR/SOT/dod"
+  REVIEW_STAMP="$PROJECT_DIR/trail/dod/.codex-reviewed"
+  SECURITY_STAMP="$PROJECT_DIR/trail/dod/.security-reviewed"
+  DOD_DIR="$PROJECT_DIR/trail/dod"
 
   # DoD 파일이 없으면 (작업 중이 아니면) 검사 스킵
   DOD_EXISTS=false
@@ -82,7 +82,7 @@ check_review_stamp() {
   [ "$DOD_EXISTS" = false ] && return 0
 
   # --- .review-pending 검증 (코드 편집 후 리뷰 필수) ---
-  REVIEW_PENDING="$PROJECT_DIR/SOT/dod/.review-pending"
+  REVIEW_PENDING="$PROJECT_DIR/trail/dod/.review-pending"
   if [ -f "$REVIEW_PENDING" ]; then
     if [ ! -f "$REVIEW_STAMP" ]; then
       echo "BLOCKED: 코드 변경 후 codex 리뷰가 실행되지 않았습니다." >&2
@@ -111,7 +111,7 @@ check_review_stamp() {
   if [ ! -f "$REVIEW_STAMP" ]; then
     echo "BLOCKED: Codex 코드 리뷰가 실행되지 않았습니다." >&2
     echo "${context} 전에 /codex 스킬로 코드 리뷰를 실행하세요." >&2
-    echo "리뷰 완료 후 SOT/dod/.codex-reviewed 파일이 생성되어야 합니다." >&2
+    echo "리뷰 완료 후 trail/dod/.codex-reviewed 파일이 생성되어야 합니다." >&2
     log_block "Codex 리뷰 미실행 (${context})" "$COMMAND"
     return 1
   fi
@@ -120,7 +120,7 @@ check_review_stamp() {
   if [ ! -f "$SECURITY_STAMP" ]; then
     echo "BLOCKED: 보안 리뷰가 실행되지 않았습니다." >&2
     echo "Codex 리뷰 후 security-reviewer 에이전트를 실행하세요." >&2
-    echo "리뷰 완료 후 SOT/dod/.security-reviewed 파일이 생성되어야 합니다." >&2
+    echo "리뷰 완료 후 trail/dod/.security-reviewed 파일이 생성되어야 합니다." >&2
     log_block "보안 리뷰 미실행 (${context})" "$COMMAND"
     return 1
   fi

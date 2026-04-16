@@ -5,7 +5,7 @@
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DOD_DIR="$PROJECT_DIR/SOT/dod"
+DOD_DIR="$PROJECT_DIR/trail/dod"
 SPEC_REVIEWS_DIR="$DOD_DIR/.spec-reviews"
 
 INPUT=$(cat)
