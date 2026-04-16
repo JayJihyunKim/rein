@@ -792,3 +792,39 @@ my-project/
   3. Claude Code 세션 재시작
 
 업스트림 (`zunoworks/gateguard`) 이 PID fallback 을 보다 안정적인 식별자 (예: `CLAUDE_SESSION_ID` 필수화, tty 기반, parent-chain 기반) 로 교체할 때까지는 병용 불가입니다.
+
+### Q: `rein --version` 이 구버전으로 나오는데요?
+
+v0.6.x 이전 버전에서는 `rein update` 가 템플릿 파일만 갱신하고 CLI 바이너리 자체는 그대로 두었습니다. v0.7.0 부터는 `rein update` 가 시작 시 CLI 버전을 체크해서 자동으로 최신 버전으로 교체합니다.
+
+**원인별 조치**:
+
+- **v0.6.x 이하 사용자**: `curl -fsSL https://raw.githubusercontent.com/JayJihyunKim/rein/main/install.sh | bash` 로 v0.7.0+ 를 설치하면 이후부터는 `rein update` 가 자동 처리
+- **v0.7.0+ 사용자인데 여전히 구버전 표시**: `rein update --yes` 로 자가 업데이트 강제 실행
+- **`rein self-update` 없나?**: 현재는 `rein update` 안에 통합. 향후 릴리즈에서 분리 가능성 있음
+
+### Q: 왜 `$HOME/.rein/` 에 설치되나요?
+
+sudo 없이 설치·업데이트·제거가 가능하도록 rustup 패턴을 따릅니다.
+
+**이유**:
+1. **sudo 불필요** — 사용자 개인 개발 도구이므로 시스템 전역 (`/usr/local/bin`) 에 둘 이유가 없음
+2. **자가 업데이트 자연스러움** — `rein update` 가 자기 자신을 `cp` 한 번으로 갱신
+3. **CI 친화적** — Docker, GitHub Actions 등 sudo 없는 환경에서도 설치 가능
+4. **관례 일치** — 이미 갖고 계신 `.claude/`, `.ssh/`, `.config/` 와 같은 계층
+
+**디렉토리 구조**:
+
+```
+$HOME/.rein/
+├── bin/rein       ← CLI 실행 파일
+└── env            ← PATH 설정 (. ~/.rein/env 로 소스)
+```
+
+PATH 에 추가하려면 셸 rc 에 아래 한 줄:
+
+```bash
+. "$HOME/.rein/env"
+```
+
+설치 스크립트가 자동으로 추가해줍니다 (프롬프트 확인 후).

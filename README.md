@@ -46,10 +46,23 @@ repo/
 ### 설치
 
 ```bash
-gh api repos/JayJihyunKim/rein/contents/scripts/rein.sh --jq '.content' | base64 -d | sudo tee /usr/local/bin/rein > /dev/null && sudo chmod +x /usr/local/bin/rein
+curl -fsSL https://raw.githubusercontent.com/JayJihyunKim/rein/main/install.sh | bash
 ```
 
-> `gh` CLI가 필요합니다. (`brew install gh && gh auth login`)
+설치 스크립트는 `$HOME/.rein/bin/rein` 에 CLI 를 설치하고 `$HOME/.rein/env` 를 생성합니다. 셸 rc (`.zshrc` / `.bashrc` / fish config) 에 `. "$HOME/.rein/env"` 한 줄이 추가됩니다 (프롬프트 확인 후). **sudo 불필요**.
+
+설치 후 바로 사용하려면:
+
+```bash
+source ~/.rein/env
+rein --version
+```
+
+비인터랙티브 (CI) 설치:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JayJihyunKim/rein/main/install.sh | REIN_INSTALL_YES=1 bash
+```
 
 ### 새 프로젝트 생성
 
@@ -158,6 +171,15 @@ Before editing:
 
 ## 버전 히스토리
 
+### v0.7.0 (2026-04-16) — CLI 자가 업데이트 + $HOME/.rein/ 전환
+- **feat**: 설치 경로 `/usr/local/bin/rein` → `$HOME/.rein/bin/rein` (rustup 패턴). sudo 완전 제거
+- **feat**: 신규 `install.sh` — `curl ... install.sh bash` one-liner 설치 스크립트. rc 파일 자동 감지 + 멱등 수정
+- **feat**: `~/.rein/env` — POSIX 호환 PATH 설정 파일. 셸 rc 에는 `. "$HOME/.rein/env"` 한 줄만 추가
+- **feat**: `rein update` 에 자가 업데이트 단계 추가 — 템플릿 VERSION 비교 후 확인 프롬프트 + `exec` 재실행으로 매끄럽게 최신 버전 전환
+- **feat**: 구 `/usr/local/bin/rein` 사용자 자동 감지 + 마이그레이션 안내 (sudo 는 사용자가 직접 실행)
+- **feat**: 신규 플래그 `rein update --yes`, `rein update --no-self-update`, 환경변수 `REIN_SELF_UPDATED`, `REIN_YES`, `REIN_NO_SELF_UPDATE`, `REIN_INSTALL_YES`
+- **test**: `tests/cli/test-install.sh` (6 케이스), `tests/cli/test-self-update.sh` (7 케이스)
+
 ### v0.6.0 (2026-04-15) — Session infra 5 개선안 (B1+B2+C+D + A1)
 - **feat (B1)**: 신규 `session-start-load-sot.sh` — SessionStart 훅이 `SOT/index.md`, `inbox/`, `daily/`, `weekly/` (최근 4주) 를 세션 시작 시 자동 컨텍스트 주입. `REIN_BUDGET_BYTES=65536` 용량 예산 + 초과 시 `truncated` 마커. `REIN_NOW` 로 기준 시각 주입 가능
 - **feat (B2)**: 신규 `post-write-spec-review-gate.sh` — canonical 경로 (`docs/**/specs/**`, `docs/**/plans/**`, `specs/**`, `plans/**`) 의 설계 문서 Write/Edit 시 pending 마커 자동 생성. `pre-edit-dod-gate` 확장으로 소스 편집 시도 시 미리뷰 spec 이 있으면 차단 (self-heal 포함)
@@ -250,6 +272,24 @@ Before editing:
 - **원인**: gateguard 가 `CLAUDE_SESSION_ID` / `ECC_SESSION_ID` 미설정 시 `pid-${ppid}` 를 fallback 세션 ID 로 사용. Claude Code 는 tool 호출마다 새 node subprocess 를 spawn 하므로 PID 가 매번 달라져 state 파일이 매번 새로 생성되고, 직전 "checked" 기록을 못 읽어 **매 호출이 "첫 실행"으로 판정 → 영원히 deny**.
 - **중복 기능**: Rein 은 이미 `pre-bash-guard.sh` + `pre-edit-dod-gate.sh` 로 동등한 fact-forcing + DoD gate 를 제공하므로 gateguard 가 있을 이유가 없습니다.
 - **조치**: `/plugin` 으로 `everything-claude-code` 언인스톨 후 `~/.claude/plugins/cache/everything-claude-code/`, `~/.gateguard/` 제거. 업스트림 수정 (PR) 전까지는 함께 쓰지 마세요.
+
+### v0.6.x → v0.7.0 마이그레이션 (설치 경로 변경)
+
+v0.7.0 부터 rein CLI 는 `/usr/local/bin/rein` 대신 `$HOME/.rein/bin/rein` 에 설치됩니다. sudo 가 필요 없어지고, `rein update` 가 CLI 자신을 자동으로 갱신합니다.
+
+**구버전 사용자 마이그레이션**:
+
+1. 새 위치에 설치:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/JayJihyunKim/rein/main/install.sh | bash
+   ```
+2. 구 파일 제거 (sudo 필요, 마지막으로 한 번):
+   ```bash
+   sudo rm /usr/local/bin/rein
+   ```
+3. 새 셸 세션 열기 또는 `source ~/.rein/env`
+
+`rein update` 를 실행하면 자동으로 마이그레이션 안내가 표시됩니다.
 
 ## 참고 저장소
 

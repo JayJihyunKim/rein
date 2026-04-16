@@ -16,7 +16,7 @@ info()  { echo -e "${GREEN}$*${NC}" >&2; }
 warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 
-VERSION="0.6.1"
+VERSION="0.7.0"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
@@ -30,6 +30,9 @@ TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJ
 # ---------------------------------------------------------------------------
 TMPDIR_PATH=""
 TEMPLATE_DIR=""
+
+# Preserve original argv for exec re-run after self-update.
+ORIGINAL_ARGV=()
 
 cleanup() {
   if [[ -n "$TMPDIR_PATH" && -d "$TMPDIR_PATH" ]]; then
@@ -50,6 +53,213 @@ clone_template() {
   git clone --depth 1 --quiet "$TEMPLATE_REPO" "$TMPDIR_PATH/template" >&2
 
   TEMPLATE_DIR="$TMPDIR_PATH/template"
+}
+
+# ---------------------------------------------------------------------------
+# template_version(template_dir)
+# Extracts VERSION="..." from template_dir/scripts/rein.sh.
+# Prints version string, or empty on failure.
+# ---------------------------------------------------------------------------
+template_version() {
+  local template_dir="$1"
+  local tmpl_rein="$template_dir/scripts/rein.sh"
+  [[ -f "$tmpl_rein" ]] || { echo ""; return 1; }
+  grep -E '^VERSION=' "$tmpl_rein" | head -1 | cut -d'"' -f2
+}
+
+# ---------------------------------------------------------------------------
+# current_cli_path()
+# Returns absolute path of the currently executing rein script.
+# Uses BASH_SOURCE[0] resolved to absolute form.
+# Honors REIN_CLI_PATH override for testing.
+# ---------------------------------------------------------------------------
+current_cli_path() {
+  if [[ -n "${REIN_CLI_PATH:-}" ]]; then
+    echo "$REIN_CLI_PATH"
+    return 0
+  fi
+
+  local src="${BASH_SOURCE[0]:-$0}"
+  # Resolve to absolute path (readlink -f is GNU-only; use portable fallback)
+  if command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
+    readlink -f "$src"
+  else
+    # macOS fallback
+    local dir
+    dir=$(cd "$(dirname "$src")" 2>/dev/null && pwd -P)
+    echo "${dir}/$(basename "$src")"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# self_update_check(template_dir)
+# Decides whether the CLI should self-update.
+# Returns 0 and prints nothing if no action needed.
+# Returns 1 and prints next-step token if action needed:
+#   "APPLY"    — overwrite self and exec re-run
+#   "MIGRATE"  — old install, print notice only
+# Callers inspect return code; this function does not perform any change.
+# ---------------------------------------------------------------------------
+self_update_check() {
+  local template_dir="$1"
+
+  # Guard 1: recursion protection
+  if [[ "${REIN_SELF_UPDATED:-0}" == "1" ]]; then
+    info "Self-update: already updated in this invocation, skipping"
+    return 0
+  fi
+
+  # Guard 2: explicit disable
+  if [[ "${REIN_NO_SELF_UPDATE:-0}" == "1" ]]; then
+    info "Self-update: disabled via REIN_NO_SELF_UPDATE"
+    return 0
+  fi
+
+  # Extract template version
+  local tv
+  tv=$(template_version "$template_dir")
+  if [[ -z "$tv" ]]; then
+    warn "Self-update: template has no VERSION, skipping"
+    return 0
+  fi
+
+  # Compare
+  if [[ "$tv" == "$VERSION" ]]; then
+    info "Self-update: versions match ($VERSION), skipping"
+    return 0
+  fi
+
+  # Versions differ — return APPLY or MIGRATE based on current path
+  local cli_path
+  cli_path=$(current_cli_path)
+
+  if [[ "$cli_path" == "/usr/local/bin/rein" ]]; then
+    echo "MIGRATE"
+  elif [[ "$cli_path" == "$HOME/.rein/bin/rein" ]]; then
+    echo "APPLY"
+  else
+    info "Self-update: detected rein at $cli_path (custom install), skipping"
+    return 0
+  fi
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# self_update_apply(template_dir)
+# Overwrites current CLI with template's scripts/rein.sh atomically.
+# Validates new file before replacing.
+# Caller is responsible for exec re-run after this returns.
+# ---------------------------------------------------------------------------
+self_update_apply() {
+  local template_dir="$1"
+  local tmpl_rein="$template_dir/scripts/rein.sh"
+  local cli_path
+  cli_path=$(current_cli_path)
+
+  [[ -f "$tmpl_rein" ]] || {
+    error "Template rein.sh not found at $tmpl_rein"
+    return 1
+  }
+
+  # Sanity check: new file must pass bash -n and have VERSION
+  if ! bash -n "$tmpl_rein" 2>/dev/null; then
+    error "Template rein.sh has syntax errors, aborting self-update"
+    return 1
+  fi
+  if ! grep -q '^VERSION=' "$tmpl_rein"; then
+    error "Template rein.sh missing VERSION, aborting self-update"
+    return 1
+  fi
+
+  # Atomic replace: copy to sibling tmp, chmod, mv
+  local tmp
+  tmp=$(mktemp "${cli_path}.XXXXXX")
+  cp "$tmpl_rein" "$tmp" || {
+    rm -f "$tmp"
+    error "Failed to copy new rein.sh to $tmp"
+    return 1
+  }
+  chmod +x "$tmp"
+  mv "$tmp" "$cli_path" || {
+    rm -f "$tmp"
+    error "Failed to install new rein to $cli_path"
+    return 1
+  }
+
+  info "Self-updated: $cli_path"
+}
+
+# ---------------------------------------------------------------------------
+# migrate_old_install_notice()
+# Prints migration guidance for users still on /usr/local/bin/rein.
+# Never calls sudo.
+# ---------------------------------------------------------------------------
+migrate_old_install_notice() {
+  warn ""
+  warn "⚠️  Migration notice: rein CLI path is changing"
+  warn "    old: /usr/local/bin/rein"
+  warn "    new: \$HOME/.rein/bin/rein"
+  warn ""
+  warn "    Please remove the old binary:"
+  warn "      sudo rm /usr/local/bin/rein"
+  warn ""
+  warn "    And ensure ~/.rein/env is sourced in your shell rc:"
+  warn "      echo '. \"\$HOME/.rein/env\"' >> ~/.zshrc"
+  warn ""
+  warn "    The new CLI will be active in your next shell session."
+  warn ""
+}
+
+# ---------------------------------------------------------------------------
+# prompt_self_update()
+# Asks user to confirm self-update. Auto-Y when REIN_YES=1 or non-tty.
+# Returns 0 (yes) / 1 (no).
+# ---------------------------------------------------------------------------
+prompt_self_update() {
+  local tv
+  tv=$(template_version "$TEMPLATE_DIR")
+  info ""
+  info "CLI update available: $VERSION -> $tv"
+
+  if [[ "${REIN_YES:-0}" == "1" ]] || [[ ! -t 0 ]]; then
+    info "Auto-confirmed (REIN_YES or non-interactive)"
+    return 0
+  fi
+
+  local ans
+  read -r -p "Proceed with self-update? [Y/n] " ans
+  case "$ans" in
+    ""|y|Y|yes|YES) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# install_to_new_home(template_dir)
+# Copies template scripts/rein.sh to $HOME/.rein/bin/rein and writes
+# $HOME/.rein/env. Used during /usr/local/bin -> $HOME/.rein migration.
+# ---------------------------------------------------------------------------
+install_to_new_home() {
+  local template_dir="$1"
+  local tmpl_rein="$template_dir/scripts/rein.sh"
+  local new_bin="$HOME/.rein/bin/rein"
+  local new_env="$HOME/.rein/env"
+
+  mkdir -p "$HOME/.rein/bin"
+  cp "$tmpl_rein" "$new_bin"
+  chmod +x "$new_bin"
+
+  cat > "$new_env" <<'EOF'
+#!/bin/sh
+# rein shell setup — managed file, do not edit manually
+case ":${PATH}:" in
+    *:"$HOME/.rein/bin":*) ;;
+    *) export PATH="$HOME/.rein/bin:$PATH" ;;
+esac
+EOF
+
+  info "New CLI installed at: $new_bin"
+  info "Env file:             $new_env"
 }
 
 # ---------------------------------------------------------------------------
@@ -742,6 +952,32 @@ cmd_merge() {
   # clone_template sets global TEMPLATE_DIR; do NOT use command substitution
   clone_template
 
+  # --- Self-update check (v0.7.0+) ---
+  # Detect whether the CLI itself needs updating before applying template
+  # changes to the user's project. Runs APPLY (overwrite self + exec re-run)
+  # or MIGRATE (print notice + stage new HOME install) based on current path.
+  local _rein_action _rein_rc=0
+  _rein_action=$(self_update_check "$TEMPLATE_DIR") || _rein_rc=$?
+
+  if [[ $_rein_rc -eq 1 ]]; then
+    case "$_rein_action" in
+      APPLY)
+        if prompt_self_update; then
+          self_update_apply "$TEMPLATE_DIR"
+          export REIN_SELF_UPDATED=1
+          info "Restarting with new version..."
+          exec "$(current_cli_path)" "${ORIGINAL_ARGV[@]}"
+        else
+          warn "Self-update skipped by user. CLI remains at v$VERSION."
+        fi
+        ;;
+      MIGRATE)
+        install_to_new_home "$TEMPLATE_DIR"
+        migrate_old_install_notice
+        ;;
+    esac
+  fi
+
   # ALL_OVERWRITE may have been set by --all/--yes flag in main(); preserve
   # that. Only reset to false if it has not been set explicitly.
   : "${ALL_OVERWRITE:=false}"
@@ -823,8 +1059,15 @@ cmd_merge() {
 parse_flags() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --all|--yes)
+      --all)
         ALL_OVERWRITE=true
+        ;;
+      --yes|-y)
+        ALL_OVERWRITE=true
+        export REIN_YES=1
+        ;;
+      --no-self-update)
+        export REIN_NO_SELF_UPDATE=1
         ;;
       --prune)
         PRUNE_MODE=true
@@ -861,6 +1104,9 @@ parse_flags() {
 # main()
 # ---------------------------------------------------------------------------
 main() {
+  # Preserve original argv for potential exec re-run after self-update
+  ORIGINAL_ARGV=("$@")
+
   if [[ $# -eq 0 ]]; then
     usage
     exit 1
