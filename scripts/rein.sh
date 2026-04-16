@@ -177,6 +177,10 @@ self_update_apply() {
     fatal "Failed to copy new rein.sh to $tmp"
   }
   chmod +x "$tmp"
+  if [[ -L "$cli_path" ]]; then
+    rm -f "$tmp"
+    fatal "Refusing to overwrite symlink at $cli_path"
+  fi
   mv "$tmp" "$cli_path" || {
     rm -f "$tmp"
     fatal "Failed to install new rein to $cli_path"
@@ -264,11 +268,19 @@ install_to_new_home() {
     warn "mktemp failed for migration install"
     return 1
   }
-  cp "$tmpl_rein" "$tmp"
+  cp "$tmpl_rein" "$tmp" || {
+    rm -f "$tmp"
+    warn "Failed to copy template to $tmp"
+    return 1
+  }
   chmod +x "$tmp"
   mv "$tmp" "$new_bin"
 
   # KEEP IN SYNC WITH install.sh:write_env_file()
+  if [[ -L "$new_env" ]]; then
+    warn "Refusing to overwrite symlink at $new_env"
+    return 1
+  fi
   cat > "$new_env" <<'EOF'
 #!/bin/sh
 # rein shell setup — managed file, do not edit manually
