@@ -312,7 +312,7 @@ COPY_TARGETS=(
   ".claude/router"
   ".github/workflows"
   "AGENTS.md"
-  "docs/SETUP_GUIDE.md"
+  "REIN_SETUP_GUIDE.md"
 )
 
 SOT_DIRS=(

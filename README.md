@@ -37,7 +37,7 @@ repo/
 │   ├── router/                  ← 스마트 라우터 설정
 │   └── hooks/                   ← 라이프사이클 자동화 스크립트
 ├── SOT/                         ← 증거 저장소 (상태/결정/사고 기록)
-├── docs/SETUP_GUIDE.md          ← 프레임워크 적용 가이드
+├── REIN_SETUP_GUIDE.md          ← 프레임워크 적용 가이드
 └── .github/workflows/           ← GitHub Actions 자동화
 ```
 
@@ -103,7 +103,7 @@ Fork하거나 별도 템플릿 레포를 사용하려면:
 REIN_TEMPLATE_REPO="git@github.com:my-org/my-template.git" rein new my-project
 ```
 
-> 상세한 커스터마이징 방법은 [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md)를 참고하세요.
+> 상세한 커스터마이징 방법은 [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md)를 참고하세요.
 
 ## 빠른 시작
 
@@ -239,7 +239,7 @@ Before editing:
 
 ### v0.3.0 — 스마트 라우터 + 템플릿 정리
 - **feat**: 스마트 라우터 도입 (`.claude/router/`) — DoD 내용과 에이전트/스킬/MCP description 매칭으로 최적 조합 자동 추천
-- **feat**: 서브프로젝트 AGENTS.md 계층 구조 가이드 (`docs/SETUP_GUIDE.md` 통합)
+- **feat**: 서브프로젝트 AGENTS.md 계층 구조 가이드 (`REIN_SETUP_GUIDE.md` 통합)
 - **chore**: `COPY_TARGETS` 누락 파일 보강 (router, 서브프로젝트, SETUP_GUIDE)
 - **fix**: ISO week-year `%G` + 프로젝트명 슬래시 차단 (2차 Codex 리뷰 반영)
 - **fix**: inbox weekly 주차 계산 + `rein new` 경로 검증 + stitch-design 오타 수정
