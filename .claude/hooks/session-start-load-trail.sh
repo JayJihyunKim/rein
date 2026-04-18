@@ -99,6 +99,36 @@ INCIDENTS_DIR="$PROJECT_DIR/trail/incidents"
 STAMP_FILE="$PROJECT_DIR/trail/dod/.incident-review-pending"
 
 if command -v python3 >/dev/null 2>&1 && [ -d "$INCIDENTS_DIR" ]; then
+  # 세션 스코프 stamp/카운터 일괄 초기화 (Task 10 강화)
+  rm -f "$PROJECT_DIR/trail/dod/.incident-decision-deferred"
+  rm -f "$PROJECT_DIR/trail/dod/.incident-stop-blocks"
+  rm -f "$PROJECT_DIR/trail/dod/.incident-stop-hashes"
+
+  # 비정상 종료 감지
+  SNAPSHOT="$PROJECT_DIR/trail/incidents/.last-aggregate-state.json"
+  if [ -f "$SNAPSHOT" ] && command -v python3 >/dev/null 2>&1; then
+    ABNORMAL=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    print('1' if not d.get('session_end', False) else '0')
+except Exception:
+    print('0')
+" "$SNAPSHOT" 2>/dev/null)
+    if [ "$ABNORMAL" = "1" ]; then
+      echo "### ⚠️ 직전 세션 비정상 종료 감지"
+      echo
+      echo "마지막 aggregate 이후 Stop hook 이 정상 실행되지 않았습니다."
+      echo "pending incident 가 있으면 이번 세션에서 처리됩니다."
+      echo
+    fi
+  fi
+
+  # 세션 시작 시 aggregate 한 번 실행 (비정상 종료로 stop-gate 를 놓친 세션의
+  # blocks.jsonl 신규 라인을 반영). flock 으로 동시성 안전.
+  python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+    --project-dir "$PROJECT_DIR" >/dev/null 2>&1 || true
+
   PENDING=$(python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
     --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null || echo 0)
 

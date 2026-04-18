@@ -24,12 +24,35 @@ print(json.dumps({
 }, ensure_ascii=False))
 PY
 
+  # hook+reason 조합별로 카운트 (aggregate THRESHOLD 와 동일 기준).
+  # 전체 hook 누적이 아닌 "동일 위반 패턴" 반복을 정확히 측정하기 위함.
   local count
-  count=$(grep -c '"pre-bash-guard"' "$BLOCKS_LOG_JSONL" 2>/dev/null || echo 0)
+  if command -v python3 >/dev/null 2>&1; then
+    count=$(python3 -c "
+import json, sys
+target_hook = 'pre-bash-guard'
+target_reason = sys.argv[1]
+n = 0
+try:
+    with open(sys.argv[2]) as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+                if e.get('hook') == target_hook and e.get('reason') == target_reason:
+                    n += 1
+            except Exception:
+                continue
+except OSError:
+    pass
+print(n)
+" "$reason" "$BLOCKS_LOG_JSONL" 2>/dev/null || echo 0)
+  else
+    count=0
+  fi
   if [ "$count" -ge 3 ]; then
-    echo "WARNING: 동일 위반 ${count}회 누적. incidents-to-agent 실행을 권장합니다." >&2
+    echo "WARNING: 동일 위반 (${reason}) ${count}회 누적. incidents-to-agent 실행을 권장합니다." >&2
   elif [ "$count" -ge 2 ]; then
-    echo "WARNING: 동일 위반 ${count}회 누적. incidents-to-rule 실행을 권장합니다." >&2
+    echo "WARNING: 동일 위반 (${reason}) ${count}회 누적. incidents-to-rule 실행을 권장합니다." >&2
   fi
 }
 

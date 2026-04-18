@@ -50,12 +50,35 @@ print(json.dumps({
 }, ensure_ascii=False))
 PY
 
+  # hook+reason 조합별로 카운트 (aggregate THRESHOLD 와 동일 기준).
+  # 전체 hook 누적이 아닌 "동일 위반 패턴" 반복을 정확히 측정하기 위함.
   local count
-  count=$(grep -c '"pre-edit-dod-gate"' "$BLOCKS_LOG_JSONL" 2>/dev/null || echo 0)
+  if command -v python3 >/dev/null 2>&1; then
+    count=$(python3 -c "
+import json, sys
+target_hook = 'pre-edit-dod-gate'
+target_reason = sys.argv[1]
+n = 0
+try:
+    with open(sys.argv[2]) as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+                if e.get('hook') == target_hook and e.get('reason') == target_reason:
+                    n += 1
+            except Exception:
+                continue
+except OSError:
+    pass
+print(n)
+" "$reason" "$BLOCKS_LOG_JSONL" 2>/dev/null || echo 0)
+  else
+    count=0
+  fi
   if [ "$count" -ge 3 ]; then
-    echo "WARNING: DoD 미작성 위반 ${count}회 누적. incidents-to-agent 실행을 권장합니다." >&2
+    echo "WARNING: 동일 위반 (${reason}) ${count}회 누적. incidents-to-agent 실행을 권장합니다." >&2
   elif [ "$count" -ge 2 ]; then
-    echo "WARNING: DoD 미작성 위반 ${count}회 누적. incidents-to-rule 실행을 권장합니다." >&2
+    echo "WARNING: 동일 위반 (${reason}) ${count}회 누적. incidents-to-rule 실행을 권장합니다." >&2
   fi
 }
 
@@ -86,6 +109,41 @@ esac
 
 if [ "$IS_SOURCE" = false ]; then
   exit 0
+fi
+
+# --- Incident Review Pending 검사 (cache 보다 앞. self-heal 포함) ---
+# cache hit 로 우회되면 안 되는 gate. 항상 실시간 검증.
+INCIDENT_STAMP="$DOD_DIR/.incident-review-pending"
+INCIDENT_BYPASS="$DOD_DIR/.skip-incident-gate"
+
+if [ -f "$INCIDENT_STAMP" ]; then
+  if ! command -v python3 >/dev/null 2>&1; then
+    # python3 필수 의존성. fail-closed 로 gate 우회 방지.
+    echo "BLOCKED: python3 미설치로 incident gate 검증 불가." >&2
+    echo "python3 설치 후 재시도하거나, 확인 후 stamp 를 수동 제거: rm $INCIDENT_STAMP" >&2
+    exit 2
+  fi
+  LIVE_COUNT=$(python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+    --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null || echo 0)
+  if [ "$LIVE_COUNT" -eq 0 ]; then
+    rm -f "$INCIDENT_STAMP"  # 자가 치유 — 통과
+  elif [ -f "$INCIDENT_BYPASS" ]; then
+    REASON=$(grep '^reason=' "$INCIDENT_BYPASS" 2>/dev/null | cut -d= -f2- || echo "unspecified")
+    echo "WARNING: incident gate 1회성 바이패스 — reason: $REASON" >&2
+    log_block "incident gate bypass" "$FILE_PATH"
+    rm -f "$INCIDENT_BYPASS"
+  else
+    echo "BLOCKED: 미처리 incident ${LIVE_COUNT}건. 먼저 처리하세요." >&2
+    echo "  1) /incidents-to-rule 스킬 호출" >&2
+    echo "  2) AskUserQuestion 으로 승격/거부 결정" >&2
+    echo "  3) 승인된 rule 을 AGENTS.md 에 추가" >&2
+    echo "  4) python3 scripts/rein-mark-incident-processed.py <path> <processed|declined>" >&2
+    echo "  5) (자동) 다음 source 편집 시 stamp 자가 해소" >&2
+    echo "" >&2
+    echo "긴급: echo 'reason=<사유>' > $INCIDENT_BYPASS" >&2
+    log_block "incident review pending" "$FILE_PATH"
+    exit 2
+  fi
 fi
 
 # --- 캐시 확인 ---
@@ -161,37 +219,6 @@ if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]; then
     echo "리뷰 완료 후: bash scripts/rein-mark-spec-reviewed.sh \"$spec_path\" codex" >&2
     log_block "미리뷰 사양 문서" "$FILE_PATH"
     exit 2
-  fi
-fi
-
-# --- 신규: Incident Review Pending 검사 (self-heal 포함) ---
-INCIDENT_STAMP="$DOD_DIR/.incident-review-pending"
-INCIDENT_BYPASS="$DOD_DIR/.skip-incident-gate"
-
-if [ -f "$INCIDENT_STAMP" ]; then
-  # Self-heal: 실시간 pending 재검증
-  if command -v python3 >/dev/null 2>&1; then
-    LIVE_COUNT=$(python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
-      --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null || echo 0)
-    if [ "$LIVE_COUNT" -eq 0 ]; then
-      rm -f "$INCIDENT_STAMP"  # 자가 치유 — 통과
-    elif [ -f "$INCIDENT_BYPASS" ]; then
-      REASON=$(grep '^reason=' "$INCIDENT_BYPASS" 2>/dev/null | cut -d= -f2- || echo "unspecified")
-      echo "WARNING: incident gate 1회성 바이패스 — reason: $REASON" >&2
-      log_block "incident gate bypass" "$FILE_PATH"
-      rm -f "$INCIDENT_BYPASS"
-    else
-      echo "BLOCKED: 미처리 incident ${LIVE_COUNT}건. 먼저 처리하세요." >&2
-      echo "  1) /incidents-to-rule 스킬 호출" >&2
-      echo "  2) AskUserQuestion 으로 승격/거부 결정" >&2
-      echo "  3) 승인된 rule 을 AGENTS.md 에 추가" >&2
-      echo "  4) 각 incident frontmatter status 갱신 (processed/declined)" >&2
-      echo "  5) (자동) 다음 source 편집 시 stamp 자가 해소" >&2
-      echo "" >&2
-      echo "긴급: echo 'reason=<사유>' > $INCIDENT_BYPASS" >&2
-      log_block "incident review pending" "$FILE_PATH"
-      exit 2
-    fi
   fi
 fi
 

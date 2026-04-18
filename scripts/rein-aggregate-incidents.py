@@ -258,6 +258,16 @@ def aggregate(project_dir: Path):
         # watermark advance (atomic) — lock 안에서 incident 생성과 묶음
         atomic_write(watermark, str(total))
 
+        # Write session state snapshot for SessionStart to detect abnormal termination.
+        snapshot = {
+            "watermark": total,
+            "pending_hashes": list_pending_hashes(incidents_dir),
+            "timestamp": now,
+            "session_end": False,
+        }
+        snapshot_path = incidents_dir / ".last-aggregate-state.json"
+        atomic_write(snapshot_path, json.dumps(snapshot, ensure_ascii=False, indent=2))
+
         if created or updated:
             print(f"NOTICE: incident patterns — created={created}, updated={updated}", file=sys.stderr)
 
@@ -272,18 +282,33 @@ def aggregate(project_dir: Path):
             pass
 
 
+def list_pending_hashes(incidents_dir: Path) -> list:
+    """Return sorted list of pattern_hash values for all files with status=pending."""
+    hashes = set()
+    for path in incidents_dir.glob("auto-*.md"):
+        try:
+            fm, _ = parse_frontmatter(path.read_text())
+            if fm.get("status", "") == "pending":
+                h = fm.get("pattern_hash", "")
+                if h:
+                    hashes.add(h)
+        except Exception:
+            continue
+    return sorted(hashes)
+
+
 def count_pending(project_dir: Path) -> int:
     incidents_dir = project_dir / "trail/incidents"
     if not incidents_dir.exists():
         return 0
     n = 0
-    for path in incidents_dir.glob("*.md"):
+    # glob 이 auto-*.md 만 반환하므로 startswith 필터 불필요.
+    # SKILL.md 정책: 루트의 frontmatter 없는 .md 파일은 무시 (legacy INC-*.md 는 legacy/ 서브디렉토리 opt-in).
+    for path in incidents_dir.glob("auto-*.md"):
         try:
             fm, _ = parse_frontmatter(path.read_text())
             if fm.get("status", "") == "pending":
-                # auto- 또는 명시적 frontmatter 가 있는 파일만 카운트
-                if path.name.startswith("auto-") or fm:
-                    n += 1
+                n += 1
         except Exception:
             continue
     return n

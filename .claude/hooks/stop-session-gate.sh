@@ -151,6 +151,99 @@ if command -v python3 >/dev/null 2>&1; then
     --project-dir "$PROJECT_DIR" 2>&1 || true
 fi
 
+# --- Incident gate (Stage 1 + Stage 2 강화) ---
+INCIDENT_STAMP_DEFERRED="$PROJECT_DIR/trail/dod/.incident-decision-deferred"
+INCIDENT_STAMP_BYPASS="$PROJECT_DIR/trail/dod/.skip-stop-gate"
+BLOCK_COUNTER_FILE="$PROJECT_DIR/trail/dod/.incident-stop-blocks"
+HASHES_FILE="$PROJECT_DIR/trail/dod/.incident-stop-hashes"
+EMIT_PY="$PROJECT_DIR/scripts/rein-stop-emit-block.py"
+INCIDENTS_DIR="$PROJECT_DIR/trail/incidents"
+
+if command -v python3 >/dev/null 2>&1; then
+  # Second invocation: read-only count query.
+  # (aggregate side effect already ran above; count_pending reflects updated state.)
+  PENDING_COUNT=$(python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+    --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null || echo 0)
+else
+  PENDING_COUNT=0
+fi
+
+if [ "$PENDING_COUNT" -gt 0 ]; then
+  if [ -f "$INCIDENT_STAMP_DEFERRED" ]; then
+    :
+  elif [ -f "$INCIDENT_STAMP_BYPASS" ]; then
+    rm -f "$INCIDENT_STAMP_BYPASS"
+  else
+    CURRENT_HASHES=$(
+      for f in "$INCIDENTS_DIR"/auto-*.md; do
+        [ -f "$f" ] || continue
+        [ "$(basename "$f")" = "auto-stop-gate-loop.md" ] && continue
+        grep '^status:' "$f" | grep -q pending || continue
+        grep '^pattern_hash:' "$f" | sed 's/.*: *//' | tr -d '"'
+      done | sort
+    )
+    PREV_HASHES=$(cat "$HASHES_FILE" 2>/dev/null || echo "")
+    if [ "$CURRENT_HASHES" != "$PREV_HASHES" ]; then
+      echo 0 > "$BLOCK_COUNTER_FILE"
+    fi
+    echo "$CURRENT_HASHES" > "$HASHES_FILE"
+
+    COUNT=$(head -1 "$BLOCK_COUNTER_FILE" 2>/dev/null || echo 0)
+    # 비정수 방어
+    [[ "$COUNT" =~ ^[0-9]+$ ]] || COUNT=0
+    COUNT=$((COUNT + 1))
+    echo "$COUNT" > "$BLOCK_COUNTER_FILE"
+
+    if [ "$COUNT" -gt 3 ]; then
+      META="$INCIDENTS_DIR/auto-stop-gate-loop.md"
+      if [ ! -f "$META" ]; then
+        cat > "$META" <<METAEOF
+---
+status: "pending"
+pattern_hash: "stop-gate-loop"
+hook: "stop-session-gate"
+reason: "3회 초과 block (루프 감지 전용)"
+first_seen: "$(date -u +%Y-%m-%dT%H:%M:%S)"
+last_seen_at: "$(date -u +%Y-%m-%dT%H:%M:%S)"
+---
+
+# Incident: stop-session-gate 3회 초과 block
+
+Stop hook 이 pending 을 3회 초과 block 했음. 스킬 체인 호출이 실패하는 것으로 추정.
+
+## 예시
+
+(자동 수집 없음 — 수동 확인)
+
+## 분석 메모
+
+(incidents-to-rule 스킬이 분석 결과를 여기에 기록)
+
+## 승격 이력
+
+(사용자 결정 기록)
+METAEOF
+      fi
+      echo "BLOCKED (3회 초과): 결정 스킬 호출이 반복 실패. 강제 통과: touch trail/dod/.skip-stop-gate" >&2
+      if [ -x "$EMIT_PY" ]; then
+        python3 "$EMIT_PY" "$PENDING_COUNT"
+      else
+        echo '{"decision":"block","reason":"pending incidents — emit helper missing"}'
+      fi
+      # Claude Code Stop hook: block via JSON decision field, not exit code.
+      exit 0
+    fi
+
+    if [ -x "$EMIT_PY" ]; then
+      python3 "$EMIT_PY" "$PENDING_COUNT"
+    else
+      echo '{"decision":"block","reason":"pending incidents present, but emit helper missing"}'
+    fi
+    # Claude Code Stop hook: block via JSON decision field, not exit code.
+    exit 0
+  fi
+fi
+
 # --- 결과 판정 ---
 if [ -n "$MISSING" ]; then
   echo "BLOCKED: 세션 종료 전 완료되지 않은 항목이 있습니다." >&2
@@ -166,6 +259,22 @@ if [ -n "$MISSING" ]; then
   echo "  4) 실제로 작업했다면 git 활동 (커밋 / staged / modified tracked file) 이" >&2
   echo "     감지되면 이 gate 는 자동으로 통과합니다 — 작업을 커밋하거나 staging 하세요" >&2
   exit 2
+fi
+
+# snapshot session_end=true 기록 (Task 10)
+SNAPSHOT="$PROJECT_DIR/trail/incidents/.last-aggregate-state.json"
+if [ -f "$SNAPSHOT" ] && command -v python3 >/dev/null 2>&1; then
+  python3 -c "
+import json, sys
+try:
+    p = sys.argv[1]
+    d = json.load(open(p))
+    d['session_end'] = True
+    with open(p, 'w') as f:
+        json.dump(d, f, ensure_ascii=False, indent=2)
+except Exception:
+    pass
+" "$SNAPSHOT" 2>/dev/null || true
 fi
 
 exit 0
