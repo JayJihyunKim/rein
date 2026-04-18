@@ -165,6 +165,19 @@ v0.7.0 부터 CLI 설치 경로가 `/usr/local/bin/rein` → `$HOME/.rein/bin/re
 
 ## 버전 히스토리
 
+### v0.7.2 (2026-04-19)
+- incidents 반자동화 **Stop hook 게이트** 도입 — 작업 종료 시 pending incident 감지하면 자동으로 `/incidents-to-rule` + `/incidents-to-agent` 스킬 체인 호출을 Claude 에게 지시
+- 진전 감지 + 3회 block 가드 + 메타 incident (무한 루프 방지)
+- 세션 경계 상태 스냅샷 (`.last-aggregate-state.json`) + 비정상 종료 감지
+- helper 스크립트 신규: `rein-stop-emit-block.py`, `rein-mark-incident-processed.py`, `rein-mark-agent-candidate.py`
+- `incidents-to-agent` 스킬 재작성 (decision skip + batch AskUserQuestion UX)
+- pre-edit-dod-gate: incident gate 를 cache 앞으로 이동 (cache hit 우회 버그 수정)
+- log_block 경고를 hook+reason 조합별 카운트로 (오인 표시 수정)
+
+### v0.7.1 (2026-04-17)
+- public release 준비 (README 영문 버전, MIT LICENSE)
+- `rein` public mirror workflow (dev-remote `main` → public `rein` repo)
+
 ### v0.7.0 (2026-04-16)
 - CLI 설치 경로 `$HOME/.rein/bin/rein` 전환 (sudo 제거)
 - `install.sh` 신규 설치 스크립트 + CLI 자가 업데이트
