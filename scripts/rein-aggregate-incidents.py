@@ -223,24 +223,24 @@ def aggregate(project_dir: Path):
         updated = 0
         now = utcnow_iso()
         for (hook, reason), count in counts.items():
-            if count < THRESHOLD:
-                continue
             hash_ = compute_hash(hook, reason)
-
             open_inc = find_open_incident(incidents_dir, hook, hash_)
+
+            # 기존 pending 이 있으면 THRESHOLD 와 무관하게 무조건 누적 갱신한다.
+            # 이전 로직은 증가분이 1건(threshold=2 미만) 이면 skip 되어 느린 반복
+            # 패턴의 count/last_seen_at 이 영구 과소 집계되었음 (codex v0.7.2 High).
+            # THRESHOLD 는 "신규 incident 생성" 여부 판정에만 사용.
             if open_inc:
-                # pending 갱신
                 path, fm = open_inc
                 old_count = int(fm.get("count", "0"))
                 fm["count"] = str(old_count + count)
                 fm["last_seen_at"] = now
-                # body 보존
                 _, body = parse_frontmatter(path.read_text())
                 content = serialize_frontmatter(fm) + "\n" + body
                 atomic_write(path, content)
                 updated += 1
-            else:
-                # 모든 suffix 가 closed → 새 파일 발급
+            elif count >= THRESHOLD:
+                # 모든 suffix 가 closed + 이번 배치가 THRESHOLD 이상 → 새 파일 발급
                 new_path = next_suffix_path(incidents_dir, hook, hash_)
                 fm = {
                     "status": "pending",
@@ -254,6 +254,7 @@ def aggregate(project_dir: Path):
                 content = render_incident(fm, examples[(hook, reason)])
                 atomic_write(new_path, content)
                 created += 1
+            # else: open_inc 없고 count < THRESHOLD → skip
 
         # watermark advance (atomic) — lock 안에서 incident 생성과 묶음
         atomic_write(watermark, str(total))
@@ -274,10 +275,13 @@ def aggregate(project_dir: Path):
         return created, updated
 
     finally:
+        # lock_path.unlink 하지 않음. 파일을 삭제하면 다른 프로세스가
+        # 먼저 O_CREAT 로 새 inode 를 잡아 flock 이 서로 다른 객체에 걸리게 되어
+        # 동시 집계 race 가 발생함 (codex v0.7.2 review High).
+        # 고정 경로 파일에 대해 flock 만 사용하는 것이 올바르다.
         try:
             fcntl.flock(fp, fcntl.LOCK_UN)
             fp.close()
-            lock_path.unlink(missing_ok=True)
         except Exception:
             pass
 

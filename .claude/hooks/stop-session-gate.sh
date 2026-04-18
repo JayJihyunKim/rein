@@ -146,9 +146,12 @@ if [ -d "$DOD_DIR" ]; then
 fi
 
 # --- Incidents 집계 (Python) ---
+# aggregate 의 stdout/stderr 는 모두 stderr 로 redirect 한다.
+# Stop hook 의 stdout 은 block JSON payload 전용이어야 하므로 aggregate 의
+# NOTICE/WARNING 이 혼입되면 JSON 파싱이 깨질 위험 (codex v0.7.2 Medium).
 if command -v python3 >/dev/null 2>&1; then
   python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
-    --project-dir "$PROJECT_DIR" 2>&1 || true
+    --project-dir "$PROJECT_DIR" 1>&2 || true
 fi
 
 # --- Incident gate (Stage 1 + Stage 2 강화) ---
@@ -166,6 +169,13 @@ if command -v python3 >/dev/null 2>&1; then
     --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null || echo 0)
 else
   PENDING_COUNT=0
+fi
+
+if [ "$PENDING_COUNT" -eq 0 ]; then
+  # pending 이 0 이면 counter/hashes 파일은 더 이상 의미 없음. 정리하지 않으면
+  # 같은 세션 내 새 pending 발생 시 이전 카운터가 남아 3회 가드가 조기 발동할
+  # 수 있음 (codex v0.7.2 Medium).
+  rm -f "$BLOCK_COUNTER_FILE" "$HASHES_FILE" 2>/dev/null || true
 fi
 
 if [ "$PENDING_COUNT" -gt 0 ]; then

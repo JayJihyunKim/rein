@@ -86,7 +86,22 @@ print(n)
 # DoD gate
 # ============================================================
 INPUT=$(cat)
-FILE_PATH=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input', {}).get('file_path', ''))" 2>/dev/null)
+
+# python3 필수 (JSON 파싱). 없으면 Edit/Write 차단 (fail-closed).
+# 예전 `2>/dev/null` 방식은 python3 미설치 시 FILE_PATH="" → exit 0 으로 gate
+# 전체가 무력화됐음 (codex v0.7.2 review Critical).
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "BLOCKED: python3 가 PATH 에 없습니다 (DoD gate 필수 의존성)." >&2
+  exit 2
+fi
+
+FILE_PATH=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input', {}).get('file_path', ''))")
+EXTRACT_RC=$?
+
+if [ "$EXTRACT_RC" -ne 0 ]; then
+  echo "BLOCKED: Edit/Write 입력 파싱 실패 (python3 exit $EXTRACT_RC)." >&2
+  exit 2
+fi
 
 if [ -z "$FILE_PATH" ]; then
   exit 0
@@ -123,8 +138,17 @@ if [ -f "$INCIDENT_STAMP" ]; then
     echo "python3 설치 후 재시도하거나, 확인 후 stamp 를 수동 제거: rm $INCIDENT_STAMP" >&2
     exit 2
   fi
+  # exit code 를 분리 캡처하여 스크립트 실패 시 fail-closed 로 처리한다.
+  # `|| echo 0` 방식은 실패 시에도 0 으로 보여 stamp 를 잘못 지우고 통과시켰음
+  # (codex v0.7.2 review High).
   LIVE_COUNT=$(python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
-    --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null || echo 0)
+    --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null)
+  LIVE_RC=$?
+  if [ "$LIVE_RC" -ne 0 ]; then
+    echo "BLOCKED: incident count 검증 실패 (exit $LIVE_RC)." >&2
+    log_block "incident count 검증 실패" "$FILE_PATH"
+    exit 2
+  fi
   if [ "$LIVE_COUNT" -eq 0 ]; then
     rm -f "$INCIDENT_STAMP"  # 자가 치유 — 통과
   elif [ -f "$INCIDENT_BYPASS" ]; then

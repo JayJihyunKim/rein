@@ -165,6 +165,15 @@ v0.7.0 부터 CLI 설치 경로가 `/usr/local/bin/rein` → `$HOME/.rein/bin/re
 
 ## 버전 히스토리
 
+### v0.7.3 (2026-04-19)
+- **Critical 보안 수정**: hook (`pre-edit-dod-gate.sh`, `pre-bash-guard.sh`) 이 python3 부재/파싱 실패 시 `exit 0` 으로 gate 전체가 우회됐던 fail-open 결함. python3 검사 + RC 체크로 fail-closed 로 전환
+- aggregate `LIVE_COUNT` RC 분리 캡처 (실패 시 차단)
+- `rein-aggregate-incidents.py` lock 파일 unlink 제거 (동시 집계 race 방지) + threshold 로직 분리 (open_inc 는 무조건 누적 갱신, 신규 생성만 threshold 적용)
+- SessionStart 세션 스코프 stamp 초기화를 조건문 밖으로 (누수 방지)
+- Stop hook aggregate 출력 stderr 로 분리, PENDING=0 시 counter 정리
+- `rein-mark-agent-candidate.py --hash` 형식 검증 (path traversal 방지)
+- helper exception 범위 확장 (OSError/UnicodeDecodeError 포괄)
+
 ### v0.7.2 (2026-04-19)
 - incidents 반자동화 **Stop hook 게이트** 도입 — 작업 종료 시 pending incident 감지하면 자동으로 `/incidents-to-rule` + `/incidents-to-agent` 스킬 체인 호출을 Claude 에게 지시
 - 진전 감지 + 3회 block 가드 + 메타 incident (무한 루프 방지)

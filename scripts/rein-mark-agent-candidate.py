@@ -16,7 +16,20 @@ from pathlib import Path
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
+# hash 는 파일명 컴포넌트로 직접 사용되므로 path traversal 방지를 위해 안전 문자
+# 집합으로 제한한다 (codex v0.7.2 review Medium). 기본 16자 SHA1 prefix 를 비롯한
+# 사용자 정의 식별자(agent 이름 등) 도 허용하되 / 또는 `..` 등 경로 문자는 차단.
+HASH_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
 VALID_DECISIONS = {"pending", "approved", "declined"}
+
+
+def hash_type(value: str) -> str:
+    if not HASH_RE.match(value):
+        raise argparse.ArgumentTypeError(
+            f"invalid hash {value!r}: must match [A-Za-z0-9_-]{{1,64}}"
+        )
+    return value
 
 
 def utcnow_iso() -> str:
@@ -132,13 +145,13 @@ def main() -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_create = sub.add_parser("create")
-    p_create.add_argument("--hash", required=True)
+    p_create.add_argument("--hash", required=True, type=hash_type)
     p_create.add_argument("--source-incident", required=True)
     p_create.add_argument("--role-one-liner", required=True)
     p_create.add_argument("--project-dir", default=".")
 
     p_decide = sub.add_parser("decide")
-    p_decide.add_argument("--hash", required=True)
+    p_decide.add_argument("--hash", required=True, type=hash_type)
     p_decide.add_argument("--decision", required=True, choices=sorted(VALID_DECISIONS))
     p_decide.add_argument("--reason", default="")
     p_decide.add_argument("--project-dir", default=".")

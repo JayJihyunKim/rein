@@ -67,7 +67,22 @@ _mtime() {
 }
 
 INPUT=$(cat)
-COMMAND=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input', {}).get('command', ''))" 2>/dev/null)
+
+# python3 필수 (JSON 파싱). 없으면 Bash gate 전체가 무력화되므로 fail-closed.
+# 예전 `2>/dev/null` 방식은 python3 미설치 시 COMMAND="" → exit 0 으로 위험
+# 명령어 차단 로직 전체가 비활성화됐음 (codex v0.7.2 review High).
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "BLOCKED: python3 가 PATH 에 없습니다 (Bash gate 필수 의존성)." >&2
+  exit 2
+fi
+
+COMMAND=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input', {}).get('command', ''))")
+EXTRACT_RC=$?
+
+if [ "$EXTRACT_RC" -ne 0 ]; then
+  echo "BLOCKED: Bash 입력 파싱 실패 (python3 exit $EXTRACT_RC)." >&2
+  exit 2
+fi
 
 if [ -z "$COMMAND" ]; then
   exit 0

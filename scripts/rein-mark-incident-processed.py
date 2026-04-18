@@ -140,12 +140,15 @@ def main() -> int:
     # trail/incidents/<file> → project root (two levels up from incidents dir)
     project_dir = path.parent.parent.parent
     append_trace(project_dir, f"start path={path.name} status={args.status}")
+    # ValueError 외에도 OSError (read_text / atomic_write 실패), UnicodeDecodeError
+    # (비-UTF8 파일) 등을 포괄 캡처하여 trace log 에 안정적으로 남긴다
+    # (codex v0.7.2 review Low).
     try:
         result = update_status(path, args.status, args.reason)
         append_trace(project_dir, f"ok path={path.name} result={result}")
-    except ValueError as e:
-        append_trace(project_dir, f"error path={path.name} err={e}")
-        print(f"ERROR: {e}", file=sys.stderr)
+    except Exception as e:
+        append_trace(project_dir, f"error path={path.name} err={type(e).__name__}: {e}")
+        print(f"ERROR: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
 
     if result == "noop":

@@ -98,12 +98,14 @@ fi
 INCIDENTS_DIR="$PROJECT_DIR/trail/incidents"
 STAMP_FILE="$PROJECT_DIR/trail/dod/.incident-review-pending"
 
-if command -v python3 >/dev/null 2>&1 && [ -d "$INCIDENTS_DIR" ]; then
-  # 세션 스코프 stamp/카운터 일괄 초기화 (Task 10 강화)
-  rm -f "$PROJECT_DIR/trail/dod/.incident-decision-deferred"
-  rm -f "$PROJECT_DIR/trail/dod/.incident-stop-blocks"
-  rm -f "$PROJECT_DIR/trail/dod/.incident-stop-hashes"
+# 세션 스코프 stamp/카운터 무조건 초기화.
+# python3 부재 또는 incidents 디렉토리 부재여도 이전 세션의 stamp 가 누수되지
+# 않도록 조건문 밖으로 이동 (codex v0.7.2 review Medium).
+rm -f "$PROJECT_DIR/trail/dod/.incident-decision-deferred"
+rm -f "$PROJECT_DIR/trail/dod/.incident-stop-blocks"
+rm -f "$PROJECT_DIR/trail/dod/.incident-stop-hashes"
 
+if command -v python3 >/dev/null 2>&1 && [ -d "$INCIDENTS_DIR" ]; then
   # 비정상 종료 감지
   SNAPSHOT="$PROJECT_DIR/trail/incidents/.last-aggregate-state.json"
   if [ -f "$SNAPSHOT" ] && command -v python3 >/dev/null 2>&1; then
