@@ -188,6 +188,9 @@ v0.7.0 부터 CLI 설치 경로가 `/usr/local/bin/rein` → `$HOME/.rein/bin/re
 
 ## 버전 히스토리
 
+### v0.8.0 (2026-04-20) — core harness purity (breaking)
+- 도메인·언어 무관 메타-하네스로 정리 — Stitch/shadcn 번들 분리, 에이전트 5개 재편(`plan-writer` 추가), 훅 리팩토링, rein-native `writing-plans`/`code-reviewer` 스킬, 라우터 id 검증 + `doctor`. 상세 + 마이그레이션: `CHANGELOG.md` · `REIN_SETUP_GUIDE.md`
+
 ### v0.7.5 (2026-04-19)
 - 스마트 라우터 강제화 — 새 DoD 에 `## 라우팅 추천` 섹션 + 사용자 승인 필수 (훅이 누락/미승인 편집 차단)
 - skill/MCP 가이드 자동 생성 스크립트 추가
