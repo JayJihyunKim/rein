@@ -118,6 +118,22 @@ python3 scripts/rein-aggregate-incidents.py --count-pending
 
 모두 처리되어 `0` 이 나오면 다음 source 편집 시 `pre-edit-dod-gate.sh` 의 self-heal 이 `.incident-review-pending` stamp 를 자동 제거한다.
 
+### Step 5b: processed / declined 파일 삭제 (정책)
+
+결정이 `processed` (rule 승격) 또는 `declined` 로 종료된 `auto-*.md` 파일은 **삭제한다**. 이유는 두 가지:
+
+1. AGENTS.md 에 rule 로 승격된 건은 이미 source of truth 에 반영됨 → incident 파일은 기록용 중복
+2. declined 건이 `blocks.jsonl` 에 남아 있으면 aggregate 가 다음 세션에서 동일 pattern_hash 로 다시 pending 을 만드는 "stale-surfacing" 현상을 재유발함. 파일 삭제가 가장 단순한 해소 수단
+
+Bash:
+```bash
+rm trail/incidents/auto-<hook>-<hash>[-N].md
+```
+
+보류(status=pending 유지) 건은 **삭제하지 않는다** — 다음 세션에서 재질문 대상.
+
+agent 로도 승격해야 할 후보(count ≥ 3)는 Step 6 `/incidents-to-agent` 가 먼저 처리하고, 그 결과로 승격/거부가 확정된 뒤에 동일 정책으로 삭제. 즉 **이 Step 5b 는 `/incidents-to-agent` 가 결정을 마친 뒤에 일괄 수행**해도 된다.
+
 ### Step 6: /incidents-to-agent 스킬 호출 (필수)
 
 `--count-pending` 결과와 무관하게, 본 스킬 완료 후 반드시 `/incidents-to-agent`
@@ -146,4 +162,5 @@ python3 scripts/rein-aggregate-incidents.py --count-pending
 [ ] --count-pending 결과가 0 이거나, 남은 건은 의식적 "보류"
 [ ] Step 6 /incidents-to-agent 스킬 호출 완료
 [ ] 보류 건이 있었다면 .incident-decision-deferred stamp 생성 확인
+[ ] processed/declined 로 종결된 auto-*.md 파일은 /incidents-to-agent 완료 후 일괄 삭제 (Step 5b 정책)
 ```

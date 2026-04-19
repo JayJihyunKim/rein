@@ -61,6 +61,20 @@ approved 후보가 있으면:
 - `trail/index.md` 에 "agent-candidates 승격 대기" 한 줄 추가
 - 사용자에게 "다음 단계: `/promote-agent <hash>` 로 정식 에이전트 초안 작성" 안내
 
+### Step 5: approved / declined 파일 삭제 (정책)
+
+결정이 `approved` (agent 승격 대기) 또는 `declined` 로 종결된 `auto-*.md` 는 **삭제한다**:
+
+```bash
+rm trail/incidents/auto-<hook>-<hash>[-N].md
+```
+
+이유:
+- approved 건은 `trail/agent-candidates/<hash>.md` 가 스텁이자 source of truth. 원본 incident 파일은 중복
+- declined 건은 `blocks.jsonl` 에 해당 엔트리가 남아 있으면 aggregate 가 다음 세션에서 재생성하는 stale-surfacing 문제 발생. 파일 삭제가 가장 단순한 해소 수단
+
+approved 후보에 대해서는 `trail/agent-candidates/<hash>.md` 를 확인해 `decision: approved` + `source_incident` 가 기록돼 있는지 검증한 뒤 원본 삭제.
+
 ## 재평가 (opt-in)
 
 기존 declined 후보를 다시 검토하려면 수동으로 해당 파일의 `decision` 을 `pending`
@@ -72,6 +86,7 @@ approved 후보가 있으면:
 [ ] 후보 있으면 batch AskUserQuestion 호출 완료
 [ ] 각 후보의 decision 갱신 (approved/declined)
 [ ] approved 건은 index.md 에 반영
+[ ] approved/declined 로 종결된 auto-*.md 원본 삭제 (Step 5)
 ```
 
 ## 주의
