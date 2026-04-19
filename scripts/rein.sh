@@ -310,7 +310,10 @@ COPY_TARGETS=(
   ".claude/skills"
   ".claude/security"
   ".claude/router"
-  ".github/workflows"
+  ".github/workflows/daily-trail-audit.yml"
+  ".github/workflows/issue-triage.yml"
+  ".github/workflows/repo-audit.yml"
+  ".github/workflows/weekly-agent-evolution.yml"
   "AGENTS.md"
   "REIN_SETUP_GUIDE.md"
 )
