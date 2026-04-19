@@ -246,26 +246,117 @@ if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]; then
   fi
 fi
 
-# BEGIN D skill-mcp
-# (1) DoD 의 '활용 skill/MCP' 섹션 검증 — 가장 최근 mtime 의 active DoD 1건만 검사 (경고만)
-if [ -d "$DOD_DIR" ]; then
-  # 가장 최근 mtime 의 active dod (인박스 매칭이 아직 없는 것) 1개 선택
-  LATEST_ACTIVE_DOD=$(ls -t "$DOD_DIR"/dod-[0-9]*.md 2>/dev/null | head -1)
-  if [ -n "$LATEST_ACTIVE_DOD" ] && [ -f "$LATEST_ACTIVE_DOD" ]; then
-    if ! grep -q '^## 활용 skill/MCP' "$LATEST_ACTIVE_DOD" 2>/dev/null; then
-      echo "WARNING: $(basename "$LATEST_ACTIVE_DOD") 에 '## 활용 skill/MCP' 섹션이 없습니다." >&2
-      echo "  .claude/cache/skill-mcp-guide.md 를 참조해 활용할 도구를 명시하세요." >&2
-    fi
+# BEGIN routing-gate
+# DoD 의 '## 라우팅 추천' 섹션 + approved_by_user: true 검증.
+# active DoD (= 신포맷 dod 파일 존재 AND 같은 slug inbox 파일 없음) 전체를 검사.
+# 섹션 있으면서 approved_by_user 가 누락/false 인 경우 BLOCK. 섹션 아예 없는 경우도 BLOCK.
+#
+# 바이패스: trail/dod/.skip-routing-gate 마커 (reason 기록 후 1회 사용 → 자동 삭제)
+ROUTING_BYPASS="$DOD_DIR/.skip-routing-gate"
+ACTIVE_DODS_TMP=$(mktemp)
+# (a) 신규 DoD 섹션 누락 차단: post-write-dod-routing-check.sh 가 DoD 작성 시
+#     '## 라우팅 추천' 섹션 없으면 .routing-missing-<basename> 마커를 남긴다.
+#     마커가 있으면 바로 BLOCK. legacy DoD 는 post-write 이전에 작성된 것이라 마커 없음.
+shopt -s nullglob
+MISSING_MARKERS=("$DOD_DIR"/.routing-missing-*)
+shopt -u nullglob
+if [ "${#MISSING_MARKERS[@]}" -gt 0 ]; then
+  if [ -f "$ROUTING_BYPASS" ]; then
+    REASON=$(grep '^reason=' "$ROUTING_BYPASS" 2>/dev/null | cut -d= -f2- || echo "unspecified")
+    echo "WARNING: routing gate 1회성 바이패스 (missing section) — reason: $REASON" >&2
+    log_block "routing missing section bypass" "$FILE_PATH"
+    rm -f "$ROUTING_BYPASS"
+  else
+    echo "BLOCKED: 다음 DoD 에 '## 라우팅 추천' 섹션이 없습니다:" >&2
+    for m in "${MISSING_MARKERS[@]}"; do
+      echo "  - $(basename -- "$m" | sed 's/^\.routing-missing-//')" >&2
+    done
+    echo "  orchestrator.md '스마트 라우팅 절차' 를 따라 섹션을 추가하세요." >&2
+    echo "  긴급 바이패스: echo 'reason=<사유>' > $ROUTING_BYPASS" >&2
+    log_block "routing section missing" "$FILE_PATH"
+    exit 2
   fi
 fi
 
-# (2) skill/MCP 가이드 재생성 pending 경고 (강제 아님, 반복 알림)
+# (b) 섹션이 있는 active DoD 는 approved_by_user: true 강제.
+
+if [ -d "$DOD_DIR" ]; then
+  for dod_file in "$DOD_DIR"/dod-[0-9]*.md; do
+    [ -f "$dod_file" ] || continue
+    fname=$(basename "$dod_file")
+    echo "$fname" | grep -q '^dod-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-' || continue
+
+    # opt-in: `## 라우팅 추천` 섹션이 없으면 enforcement 대상 외
+    if ! grep -q '^## 라우팅 추천' "$dod_file" 2>/dev/null; then
+      continue
+    fi
+
+    dod_slug=$(echo "$fname" | sed 's/^dod-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-//' | sed 's/\.md$//')
+
+    is_active=true
+    if [ -d "$INBOX_DIR" ]; then
+      for inbox_file in "$INBOX_DIR"/[0-9]*.md; do
+        [ -f "$inbox_file" ] || continue
+        inbox_slug_val=$(basename "$inbox_file" .md | sed 's/^[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-//')
+        if [ "$inbox_slug_val" = "$dod_slug" ]; then
+          is_active=false
+          break
+        fi
+      done
+    fi
+
+    if [ "$is_active" = true ]; then
+      printf '%s\n' "$dod_file" >> "$ACTIVE_DODS_TMP"
+    fi
+  done
+fi
+
+ROUTING_VIOLATIONS=""
+while IFS= read -r active_dod; do
+  [ -z "$active_dod" ] && continue
+  [ -f "$active_dod" ] || continue
+  # `## 라우팅 추천` 섹션 범위만 추출 (다음 `^## ` 직전까지).
+  # approved_by_user: true (선택적 inline # 주석 허용) 이 범위 내에 있어야 통과.
+  # awk: 첫 `## 라우팅 추천` 섹션만 추출. 중복 섹션이 있어도 이어붙이지 않는다.
+  SECTION=$(awk '
+    /^## 라우팅 추천/ {if (!seen) {in_sec=1; seen=1}; next}
+    in_sec && /^## / {in_sec=0}
+    in_sec {print}
+  ' "$active_dod" 2>/dev/null)
+  # 이 루프에 들어온 시점에서 섹션 존재는 이미 확인됨.
+  if ! printf '%s\n' "$SECTION" | grep -qE '^[[:space:]]*approved_by_user:[[:space:]]*true([[:space:]]*#.*)?[[:space:]]*$'; then
+    ROUTING_VIOLATIONS="$ROUTING_VIOLATIONS
+  - $(basename "$active_dod"): 섹션 내 approved_by_user: true 없음 (pending/false)"
+  fi
+done < "$ACTIVE_DODS_TMP"
+rm -f "$ACTIVE_DODS_TMP"
+
+if [ -n "$ROUTING_VIOLATIONS" ]; then
+  if [ -f "$ROUTING_BYPASS" ]; then
+    REASON=$(grep '^reason=' "$ROUTING_BYPASS" 2>/dev/null | cut -d= -f2- || echo "unspecified")
+    echo "WARNING: routing gate 1회성 바이패스 — reason: $REASON" >&2
+    log_block "routing gate bypass" "$FILE_PATH"
+    rm -f "$ROUTING_BYPASS"
+  else
+    printf "BLOCKED: active DoD 의 '## 라우팅 추천' 섹션 위반:%b\n" "$ROUTING_VIOLATIONS" >&2
+    echo "  orchestrator.md '스마트 라우팅 절차' 를 따라 추천 조합 + approved_by_user: true 를 기록하세요." >&2
+    echo "  긴급 바이패스: echo 'reason=<사유>' > $ROUTING_BYPASS" >&2
+    log_block "routing section 위반" "$FILE_PATH"
+    exit 2
+  fi
+fi
+
+# skill/MCP 가이드 재생성 pending: 자동 생성 시도 → 실패 시 WARNING 만 (block 아님)
 SKILL_REGEN_STAMP="$PROJECT_DIR/.claude/cache/.skill-mcp-regen-pending"
 if [ -f "$SKILL_REGEN_STAMP" ]; then
-  echo "WARNING: skill/MCP 가이드 재생성 pending. 첫 turn 이 끝나기 전에 LLM 으로 재생성하세요." >&2
-  echo "  대상 파일: .claude/cache/skill-mcp-guide.md" >&2
+  if [ -x "$PROJECT_DIR/scripts/rein-generate-skill-mcp-guide.py" ] || [ -f "$PROJECT_DIR/scripts/rein-generate-skill-mcp-guide.py" ]; then
+    ( cd "$PROJECT_DIR" && python3 scripts/rein-generate-skill-mcp-guide.py >/dev/null 2>&1 ) || \
+      echo "WARNING: skill-mcp-guide 자동 생성 실패 (stamp 유지)" >&2
+  else
+    echo "WARNING: skill/MCP 가이드 재생성 pending. .claude/cache/skill-mcp-guide.md 를 확인하세요." >&2
+  fi
 fi
-# END D skill-mcp
+# END routing-gate
 
 if [ "$DOD_FOUND" = true ]; then
   touch "$CACHE"

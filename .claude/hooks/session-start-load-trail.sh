@@ -214,11 +214,27 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$PROJECT_DIR/scripts/rein-scan-sk
 
   case "$NEEDS_REGEN" in
     yes)
-      echo "### 🔄 skill/MCP 인벤토리 변경 감지"
-      echo "AGENTS.md 규칙: 첫 turn 에 LLM 호출하여 \`.claude/cache/skill-mcp-guide.md\` 재생성 필요"
-      echo
       mkdir -p "$(dirname "$SKILL_REGEN_STAMP")"
       touch "$SKILL_REGEN_STAMP"
+      # 자동 재생성 시도 (실패 시 stamp 유지하여 gate hook 이 재시도)
+      if [ -f "$PROJECT_DIR/scripts/rein-generate-skill-mcp-guide.py" ]; then
+        if ( cd "$PROJECT_DIR" && python3 scripts/rein-generate-skill-mcp-guide.py >/dev/null 2>&1 ); then
+          echo "### 🔄 skill/MCP 가이드 자동 재생성 완료"
+          echo
+          if [ -f "$SKILL_GUIDE" ]; then
+            cat "$SKILL_GUIDE"
+            echo
+          fi
+        else
+          echo "### ⚠️ skill/MCP 가이드 자동 재생성 실패 (stamp 유지)"
+          echo "수동 실행: python3 scripts/rein-generate-skill-mcp-guide.py"
+          echo
+        fi
+      else
+        echo "### 🔄 skill/MCP 인벤토리 변경 감지"
+        echo "수동 재생성: python3 scripts/rein-generate-skill-mcp-guide.py"
+        echo
+      fi
       ;;
     no)
       rm -f "$SKILL_REGEN_STAMP"

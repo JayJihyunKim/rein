@@ -84,7 +84,9 @@ DoD 작성 완료 후, 구현 시작 전에 아래를 수행한다.
    - 스킬: 관련성 높은 순 상위 3개까지
    - MCP: 관련성 높은 순 상위 2개까지
 
-5. **사용자 확인**: 아래 형식으로 추천 조합을 제시
+5. **사용자 확인 + DoD 기록**: 아래 형식으로 추천 조합을 제시하고, 동시에 DoD 파일에 `## 라우팅 추천` 섹션을 기록한다.
+
+   채팅 형식:
    ```
    [라우팅] 작업: "[DoD 작업명]"
 
@@ -100,8 +102,35 @@ DoD 작성 완료 후, 구현 시작 전에 아래를 수행한다.
    이 조합으로 진행할까요? (수정하려면 말씀해 주세요)
    ```
 
-6. **수정 사항 기록**: 사용자가 수정하면 `.claude/router/overrides.yaml`에 기록
-7. **승인된 조합으로 작업 진행**
+   DoD 파일 저장 형식 (필수 — hook 이 이 섹션을 검증한다):
+   ````markdown
+   ## 라우팅 추천
+
+   ```yaml
+   agent: feature-builder
+   skills:
+     - codex
+     - security-reviewer
+   mcps: []
+   rationale:
+     - 작업 성격: ...
+     - 파일 패턴: ...
+   approved_by_user: pending   # 사용자 승인 후 true 로 교체
+   ```
+   ````
+
+   **중요**: `approved_by_user` 값은 사용자가 "진행해" 등으로 명시 승인한 뒤에만 `true` 로 설정한다. `pre-edit-dod-gate.sh` 가 `approved_by_user: true` 없으면 Edit/Write 를 차단한다.
+
+6. **수정 사항 기록**: 사용자가 추천 조합을 수정하면 아래 명령으로 `.claude/router/overrides.yaml` 에 기록
+   ```bash
+   python3 scripts/rein-route-record.py override \
+     --dod trail/dod/dod-YYYY-MM-DD-<slug>.md \
+     --removed "skill:foo,mcp:bar" \
+     --added "skill:baz" \
+     --reason "사용자가 말한 이유"
+   ```
+
+7. **승인된 조합으로 작업 진행** (`approved_by_user: true` 로 교체 후 IMPLEMENT 단계로 이동)
 
 ### overrides.yaml 기록 형식
 
@@ -120,21 +149,19 @@ DoD 작성 완료 후, 구현 시작 전에 아래를 수행한다.
 
 ### 작업 완료 후 피드백 기록
 
-작업 완료 시 `.claude/router/feedback-log.yaml`에 아래를 추가한다:
+작업 완료 시(=inbox 기록 직후) 아래 명령으로 `.claude/router/feedback-log.yaml` 에 append 한다:
 
-```yaml
-- date: YYYY-MM-DD
-  dod: "dod-[작업명].md"
-  recommended:
-    agent: [에이전트 id]
-    skills: [스킬 id 목록]
-    mcp: [MCP id 목록]
-  user_modified:
-    removed: [제거된 id]
-    added: [추가된 id]
-  outcome: success | partial | failed
-  notes: "특이사항"
+```bash
+python3 scripts/rein-route-record.py feedback \
+  --dod trail/dod/dod-YYYY-MM-DD-<slug>.md \
+  --agent feature-builder \
+  --skills "codex,security-reviewer" \
+  --mcps "" \
+  --outcome success \
+  --notes "특이사항"
 ```
+
+주기적 또는 세션 종료 시 `python3 scripts/rein-route-record.py learn` 으로 `registry.learned_preferences` 를 갱신한다.
 
 ### 자동 보정 규칙
 

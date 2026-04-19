@@ -103,6 +103,10 @@
           {
             "type": "command",
             "command": ".claude/hooks/post-edit-plan-coverage.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/post-write-dod-routing-check.sh"
           }
         ]
       }

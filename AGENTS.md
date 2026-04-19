@@ -110,30 +110,30 @@ pending 마커는 원래 경로를 기억한다. 이동/리네임 후 gate 가 "
 
 ### Skill/MCP 활용 강제
 
-세션 시작 시 `Skill/MCP 활용 가이드` 섹션이 컨텍스트에 자동 주입된다 (D 시스템). 작업 시작 전에:
+세션 시작 시 `Skill/MCP 활용 가이드` 가 `.claude/cache/skill-mcp-guide.md` 에서 자동 생성된다. 작업 시작 전에:
 
 1. **반드시** 가이드를 먼저 참조해 적합한 skill/MCP 조합을 선택한다
-2. DoD 작성 시 `## 활용 skill/MCP` 섹션을 포함해 어떤 도구를 쓸지 명시한다
-3. 변경 감지(`🔄 skill/MCP 인벤토리 변경 감지`) flag 가 있으면 첫 turn 에 LLM 호출해 `.claude/cache/skill-mcp-guide.md` 를 재생성한다
+2. DoD 작성 시 **`## 라우팅 추천`** 섹션에 `agent`/`skills`/`mcps`/`rationale`/`approved_by_user` 를 기록한다 (신규 스키마, `pre-edit-dod-gate.sh` 가 검증)
+3. 이전 `## 활용 skill/MCP` 자유 서술은 **legacy** — 기존 DoD 는 유지, 신규 DoD 는 `## 라우팅 추천` 을 사용
+4. 사용자 승인 후 DoD 내 `approved_by_user: true` 로 교체
+5. 사용자가 추천을 수정하면 `python3 scripts/rein-route-record.py override ...` 로 `overrides.yaml` 에 기록
+6. 작업 완료 시 `python3 scripts/rein-route-record.py feedback ...` 로 `feedback-log.yaml` 에 기록
 
-### 가이드 재생성 절차 (최소 템플릿)
+### 가이드 자동 생성 (자동화됨)
 
-`.claude/cache/.skill-mcp-regen-pending` stamp 가 있을 때 첫 turn 에 수행:
+`.claude/cache/.skill-mcp-regen-pending` stamp 가 있으면 `pre-edit-dod-gate.sh` 가 `scripts/rein-generate-skill-mcp-guide.py` 를 자동 호출해 `.claude/cache/skill-mcp-guide.md` 를 재생성한다.
 
-1. 현재 인벤토리 (`.claude/cache/skill-mcp-inventory.json`) 읽기
-2. 기존 가이드(`skill-mcp-guide.md`) 가 있으면 **사용자 수동 메모는 보존** — frontmatter 또는 `<!-- USER NOTES -->` 블록은 그대로 복사
-3. 카테고리별 활용방안 markdown 을 **다음 순서 고정** 으로 작성:
-   1. **검색 / 정보 탐색** (Tavily, Context7, Sequential, WebFetch)
-   2. **코드 작성 / 편집** (Serena, Morphllm, Magic, Codex)
-   3. **디버깅 / 검증** (Chrome DevTools, Playwright, code-reviewer)
-   4. **작업 흐름** (brainstorming, writing-plans, TDD, incidents-to-rule)
-   5. **기본 권장 조합** (작업 유형 → 1순위 도구 표)
-4. **6KB 미만** 으로 작성. 초과 시 압축 재시도
-5. **인벤토리에 없는 도구는 추측 금지** — 실제 스캔된 skill/MCP 만 언급
-6. `.claude/cache/skill-mcp-guide.md` 에 Write 도구로 저장
-7. `.claude/cache/.skill-mcp-regen-pending` 삭제 (`rm`)
-8. **재생성 실패 시**: stamp 유지, stderr 에 사유 출력, 다음 세션에서 재시도
-9. 사용자에게 "가이드 갱신됨" 한 줄 알림
+수동 실행:
+```bash
+python3 scripts/rein-generate-skill-mcp-guide.py
+```
+
+스크립트 동작:
+1. 인벤토리 (`.claude/cache/skill-mcp-inventory.json`) 읽기
+2. 기존 가이드에 `<!-- USER NOTES -->` ~ `<!-- /USER NOTES -->` 블록 있으면 보존
+3. 5 카테고리 고정 (검색·코드·디버깅·흐름·기타) + 기본 권장 조합 표 생성
+4. 6KB 초과 시 description 압축
+5. 성공 시 stamp 삭제, 실패 시 stamp 유지 + stderr 경고 (gate 차단 없음)
 
 ### Cache 디렉토리
 

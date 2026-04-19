@@ -78,11 +78,13 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 2. **WRITE** `trail/dod/dod-YYYY-MM-DD-<slug>.md` — 소스 코드 편집 전 필수 (날짜=작업 시작일, slug=영문 kebab-case, AGENTS.md §2 규칙 준수)
    → `pre-edit-dod-gate.sh`가 DoD 파일 없으면 Edit/Write/MultiEdit를 차단함
    → DoD는 inbox과 분리. inbox은 "작업 완료 기록", dod는 "작업 시작 전 기준"
-3. **ROUTE** — 스마트 라우터로 최적 조합 추천 → 사용자 확인
+3. **ROUTE** — 스마트 라우터로 최적 조합 추천 → 사용자 확인 → DoD 에 `## 라우팅 추천` 섹션 기록
    → `.claude/orchestrator.md`의 "스마트 라우팅 절차"를 따른다
    → 세션 컨텍스트에서 사용 가능한 에이전트/스킬/MCP를 동적으로 발견
    → DoD 내용과 description 매칭으로 에이전트 1 + 스킬 최대 3 + MCP 최대 2 추천
-   → 사용자 승인 후 다음 단계 진행 (수정 시 overrides.yaml에 기록)
+   → DoD 파일에 `## 라우팅 추천` YAML 섹션 기록 (agent/skills/mcps/rationale/approved_by_user)
+   → 사용자 승인 후 `approved_by_user: true` 로 교체. `pre-edit-dod-gate.sh` 가 누락 시 Edit/Write 차단 (exit 2)
+   → 수정 시 `python3 scripts/rein-route-record.py override ...` 로 overrides.yaml 에 기록
 4. **IMPLEMENT** — 승인된 조합의 에이전트/스킬/MCP를 활용하여 소스 코드 편집
 5. **CODEX REVIEW** — 구현 완료 후 반드시 Codex로 코드 리뷰 실행
    → `/codex` 스킬로 변경된 파일에 대해 리뷰 요청
