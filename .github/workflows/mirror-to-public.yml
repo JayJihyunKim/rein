@@ -1,0 +1,32 @@
+name: Mirror main to public repo
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Strip maintainer-only files and force push to public
+        run: |
+          git config user.email "github-actions@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+          # Strip the mirror workflow itself — it must exist on rein-dev main
+          # (so this workflow triggers on push) but should NOT appear in the
+          # public rein repo.
+          if [ -f .github/workflows/mirror-to-public.yml ]; then
+            git rm -q .github/workflows/mirror-to-public.yml
+            git commit -m "chore: strip maintainer-only mirror workflow for public"
+          fi
+
+          git remote add public https://x-access-token:${{ secrets.PUBLIC_REPO_TOKEN }}@github.com/JayJihyunKim/rein.git
+          git push public HEAD:main --force
