@@ -7,6 +7,10 @@ on:
 
 jobs:
   mirror:
+    # Defense-in-depth: if this workflow leaks into another repo (via
+    # "Use this template", fork, or accidental copy), refuse to run.
+    # Only the canonical maintainer repo should mirror to public rein.
+    if: github.repository == 'JayJihyunKim/rein-dev'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main with tags
