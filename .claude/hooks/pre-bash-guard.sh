@@ -167,6 +167,17 @@ check_review_stamp() {
   return 0
 }
 
+# --- Coverage matrix gate (pytest/commit 차단, 리뷰 stamp 검사보다 선행) ---
+COVERAGE_MARKER="$PROJECT_DIR/trail/dod/.coverage-mismatch"
+if [ -f "$COVERAGE_MARKER" ]; then
+  if echo "$COMMAND" | grep -qE "(pytest|jest|vitest|mocha|npm run test|npm test|yarn test|pnpm test|python -m pytest|npx jest|npx vitest|git commit|bash tests/)"; then
+    echo "BLOCKED: coverage matrix 검증 실패 마커 존재 ($COVERAGE_MARKER)." >&2
+    echo "  plan 을 수정해 validator 를 통과시키거나, 예외 승인 후 마커를 직접 삭제하세요." >&2
+    log_block "coverage-mismatch" "$COMMAND"
+    exit 2
+  fi
+fi
+
 # --- Codex 리뷰 stamp 검사 (테스트 실행 시) ---
 if echo "$COMMAND" | grep -qE "(pytest|jest|vitest|mocha|npm run test|npm test|yarn test|pnpm test|python -m pytest|npx jest|npx vitest)"; then
   if ! check_review_stamp "테스트 실행"; then

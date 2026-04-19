@@ -99,6 +99,10 @@
           {
             "type": "command",
             "command": ".claude/hooks/post-write-spec-review-gate.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/post-edit-plan-coverage.sh"
           }
         ]
       }

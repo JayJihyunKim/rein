@@ -62,6 +62,29 @@ trail/
 
 `rein update` 실행 시 템플릿 파일뿐만 아니라 **CLI 자체도 최신 버전으로 자동 갱신**됩니다. sudo 불필요.
 
+### 7. Design → Plan 범위 커버리지 추적
+
+설계 문서의 scope item 이 구현 plan 으로 전환될 때 조용히 누락되는 것을 **기계 가독 꼬리표**로 방지합니다:
+
+```markdown
+## Design 범위 커버리지 매트릭스       ← plan 에 필수 섹션
+> design ref: docs/specs/foo-design.md
+
+| Scope ID | 상태 | 위치/사유 |
+|----------|------|----------|
+| A1 | implemented | Phase 2 |
+| A2 | deferred | Stage 2.5 연기 — 사유 |
+
+## Phase 2: 데이터 정합성              ← work unit 이름 자유
+covers: [A1]                          ← 기계 가독 꼬리표
+```
+
+plan 파일을 편집하면 validator (`scripts/rein-validate-coverage-matrix.py`) 가 자동 실행됩니다:
+- design scope ID 누락/중복/unknown 감지 시 `trail/dod/.coverage-mismatch` 마커 생성
+- pre-bash-guard 가 마커 존재 시 `git commit` / `pytest` 차단 (exit 2)
+- Gate/Phase/Sprint 이름은 자유 (추적성은 `covers:` 꼬리표가 담당)
+- legacy plan (matrix 섹션 없음) 은 경고만, 차단하지 않음 — gradual adoption
+
 ---
 
 ## 설치
@@ -164,6 +187,15 @@ claude
 v0.7.0 부터 CLI 설치 경로가 `/usr/local/bin/rein` → `$HOME/.rein/bin/rein` 으로 변경되었습니다. 기존 사용자는 [install.sh](install.sh) 를 한 번 실행하면 됩니다. 이후 `rein update` 가 자가 업데이트를 자동 처리합니다.
 
 ## 버전 히스토리
+
+### v0.7.4 (2026-04-19)
+- **Design → Plan 범위 커버리지 추적 레이어** 도입 — design 문서의 scope item 이 plan 전환 과정에 조용히 누락되는 것을 구조적으로 방지
+- `.claude/rules/design-plan-coverage.md` — 규칙 (opt-in, matrix 섹션 없는 legacy plan 은 경고만)
+- `scripts/rein-validate-coverage-matrix.py` — Python validator (5개 v1 규칙: ID 집합 일치, 중복 금지, covers 정합성 등)
+- `.claude/hooks/post-edit-plan-coverage.sh` — plan 편집 시 자동 검증, plan-specific line-list 마커 관리 (다중 plan 격리 보장)
+- `pre-bash-guard.sh` 확장 — `.coverage-mismatch` 마커 존재 시 pytest/git commit 차단
+- `.claude/workflows/design-to-plan.md` — 전환 절차 문서
+- 14개 테스트 (`tests/hooks/test-coverage-matrix.sh`) — validator 7 + integration 7
 
 ### v0.7.3 (2026-04-19)
 - **Critical 보안 수정**: hook (`pre-edit-dod-gate.sh`, `pre-bash-guard.sh`) 이 python3 부재/파싱 실패 시 `exit 0` 으로 gate 전체가 우회됐던 fail-open 결함. python3 검사 + RC 체크로 fail-closed 로 전환

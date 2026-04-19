@@ -32,7 +32,7 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 @.claude/rules/testing.md
 @.claude/rules/security.md
 @.claude/rules/subagent-review.md
-@.claude/rules/branch-strategy.md
+@.claude/rules/design-plan-coverage.md
 
 ---
 

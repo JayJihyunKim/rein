@@ -66,6 +66,10 @@ bash scripts/rein-mark-spec-reviewed.sh docs/specs/foo.md codex
 
 리뷰가 해소되지 않은 상태에서 소스 파일(`src/`, `app/`, `scripts/` 등)을 편집하려 하면 `pre-edit-dod-gate` 가 차단한다.
 
+#### 범위 커버리지 (design → plan)
+
+plan 문서는 `## Design 범위 커버리지 매트릭스` 섹션을 포함하고 각 work unit(Gate/Phase/Task 등) 에 `covers: [ID, ...]` 메타데이터를 표기할 것을 권장한다. 매트릭스 섹션이 없는 legacy plan 은 validator 가 경고만 출력하며 차단하지 않는다. 자세한 절차는 `.claude/workflows/design-to-plan.md` 참조. `post-edit-plan-coverage.sh` 훅이 자동 검증하고 실패 시 `trail/dod/.coverage-mismatch` 마커로 commit/test 를 차단한다.
+
 #### `/codex` 장애 시 Fallback
 
 1. **대체 리뷰어**: `superpowers:code-reviewer` 스킬 또는 `general-purpose` 에이전트에게 리뷰 요청 후:
