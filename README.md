@@ -188,32 +188,18 @@ v0.7.0 부터 CLI 설치 경로가 `/usr/local/bin/rein` → `$HOME/.rein/bin/re
 
 ## 버전 히스토리
 
+### v0.7.5 (2026-04-19)
+- 스마트 라우터 강제화 — 새 DoD 에 `## 라우팅 추천` 섹션 + 사용자 승인 필수 (훅이 누락/미승인 편집 차단)
+- skill/MCP 가이드 자동 생성 스크립트 추가
+
 ### v0.7.4 (2026-04-19)
-- **Design → Plan 범위 커버리지 추적 레이어** 도입 — design 문서의 scope item 이 plan 전환 과정에 조용히 누락되는 것을 구조적으로 방지
-- `.claude/rules/design-plan-coverage.md` — 규칙 (opt-in, matrix 섹션 없는 legacy plan 은 경고만)
-- `scripts/rein-validate-coverage-matrix.py` — Python validator (5개 v1 규칙: ID 집합 일치, 중복 금지, covers 정합성 등)
-- `.claude/hooks/post-edit-plan-coverage.sh` — plan 편집 시 자동 검증, plan-specific line-list 마커 관리 (다중 plan 격리 보장)
-- `pre-bash-guard.sh` 확장 — `.coverage-mismatch` 마커 존재 시 pytest/git commit 차단
-- `.claude/workflows/design-to-plan.md` — 전환 절차 문서
-- 14개 테스트 (`tests/hooks/test-coverage-matrix.sh`) — validator 7 + integration 7
+- 설계 → 플랜 범위 커버리지 추적 — design 의 scope item 이 plan 전환 시 누락되면 편집 단계에서 자동 감지
 
 ### v0.7.3 (2026-04-19)
-- **Critical 보안 수정**: hook (`pre-edit-dod-gate.sh`, `pre-bash-guard.sh`) 이 python3 부재/파싱 실패 시 `exit 0` 으로 gate 전체가 우회됐던 fail-open 결함. python3 검사 + RC 체크로 fail-closed 로 전환
-- aggregate `LIVE_COUNT` RC 분리 캡처 (실패 시 차단)
-- `rein-aggregate-incidents.py` lock 파일 unlink 제거 (동시 집계 race 방지) + threshold 로직 분리 (open_inc 는 무조건 누적 갱신, 신규 생성만 threshold 적용)
-- SessionStart 세션 스코프 stamp 초기화를 조건문 밖으로 (누수 방지)
-- Stop hook aggregate 출력 stderr 로 분리, PENDING=0 시 counter 정리
-- `rein-mark-agent-candidate.py --hash` 형식 검증 (path traversal 방지)
-- helper exception 범위 확장 (OSError/UnicodeDecodeError 포괄)
+- 훅 안전성 개선 (critical 보안 수정) — python3 부재/파싱 실패 시 gate 가 무력화되던 fail-open 을 fail-closed 로 전환
 
 ### v0.7.2 (2026-04-19)
-- incidents 반자동화 **Stop hook 게이트** 도입 — 작업 종료 시 pending incident 감지하면 자동으로 `/incidents-to-rule` + `/incidents-to-agent` 스킬 체인 호출을 Claude 에게 지시
-- 진전 감지 + 3회 block 가드 + 메타 incident (무한 루프 방지)
-- 세션 경계 상태 스냅샷 (`.last-aggregate-state.json`) + 비정상 종료 감지
-- helper 스크립트 신규: `rein-stop-emit-block.py`, `rein-mark-incident-processed.py`, `rein-mark-agent-candidate.py`
-- `incidents-to-agent` 스킬 재작성 (decision skip + batch AskUserQuestion UX)
-- pre-edit-dod-gate: incident gate 를 cache 앞으로 이동 (cache hit 우회 버그 수정)
-- log_block 경고를 hook+reason 조합별 카운트로 (오인 표시 수정)
+- incidents 반자동화 — 반복 실패 패턴을 세션 종료 시점에 자동 감지해 규칙/에이전트 승격 플로우로 연결
 
 ### v0.7.1 (2026-04-17)
 - public release 준비 (README 영문 버전, MIT LICENSE)

@@ -165,6 +165,22 @@ Starting with v0.7.0, the CLI install path changed from `/usr/local/bin/rein` to
 
 ## Version History
 
+### v0.7.5 (2026-04-19)
+- Smart router enforcement — new DoDs require a `## 라우팅 추천` section + explicit user approval (hook blocks edits when missing)
+- Skill/MCP guide auto-generation script added
+
+### v0.7.4 (2026-04-19)
+- Design → Plan scope coverage tracking — scope items dropped during plan transition are detected at plan-edit time
+
+### v0.7.3 (2026-04-19)
+- Hook safety hardening (critical security fix) — `exit 0` fail-open on missing `python3` / parse failure replaced with fail-closed behavior
+
+### v0.7.2 (2026-04-19)
+- Incidents semi-automation — recurring failure patterns detected at session end and routed to rule / agent promotion flow
+
+### v0.7.1 (2026-04-17)
+- Public release prep (English README, MIT license, public mirror workflow)
+
 ### v0.7.0 (2026-04-16)
 - CLI install path moved to `$HOME/.rein/bin/rein` (no more sudo)
 - New `install.sh` installer + CLI self-update
