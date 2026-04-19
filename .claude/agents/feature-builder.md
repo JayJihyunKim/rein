@@ -11,9 +11,9 @@ description: 신규 기능 구현 및 버그 수정 전담. 기존 서비스/모
 - 새 기능 구현 (add-feature workflow)
 - 버그 수정 (fix-bug workflow)
 - 기존 코드 리팩토링 (기능 변경 없는 구조 개선)
+- 새 모듈·서비스 초기 스캐폴딩 (build-from-scratch workflow 실행 주체)
 
 ## 담당하지 않는 것
-- 새 서비스/모듈 초기 생성 → `service-builder`
 - 기술 조사 → `researcher`
 - 코드 리뷰 → `reviewer`
 - 문서 작성 → `docs-writer`

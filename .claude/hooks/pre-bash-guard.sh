@@ -89,7 +89,10 @@ if [ -z "$COMMAND" ]; then
 fi
 
 # --- 즉시 차단: 파이프로 쉘 스크립트 실행 ---
-if echo "$COMMAND" | grep -qE "\| *(bash|sh)"; then
+# 정규식은 파이프 뒤 bash/sh 토큰 다음에 공백 또는 라인 끝이 오는 경우만 매치한다.
+# 단어 경계를 요구하지 않으면 'grep "x\|shadcn"' 같이 alternation 인자에
+# sh- / bash- 로 시작하는 substring 이 있을 때 false-positive 로 차단됐다.
+if echo "$COMMAND" | grep -qE '\| *(bash|sh)( |$)'; then
   echo "BLOCKED: 파이프로 쉘 스크립트 실행은 허용되지 않습니다." >&2
   log_block "파이프 쉘 실행" "$COMMAND"
   exit 2

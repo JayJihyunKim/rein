@@ -4,23 +4,9 @@
 agents:
   - name: feature-builder
     status: active
-    role: "기존 코드베이스에 새 기능을 추가하거나 버그를 수정한다"
+    role: "기존 코드베이스에 새 기능을 추가하거나, 버그를 수정하거나, 새 모듈·서비스 초기 스캐폴딩을 수행한다"
     file: ".claude/agents/feature-builder.md"
-    triggers: [add-feature workflow, fix-bug workflow]
-    added: "2026-03-17"
-
-  - name: service-builder
-    status: active
-    role: "새 서비스나 모듈의 초기 구조를 설계하고 생성한다"
-    file: ".claude/agents/service-builder.md"
-    triggers: [build-from-scratch workflow]
-    added: "2026-03-17"
-
-  - name: reviewer
-    status: active
-    role: "코드 품질을 검토하고, 문제 패턴을 감지해 incident 초안을 작성한다"
-    file: ".claude/agents/reviewer.md"
-    triggers: [PR 리뷰 요청, feature-builder 작업 완료 후]
+    triggers: [add-feature workflow, fix-bug workflow, build-from-scratch workflow]
     added: "2026-03-17"
 
   - name: researcher
@@ -36,6 +22,13 @@ agents:
     file: ".claude/agents/docs-writer.md"
     triggers: [문서 작성/업데이트 요청]
     added: "2026-03-17"
+
+  - name: plan-writer
+    status: active
+    role: "design → plan 변환 전담. coverage 매트릭스 + covers 메타데이터 생성 + validator 통과."
+    file: ".claude/agents/plan-writer.md"
+    triggers: [design-review-passed, plan-writing-request]
+    added: "2026-04-19"
 
 # candidates: []   # 승인 대기 에이전트
 # inactive: []     # 비활성 에이전트 (히스토리 보존)

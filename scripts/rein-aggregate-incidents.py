@@ -16,6 +16,9 @@ from pathlib import Path
 THRESHOLD = int(os.environ.get("REIN_INCIDENT_THRESHOLD", "2"))
 LOCK_TTL_SEC = 300
 
+# advisory-summary reads from this path (overridable for tests)
+_BLOCKS_JSONL_DEFAULT = None  # resolved lazily from PROJECT_DIR
+
 
 def utcnow_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
@@ -318,13 +321,100 @@ def count_pending(project_dir: Path) -> int:
     return n
 
 
+def cmd_advisory_summary(args) -> int:
+    """advisory-summary 서브커맨드: blocks.jsonl 을 집계해 패턴 JSON 을 출력한다.
+
+    blocks.jsonl 의 각 레코드는 {"ts": ..., "source": ..., "reason": ..., "target": ...} 형식.
+    reason 필드를 pattern_label 로 사용하며 sha1 해시를 pattern_hash 로 부여한다.
+    """
+    blocks_jsonl_path = Path(
+        os.environ.get("REIN_BLOCKS_JSONL", "")
+        or os.path.join(str(Path(args.project_dir or ".").resolve()), "trail", "incidents", "blocks.jsonl")
+    )
+
+    if not blocks_jsonl_path.exists():
+        print("[]")
+        return 0
+
+    since_line = max(1, args.since_line) if args.since_line is not None else 1
+    since_ts = args.since_ts if hasattr(args, "since_ts") else None
+
+    counts: dict = {}        # label → int
+    examples: dict = {}      # label → list[str]
+
+    with open(blocks_jsonl_path) as f:
+        all_lines = f.readlines()
+
+    # since_line is 1-indexed; skip lines before it
+    for idx_zero, raw in enumerate(all_lines):
+        line_num = idx_zero + 1  # 1-indexed
+        if line_num < since_line:
+            continue
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            rec = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if since_ts and rec.get("ts", "") < since_ts:
+            continue
+        label = rec.get("reason", "")
+        if not label:
+            continue
+        counts[label] = counts.get(label, 0) + 1
+        if len(examples.get(label, [])) < 3:
+            ref = f"blocks.jsonl:L{line_num}"
+            examples.setdefault(label, []).append(ref)
+
+    result = []
+    for label, count in counts.items():
+        pattern_hash = hashlib.sha1(label.encode("utf-8")).hexdigest()[:12]
+        result.append({
+            "pattern_hash": pattern_hash,
+            "pattern_label": label,
+            "count": count,
+            "examples": examples.get(label, []),
+        })
+
+    # Sort by (-count, pattern_label) for deterministic output
+    result.sort(key=lambda x: (-x["count"], x["pattern_label"]))
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--project-dir", default=os.environ.get("REIN_PROJECT_DIR"))
     parser.add_argument("--count-pending", action="store_true",
                         help="aggregate 대신 pending 개수만 출력")
+
+    subparsers = parser.add_subparsers(dest="subcommand")
+
+    # advisory-summary 서브커맨드
+    adv_parser = subparsers.add_parser(
+        "advisory-summary",
+        help="blocks.jsonl 을 집계해 패턴 요약 JSON 출력"
+    )
+    adv_parser.add_argument(
+        "--since-line",
+        type=int,
+        default=1,
+        metavar="N",
+        help="1-indexed 시작 줄 번호 (기본: 1 = 전체)"
+    )
+    adv_parser.add_argument(
+        "--since-ts",
+        default=None,
+        metavar="ISO8601",
+        help="이 타임스탬프 이후 레코드만 집계"
+    )
+
     args = parser.parse_args()
     project_dir = Path(args.project_dir or ".").resolve()
+
+    if args.subcommand == "advisory-summary":
+        sys.exit(cmd_advisory_summary(args))
 
     if args.count_pending:
         print(count_pending(project_dir))

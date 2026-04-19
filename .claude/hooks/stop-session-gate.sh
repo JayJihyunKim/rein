@@ -18,12 +18,53 @@
 # 데드락이 해소된다.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_DIR="${REIN_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 INBOX_DIR="$PROJECT_DIR/trail/inbox"
 DOD_DIR="$PROJECT_DIR/trail/dod"
 INDEX_FILE="$PROJECT_DIR/trail/index.md"
 SRC_EDIT_MARKER="$DOD_DIR/.session-has-src-edit"
 TODAY=$(date +%Y-%m-%d)
+
+# --- H3.3: incident_advisory_check (non-blocking, stderr only) ---
+# 현재 세션 동안 쌓인 blocks.jsonl 엔트리를 per-pattern 집계해
+# 자기진화 파이프라인 (2회→rule, 3회→agent) 트리거를 권장한다.
+# 주의: stdout 에 쓰지 않는다 (stop-session-gate 가 stdout 에 block JSON 출력).
+incident_advisory_check() {
+  local STAMP="$PROJECT_DIR/trail/incidents/.session-start-line"
+  local since_line=1
+  if [ -f "$STAMP" ]; then
+    since_line=$(cat "$STAMP" 2>/dev/null | tr -d ' \n')
+    [ -z "$since_line" ] && since_line=1
+  fi
+
+  local summary_json
+  summary_json=$(python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+    advisory-summary --since-line "$since_line" 2>/dev/null || echo "[]")
+
+  if [ -z "$summary_json" ] || [ "$summary_json" = "[]" ]; then
+    return 0
+  fi
+
+  SUMMARY="$summary_json" python3 - <<'PY' >&2
+import json, os
+data = json.loads(os.environ.get("SUMMARY", "[]"))
+for item in data:
+    c = item.get("count", 0)
+    label = item.get("pattern_label", "unknown")
+    if c >= 3:
+        print(f"[advisory] 같은 incident 패턴 '{label}' 이 {c}회 반복됨. 'incidents-to-agent' 스킬 실행을 권장합니다.")
+    elif c >= 2:
+        print(f"[advisory] 같은 incident 패턴 '{label}' 이 {c}회 반복됨. 'incidents-to-rule' 스킬 실행을 권장합니다.")
+PY
+
+  local DRAFTS="$PROJECT_DIR/trail/incidents"
+  if ls "$DRAFTS"/*.draft.md 2>/dev/null | head -1 >/dev/null; then
+    echo "[advisory] pending incident draft 존재: $DRAFTS/*.draft.md" >&2
+  fi
+  if ls "$DRAFTS"/auto-*.md 2>/dev/null | head -1 >/dev/null; then
+    echo "[advisory] pending incident auto-* 존재: $DRAFTS/auto-*.md" >&2
+  fi
+}
 
 # ---- 방어층 3: 비상 탈출 env var (with audit trail) ----
 # 극단 상황 (git 활동도 없고 inbox 도 못 만드는 경우) 에 세션을 강제로
@@ -41,6 +82,8 @@ if [ "${REIN_BYPASS_STOP_GATE:-0}" = "1" ]; then
 fi
 
 # ---- QA 세션 감지: 소스 편집이 없었으면 inbox/index 요구 면제 ----
+# incident advisory 는 소스 편집 여부와 무관하게 항상 실행
+incident_advisory_check
 if [ ! -f "$SRC_EDIT_MARKER" ]; then
   exit 0
 fi

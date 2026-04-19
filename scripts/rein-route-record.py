@@ -25,10 +25,25 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-ROUTER_DIR = Path(".claude/router")
-OVERRIDES = ROUTER_DIR / "overrides.yaml"
-FEEDBACK = ROUTER_DIR / "feedback-log.yaml"
-REGISTRY = ROUTER_DIR / "registry.yaml"
+# Default project root; overridden by --project-dir at runtime
+_PROJECT_ROOT = Path(".")
+
+
+def _router_dir() -> Path:
+    return _PROJECT_ROOT / ".claude" / "router"
+
+
+def _overrides_path() -> Path:
+    return _router_dir() / "overrides.yaml"
+
+
+def _feedback_path() -> Path:
+    return _router_dir() / "feedback-log.yaml"
+
+
+def _registry_path() -> Path:
+    return _router_dir() / "registry.yaml"
+
 
 LEARN_MIN_REPEAT = 3
 LEARN_SUCCESS_MIN = 5
@@ -137,6 +152,15 @@ def _entry_to_yaml(entry: dict, indent: str = "  ") -> list[str]:
         if isinstance(v, list):
             if not v:
                 lines.append(f"{prefix}{k}: []")
+            elif v and isinstance(v[0], dict):
+                # list of dicts — render each as a block mapping
+                lines.append(f"{prefix}{k}:")
+                for item in v:
+                    first = True
+                    for sk, sv in item.items():
+                        item_prefix = f"{indent}    - " if first else f"{indent}      "
+                        lines.append(f"{item_prefix}{sk}: {_yaml_scalar(sv)}")
+                        first = False
             else:
                 lines.append(f"{prefix}{k}:")
                 for item in v:
@@ -185,9 +209,271 @@ def _append_entry(path: Path, entry: dict) -> None:
         _append_entry_textual(path, entry)
 
 
+def _load_known_ids(project_dir: Path) -> tuple[set[str], set[str]]:
+    """Scan agent + skill frontmatter to build known id sets.
+
+    Returns (agents_set, skills_set) where each element is a `name:` value
+    read from YAML frontmatter of the respective manifest files.
+    """
+    agents: set[str] = set()
+    skills: set[str] = set()
+
+    agents_dir = project_dir / ".claude" / "agents"
+    if agents_dir.is_dir():
+        for md in agents_dir.glob("*.md"):
+            name = _read_frontmatter_name(md)
+            if name:
+                agents.add(name)
+
+    skills_dir = project_dir / ".claude" / "skills"
+    if skills_dir.is_dir():
+        for skill_md in skills_dir.glob("*/SKILL.md"):
+            name = _read_frontmatter_name(skill_md)
+            if name:
+                skills.add(name)
+
+    return agents, skills
+
+
+def _read_frontmatter_name(path: Path) -> str | None:
+    """Extract `name:` from YAML frontmatter (--- delimited block)."""
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        stripped = line.strip()
+        if stripped == "---":
+            break
+        if stripped.startswith("name:"):
+            value = stripped[len("name:"):].strip().strip("\"'")
+            return value or None
+    return None
+
+
+def _split_valid_invalid(
+    ids: list[str],
+    known: set[str],
+    kind: str,
+    source: str = "recommended",
+) -> tuple[list[str], list[dict]]:
+    """Partition ids into (valid_list, invalid_entries).
+
+    invalid entries have the shape: {"kind": kind, "id": id, "source": source}
+    """
+    valid: list[str] = []
+    invalid: list[dict] = []
+    for item_id in ids:
+        if item_id in known:
+            valid.append(item_id)
+        else:
+            invalid.append({"kind": kind, "id": item_id, "source": source})
+    return valid, invalid
+
+
+def _atomic_write(path: Path, data: dict) -> None:
+    """Write YAML data to path atomically via tmp+rename."""
+    import tempfile
+    import os
+
+    yaml = _load_ruamel()
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        os.close(tmp_fd)
+        if yaml is not None:
+            with open(tmp_path, "w") as f:
+                yaml.dump(data, f)
+        else:
+            import yaml as pyyaml  # type: ignore
+            with open(tmp_path, "w") as f:
+                pyyaml.dump(data, f, allow_unicode=True, default_flow_style=False)
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _migrate_feedback_entries(
+    entries: list,
+    known_agents: set[str],
+    known_skills: set[str],
+) -> tuple[list, int]:
+    """Migrate stale agent/skill ids in feedback entries to invalid_ids.
+
+    Returns (updated_entries, changed_count).
+    """
+    changed = 0
+    for entry in entries:
+        rec = entry.get("recommended")
+        if not rec:
+            continue
+
+        new_invalid: list[dict] = list(entry.get("invalid_ids") or [])
+        already_invalid_pairs = {(i.get("kind"), i.get("id")) for i in new_invalid}
+
+        agent = rec.get("agent") or ""
+        if agent and known_agents and agent not in known_agents:
+            pair = ("agent", agent)
+            if pair not in already_invalid_pairs:
+                new_invalid.append({"kind": "agent", "id": agent, "source": "recommended"})
+                already_invalid_pairs.add(pair)
+            rec["agent"] = ""
+            changed += 1
+
+        raw_skills = list(rec.get("skills") or [])
+        valid_skills, invalid_skills = _split_valid_invalid(raw_skills, known_skills, "skill")
+        for inv in invalid_skills:
+            pair = ("skill", inv["id"])
+            if pair not in already_invalid_pairs:
+                new_invalid.append(inv)
+                already_invalid_pairs.add(pair)
+                changed += 1
+        rec["skills"] = valid_skills
+
+        if new_invalid:
+            entry["invalid_ids"] = new_invalid
+        elif "invalid_ids" in entry:
+            del entry["invalid_ids"]
+
+    return entries, changed
+
+
+def _parse_prefixed_token(token: str) -> tuple[str, str] | None:
+    """Parse 'kind:id' token. Returns (kind, id) or None if unrecognised."""
+    for prefix in ("agent:", "skill:", "mcp:"):
+        if token.startswith(prefix):
+            kind = prefix.rstrip(":")
+            item_id = token[len(prefix):]
+            return kind, item_id
+    return None
+
+
+def _migrate_override_entries(
+    entries: list,
+    known_agents: set[str],
+    known_skills: set[str],
+) -> tuple[list, int]:
+    """Migrate stale prefixed tokens in override modification lists to invalid_ids.
+
+    Returns (updated_entries, changed_count).
+    """
+    changed = 0
+    for entry in entries:
+        mod = entry.get("modification")
+        if not mod:
+            continue
+
+        new_invalid: list[dict] = list(entry.get("invalid_ids") or [])
+        already_invalid_raws = {i.get("raw") for i in new_invalid}
+
+        for field in ("removed", "added"):
+            tokens: list[str] = list(mod.get(field) or [])
+            kept: list[str] = []
+            for token in tokens:
+                parsed = _parse_prefixed_token(token)
+                if parsed is None:
+                    kept.append(token)
+                    continue
+                kind, item_id = parsed
+                if kind == "agent":
+                    known_set = known_agents
+                elif kind == "skill":
+                    known_set = known_skills
+                else:
+                    # MCPs and any other future prefix are discovered dynamically —
+                    # the migrator must not prune them.
+                    kept.append(token)
+                    continue
+                # Only validate against known set if it is non-empty
+                if known_set and item_id not in known_set:
+                    if token not in already_invalid_raws:
+                        new_invalid.append({
+                            "raw": token,
+                            "kind": kind,
+                            "id": item_id,
+                            "source": f"modification.{field}",
+                        })
+                        already_invalid_raws.add(token)
+                        changed += 1
+                    # Drop invalid token from field list
+                else:
+                    kept.append(token)
+            mod[field] = kept
+
+        if new_invalid:
+            entry["invalid_ids"] = new_invalid
+        elif "invalid_ids" in entry:
+            del entry["invalid_ids"]
+
+    return entries, changed
+
+
+def cmd_doctor(_: argparse.Namespace) -> int:
+    """Scan router yaml files and migrate stale ids to invalid_ids."""
+    known_agents, known_skills = _load_known_ids(_PROJECT_ROOT)
+
+    if not known_agents and not known_skills:
+        print(
+            "WARNING: no agent/skill manifests found — doctor cannot validate ids",
+            file=sys.stderr,
+        )
+
+    files_migrated = 0
+
+    # --- feedback-log.yaml ---
+    feedback = _feedback_path()
+    if feedback.exists():
+        import yaml as pyyaml  # type: ignore
+
+        try:
+            with feedback.open() as f:
+                data = pyyaml.safe_load(f) or {}
+            entries = data.get("entries") or []
+            updated, n_changed = _migrate_feedback_entries(entries, known_agents, known_skills)
+            if n_changed > 0:
+                data["entries"] = updated
+                _atomic_write(feedback, data)
+                print(f"migrated: {feedback}", file=sys.stderr)
+                files_migrated += 1
+        except Exception as exc:
+            print(f"ERROR processing {feedback}: {exc}", file=sys.stderr)
+    else:
+        print(f"WARNING: {feedback} not found", file=sys.stderr)
+
+    # --- overrides.yaml ---
+    overrides = _overrides_path()
+    if overrides.exists():
+        import yaml as pyyaml  # type: ignore
+
+        try:
+            with overrides.open() as f:
+                data = pyyaml.safe_load(f) or {}
+            entries = data.get("entries") or []
+            updated, n_changed = _migrate_override_entries(entries, known_agents, known_skills)
+            if n_changed > 0:
+                data["entries"] = updated
+                _atomic_write(overrides, data)
+                print(f"migrated: {overrides}", file=sys.stderr)
+                files_migrated += 1
+        except Exception as exc:
+            print(f"ERROR processing {overrides}: {exc}", file=sys.stderr)
+    else:
+        print(f"WARNING: {overrides} not found", file=sys.stderr)
+
+    print(f"doctor: {files_migrated} file(s) migrated", file=sys.stderr)
+    return 0
+
+
 def cmd_override(args: argparse.Namespace) -> int:
-    if not OVERRIDES.exists():
-        print(f"ERROR: {OVERRIDES} 가 없습니다.", file=sys.stderr)
+    overrides = _overrides_path()
+    if not overrides.exists():
+        print(f"ERROR: {overrides} 가 없습니다.", file=sys.stderr)
         return 2
     entry = {
         "date": _today(),
@@ -198,37 +484,63 @@ def cmd_override(args: argparse.Namespace) -> int:
         },
         "reason": args.reason or "",
     }
-    _append_entry(OVERRIDES, entry)
-    print(f"recorded override → {OVERRIDES}")
+    _append_entry(overrides, entry)
+    print(f"recorded override → {overrides}")
     return 0
 
 
 def cmd_feedback(args: argparse.Namespace) -> int:
-    if not FEEDBACK.exists():
-        print(f"ERROR: {FEEDBACK} 가 없습니다.", file=sys.stderr)
+    feedback = _feedback_path()
+    if not feedback.exists():
+        print(f"ERROR: {feedback} 가 없습니다.", file=sys.stderr)
         return 2
     if args.outcome not in ("success", "partial", "failed"):
         print("ERROR: --outcome 은 success|partial|failed 중 하나", file=sys.stderr)
         return 2
-    entry = {
+
+    known_agents, known_skills = _load_known_ids(_PROJECT_ROOT)
+
+    raw_agent = args.agent or ""
+    raw_skills = _split_ids(args.skills or "")
+
+    invalid_ids: list[dict] = []
+
+    # Validate agent (only if non-empty and known set is populated)
+    valid_agent = raw_agent
+    if raw_agent and known_agents:
+        if raw_agent not in known_agents:
+            invalid_ids.append({"kind": "agent", "id": raw_agent, "source": "recommended"})
+            valid_agent = ""
+
+    # Validate skills
+    valid_skills, invalid_skills = _split_valid_invalid(raw_skills, known_skills, "skill")
+    invalid_ids.extend(invalid_skills)
+
+    entry: dict = {
         "date": _today(),
         "dod": _dod_basename(args.dod),
         "recommended": {
-            "agent": args.agent or "",
-            "skills": _split_ids(args.skills or ""),
+            "agent": valid_agent,
+            "skills": valid_skills,
             "mcps": _split_ids(args.mcps or ""),
         },
         "outcome": args.outcome,
         "notes": args.notes or "",
     }
-    _append_entry(FEEDBACK, entry)
-    print(f"recorded feedback → {FEEDBACK}")
+    if invalid_ids:
+        entry["invalid_ids"] = invalid_ids
+
+    _append_entry(feedback, entry)
+    print(f"recorded feedback → {feedback}")
     return 0
 
 
 def cmd_learn(_: argparse.Namespace) -> int:
     """feedback + overrides 이력을 분석해 registry.yaml learned_preferences 갱신."""
-    if not FEEDBACK.exists() or not OVERRIDES.exists() or not REGISTRY.exists():
+    feedback = _feedback_path()
+    overrides = _overrides_path()
+    registry = _registry_path()
+    if not feedback.exists() or not overrides.exists() or not registry.exists():
         print("ERROR: router yaml 파일 누락", file=sys.stderr)
         return 2
 
@@ -237,11 +549,11 @@ def cmd_learn(_: argparse.Namespace) -> int:
         print("WARNING: ruamel.yaml 없음 — learn 은 ruamel 필수. skipping.", file=sys.stderr)
         return 0
 
-    with FEEDBACK.open() as f:
+    with feedback.open() as f:
         fb = yaml.load(f) or {}
-    with OVERRIDES.open() as f:
+    with overrides.open() as f:
         ov = yaml.load(f) or {}
-    with REGISTRY.open() as f:
+    with registry.open() as f:
         reg = yaml.load(f) or {}
 
     prefs: dict[str, dict] = {}
@@ -306,14 +618,22 @@ def cmd_learn(_: argparse.Namespace) -> int:
         }
         for p in prefs.values()
     ]
-    with REGISTRY.open("w") as f:
+    with registry.open("w") as f:
         yaml.dump(reg, f)
-    print(f"updated learned_preferences ({len(prefs)} items) → {REGISTRY}")
+    print(f"updated learned_preferences ({len(prefs)} items) → {registry}")
     return 0
 
 
 def main() -> int:
+    global _PROJECT_ROOT
+
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--project-dir",
+        default=None,
+        metavar="DIR",
+        help="프로젝트 루트 디렉토리 (기본값: 현재 작업 디렉토리). 샌드박스 테스트 용도.",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_ov = sub.add_parser("override", help="사용자 수정 이력 append")
@@ -335,7 +655,14 @@ def main() -> int:
     p_ln = sub.add_parser("learn", help="registry.learned_preferences 재계산")
     p_ln.set_defaults(func=cmd_learn)
 
+    p_dr = sub.add_parser("doctor", help="router yaml 의 stale id 를 invalid_ids 로 이관")
+    p_dr.set_defaults(func=cmd_doctor)
+
     args = parser.parse_args()
+
+    if args.project_dir is not None:
+        _PROJECT_ROOT = Path(args.project_dir).resolve()
+
     return args.func(args)
 
 

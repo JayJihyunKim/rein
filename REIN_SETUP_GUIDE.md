@@ -115,10 +115,10 @@ your-project/
 │   │   └── research-task.md
 │   ├── agents/                  ← 역할별 에이전트 정의
 │   │   ├── feature-builder.md
-│   │   ├── service-builder.md
-│   │   ├── reviewer.md
+│   │   ├── plan-writer.md
 │   │   ├── researcher.md
-│   │   └── docs-writer.md
+│   │   ├── docs-writer.md
+│   │   └── security-reviewer.md
 │   ├── skills/                  ← 특정 시점 호출 스킬
 │   │   ├── repo-audit/
 │   │   ├── incidents-to-rule/
@@ -127,9 +127,9 @@ your-project/
 │   │   ├── changelog-writer/
 │   │   └── pr-review-fixer/
 │   └── hooks/                   ← 라이프사이클 자동화 스크립트
-│       ├── post-edit-lint.sh
-│       ├── pre-bash-guard.sh
-│       └── task-completed-incident.sh
+│       ├── post-edit-hygiene.sh
+│       ├── post-edit-lint.sh.example  ← 언어별 autofix 예시 (복사 후 수정)
+│       └── pre-bash-guard.sh
 ├── trail/                         ← 증거 저장소 (상태/결정/사고 기록)
 │   ├── index.md                 ← 현재 프로젝트 상태 (5~15줄)
 │   ├── inbox/                   ← 세션 원본 로그
@@ -422,13 +422,13 @@ tests/
 
 **에이전트는 5개가 기본 제공됩니다:**
 
-| 에이전트 | 역할 | 언제 쓰이나 |
-|---------|------|------------|
-| `feature-builder` | 기능 추가 / 버그 수정 | 가장 자주 사용 |
-| `service-builder` | 새 서비스 초기 구조 생성 | 새 모듈 만들 때 |
-| `reviewer` | 코드 리뷰 + incident 작성 | PR 리뷰, self-review |
-| `researcher` | 기술 조사 | 라이브러리/아키텍처 결정 |
-| `docs-writer` | 문서 작성 | README, API 문서, changelog |
+| 에이전트 | 역할 |
+|---|---|
+| `feature-builder` | 기능 추가/버그 수정/새 모듈 초기화 |
+| `plan-writer` | design → plan 변환 + coverage 매트릭스 |
+| `researcher` | 기술 조사 |
+| `docs-writer` | 문서/CHANGELOG/설계 산문 |
+| `security-reviewer` | 보안 리뷰 |
 
 #### 2-3. 워크플로우 커스터마이징
 
@@ -482,31 +482,31 @@ paths:
 
 #### 3-2. Hooks (라이프사이클 자동화)
 
-**기본 제공 3개:**
+**기본 제공:**
 
 | Hook | 트리거 | 동작 |
 |------|--------|------|
-| `post-edit-lint.sh` | 파일 Edit/Write 후 | 확장자별 자동 lint/format 실행 |
+| `post-edit-hygiene.sh` | 파일 Edit/Write 후 | 언어 중립 위생 검사 (trailing whitespace, DoD 마커 등) |
+| `post-edit-lint.sh.example` | — (복사 후 활성화) | 언어별 autofix 예시 (eslint, ruff 등). 필요 시 복사하여 수정 |
 | `pre-bash-guard.sh` | Bash 명령 실행 전 | 위험 명령어 차단 (pipe to shell, force push 등) |
-| `task-completed-incident.sh` | 작업 완료 시 | self-review 체크리스트 리마인더 출력 |
 
 **Hook 동작 원리:**
 
 ```
-PostToolUse(Edit|Write) → post-edit-lint.sh
+PostToolUse(Edit|Write) → post-edit-hygiene.sh
+  └── 도메인·언어 무관 위생 검사 (trailing whitespace, DoD stamp 등)
+
+PostToolUse(Edit|Write) → post-edit-lint.sh  (활성화 시)
   ├── .ts/.tsx/.js/.jsx → npx eslint --fix
   └── .py → ruff check --fix + ruff format
 
 PreToolUse(Bash) → pre-bash-guard.sh
   ├── `| bash` or `| sh` → 즉시 차단 (exit 1)
   └── `git reset --hard` 등 → 확인 요청 (exit 2)
-
-TaskCompleted → task-completed-incident.sh
-  └── self-review 완료 여부, trail 갱신 여부 확인 메시지 출력
 ```
 
 **프로젝트에 맞게 수정할 포인트:**
-- `post-edit-lint.sh`: 프로젝트에서 사용하는 린터로 교체 (예: `biome`, `black`)
+- 언어별 autofix 필요 시: `post-edit-lint.sh.example` 을 `post-edit-lint.sh` 로 복사 후 린터 교체 (예: `biome`, `black`)
 - `pre-bash-guard.sh`: 차단할 위험 명령어 패턴 추가
 
 ---
@@ -672,7 +672,7 @@ Step 4: 회귀 테스트 추가 → trail/incidents/INC-NNN.md 작성
 ```
 사용자: "결제 서비스 만들어줘"
                     ↓
-orchestrator.md 참조 → build-from-scratch workflow + service-builder agent
+orchestrator.md 참조 → build-from-scratch workflow + feature-builder agent
                     ↓
 Step 1: 서비스 목적 + MVP 범위 + 기술 스택 결정
 Step 2: trail/decisions/DEC-NNN.md 기록
@@ -828,3 +828,20 @@ PATH 에 추가하려면 셸 rc 에 아래 한 줄:
 ```
 
 설치 스크립트가 자동으로 추가해줍니다 (프롬프트 확인 후).
+
+---
+
+## Breaking changes (v0.8.0)
+
+v0.8.0 에서 코어 하네스를 "도메인·언어 무관 메타-하네스" 로 명확화했습니다. 다음 변경점이 사용자 프로젝트에 영향을 줍니다:
+
+| 변경 | 영향 | 사용자 조치 |
+|---|---|---|
+| Stitch / shadcn 스킬 8개 번들 제거 | `.claude/skills/` 에서 사라짐 | 필요하면 개인적으로 재설치 (후속 플러그인 릴리스 대기) |
+| StitchMCP 설정 제거 | `.claude/settings.json` 에서 사라짐 | 사용자가 `.claude/settings.local.json` 에 개인 추가 |
+| 에이전트 `service-builder`, `reviewer` 제거 | 라우팅은 `feature-builder` + `/codex` 로 자동 매핑 | 없음 |
+| `post-edit-lint.sh` → `post-edit-hygiene.sh` + `.example` | 기본 훅 이름/동작 변경 | 언어별 autofix 필요 시 `post-edit-lint.sh.example` 복사 후 수정 |
+| `task-completed-incident.sh` 제거 | 기능은 `stop-session-gate.sh` 내부로 이동 | 없음 |
+| `inbox-compress.sh` → `trail-rotate.sh` 리네임 | 1-release wrapper alias 유지, 다음 릴리스에서 제거 | 외부 참조가 있다면 `trail-rotate.sh` 로 업데이트 |
+| AGENTS.md `/codex` fallback 체인 | `superpowers:code-reviewer` → rein 자체 `code-reviewer` 스킬 | 없음 |
+| `feedback-log.yaml` + `overrides.yaml` 스키마 확장 (`invalid_ids`) | 하위 호환 유지 | 1회 수동 실행: `python3 scripts/rein-route-record.py doctor` |

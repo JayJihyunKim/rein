@@ -24,3 +24,7 @@ data/processed/
 
 # Claude Code 로컬 설정 (공유 불가)
 .claude/settings.local.json
+
+# Git worktrees (로컬 작업 분리용)
+.worktrees/
+worktrees/

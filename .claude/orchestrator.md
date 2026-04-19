@@ -10,11 +10,12 @@
 |----------|----------|-------|----------------|
 | 새 기능 추가 | `add-feature.md` | `feature-builder` | 해당 언어 디렉토리 |
 | 버그 수정 | `fix-bug.md` | `feature-builder` | 해당 언어 디렉토리 |
-| 새 서비스 생성 | `build-from-scratch.md` | `service-builder` | 해당 언어 디렉토리 |
+| 새 서비스 생성 | `build-from-scratch.md` | `feature-builder` | 해당 언어 디렉토리 |
 | 기술 조사 | `research-task.md` | `researcher` | — |
-| 코드 리뷰 | — | `reviewer` | — |
+| 코드 리뷰 | — | `/codex` 스킬 (fallback: `code-reviewer` 스킬 → `general-purpose`) | — |
 | 보안 리뷰 | — | `security-reviewer` | — |
 | 문서 작성 | — | `docs-writer` | — |
+| plan 작성 | — | `plan-writer` | — |
 
 ---
 
@@ -48,7 +49,7 @@
 Agent Teams 사용 시:
 - 각 서브 에이전트에게 독립적인 DoD를 부여한다
 - 서브 에이전트 결과를 메인 컨텍스트로 가져올 때는 요약본만 포함한다
-- 병렬 결과 머지 시 `reviewer` 에이전트가 최종 검토한다
+- 병렬 결과 머지 시 `/codex` 스킬 (fallback: `code-reviewer` 스킬 → `general-purpose` 에이전트) 로 최종 검토한다
 
 ---
 
@@ -66,7 +67,7 @@ DoD 작성 완료 후, 구현 시작 전에 아래를 수행한다.
    - **프로젝트 에이전트**: `.claude/agents/*.md` 파일을 스캔하여 역할 설명 읽기
    - **스킬**: 세션 컨텍스트의 `The following skills are available` 목록에서 이름 + description 수집
    - **MCP**: 세션 컨텍스트의 `deferred tools` 목록에서 `mcp__서버명__` 접두사로 서버 식별
-   - **제외**: `.claude/router/registry.yaml`의 `excluded_patterns`에 해당하는 프로세스 스킬 제외
+   - **제외**: `.claude/router/registry.yaml`의 `excluded_patterns.description_keywords` 에 매칭되는 스킬(설명문 키워드) 또는 `excluded_patterns.id_globs` 에 매칭되는 id(glob) 를 라우팅 추천에서 제외
 
 2. **신호 추출**: DoD 파일에서 아래 4가지 신호를 추출
    - 키워드: 작업명, 완료 기준, 요약에서 핵심 단어

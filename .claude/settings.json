@@ -23,8 +23,7 @@
       "Bash(mkdir *)",
       "Bash(touch *)",
       "Bash(cp *)",
-      "Bash(mv *)",
-      "mcp__StitchMCP__*"
+      "Bash(mv *)"
     ],
     "ask": [
       "Bash(git push *)",
@@ -44,12 +43,7 @@
       "Read(./**/*.key)"
     ]
   },
-  "mcpServers": {
-    "StitchMCP": {
-      "command": "npx",
-      "args": ["@_davideast/stitch-mcp", "proxy"]
-    }
-  },
+  "mcpServers": {},
   "hooks": {
     "PreToolUse": [
       {
@@ -57,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/inbox-compress.sh"
+            "command": ".claude/hooks/trail-rotate.sh"
           }
         ]
       },
@@ -86,7 +80,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/post-edit-lint.sh"
+            "command": ".claude/hooks/post-edit-hygiene.sh"
           },
           {
             "type": "command",
@@ -117,16 +111,6 @@
           {
             "type": "command",
             "command": ".claude/hooks/session-start-load-trail.sh"
-          }
-        ]
-      }
-    ],
-    "TaskCompleted": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/task-completed-incident.sh"
           }
         ]
       }

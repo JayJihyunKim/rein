@@ -12,20 +12,24 @@
 
 # ============================================================
 # 프로세스 스킬 제외 목록
-# 아래 패턴의 스킬은 기존 흐름이 제어하므로 라우팅 추천에서 제외한다.
+# 라우팅 추천에서 제외할 프로세스 스킬을 식별하는 방식:
+#   1) description_keywords — 스킬 description 텍스트에 포함되면 제외 (기본)
+#   2) id_globs — id 를 직접 지정해야 하는 경우 glob 패턴으로 fallback
+# 외부 플러그인 네임스페이스(superpowers 등)에 하드코딩하지 않는다.
 # ============================================================
 excluded_patterns:
-  - "superpowers:brainstorming"
-  - "superpowers:writing-plans"
-  - "superpowers:executing-plans"
-  - "superpowers:verification-before-completion"
-  - "superpowers:using-superpowers"
-  - "superpowers:using-git-worktrees"
-  - "superpowers:finishing-a-development-branch"
-  - "superpowers:requesting-code-review"
-  - "superpowers:receiving-code-review"
-  - "superpowers:dispatching-parallel-agents"
-  - "superpowers:subagent-driven-development"
+  description_keywords:
+    - "Use when starting any conversation"    # using-superpowers 류
+    - "implementation plan"                   # writing-plans 류
+    - "execute.*plan"                         # executing-plans 류
+    - "brainstorm"                            # brainstorming 류
+    - "verify.*completion"                    # verification-before-completion 류
+    - "code review"                           # requesting-/receiving-code-review 류
+    - "worktree"                              # using-git-worktrees 류
+    - "finishing.*development"                # finishing-a-development-branch 류
+    - "dispatching.*parallel"                 # dispatching-parallel-agents 류
+    - "subagent-driven"                       # subagent-driven-development 류
+  id_globs: []                                # 필요 시 "plugin:skill-*" 형식 추가
 
 # ============================================================
 # 학습된 보정 데이터

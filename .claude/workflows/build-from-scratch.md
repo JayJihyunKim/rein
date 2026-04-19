@@ -1,5 +1,6 @@
 # Workflow: build-from-scratch
 > 새 서비스, 모듈, 앱을 처음부터 만들 때 사용
+> 실행 에이전트: `feature-builder` (v0.8.0+, 이전 `service-builder` 역할 흡수)
 
 ## 실행 절차
 

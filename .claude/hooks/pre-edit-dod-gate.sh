@@ -1,7 +1,7 @@
 #!/bin/bash
 # Hook: PreToolUse(Edit|Write|MultiEdit)
 # DoD 파일 없으면 소스 편집 차단
-# (inbox 정리는 inbox-compress.sh로 분리됨)
+# (inbox 정리는 trail-rotate (구 inbox-compress).sh로 분리됨)
 #
 # Exit code: 0=허용, 2=차단
 

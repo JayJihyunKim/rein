@@ -165,16 +165,16 @@ claude
 | `changelog-writer` | Git 히스토리 기반 CHANGELOG 자동 작성 |
 | `pr-review-fixer` | PR 리뷰 코멘트 자동 수정 적용 |
 
-**Stitch UI 디자인 스킬** (Stitch MCP 연결 시):
+### 작업 유형별 추천 조합 (예시)
 
-| 스킬 | 역할 |
-|------|------|
-| `stitch-design` | 디자인 시스템 총괄 + 프롬프트 강화 |
-| `stitch-loop` | 멀티페이지 자동 생성 |
-| `enhance-prompt` | 모호한 UI 요청 → 정교한 프롬프트 변환 |
-| `react-components` | 디자인 → React 컴포넌트 변환 |
+| 작업 | 추천 에이전트 | 주요 스킬 |
+|---|---|---|
+| 기능 추가 | feature-builder | codex, writing-plans |
+| 버그 수정 | feature-builder | codex, systematic-debugging |
+| 설계 | docs-writer | brainstorming, writing-plans |
+| 리팩토링 | feature-builder | codex, repo-audit |
 
-> Stitch 스킬은 호출 시에만 로드되므로 미사용 시 컨텍스트를 차지하지 않습니다.
+> 사용자가 별도 스킬·플러그인을 설치하면 라우터가 세션마다 동적으로 스캔하여 자동 추천 후보에 포함한다.
 
 ## 호환성 주의
 

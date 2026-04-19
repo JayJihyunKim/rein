@@ -12,7 +12,8 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# sandbox/테스트용 override — 설정 시 이 값 사용, 아니면 기본 경로 계산
+PROJECT_DIR="${REIN_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 
 BUDGET_BYTES="${REIN_BUDGET_BYTES:-65536}"
 USED_BYTES=0
@@ -130,6 +131,23 @@ except Exception:
   # blocks.jsonl 신규 라인을 반영). flock 으로 동시성 안전.
   python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
     --project-dir "$PROJECT_DIR" >/dev/null 2>&1 || true
+
+  # --- H3.2: session-start-line stamp (recovery aggregate 완료 후) ---
+  # 순서 중요: ① recovery aggregate (위) → ② blocks.jsonl line count → ③ stamp 원자적 쓰기
+  # stamp 값은 "이번 세션이 시작할 line 번호" = 현재 line_count + 1
+  _write_session_start_line() {
+    local BLOCKS_JSONL="$PROJECT_DIR/trail/incidents/blocks.jsonl"
+    local STAMP="$PROJECT_DIR/trail/incidents/.session-start-line"
+    mkdir -p "$(dirname "$STAMP")" 2>/dev/null || return 0
+    local line_count=0
+    if [ -f "$BLOCKS_JSONL" ]; then
+      line_count=$(wc -l < "$BLOCKS_JSONL" | tr -d ' ')
+    fi
+    local next_line=$((line_count + 1))
+    local tmp="${STAMP}.tmp.$$"
+    echo "$next_line" > "$tmp" && mv "$tmp" "$STAMP"
+  }
+  _write_session_start_line
 
   PENDING=$(python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
     --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null || echo 0)

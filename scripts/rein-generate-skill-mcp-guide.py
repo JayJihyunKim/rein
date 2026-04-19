@@ -32,7 +32,7 @@ CATEGORIES = [
     },
     {
         "title": "코드 작성 / 편집",
-        "hints": ["serena", "morphllm", "magic", "codex", "feature-builder", "service-builder", "pr-review"],
+        "hints": ["serena", "morphllm", "magic", "codex", "feature-builder", "pr-review"],
     },
     {
         "title": "디버깅 / 검증",
@@ -46,12 +46,11 @@ CATEGORIES = [
 
 DEFAULT_COMBOS = [
     ("새 기능 추가", "feature-builder + codex + security-reviewer"),
-    ("버그 수정", "feature-builder + codex"),
-    ("새 서비스 생성", "service-builder + writing-plans + codex"),
+    ("버그 수정", "feature-builder + codex + systematic-debugging"),
+    ("새 모듈 초기화", "feature-builder + writing-plans + codex"),
     ("기술 조사", "researcher + context7"),
-    ("코드 리뷰", "reviewer + codex"),
+    ("코드 리뷰", "code-reviewer + codex"),
     ("보안 리뷰", "security-reviewer"),
-    ("UI 디자인", "frontend-design + stitch-design + shadcn-ui"),
 ]
 
 
