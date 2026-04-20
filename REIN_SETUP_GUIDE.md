@@ -40,6 +40,8 @@
 
 ## 적용 방법
 
+> **Windows 사용자**: Rein 은 bash + GNU coreutils + POSIX Python API 를 전제로 하므로 **WSL2 (Ubuntu) 환경**에서 사용하세요. PowerShell 을 관리자 권한으로 열고 `wsl --install` 을 실행한 뒤, WSL Ubuntu 셸 안에서 아래 방법 중 하나를 따르면 됩니다. 자세한 설치 방법은 [README.md 의 "Windows 사용자" 섹션](README.md#windows-사용자) 을 참조하세요.
+
 ### 방법 A: 새 프로젝트를 템플릿으로 생성
 
 ```bash

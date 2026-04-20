@@ -19,6 +19,9 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="${REIN_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+# shellcheck source=./lib/portable.sh
+. "$SCRIPT_DIR/lib/portable.sh"
+
 INBOX_DIR="$PROJECT_DIR/trail/inbox"
 DOD_DIR="$PROJECT_DIR/trail/dod"
 INDEX_FILE="$PROJECT_DIR/trail/index.md"
@@ -175,8 +178,7 @@ if [ -d "$DOD_DIR" ]; then
     FILE_DATE=$(basename "$f" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1)
     [ -z "$FILE_DATE" ] && continue
 
-    FILE_EPOCH=$(date -j -f "%Y-%m-%d" "$FILE_DATE" +%s 2>/dev/null \
-               || date -d "$FILE_DATE" +%s 2>/dev/null)
+    FILE_EPOCH=$(portable_date_ymd_to_epoch "$FILE_DATE")
     [ -z "$FILE_EPOCH" ] && continue
 
     AGE_DAYS=$(( (NOW_EPOCH - FILE_EPOCH) / 86400 ))

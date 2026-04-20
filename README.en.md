@@ -64,6 +64,46 @@ Running `rein update` updates both template files **and the CLI itself** to the 
 
 ---
 
+## Supported platforms
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| macOS | ✅ Official | |
+| Linux | ✅ Official | |
+| Windows (WSL2) | ✅ Official | See "Windows users" below |
+| Windows (Git Bash / MSYS2) | ⚠️ Best-effort | Not part of the regular test matrix |
+| Windows (PowerShell / CMD native) | ❌ Unsupported | Hooks assume POSIX bash + GNU coreutils |
+
+### Windows users
+
+Rein's hooks rely on bash + GNU coreutils, and a few Python scripts use POSIX-only APIs (`fcntl` for file locking). On Windows, **use WSL2 (Ubuntu)**.
+
+**Install WSL2** (open PowerShell as **Administrator**):
+
+```powershell
+wsl --install
+```
+
+- One-liner on Windows 10 2004 (build 19041) or later, and Windows 11
+- Ubuntu is installed as the default distribution and prompts for a username on first boot
+- Reboot, then run `wsl` again to enter the Ubuntu shell
+
+Then install Rein the same way as on Linux:
+
+```bash
+# Prerequisites (usually preinstalled on Ubuntu)
+sudo apt update && sudo apt install -y git curl python3
+
+# Install Rein
+curl -fsSL https://raw.githubusercontent.com/JayJihyunKim/rein/main/install.sh | bash
+source ~/.rein/env
+rein --version
+```
+
+Keep your project checkouts under `~/` (the WSL filesystem). Working from `/mnt/c/...` (the Windows filesystem) is functional but noticeably slower for disk I/O.
+
+More details in Microsoft's docs: [aka.ms/wsl-install](https://aka.ms/wsl-install).
+
 ## Installation
 
 ```bash
@@ -164,6 +204,12 @@ The `gateguard-fact-force` hook in `everything-claude-code` (>= 1.9.0) is incomp
 Starting with v0.7.0, the CLI install path changed from `/usr/local/bin/rein` to `$HOME/.rein/bin/rein`. Run [install.sh](install.sh) once to migrate. After that, `rein update` handles self-updates automatically.
 
 ## Version History
+
+### v0.9.0 (2026-04-20) — cross-platform portability + Windows WSL2 guidance
+- Fixed `file_size()` in `session-start-load-trail.sh` breaking on Linux (GNU `stat -f` returns exit 0 in filesystem-info mode, so the `||` fallback never fired)
+- Consolidated BSD/GNU dispatch helpers into `.claude/hooks/lib/portable.sh` (removed duplicated `_mtime`/`_mtime_date`/`file_size` copies)
+- Added `.gitattributes` to force LF line endings — protects shebang hooks on Windows checkouts
+- Declared supported platforms: macOS / Linux / Windows via WSL2. README now includes a WSL2 installation walkthrough.
 
 ### v0.7.5 (2026-04-19)
 - Smart router enforcement — new DoDs require a `## 라우팅 추천` section + explicit user approval (hook blocks edits when missing)

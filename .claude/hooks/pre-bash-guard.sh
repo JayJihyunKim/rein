@@ -6,6 +6,9 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=./lib/portable.sh
+. "$SCRIPT_DIR/lib/portable.sh"
+
 BLOCKS_LOG="$PROJECT_DIR/trail/incidents/blocks.log"
 BLOCKS_LOG_JSONL="$PROJECT_DIR/trail/incidents/blocks.jsonl"
 
@@ -53,16 +56,6 @@ print(n)
     echo "WARNING: 동일 위반 (${reason}) ${count}회 누적. incidents-to-agent 실행을 권장합니다." >&2
   elif [ "$count" -ge 2 ]; then
     echo "WARNING: 동일 위반 (${reason}) ${count}회 누적. incidents-to-rule 실행을 권장합니다." >&2
-  fi
-}
-
-# Portable mtime extractor: returns epoch seconds.
-# macOS uses BSD stat (-f %m), Linux/WSL/Git Bash/Cygwin use GNU stat (-c %Y).
-_mtime() {
-  if [ "$(uname)" = "Darwin" ]; then
-    stat -f %m "$1" 2>/dev/null || echo 0
-  else
-    stat -c %Y "$1" 2>/dev/null || echo 0
   fi
 }
 
@@ -133,8 +126,8 @@ check_review_stamp() {
     fi
 
     # .codex-reviewed가 .review-pending보다 최신인지 검증
-    PENDING_TIME=$(_mtime "$REVIEW_PENDING")
-    REVIEW_TIME=$(_mtime "$REVIEW_STAMP")
+    PENDING_TIME=$(portable_mtime_epoch "$REVIEW_PENDING")
+    REVIEW_TIME=$(portable_mtime_epoch "$REVIEW_STAMP")
     if [ "$REVIEW_TIME" -lt "$PENDING_TIME" ]; then
       echo "BLOCKED: 리뷰 이후 코드가 다시 수정되었습니다. codex 리뷰를 재실행하세요." >&2
       log_block "리뷰 후 코드 재수정 (${context})" "$COMMAND"

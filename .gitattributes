@@ -1,0 +1,24 @@
+# Normalize line endings to LF for all text files.
+# Prevents Windows checkout from converting shebang scripts to CRLF,
+# which would break `#!/bin/bash` invocation and break Python scripts that
+# expect LF-only line endings (e.g. aggregator parsing blocks.jsonl).
+
+*               text=auto eol=lf
+
+# Explicit overrides for files where LF is mandatory.
+*.sh            text eol=lf
+*.py            text eol=lf
+*.md            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.json          text eol=lf
+*.toml          text eol=lf
+*.cfg           text eol=lf
+
+# Binary files — do not touch.
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.pdf           binary

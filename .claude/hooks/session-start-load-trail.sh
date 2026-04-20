@@ -12,6 +12,9 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=./lib/portable.sh
+. "$SCRIPT_DIR/lib/portable.sh"
+
 # sandbox/테스트용 override — 설정 시 이 값 사용, 아니면 기본 경로 계산
 PROJECT_DIR="${REIN_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 
@@ -33,11 +36,6 @@ now_week_offset() {
   fi
 }
 
-# 파일 크기 계산 (macOS/Linux 호환)
-file_size() {
-  stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || echo 0
-}
-
 emit_file_block() {
   # $1 = 파일 경로 (프로젝트 루트 기준 상대 경로)
   local rel="$1"
@@ -45,7 +43,7 @@ emit_file_block() {
   [ -f "$abs" ] || return 0
 
   local sz
-  sz=$(file_size "$abs")
+  sz=$(portable_stat_size "$abs")
 
   # 예산 초과 시 제목만 출력
   if [ "$((USED_BYTES + sz))" -gt "$BUDGET_BYTES" ]; then
@@ -218,7 +216,7 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$PROJECT_DIR/scripts/rein-scan-sk
   rm -f "$SCAN_TMP"
 
   if [ -f "$SKILL_GUIDE" ]; then
-    GUIDE_SIZE=$(stat -f %z "$SKILL_GUIDE" 2>/dev/null || stat -c %s "$SKILL_GUIDE" 2>/dev/null || echo 0)
+    GUIDE_SIZE=$(portable_stat_size "$SKILL_GUIDE")
     echo "### Skill/MCP 활용 가이드"
     if [ "$GUIDE_SIZE" -gt "$SKILL_GUIDE_MAX_BYTES" ]; then
       head -c "$SKILL_GUIDE_MAX_BYTES" "$SKILL_GUIDE"

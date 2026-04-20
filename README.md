@@ -87,6 +87,46 @@ plan 파일을 편집하면 validator (`scripts/rein-validate-coverage-matrix.py
 
 ---
 
+## 지원 플랫폼
+
+| 플랫폼 | 상태 | 비고 |
+|--------|------|------|
+| macOS | ✅ 공식 지원 | |
+| Linux | ✅ 공식 지원 | |
+| Windows (WSL2) | ✅ 공식 지원 | 아래 "Windows 사용자" 안내 참조 |
+| Windows (Git Bash / MSYS2) | ⚠️ best-effort | 정식 테스트 대상 아님 |
+| Windows (PowerShell / CMD native) | ❌ 미지원 | 훅이 POSIX bash + GNU coreutils 를 전제로 함 |
+
+### Windows 사용자
+
+Rein 의 훅은 bash + GNU coreutils 를 전제로 동작하며, 일부 Python 스크립트는 `fcntl` 같은 POSIX API 에 의존합니다. Windows 에서는 **WSL2 (Ubuntu) 환경을 권장**합니다.
+
+**WSL2 설치** (PowerShell 을 **관리자 권한**으로 열고 실행):
+
+```powershell
+wsl --install
+```
+
+- Windows 10 2004 (빌드 19041) 이상 또는 Windows 11 에서 한 줄로 완료됩니다
+- 기본 배포판 Ubuntu 가 자동 설치되고 사용자 계정을 만들라는 프롬프트가 뜹니다
+- 재부팅 후 `wsl` 을 다시 실행하면 Ubuntu 셸로 진입합니다
+
+그 다음 WSL Ubuntu 셸 안에서 일반 Linux 와 동일하게 설치합니다:
+
+```bash
+# 필수 도구 (대부분 Ubuntu 기본 포함)
+sudo apt update && sudo apt install -y git curl python3
+
+# Rein 설치
+curl -fsSL https://raw.githubusercontent.com/JayJihyunKim/rein/main/install.sh | bash
+source ~/.rein/env
+rein --version
+```
+
+프로젝트 체크아웃 경로는 `/mnt/c/...` (Windows 파일시스템) 보다 `~/` (WSL 파일시스템) 가 디스크 I/O 가 훨씬 빠릅니다.
+
+자세한 안내: Microsoft 공식 문서 [aka.ms/wsl-install](https://aka.ms/wsl-install).
+
 ## 설치
 
 ```bash
@@ -187,6 +227,12 @@ claude
 v0.7.0 부터 CLI 설치 경로가 `/usr/local/bin/rein` → `$HOME/.rein/bin/rein` 으로 변경되었습니다. 기존 사용자는 [install.sh](install.sh) 를 한 번 실행하면 됩니다. 이후 `rein update` 가 자가 업데이트를 자동 처리합니다.
 
 ## 버전 히스토리
+
+### v0.9.0 (2026-04-20) — cross-platform portability + Windows WSL2 guidance
+- Linux 에서 `session-start-load-trail.sh` 의 `file_size()` 가 깨지는 버그 수정 (GNU `stat -f` 가 exit 0 인 filesystem-info 모드로 해석되어 `||` fallback 이 안 타던 문제)
+- 훅 전반의 BSD/GNU 분기 헬퍼를 `.claude/hooks/lib/portable.sh` 로 공통화 (`_mtime`/`_mtime_date`/`file_size` 중복 제거)
+- `.gitattributes` 추가 — Windows checkout 시 CRLF 변환 방지로 shebang 훅 보호
+- 지원 플랫폼 명시: macOS / Linux / Windows via WSL2. README 에 WSL2 설치 안내 추가
 
 ### v0.8.0 (2026-04-20) — core harness purity (breaking)
 - 도메인·언어 무관 메타-하네스로 정리 — Stitch/shadcn 번들 분리, 에이전트 5개 재편(`plan-writer` 추가), 훅 리팩토링, rein-native `writing-plans`/`code-reviewer` 스킬, 라우터 id 검증 + `doctor`. 상세 + 마이그레이션: `CHANGELOG.md` · `REIN_SETUP_GUIDE.md`

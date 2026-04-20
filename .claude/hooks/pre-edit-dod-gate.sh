@@ -7,6 +7,9 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=./lib/portable.sh
+. "$SCRIPT_DIR/lib/portable.sh"
+
 BLOCKS_LOG="$PROJECT_DIR/trail/incidents/blocks.log"
 BLOCKS_LOG_JSONL="$PROJECT_DIR/trail/incidents/blocks.jsonl"
 DOD_DIR="$PROJECT_DIR/trail/dod"
@@ -14,22 +17,12 @@ INBOX_DIR="$PROJECT_DIR/trail/inbox"
 SRC_EDIT_MARKER="$DOD_DIR/.session-has-src-edit"
 CACHE_KEY=$(echo "${PROJECT_DIR}" | md5 -q 2>/dev/null || echo "${PROJECT_DIR}" | md5sum 2>/dev/null | cut -c1-8)
 
-# Portable mtime extractor: returns epoch seconds.
-# macOS uses BSD stat (-f %m), Linux/WSL/Git Bash/Cygwin use GNU stat (-c %Y).
-_mtime() {
-  if [ "$(uname)" = "Darwin" ]; then
-    stat -f %m "$1" 2>/dev/null || echo 0
-  else
-    stat -c %Y "$1" 2>/dev/null || echo 0
-  fi
-}
-
 # 캐시 키에 dod/inbox 디렉토리의 최신 mtime 을 혼입 (Codex 리뷰 완화책):
 # inbox 파일이 생기는 순간 디렉토리 mtime 이 갱신되어 캐시가 즉시 무효화됨.
 DIR_MTIME=$(
   {
-    _mtime "$DOD_DIR"
-    _mtime "$INBOX_DIR"
+    portable_mtime_epoch "$DOD_DIR"
+    portable_mtime_epoch "$INBOX_DIR"
   } | sort -nr | head -1
 )
 CACHE="/tmp/.claude-dod-${CACHE_KEY}-${DIR_MTIME:-0}"
@@ -172,7 +165,7 @@ fi
 
 # --- 캐시 확인 ---
 if [ -f "$CACHE" ]; then
-  CACHE_AGE=$(( $(date +%s) - $(_mtime "$CACHE") ))
+  CACHE_AGE=$(( $(date +%s) - $(portable_mtime_epoch "$CACHE") ))
   if [ "$CACHE_AGE" -lt "$CACHE_TTL" ]; then
     touch "$SRC_EDIT_MARKER" 2>/dev/null
     exit 0

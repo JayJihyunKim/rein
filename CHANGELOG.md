@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.9.0 (2026-04-20) — Cross-platform portability + Windows WSL2 guidance
+
+### Fixed
+
+- Linux 에서 `session-start-load-trail.sh:file_size()` 가 깨지는 버그. GNU `stat -f` 가 exit 0 인 filesystem-info 모드로 해석되어 `||` fallback 이 안 타던 문제를 `uname` 명시 분기 + 숫자 검증으로 해결.
+
+### Added
+
+- `.claude/hooks/lib/portable.sh` — BSD/GNU 분기 헬퍼 모음 (`portable_stat_size`, `portable_mtime_epoch`, `portable_mtime_date`, `portable_date_ymd_to_epoch`). 각 훅은 이 파일을 source 하여 중복 구현을 제거.
+- `.gitattributes` — `*.sh`/`*.py`/`*.md` 등 텍스트 파일에 LF 강제. Windows checkout 시 CRLF 변환으로 shebang 훅이 깨지는 것을 예방.
+- README / README.en / REIN_SETUP_GUIDE 에 지원 플랫폼 표 + Windows 사용자용 WSL2 설치 안내.
+
+### Changed
+
+- `.claude/hooks/pre-edit-dod-gate.sh`, `pre-bash-guard.sh`, `trail-rotate.sh`, `session-start-load-trail.sh`, `stop-session-gate.sh` 가 각자 보유한 `_mtime`/`_mtime_date`/`file_size` helper 제거하고 `lib/portable.sh` 를 source.
+- `tests/hooks/test-stat-portability.sh` 를 `portable.sh` 함수 단위 unit test 로 재구성 (`portable_*` 4 개 함수 + 소스 규약 + parse check + 레거시 체인 grep guard, 총 14 테스트).
+- `tests/hooks/lib/test-harness.sh:sandbox_setup()` 가 `.claude/hooks/lib/` 를 샌드박스로 먼저 복사.
+
+### Supported platforms (declared)
+
+- ✅ macOS, Linux, Windows via WSL2
+- ⚠️ Git Bash / MSYS2 — best-effort, not part of the regular test matrix
+- ❌ PowerShell / CMD native — hooks assume POSIX bash + GNU coreutils
+
 ## v0.8.0 (2026-04-XX) — Core Harness Purity
 
 ### Breaking changes

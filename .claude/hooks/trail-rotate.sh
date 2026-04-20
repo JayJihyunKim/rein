@@ -8,6 +8,9 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=./lib/portable.sh
+. "$SCRIPT_DIR/lib/portable.sh"
+
 INBOX_DIR="$PROJECT_DIR/trail/inbox"
 DAILY_DIR="$PROJECT_DIR/trail/daily"
 WEEKLY_DIR="$PROJECT_DIR/trail/weekly"
@@ -16,15 +19,6 @@ CACHE_KEY=$(echo "${PROJECT_DIR}" | md5 -q 2>/dev/null || echo "${PROJECT_DIR}" 
 COMPRESS_MARKER="/tmp/.claude-inbox-compressed-${CACHE_KEY}"
 
 TODAY=$(date +%Y-%m-%d)
-
-# Returns YYYY-MM-DD of file mtime, portable across BSD/GNU stat.
-_mtime_date() {
-  if [ "$(uname)" = "Darwin" ]; then
-    stat -f "%Sm" -t "%Y-%m-%d" "$1" 2>/dev/null
-  else
-    stat -c "%y" "$1" 2>/dev/null | cut -d' ' -f1
-  fi
-}
 
 # ============================================================
 # 레거시 DoD 스윕 (마커 검사 이전에 실행 — 업데이트 당일 즉시 청소)
@@ -54,7 +48,7 @@ sweep_legacy_dod() {
     fi
 
     local FILE_MTIME
-    FILE_MTIME=$(_mtime_date "$f")
+    FILE_MTIME=$(portable_mtime_date "$f")
 
     # 원자성: tmp 에 섹션 작성 후 append 성공 시에만 원본 rm
     local TMP_SECTION
