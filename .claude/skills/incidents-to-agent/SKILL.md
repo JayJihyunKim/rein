@@ -17,7 +17,7 @@ rule 로 해결 불가한 반복 실패 패턴을 분석해 전문 에이전트 
 3. 기존 에이전트 + 하위 AGENTS.md 조합으로 해결 **불가능**
 
 ## 입력
-- `trail/incidents/auto-*.md` (status in {pending, processed}, count >= 3)
+- `trail/incidents/auto-*.md` (status in {pending, processed}, count >= 3, `agent_eligible != false`)
 - 기존 `trail/agent-candidates/<hash>.md` (decision 확인용)
 
 ## 실행 절차
@@ -25,8 +25,13 @@ rule 로 해결 불가한 반복 실패 패턴을 분석해 전문 에이전트 
 ### Step 1: 후보 식별
 각 auto-*.md 를 순회:
 - `count >= 3` 체크
+- frontmatter `agent_eligible` 확인:
+  - `false` → **에이전트 후보에서 제외** (bug/artifact — hook 소스 수정 등 다른 경로로 해결)
+  - `true` 또는 `unknown` 또는 필드 없음 → 통과 (기존 동작 유지)
 - 기존 candidate `<pattern_hash>.md` 존재? → decision != pending 이면 skip
 - 남은 건을 후보 리스트에 추가
+
+> **왜 이 필터인가**: `count >= 3` 만 보면 hook 소스의 regex false-positive 같은 버그성 패턴도 agent 후보로 올라와 사용자가 매번 decline 해야 한다. `agent_eligible: false` 는 `/incidents-to-rule` 분석 단계에서 기록되며, 여기서 필터링한다. 기존 incident 파일 (필드 없음) 은 `unknown` 으로 해석되어 기존 동작을 깨지 않는다 (backfill 불요).
 
 candidate stub 생성:
 ```bash

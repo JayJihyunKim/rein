@@ -27,6 +27,8 @@ reason: "파이프 쉘 실행"
 count: "5"
 first_seen: "2026-04-10T14:23:10"
 last_seen_at: "2026-04-15T09:17:45"
+agent_eligible: unknown      # true | false | unknown — 분류 후 기록 (선택)
+root_cause: unknown           # bug | missing_rule | missing_agent | tooling | user_error | unknown (선택)
 ---
 
 # Incident: pre-bash-guard / 파이프 쉘 실행
@@ -39,6 +41,42 @@ last_seen_at: "2026-04-15T09:17:45"
 - `auto-*.md` 파일은 frontmatter `status: pending` 인 것만 처리
 - `status: processed` 또는 `status: declined` 는 건너뜀
 - 처리 완료 후 해당 파일의 frontmatter `status` 를 `processed` 또는 `declined` 로 갱신
+- 분석 중에 **분류 필드** (`agent_eligible`, `root_cause`) 를 함께 기록하면 `/incidents-to-agent` 가 이를 기준으로 에이전트 승격 후보에서 제외할 수 있다 (아래 "분류 가이드" 참조)
+
+### 분류 가이드 (`agent_eligible` / `root_cause`)
+
+incident 를 분석하면서 아래 기준으로 분류한다. 확신이 없으면 `unknown` 유지 (보수적 기본값).
+
+| 상황 | `agent_eligible` | `root_cause` |
+|------|------------------|-------------|
+| hook 소스의 regex/pattern false-positive — 코드 수정으로 해결 | `false` | `bug` |
+| 특정 workflow 에서 반복되는 순서 위반 — AGENTS.md 규칙 추가로 해결 | `true` | `missing_rule` |
+| 여러 스킬 조합으로 해결 가능한 패턴 — 에이전트 후보 | `true` | `missing_agent` |
+| 외부 도구/MCP 설정 부재 | `false` | `tooling` |
+| 사용자가 일회성으로 실수한 패턴 (반복 아님) | `false` | `user_error` |
+| 분류 불명 | `unknown` | `unknown` |
+
+- `agent_eligible: false` 로 분류된 건은 `/incidents-to-agent` 의 Step 1 필터에서 제외된다 — 사람이 hook 소스 수정이나 다른 대응으로 해결해야 할 대상
+- 기존 incident 파일 (필드 없음) 은 `unknown` 으로 해석되어 기존 동작 (count >= 3 이면 후보 생성) 을 유지한다 — backfill 불필요
+
+분류 기록 명령 (status 갱신과 동시 적용 가능):
+
+```bash
+# status 는 바꾸지 않고 분류만 기록
+python3 scripts/rein-mark-incident-processed.py \
+  trail/incidents/auto-<hook>-<hash>.md \
+  --set-agent-eligible false \
+  --set-root-cause bug \
+  --reason "pre-bash-guard regex false positive — hook 소스 수정으로 해결"
+
+# status 갱신 + 분류 동시
+python3 scripts/rein-mark-incident-processed.py \
+  trail/incidents/auto-<hook>-<hash>.md \
+  declined \
+  --set-agent-eligible false \
+  --set-root-cause bug \
+  --reason "..."
+```
 
 ### 레거시 포맷 (`INC-NNN.md`)
 ```markdown

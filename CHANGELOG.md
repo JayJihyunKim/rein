@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.10.0 (2026-04-20) — Follow-up issues 2/3/4/5: tests CI + brainstorming + codex modes + incident classifier
+
+### Added
+
+- **tests CI workflow** (`.github/workflows/tests.yml`): push + PR 트리거, ubuntu+macOS matrix primary, windows-latest advisory (`continue-on-error`). `bash tests/hooks/run-all.sh` + `bash tests/scripts/run-all.sh` 전체 green 을 자동 검증. `github.repository == 'JayJihyunKim/rein-dev'` 가드로 fork/template 방어, `mirror-to-public.yml` 가 main 배포 시 strip.
+- **`tests/scripts/run-all.sh`**: scripts 테스트 모음 순차 runner. 개별 `bash <file>` 로 실행하여 실패 전염 방지. 리스트에 적힌 파일이 누락되면 CI 를 red 로 전환 (rename/typo 감지).
+- **rein-native `brainstorming` skill** (`.claude/skills/brainstorming/`): brownfield 에서 feasibility·compatibility 를 선검증한 뒤 선택지를 수렴한다. 산출물 포맷 (Problem/Constraints/Options/Chosen/Rejected/Open Questions) 고정, 저장 위치 `docs/superpowers/brainstorms/YYYY-MM-DD-<slug>.md`. greenfield 는 얇은 경로로 분기.
+- **`/codex ask` subcommand**: Codex 를 Claude 세션 컨텍스트에 오염되지 않은 독립 관점 에이전트로 호출. stamp 생성 없음, `resume --last` 금지, 항상 새 `codex exec` 세션.
+- **incident `agent_eligible` classification field**: `scripts/rein-mark-incident-processed.py` 에 `--set-agent-eligible {true|false|unknown}` + `--set-root-cause <label>` 옵션. `/incidents-to-agent` Step 1 이 `agent_eligible != false` 를 필터로 사용하여 hook-source bug 패턴을 자동 분리. 기존 incident 파일 (필드 없음) 은 `unknown` 해석으로 기존 동작 유지 (backfill 불요).
+- **`tests/scripts/test-incident-agent-eligible.sh`**: 분류 필드 회귀 6 케이스 (backward compat, append, update, combined, invalid rejection, no-arg rejection).
+
+### Changed
+
+- **`/codex` subcommand split**: `.claude/skills/codex/SKILL.md` 을 Mode A (`/codex review` — 기존 리뷰 게이트) / Mode B (`/codex ask` — second opinion) 로 재구성. 하위 커맨드 없이 `/codex` 만 호출하면 backward compat 로 Mode A 해석. `AGENTS.md`, `.claude/CLAUDE.md`, `.claude/orchestrator.md` 의 `/codex` 언급을 `/codex review` 로 명시화.
+- **Smart router registry (`.claude/router/registry.yaml`)**: `description_keywords` 에서 `"brainstorm"` 제거 → rein-native brainstorming 이 자동 추천 대상에 포함. `id_globs` 에 `superpowers:brainstorming` / `superpowers:writing-plans` 추가 → 외부 중복 스킬은 id prefix 로 차단되어 rein-native 우선. Claude 가 orchestrator.md:83 지시에 따라 이 두 키를 모두 라우팅 매칭에서 참조한다.
+- **`writing-plans` skill**: design 문서에 `brainstorm ref:` 가 있으면 plan 상단 메타에도 옮겨 적어 brainstorm→design→plan 추적성 유지 (soft v1 권고).
+- **`.claude/orchestrator.md`**: 라우팅 테이블에 brainstorming / `/codex ask` 항목 추가, brainstorm→spec→plan 체인 섹션 신설.
+- **`.claude/rules/branch-strategy.md`**: `.github/workflows/tests.yml` 을 main 제외 목록에 명시.
+- **`.github/workflows/mirror-to-public.yml`**: `tests.yml` 도 strip 대상에 추가 (이중 방어).
+
+### Notes
+
+- v0.10.0 은 rein-native 프로세스의 공백을 메우는 릴리스다. design→plan coverage 강제 뒤에 brainstorm→spec 의 구조화 연결이 추가되었고, 코드 리뷰 전용이던 `/codex` 가 second-opinion 용도까지 확장되었다. 사용자 프로젝트에는 `tests.yml` 이 설치되지 않는다 (rein-dev 전용).
+
 ## v0.9.1 (2026-04-20) — Hotfix: `rein merge` hook exec bit propagation
 
 ### Fixed

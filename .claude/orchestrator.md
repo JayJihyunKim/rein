@@ -12,10 +12,23 @@
 | 버그 수정 | `fix-bug.md` | `feature-builder` | 해당 언어 디렉토리 |
 | 새 서비스 생성 | `build-from-scratch.md` | `feature-builder` | 해당 언어 디렉토리 |
 | 기술 조사 | `research-task.md` | `researcher` | — |
-| 코드 리뷰 | — | `/codex` 스킬 (fallback: `code-reviewer` 스킬 → `general-purpose`) | — |
+| 아이디어 정제 (brainstorming) | — | `brainstorming` 스킬 | — |
+| 코드 리뷰 | — | `/codex review` (fallback: `code-reviewer` 스킬 → `general-purpose`) | — |
+| 독립 관점 질의 (second opinion) | — | `/codex ask` 스킬 | — |
 | 보안 리뷰 | — | `security-reviewer` | — |
 | 문서 작성 | — | `docs-writer` | — |
 | plan 작성 | — | `plan-writer` | — |
+
+### 설계 전 체인 (brownfield 기본 경로)
+
+아이디어 → brainstorming → spec → plan → 구현 → 리뷰.
+
+1. **brainstorming 스킬** — `docs/superpowers/brainstorms/YYYY-MM-DD-<slug>.md` 작성 (Problem / Constraints / Options / Chosen / Rejected / Open Questions)
+2. spec 작성 시 `brainstorm ref:` 로 해당 brainstorm 을 가리킴 (soft v1 권고)
+3. **plan-writer 에이전트** 가 spec 의 Scope Items 를 읽어 `writing-plans` 스킬로 plan 작성 (coverage matrix + covers)
+4. 구현 → `/codex review` → `security-reviewer`
+
+의심스러운 결정이 있으면 임의 단계에서 `/codex ask` 로 독립 관점을 구할 수 있다 (stamp 없음, resume 금지).
 
 ---
 

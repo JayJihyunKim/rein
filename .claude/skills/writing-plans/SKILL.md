@@ -20,7 +20,7 @@ design 문서의 `## Scope Items` 표에서 ID 를 추출하고, Phase/Task 로 
 
 3. **Plan 파일 작성 경로** — 프로젝트의 plan 디렉토리 하위 (`docs/**/plans/YYYY-MM-DD-<slug>-implementation.md` 형태) 에 저장. rein-dev 는 `docs/superpowers/plans/` 를 사용하지만 경로는 프로젝트 자유. 날짜는 작업 시작일, slug 는 design 파일명과 일치시킨다.
 
-4. **Matrix + covers 기입** — `## Design 범위 커버리지 매트릭스` 섹션을 작성하고, `design ref:` 줄에 design 파일의 repo-root 기준 상대경로를 기입한다. 각 Phase/Task heading 바로 다음 줄에 `covers: [ID, ...]` 를 기입한다. `deferred` 상태 항목은 사유 + 후속 위치를 반드시 명시한다.
+4. **Matrix + covers 기입** — `## Design 범위 커버리지 매트릭스` 섹션을 작성하고, `design ref:` 줄에 design 파일의 repo-root 기준 상대경로를 기입한다. 각 Phase/Task heading 바로 다음 줄에 `covers: [ID, ...]` 를 기입한다. `deferred` 상태 항목은 사유 + 후속 위치를 반드시 명시한다. design 문서에 `brainstorm ref:` 줄이 있으면 plan 문서 상단 메타에도 그대로 옮겨 적어 brainstorm→design→plan 추적성을 유지한다 (soft v1 권고).
 
 5. **Validator 실행 (자기수정 loop)** — `python3 scripts/rein-validate-coverage-matrix.py <plan>` 실행. exit 0 이 아니면 stderr 오류 메시지를 읽어 matrix/covers 를 수정하고 재실행한다. 최대 3회 반복 후에도 실패하면 작업 중단하고 오류 내용을 보고한다.
 

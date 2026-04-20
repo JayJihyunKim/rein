@@ -209,10 +209,13 @@ claude
 
 | 작업 | 추천 에이전트 | 주요 스킬 |
 |---|---|---|
-| 기능 추가 | feature-builder | codex, writing-plans |
-| 버그 수정 | feature-builder | codex, systematic-debugging |
-| 설계 | docs-writer | brainstorming, writing-plans |
-| 리팩토링 | feature-builder | codex, repo-audit |
+| 기능 추가 | feature-builder | `brainstorming` (brownfield) → writing-plans → `/codex review` |
+| 버그 수정 | feature-builder | systematic-debugging, `/codex review` |
+| 설계 | docs-writer / plan-writer | `brainstorming` → writing-plans |
+| 리팩토링 | feature-builder | `brainstorming`, `/codex review`, repo-audit |
+| 독립 관점 질의 | — | `/codex ask` (stamp 없음, 세션 컨텍스트 오염 회피) |
+
+> `brainstorming` / `writing-plans` 는 rein-native 스킬입니다. superpowers 플러그인의 동명 스킬보다 우선 매칭됩니다.
 
 > 사용자가 별도 스킬·플러그인을 설치하면 라우터가 세션마다 동적으로 스캔하여 자동 추천 후보에 포함한다.
 
@@ -227,6 +230,14 @@ claude
 v0.7.0 부터 CLI 설치 경로가 `/usr/local/bin/rein` → `$HOME/.rein/bin/rein` 으로 변경되었습니다. 기존 사용자는 [install.sh](install.sh) 를 한 번 실행하면 됩니다. 이후 `rein update` 가 자가 업데이트를 자동 처리합니다.
 
 ## 버전 히스토리
+
+### v0.10.0 (2026-04-20) — rein-native brainstorming + /codex ask + tests CI + incident classifier
+- rein-native `brainstorming` skill 신설 — brownfield 에서 feasibility·compatibility 를 선검증한 뒤 선택지를 수렴 (산출물 `docs/superpowers/brainstorms/`)
+- `/codex` 를 `/codex review` (Mode A, 리뷰 stamp) + `/codex ask` (Mode B, second opinion, stamp 없음, `resume --last` 금지) 로 분리
+- `.github/workflows/tests.yml` 신설 — ubuntu/macOS 에서 전체 hook + script 테스트를 push/PR 마다 자동 실행. rein-dev 전용
+- incident `agent_eligible` 분류 필드 도입 — `/incidents-to-agent` 가 hook-source bug 패턴 (`false`) 을 자동 제외
+- router 가 `superpowers:brainstorming`/`superpowers:writing-plans` 를 id prefix 로 차단하여 rein-native 스킬이 우선 매칭됨
+- 상세: [CHANGELOG](CHANGELOG.md)
 
 ### v0.9.1 (2026-04-20) — hotfix: `rein merge` hook exec bit propagation
 - `scripts/rein.sh:copy_file()` 가 기존 dst 파일의 mode 를 갱신하지 못해 과거 버전에 설치된 프로젝트의 훅이 `-rw-rw-r--` 로 남던 문제 수정. src 가 실행 가능하고 dst 에 exec bit 이 없을 때만 `chmod +x` 승격 (기존 755 비삭제). 상세: [CHANGELOG](CHANGELOG.md)

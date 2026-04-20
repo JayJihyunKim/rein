@@ -175,6 +175,9 @@ claude
 
 | Skill | Role |
 |-------|------|
+| `brainstorming` | Rein-native brainstorming. Validates feasibility/compatibility against the existing system before converging on options; writes artifacts to `docs/superpowers/brainstorms/`. Takes precedence over `superpowers:brainstorming`. |
+| `writing-plans` | Converts a design/spec into an implementation plan with coverage matrix + `covers:` tags. Rein-native; takes precedence over `superpowers:writing-plans`. |
+| `codex` | Two modes: `/codex review` (code review, stamp, severity escalation, Sonnet fallback) and `/codex ask` (second opinion — stamp-less, always a new session, no `resume --last`). |
 | `repo-audit` | Repository health check (stale rules, missing tests) |
 | `incidents-to-rule` | Repeated failures → auto-generate AGENTS.md rule candidates |
 | `incidents-to-agent` | Repeated patterns → generate agent candidates |
@@ -204,6 +207,17 @@ The `gateguard-fact-force` hook in `everything-claude-code` (>= 1.9.0) is incomp
 Starting with v0.7.0, the CLI install path changed from `/usr/local/bin/rein` to `$HOME/.rein/bin/rein`. Run [install.sh](install.sh) once to migrate. After that, `rein update` handles self-updates automatically.
 
 ## Version History
+
+### v0.10.0 (2026-04-20) — rein-native brainstorming + /codex ask + tests CI + incident classifier
+- New rein-native `brainstorming` skill — validates feasibility/compatibility against the existing system before converging on options (artifacts under `docs/superpowers/brainstorms/`)
+- Split `/codex` into `/codex review` (Mode A, review stamp) and `/codex ask` (Mode B, second opinion, stamp-less, no `resume --last`)
+- New `.github/workflows/tests.yml` — runs the full hook + script suites on push/PR across ubuntu + macOS (windows advisory). Maintainer-only (rein-dev)
+- New incident `agent_eligible` classification — `/incidents-to-agent` now auto-excludes hook-source bug patterns (`false`)
+- Router excludes `superpowers:brainstorming` / `superpowers:writing-plans` by id prefix so rein-native skills take precedence
+- Details: [CHANGELOG](CHANGELOG.md)
+
+### v0.9.1 (2026-04-20) — hotfix: `rein merge` hook exec bit propagation
+- `scripts/rein.sh:copy_file()` now propagates the src exec bit onto pre-existing dst files when needed (preserves already-correct 755 files; no downgrade)
 
 ### v0.9.0 (2026-04-20) — cross-platform portability + Windows WSL2 guidance
 - Fixed `file_size()` in `session-start-load-trail.sh` breaking on Linux (GNU `stat -f` returns exit 0 in filesystem-info mode, so the `||` fallback never fired)
