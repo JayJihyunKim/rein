@@ -228,6 +228,9 @@ v0.7.0 부터 CLI 설치 경로가 `/usr/local/bin/rein` → `$HOME/.rein/bin/re
 
 ## 버전 히스토리
 
+### v0.9.1 (2026-04-20) — hotfix: `rein merge` hook exec bit propagation
+- `scripts/rein.sh:copy_file()` 가 기존 dst 파일의 mode 를 갱신하지 못해 과거 버전에 설치된 프로젝트의 훅이 `-rw-rw-r--` 로 남던 문제 수정. src 가 실행 가능하고 dst 에 exec bit 이 없을 때만 `chmod +x` 승격 (기존 755 비삭제). 상세: [CHANGELOG](CHANGELOG.md)
+
 ### v0.9.0 (2026-04-20) — cross-platform portability + Windows WSL2 guidance
 - Linux 에서 `session-start-load-trail.sh` 의 `file_size()` 가 깨지는 버그 수정 (GNU `stat -f` 가 exit 0 인 filesystem-info 모드로 해석되어 `||` fallback 이 안 타던 문제)
 - 훅 전반의 BSD/GNU 분기 헬퍼를 `.claude/hooks/lib/portable.sh` 로 공통화 (`_mtime`/`_mtime_date`/`file_size` 중복 제거)

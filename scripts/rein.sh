@@ -17,7 +17,7 @@ warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 fatal() { echo -e "${RED}Fatal: $*${NC}" >&2; exit 1; }
 
-VERSION="0.9.0"
+VERSION="0.9.1"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
@@ -744,6 +744,13 @@ copy_file() {
 
   mkdir -p "$(dirname "$dst")"
   cp "$src" "$dst"
+
+  # POSIX cp preserves the existing dst mode when dst already exists, so a
+  # project installed before the template got 100755 on its hooks keeps 644
+  # forever. Grant the exec bit when src has it; never revoke (minimal risk).
+  if [[ -x "$src" && ! -x "$dst" ]]; then
+    chmod +x "$dst"
+  fi
 }
 
 # ---------------------------------------------------------------------------

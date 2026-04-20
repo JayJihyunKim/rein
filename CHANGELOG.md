@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.9.1 (2026-04-20) — Hotfix: `rein merge` hook exec bit propagation
+
+### Fixed
+
+- `scripts/rein.sh:copy_file()` 가 기존에 존재하는 dst 파일의 mode 를 갱신하지 못해, 과거 버전(hook 파일이 git tree 에 `100644` 로 커밋돼 있던 시절)에 `rein init` 된 프로젝트가 `rein merge` 후에도 훅 파일이 `-rw-rw-r--` 로 남던 문제. POSIX `cp` 는 dst 존재 시 기존 mode 를 보존하므로 — src 가 실행 가능하고 dst 에 exec bit 이 없을 때만 `chmod +x` 로 승격하도록 수정. 기존에 정상인 755 파일을 낮추지는 않음 (minimal risk).
+- 증상: `/bin/sh: .claude/hooks/post-write-spec-review-gate.sh: Permission denied` 가 hook PostToolUse 에서 non-blocking 오류로 출력됨.
+
+### Added
+
+- `tests/cli/test-copy-file-mode.sh` — 4 개 회귀 테스트: src 실행 비트 전파 (신규/기존 dst), 비실행 src 보존, 기존 실행 bit 비삭제.
+
+### Notes
+
+- 기존 설치된 사용자 프로젝트의 이미 644 인 파일은 다음 `rein merge` 에서 자동 승격. 즉시 복구는 `chmod +x .claude/hooks/*.sh` 수동 실행.
+
 ## v0.9.0 (2026-04-20) — Cross-platform portability + Windows WSL2 guidance
 
 ### Fixed
