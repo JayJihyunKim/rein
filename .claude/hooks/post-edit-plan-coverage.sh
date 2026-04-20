@@ -4,34 +4,43 @@
 # 실패 시 trail/dod/.coverage-mismatch 마커 생성. pre-bash-guard 가 이후 차단.
 
 set -u
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DOD_DIR="$PROJECT_DIR/trail/dod"
 MARKER="$DOD_DIR/.coverage-mismatch"
 VALIDATOR="$PROJECT_DIR/scripts/rein-validate-coverage-matrix.py"
 
+# shellcheck source=./lib/python-runner.sh
+. "$SCRIPT_DIR/lib/python-runner.sh"
+
 [ -f "$VALIDATOR" ] || exit 0  # validator 없으면 no-op
+
+# Post-hook: Python 미해결 시 조용히 skip (세션 차단 금지).
+resolve_python 2>/dev/null
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  exit 0
+fi
 
 INPUT=$(cat)
 
-FILE_PATHS=$(printf '%s' "$INPUT" | python3 -c '
-import sys, json
-d = json.load(sys.stdin)
-ti = d.get("tool_input", {}) or {}
-tr = d.get("tool_result", {}) or {}
-paths = []
-if "file_path" in ti and ti["file_path"]:
-    paths.append(ti["file_path"])
-for src in (ti, tr):
-    for e in (src.get("edits") or []):
-        fp = e.get("file_path", "")
-        if fp and fp not in paths:
-            paths.append(fp)
-if not paths and tr.get("file_path"):
-    paths.append(tr["file_path"])
-print("\n".join(paths))
-' 2>/dev/null
+# Claude Code hook payload 의 여러 필드에서 편집 대상 경로를 수집한다.
+# 수집 순서(원본 보존): tool_input.file_path → tool_input.edits[*].file_path
+#                   → tool_result.edits[*].file_path → tool_result.file_path(fallback only).
+# 빈 값/중복은 awk 단계에서 제거 (원본의 `if fp and fp not in paths` 의미 유지).
+FILE_PATHS=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
+  --field tool_input.file_path \
+  --array-of tool_input.edits --subfield file_path \
+  --array-of tool_result.edits --subfield file_path \
+  --default '' 2>/dev/null \
+  | awk 'NF && !seen[$0]++'
 )
+
+# fallback: tool_result.file_path 는 1~3 에서 경로를 찾지 못했을 때만 사용 (Codex final review A4).
+if [ -z "$FILE_PATHS" ]; then
+  FILE_PATHS=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
+    --field tool_result.file_path --default '' 2>/dev/null | awk 'NF && !seen[$0]++')
+fi
 
 [ -z "$FILE_PATHS" ] && exit 0
 
@@ -77,14 +86,14 @@ marker_remove_plan() {
 
 while IFS= read -r FILE_PATH; do
   [ -z "$FILE_PATH" ] && continue
-  ABS=$(python3 -c "import os,sys; print(os.path.abspath(sys.argv[1]))" "$FILE_PATH" 2>/dev/null)
+  ABS=$("${PYTHON_RUNNER[@]}" -c "import os,sys; print(os.path.abspath(sys.argv[1]))" "$FILE_PATH" 2>/dev/null)
   [ -z "$ABS" ] && continue
   is_plan_path "$ABS" || continue
   [ -f "$ABS" ] || continue  # 편집된 파일이 실제로 존재해야 검증 가능
 
   # Run validator once, capture stderr + exit code.
   TMP_ERR=$(mktemp)
-  python3 "$VALIDATOR" "$ABS" 2> "$TMP_ERR"
+  "${PYTHON_RUNNER[@]}" "$VALIDATOR" "$ABS" 2> "$TMP_ERR"
   VEXIT=$?
   if [ -s "$TMP_ERR" ]; then
     cat "$TMP_ERR" >&2

@@ -104,6 +104,34 @@ Keep your project checkouts under `~/` (the WSL filesystem). Working from `/mnt/
 
 More details in Microsoft's docs: [aka.ms/wsl-install](https://aka.ms/wsl-install).
 
+### Windows Git Bash diagnostics (v0.10.1+)
+
+If hooks on Windows Git Bash / MSYS2 block with `BLOCKED: ... Python launch 실패 (9009 계열)`, run these three probes:
+
+```bash
+command -v python3      # is python3 on PATH?
+python3 -V              # does it actually execute?
+py -3 -V                # does the py launcher reach a real Python?
+```
+
+**Interpretation**:
+- `command -v` succeeds + `python3 -V` fails + `py -3 -V` succeeds → **WindowsApps App Execution Alias stub problem** (by far the most common case)
+- All three fail → no real Python installed
+- `command -v` fails → PATH problem
+
+Note: the `python3 exit 49` code is **not** a Python JSON parse failure. It is Windows' `9009` exit code (command not found / App Execution Alias stub launch failure) truncated to 8 bits under Git Bash/MSYS (`9009 mod 256 = 49`).
+
+**Fixes** (in priority order):
+
+1. **Switch to WSL2** — the officially supported Windows path for Rein (see the "Windows users" section above)
+2. Windows Settings → "Manage app execution aliases" → toggle `python.exe` / `python3.exe` **off**, then install a real Python from [python.org](https://www.python.org/downloads/) or the Python install manager
+3. Reorder PATH so that the real Python / `py` launcher comes **before** `WindowsApps`
+4. For venv users, `export REIN_PYTHON=/path/to/python3` — the resolver uses it as the top-priority candidate
+
+**alias caveat**: non-interactive hooks do **not** inherit shell aliases like `alias python3=...`. Hooks run as forked bash scripts and never source interactive rc files. You need a real executable wrapper or a PATH adjustment — aliases will not work.
+
+**Unsupported local fork**: editing the hooks locally (for example flipping fail-closed branches to `exit 0` to bypass the gate) is always technically possible, but at that point Rein's gate guarantees are void. Anyone deliberately taking that path is operating outside Rein's support scope.
+
 ## Installation
 
 ```bash
@@ -207,6 +235,12 @@ The `gateguard-fact-force` hook in `everything-claude-code` (>= 1.9.0) is incomp
 Starting with v0.7.0, the CLI install path changed from `/usr/local/bin/rein` to `$HOME/.rein/bin/rein`. Run [install.sh](install.sh) once to migrate. After that, `rein update` handles self-updates automatically.
 
 ## Version History
+
+### v0.10.1 (2026-04-20) — Structural fix for Windows Git Bash/MSYS `python3 exit 49`
+- New `.claude/hooks/lib/python-runner.sh` (shared Python resolver, bash-array based) and `.claude/hooks/lib/extract-hook-json.py` (argparse-based JSON stdin extractor)
+- All 8 hooks migrated from inline `echo "$INPUT" | python3 -c ...` patterns to the helper path, so Windows launch failures (9009 class) / WindowsApps stubs / JSON parse errors are diagnosed distinctly
+- Pre-hook blocks now emit Windows-specific diagnostics with `[DoD gate]` / `[Bash guard]` prefix (WSL2, App execution aliases, `REIN_PYTHON`, venv guidance)
+- Details: [CHANGELOG](CHANGELOG.md) · README "Windows Git Bash diagnostics" section
 
 ### v0.10.0 (2026-04-20) — rein-native brainstorming + /codex ask + tests CI + incident classifier
 - New rein-native `brainstorming` skill — validates feasibility/compatibility against the existing system before converging on options (artifacts under `docs/superpowers/brainstorms/`)

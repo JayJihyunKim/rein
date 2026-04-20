@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=./lib/portable.sh
 . "$SCRIPT_DIR/lib/portable.sh"
+# shellcheck source=./lib/python-runner.sh
+. "$SCRIPT_DIR/lib/python-runner.sh"
 
 BLOCKS_LOG="$PROJECT_DIR/trail/incidents/blocks.log"
 BLOCKS_LOG_JSONL="$PROJECT_DIR/trail/incidents/blocks.jsonl"
@@ -15,8 +17,13 @@ BLOCKS_LOG_JSONL="$PROJECT_DIR/trail/incidents/blocks.jsonl"
 log_block() {
   local reason="$1"
   local target="$2"
+  # Guard: resolver 실패 경로에서 raw python3 재호출을 피함 (stderr noise 방지).
+  # PYTHON_RUNNER 가 아직 set 되지 않았거나 비어있으면 logging 을 skip.
+  if [ -z "${PYTHON_RUNNER+x}" ] || [ "${#PYTHON_RUNNER[@]}" -eq 0 ]; then
+    return 0
+  fi
   mkdir -p "$(dirname "$BLOCKS_LOG_JSONL")"
-  python3 - "pre-bash-guard" "$reason" "$target" <<'PY' >> "$BLOCKS_LOG_JSONL"
+  "${PYTHON_RUNNER[@]}" - "pre-bash-guard" "$reason" "$target" <<'PY' >> "$BLOCKS_LOG_JSONL" 2>/dev/null || true
 import json, sys
 from datetime import datetime, timezone
 print(json.dumps({
@@ -30,8 +37,7 @@ PY
   # hook+reason 조합별로 카운트 (aggregate THRESHOLD 와 동일 기준).
   # 전체 hook 누적이 아닌 "동일 위반 패턴" 반복을 정확히 측정하기 위함.
   local count
-  if command -v python3 >/dev/null 2>&1; then
-    count=$(python3 -c "
+  count=$("${PYTHON_RUNNER[@]}" -c "
 import json, sys
 target_hook = 'pre-bash-guard'
 target_reason = sys.argv[1]
@@ -49,9 +55,6 @@ except OSError:
     pass
 print(n)
 " "$reason" "$BLOCKS_LOG_JSONL" 2>/dev/null || echo 0)
-  else
-    count=0
-  fi
   if [ "$count" -ge 3 ]; then
     echo "WARNING: 동일 위반 (${reason}) ${count}회 누적. incidents-to-agent 실행을 권장합니다." >&2
   elif [ "$count" -ge 2 ]; then
@@ -64,16 +67,32 @@ INPUT=$(cat)
 # python3 필수 (JSON 파싱). 없으면 Bash gate 전체가 무력화되므로 fail-closed.
 # 예전 `2>/dev/null` 방식은 python3 미설치 시 COMMAND="" → exit 0 으로 위험
 # 명령어 차단 로직 전체가 비활성화됐음 (codex v0.7.2 review High).
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "BLOCKED: python3 가 PATH 에 없습니다 (Bash gate 필수 의존성)." >&2
+# v0.10.1: Windows Git Bash/MSYS 의 `python3 exit 49` (= 9009 mod 256, App
+# Execution Alias stub) 를 실제 JSON 파싱 실패와 구분하기 위해 strict
+# resolver 기반으로 교체. exit code 10/11/12 로 원인 분기 + Windows 전용
+# 진단 메시지. 파싱은 lib/extract-hook-json.py 로 위임 (inline python3 -c 제거).
+# NOTE: bash `!` prefix resets $? to 0 after evaluation. To preserve the
+# resolver's specific exit code (10/11/12) for diagnostic routing, capture
+# $? immediately after the call BEFORE the conditional, not inside `if !`.
+resolve_python
+RESOLVER_RC=$?
+if [ "$RESOLVER_RC" -ne 0 ]; then
+  case "$RESOLVER_RC" in
+    10) echo "BLOCKED: [Bash guard] Python 인터프리터 부재." >&2 ;;
+    11) echo "BLOCKED: [Bash guard] WindowsApps Python stub 감지. 실제 Python 설치 필요." >&2 ;;
+    12) echo "BLOCKED: [Bash guard] Python launch 실패 (9009 계열) — Windows Git Bash/MSYS 가능성 또는 REIN_PYTHON invalid override." >&2 ;;
+  esac
+  print_windows_diagnostics_if_applicable >&2
+  log_block "python runtime unavailable" "unknown"
   exit 2
 fi
 
-COMMAND=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input', {}).get('command', ''))")
+COMMAND=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" --field tool_input.command --default '')
 EXTRACT_RC=$?
 
 if [ "$EXTRACT_RC" -ne 0 ]; then
-  echo "BLOCKED: Bash 입력 파싱 실패 (python3 exit $EXTRACT_RC)." >&2
+  echo "BLOCKED: [Bash guard] Bash 입력 JSON 파싱 실패 (extract-hook-json.py exit $EXTRACT_RC)." >&2
+  log_block "json parse failure" "unknown"
   exit 2
 fi
 
@@ -207,12 +226,11 @@ if echo "$COMMAND" | grep -qE "git commit"; then
     log_block "commit msg helper 누락" "$EXTRACT_SCRIPT"
     exit 2
   fi
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "BLOCKED: python3 가 PATH 에 없습니다 (커밋 메시지 검증 필수 의존성)." >&2
-    log_block "python3 누락 (commit msg)" "$COMMAND"
-    exit 2
-  fi
-  COMMIT_MSG=$(python3 "$EXTRACT_SCRIPT" "$COMMAND" 2>/dev/null)
+  # v0.10.1: python3 존재 여부는 파일 상단의 resolve_python() 이 이미 gate 했다.
+  # 중복 `command -v python3` 체크 제거. PYTHON_RUNNER 배열은 이 시점에 set 되어
+  # 있으며 strict-resolver 통과한 인터프리터이다. 배열 확장 `"${PYTHON_RUNNER[@]}"`
+  # 로 token 경계를 보존해야 안전하다 (REIN_PYTHON 주입 방어).
+  COMMIT_MSG=$("${PYTHON_RUNNER[@]}" "$EXTRACT_SCRIPT" "$COMMAND" 2>/dev/null)
   EXTRACT_RC=$?
   if [ "$EXTRACT_RC" -ne 0 ]; then
     echo "BLOCKED: 커밋 메시지 추출이 실패했습니다 (helper exit=$EXTRACT_RC)." >&2

@@ -42,6 +42,16 @@
 
 > **Windows 사용자**: Rein 은 bash + GNU coreutils + POSIX Python API 를 전제로 하므로 **WSL2 (Ubuntu) 환경**에서 사용하세요. PowerShell 을 관리자 권한으로 열고 `wsl --install` 을 실행한 뒤, WSL Ubuntu 셸 안에서 아래 방법 중 하나를 따르면 됩니다. 자세한 설치 방법은 [README.md 의 "Windows 사용자" 섹션](README.md#windows-사용자) 을 참조하세요.
 
+### Windows Git Bash 설치 전 체크 (v0.10.1+)
+
+Git Bash / MSYS2 로 advisory 경로를 사용하는 경우, 설치를 시작하기 전에 Python 런타임이 실제로 실행되는지 아래 3종 명령으로 확인하세요:
+
+- [ ] `command -v python3` 가 경로를 출력하는가?
+- [ ] `python3 -V` 가 실제 버전을 출력하는가?
+- [ ] `py -3 -V` 가 성공하는가?
+
+셋 중 하나라도 실패하면 훅이 `BLOCKED: ... Python launch 실패 (9009 계열)` 으로 차단될 가능성이 높습니다. 해결 절차는 [README.md 의 "Windows Git Bash 진단" 섹션](README.md#windows-git-bash-진단-v0101)을 참조하세요 (WSL2 전환 · App execution aliases 끄기 · `REIN_PYTHON` / venv 지정).
+
 ### 방법 A: 새 프로젝트를 템플릿으로 생성
 
 ```bash

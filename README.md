@@ -127,6 +127,34 @@ rein --version
 
 자세한 안내: Microsoft 공식 문서 [aka.ms/wsl-install](https://aka.ms/wsl-install).
 
+### Windows Git Bash 진단 (v0.10.1+)
+
+Windows Git Bash / MSYS2 환경에서 훅이 `BLOCKED: ... Python launch 실패 (9009 계열)` 메시지로 차단되면 아래 3종 명령으로 진단합니다:
+
+```bash
+command -v python3      # python3 가 PATH 에 잡히는가
+python3 -V              # 실제 실행 성공하는가
+py -3 -V                # py launcher 가 real Python 을 가리키는가
+```
+
+**해석**:
+- `command -v` 성공 + `python3 -V` 실패 + `py -3 -V` 성공 → **WindowsApps App Execution Alias stub 문제** (가장 흔한 케이스)
+- 세 명령 모두 실패 → real Python 미설치
+- `command -v` 실패 → PATH 설정 문제
+
+참고: 훅이 보고하는 `python3 exit 49` 는 Python 의 JSON 파싱 실패가 아니라 Windows 의 `9009` (command not found / App Execution Alias stub 실행 실패) 가 Git Bash/MSYS 에서 8비트로 잘린 값입니다 (`9009 mod 256 = 49`).
+
+**해결책** (우선순위 순):
+
+1. **WSL2 로 전환** — rein 의 공식 Windows 지원 경로 (위 "Windows 사용자" 섹션 참조)
+2. Windows Settings → "앱 실행 별칭 관리(Manage app execution aliases)" 에서 `python.exe` / `python3.exe` 스위치를 **off** 로 바꾸고, [python.org](https://www.python.org/downloads/) 또는 Python install manager 로 실제 Python 을 설치
+3. PATH 에서 real Python 또는 `py` launcher 가 `WindowsApps` 디렉토리보다 **앞에** 오도록 순서 조정
+4. venv 사용자는 `export REIN_PYTHON=/path/to/python3` 로 명시 지정 (resolver 우선순위에서 1순위로 사용됨)
+
+**alias 한계 경고**: 비대화형 hook 은 `alias python3=...` 같은 shell alias 를 상속받지 못합니다. 훅은 bash script 로 fork 되어 interactive rc 파일을 source 하지 않기 때문입니다. **실제 실행파일 wrapper 또는 PATH 조정**이 필요합니다.
+
+**Unsupported local fork**: local hook 수정 (예: fail-closed 를 `exit 0` 으로 바꿔 gate 를 우회) 은 언제든 기술적으로 가능하지만, 그 시점에 rein 의 gate 보장은 무효가 됩니다. 이 경로를 의도적으로 쓰는 경우 rein 트래킹 대상이 아닙니다.
+
 ## 설치
 
 ```bash
@@ -230,6 +258,12 @@ claude
 v0.7.0 부터 CLI 설치 경로가 `/usr/local/bin/rein` → `$HOME/.rein/bin/rein` 으로 변경되었습니다. 기존 사용자는 [install.sh](install.sh) 를 한 번 실행하면 됩니다. 이후 `rein update` 가 자가 업데이트를 자동 처리합니다.
 
 ## 버전 히스토리
+
+### v0.10.1 (2026-04-20) — Windows Git Bash/MSYS `python3 exit 49` 구조적 해결
+- `.claude/hooks/lib/python-runner.sh` (공용 Python resolver, bash array 기반) + `.claude/hooks/lib/extract-hook-json.py` (argparse 기반 JSON stdin 추출 helper) 도입
+- 8개 훅의 inline `echo "$INPUT" | python3 -c ...` 패턴을 helper 경유 호출로 전부 교체. Windows launch failure(9009 계열) / WindowsApps stub / JSON 파싱 실패를 구분 진단
+- pre-hook 차단 시 `[DoD gate]` / `[Bash guard]` prefix 포함 Windows-specific 진단 메시지 (WSL2 / App execution aliases / `REIN_PYTHON` / venv 안내) 출력
+- 상세: [CHANGELOG](CHANGELOG.md) · README "Windows Git Bash 진단" 섹션
 
 ### v0.10.0 (2026-04-20) — rein-native brainstorming + /codex ask + tests CI + incident classifier
 - rein-native `brainstorming` skill 신설 — brownfield 에서 feasibility·compatibility 를 선검증한 뒤 선택지를 수렴 (산출물 `docs/superpowers/brainstorms/`)

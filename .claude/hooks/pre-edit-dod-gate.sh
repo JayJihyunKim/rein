@@ -9,6 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=./lib/portable.sh
 . "$SCRIPT_DIR/lib/portable.sh"
+# shellcheck source=./lib/python-runner.sh
+. "$SCRIPT_DIR/lib/python-runner.sh"
 
 BLOCKS_LOG="$PROJECT_DIR/trail/incidents/blocks.log"
 BLOCKS_LOG_JSONL="$PROJECT_DIR/trail/incidents/blocks.jsonl"
@@ -31,8 +33,15 @@ CACHE_TTL=300  # 5분
 log_block() {
   local reason="$1"
   local target="$2"
+  # Guard: PYTHON_RUNNER 가 아직 설정되지 않았거나 비어있으면 (resolver 실패 경로
+  # 포함) raw python3 재호출을 피하고 조용히 skip. logging 은 best-effort 이며,
+  # resolver 가 실패한 상황에서 같은 python3 stub 를 다시 부르면 stderr noise 가
+  # 추가되어 사용자 진단 메시지 품질을 해친다.
+  if [ -z "${PYTHON_RUNNER+x}" ] || [ "${#PYTHON_RUNNER[@]}" -eq 0 ]; then
+    return 0
+  fi
   mkdir -p "$(dirname "$BLOCKS_LOG_JSONL")"
-  python3 - "pre-edit-dod-gate" "$reason" "$target" <<'PY' >> "$BLOCKS_LOG_JSONL"
+  "${PYTHON_RUNNER[@]}" - "pre-edit-dod-gate" "$reason" "$target" <<'PY' >> "$BLOCKS_LOG_JSONL" 2>/dev/null || true
 import json, sys
 from datetime import datetime, timezone
 print(json.dumps({
@@ -46,8 +55,7 @@ PY
   # hook+reason 조합별로 카운트 (aggregate THRESHOLD 와 동일 기준).
   # 전체 hook 누적이 아닌 "동일 위반 패턴" 반복을 정확히 측정하기 위함.
   local count
-  if command -v python3 >/dev/null 2>&1; then
-    count=$(python3 -c "
+  count=$("${PYTHON_RUNNER[@]}" -c "
 import json, sys
 target_hook = 'pre-edit-dod-gate'
 target_reason = sys.argv[1]
@@ -65,9 +73,6 @@ except OSError:
     pass
 print(n)
 " "$reason" "$BLOCKS_LOG_JSONL" 2>/dev/null || echo 0)
-  else
-    count=0
-  fi
   if [ "$count" -ge 3 ]; then
     echo "WARNING: 동일 위반 (${reason}) ${count}회 누적. incidents-to-agent 실행을 권장합니다." >&2
   elif [ "$count" -ge 2 ]; then
@@ -83,16 +88,29 @@ INPUT=$(cat)
 # python3 필수 (JSON 파싱). 없으면 Edit/Write 차단 (fail-closed).
 # 예전 `2>/dev/null` 방식은 python3 미설치 시 FILE_PATH="" → exit 0 으로 gate
 # 전체가 무력화됐음 (codex v0.7.2 review Critical).
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "BLOCKED: python3 가 PATH 에 없습니다 (DoD gate 필수 의존성)." >&2
+# v0.10.1: python-runner.sh resolver 로 통합 (Windows Git Bash 9009 → exit 49 감지 포함).
+# 주의: `if ! resolve_python` 은 bash `!` 가 $? 를 0/1 로 정규화하므로 resolver 의
+# 세부 exit code (10/11/12) 가 사라진다. 직접 호출 후 $? 를 즉시 캡처한다.
+resolve_python
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  case "$rc" in
+    10) echo "BLOCKED: [DoD gate] Python 인터프리터 부재." >&2 ;;
+    11) echo "BLOCKED: [DoD gate] WindowsApps Python stub 감지. 실제 Python 설치 필요." >&2 ;;
+    12) echo "BLOCKED: [DoD gate] Python launch 실패 (9009 계열) — Windows Git Bash/MSYS 가능성 또는 REIN_PYTHON invalid override." >&2 ;;
+    *)  echo "BLOCKED: [DoD gate] resolve_python 실패 (rc=$rc)." >&2 ;;
+  esac
+  print_windows_diagnostics_if_applicable >&2
+  log_block "python runtime unavailable" "unknown"
   exit 2
 fi
 
-FILE_PATH=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input', {}).get('file_path', ''))")
+FILE_PATH=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" --field tool_input.file_path --default '')
 EXTRACT_RC=$?
 
 if [ "$EXTRACT_RC" -ne 0 ]; then
-  echo "BLOCKED: Edit/Write 입력 파싱 실패 (python3 exit $EXTRACT_RC)." >&2
+  echo "BLOCKED: [DoD gate] Edit/Write 입력 JSON 파싱 실패 (extract-hook-json.py exit $EXTRACT_RC)." >&2
+  log_block "json parse failure" "unknown"
   exit 2
 fi
 
@@ -125,16 +143,11 @@ INCIDENT_STAMP="$DOD_DIR/.incident-review-pending"
 INCIDENT_BYPASS="$DOD_DIR/.skip-incident-gate"
 
 if [ -f "$INCIDENT_STAMP" ]; then
-  if ! command -v python3 >/dev/null 2>&1; then
-    # python3 필수 의존성. fail-closed 로 gate 우회 방지.
-    echo "BLOCKED: python3 미설치로 incident gate 검증 불가." >&2
-    echo "python3 설치 후 재시도하거나, 확인 후 stamp 를 수동 제거: rm $INCIDENT_STAMP" >&2
-    exit 2
-  fi
+  # v0.10.1: resolver 는 이미 위에서 성공했으므로 PYTHON_RUNNER 가 populated 되어 있음.
   # exit code 를 분리 캡처하여 스크립트 실패 시 fail-closed 로 처리한다.
   # `|| echo 0` 방식은 실패 시에도 0 으로 보여 stamp 를 잘못 지우고 통과시켰음
   # (codex v0.7.2 review High).
-  LIVE_COUNT=$(python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+  LIVE_COUNT=$("${PYTHON_RUNNER[@]}" "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
     --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null)
   LIVE_RC=$?
   if [ "$LIVE_RC" -ne 0 ]; then

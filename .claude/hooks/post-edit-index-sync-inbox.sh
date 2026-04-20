@@ -16,7 +16,21 @@
 # 안전하게 stdin 을 읽는다. 실패해도 계속 진행.
 INPUT=$(cat 2>/dev/null || true)
 
-FILE_PATH=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('tool_input', {}).get('file_path', ''); sys.stdout.write(p.replace('\n','').replace('\r',''))" 2>/dev/null || true)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || exit 0
+# shellcheck source=./lib/python-runner.sh
+. "$SCRIPT_DIR/lib/python-runner.sh"
+
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd)" || exit 0
+
+# Python resolver — post-hook silent on failure.
+resolve_python 2>/dev/null
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  exit 0
+fi
+
+FILE_PATH=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
+  --field tool_input.file_path --strip-newlines --default '' 2>/dev/null || true)
 
 # file_path 추출 실패 또는 trail/index.md 가 아니면 즉시 종료.
 if [ -z "$FILE_PATH" ]; then
@@ -27,9 +41,6 @@ case "$FILE_PATH" in
   */trail/index.md|trail/index.md) ;;
   *) exit 0 ;;
 esac
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" || exit 0
-PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd)" || exit 0
 
 TODAY=$(date +%Y-%m-%d 2>/dev/null || true)
 if [ -z "$TODAY" ]; then

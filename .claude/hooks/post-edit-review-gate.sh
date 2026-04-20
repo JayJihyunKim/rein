@@ -4,34 +4,41 @@
 # 소스 코드 파일 편집 시 trail/dod/.review-pending 생성
 # trail/, docs/, .md 파일은 제외 (규칙/문서 파일)
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./lib/python-runner.sh
+. "$SCRIPT_DIR/lib/python-runner.sh"
+
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REVIEW_PENDING="$PROJECT_DIR/trail/dod/.review-pending"
 
 INPUT=$(cat)
 
+# Python resolver — post-hook silent on failure.
+resolve_python 2>/dev/null
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  exit 0
+fi
+
 # 모든 편집 파일 경로 추출 (MultiEdit는 여러 파일 가능)
-FILE_PATHS=$(echo "$INPUT" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-tr = d.get('tool_result', {})
-ti = d.get('tool_input', {})
-paths = []
-# Edit/Write: tool_input.file_path
-if 'file_path' in ti:
-    paths.append(ti['file_path'])
-# MultiEdit: tool_input.edits 또는 tool_result.edits
-for src in (ti, tr):
-    edits = src.get('edits', [])
-    for e in edits:
-        fp = e.get('file_path', '')
-        if fp and fp not in paths:
-            paths.append(fp)
-# tool_result.file_path (fallback)
-if not paths and 'file_path' in tr:
-    paths.append(tr['file_path'])
-print('\n'.join(paths))
-" 2>/dev/null)
+# 수집 순서 (기존 semantics 와 동일):
+#   1) tool_input.file_path          (Edit/Write)
+#   2) tool_input.edits[*].file_path (MultiEdit 입력)
+#   3) tool_result.edits[*].file_path(MultiEdit 결과)
+#   4) tool_result.file_path         (fallback — 1~3 에서 아무것도 못 찾은 경우만)
+# extract-hook-json.py 는 dedup/빈 문자열 필터링을 하지 않으므로 shell 에서 후처리.
+FILE_PATHS=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
+  --field tool_input.file_path \
+  --array-of tool_input.edits --subfield file_path \
+  --array-of tool_result.edits --subfield file_path \
+  --default '' 2>/dev/null | awk 'NF && !seen[$0]++')
+
+# fallback: tool_result.file_path 는 1~3 에서 경로를 찾지 못했을 때만 사용.
+# 이는 Claude Code hook schema 기존 semantics 를 보존하기 위함 (Codex final review A4).
+if [ -z "$FILE_PATHS" ]; then
+  FILE_PATHS=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
+    --field tool_result.file_path --default '' 2>/dev/null | awk 'NF && !seen[$0]++')
+fi
 
 if [ -z "$FILE_PATHS" ]; then
   exit 0

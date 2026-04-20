@@ -6,24 +6,31 @@
 #
 # 이 hook 은 DoD 가 작성된 후에만 동작하므로 legacy DoD 는 자연스럽게 grandfather 된다.
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./lib/python-runner.sh
+. "$SCRIPT_DIR/lib/python-runner.sh"
+
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DOD_DIR="$PROJECT_DIR/trail/dod"
 
 INPUT=$(cat)
 
-# python3 부재: routing-gate 의 신뢰성을 지키기 위해 fail-closed.
-# 보수적 마커를 생성해 다음 pre-edit 에서 소스 편집이 막히도록 한다.
-# (inspection 불가 → '미검증' 상태로 처리)
-if ! command -v python3 >/dev/null 2>&1; then
-  mkdir -p "$DOD_DIR"
-  touch "$DOD_DIR/.routing-missing-unknown-python3-absent"
-  echo "WARNING: python3 부재 — routing check skipped. 다음 소스 편집은 차단됩니다." >&2
-  echo "  복구: python3 설치 후 DoD 를 재저장하면 자가 치유." >&2
+# Python resolver (soft fail-closed for post-hook):
+# resolver 실패 시에도 routing-gate 의 신뢰성을 지키기 위해 보수적 marker 를
+# 생성한다. 다음 pre-edit-dod-gate 가 이 marker 를 감지해 routing-missing
+# BLOCK 을 걸면서 Python 진단을 함께 노출한다. post-hook 자체는 exit 0
+# (silent) — 사용자의 현재 write 를 되돌리지 않는다.
+resolve_python 2>/dev/null
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  mkdir -p "$DOD_DIR" 2>/dev/null
+  : > "$DOD_DIR/.routing-missing-unknown-python-runtime" 2>/dev/null
   exit 0
 fi
+# resolver 성공 경로에 도달하면 이전 write 시 남긴 python-runtime fallback marker 를 자동 해소.
+rm -f "$DOD_DIR/.routing-missing-unknown-python-runtime" 2>/dev/null || true
 
-FILE_PATH=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input', {}).get('file_path', ''))" 2>/dev/null)
+FILE_PATH=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" --field tool_input.file_path --default '' 2>/dev/null)
 [ -z "$FILE_PATH" ] && exit 0
 
 case "$FILE_PATH" in

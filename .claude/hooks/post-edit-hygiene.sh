@@ -4,8 +4,22 @@
 #
 # Exit code: 항상 0 (사후 피드백, 차단하지 않음)
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./lib/python-runner.sh
+. "$SCRIPT_DIR/lib/python-runner.sh"
+
 INPUT=$(cat)
-FILE_PATH=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input', {}).get('file_path', ''))" 2>/dev/null)
+
+# Python resolver (soft fail, silent — hygiene 은 단순 console.log/시크릿 grep 만
+# 수행하는 사후 피드백이므로 resolver 실패 시 조용히 skip). marker 를 생성하지
+# 않는다 — 다음 편집을 BLOCK 할 이유가 없다.
+resolve_python 2>/dev/null
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  exit 0
+fi
+
+FILE_PATH=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" --field tool_input.file_path --default '' 2>/dev/null)
 
 if [ -z "$FILE_PATH" ] || [ ! -f "$FILE_PATH" ]; then
   exit 0

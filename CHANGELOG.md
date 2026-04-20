@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.10.1 (2026-04-20) — Windows Git Bash/MSYS `python3 exit 49` 구조적 해결
+
+### Fixed
+
+- **Windows Git Bash / MSYS `python3 exit 49` 차단 이슈 해결** (사용자 제보 2026-04-20). 근본원인: Windows shell 의 `9009` (command not found / App Execution Alias stub 실행 실패) 가 Git Bash/MSYS 에서 8비트로 잘려 `9009 mod 256 = 49` 로 노출. 훅이 이를 "JSON 파싱 실패" 로 뭉뚱그려 fail-closed 차단하던 경로를 구조적으로 개선. Codex gpt-5.4/high 독립 분석 + Microsoft/Python 공식 문서 교차 확인으로 확정.
+
+### Added
+
+- `.claude/hooks/lib/python-runner.sh` — Python interpreter resolver (bash array `PYTHON_RUNNER` 기반, 호출부는 `"${PYTHON_RUNNER[@]}"` 로 expand).
+  - 우선순위: `$REIN_PYTHON` (validated 단일 경로, invalid override 는 hard-fail) → `$VIRTUAL_ENV` (POSIX `bin/python` / Windows `Scripts/python.exe`) → `python3` → `python` → MSYS/Cygwin 감지 시 `py -3`
+  - WindowsApps App Execution Alias stub 경로 **case-insensitive** 감지 후 skip
+  - 각 후보마다 `-c "import sys; sys.exit(0)"` health-check 실제 실행까지 성공한 경우에만 채택
+  - Exit code 구분: `10` (missing — 모든 candidate 없음) / `11` (WindowsApps stub) / `12` (launch failure — 실행은 되지만 stub 아닌 다른 이유 / 또는 invalid `REIN_PYTHON` override)
+  - `validate_runner_override()` 가 `REIN_PYTHON` 에 쉘 메타문자(`;&|<>$\``) 포함 시 reject → exit 12 (hard-fail, silent fallback 금지)
+- `.claude/hooks/lib/extract-hook-json.py` — stdin JSON field 추출 CLI helper (argparse 기반, Python 3 stdlib only).
+  - `--field <dotted.path>` (반복), `--array-of <array.path> --subfield <field>` (2단 API, **wildcard 미지원**), `--default`, `--strip-newlines`, `--separator`, `--stdin` / `--input-file`
+  - bracket 표기 (`a[0].b`) 는 입력 시점에 `a.0.b` 로 정규화. 각 segment 가 정수 리터럴이면 list 인덱스, 아니면 dict key
+  - Exit code: `0` (success) / `20` (invalid JSON) / `21` (missing field + no `--default`, 또는 wildcard reject) / `22` (decode/encoding failure). CRLF payload 는 정상 처리 대상이며 실패 사유 아님
+
+### Changed
+
+- 8개 훅 — `pre-edit-dod-gate.sh`, `pre-bash-guard.sh`, `post-write-dod-routing-check.sh`, `post-edit-hygiene.sh`, `post-edit-review-gate.sh`, `post-edit-index-sync-inbox.sh`, `post-edit-plan-coverage.sh`, `post-write-spec-review-gate.sh` — 의 inline `echo "$INPUT" | python3 -c ...` 패턴을 전부 `resolve_python` + `extract-hook-json.py` helper 호출로 교체. pre-hook 은 fail-closed 유지, post-hook 은 silent (예외: `post-write-dod-routing-check.sh` 는 `.routing-missing-unknown-python-runtime` marker 생성으로 보수적 parity).
+- pre-hook (`pre-edit-dod-gate.sh`, `pre-bash-guard.sh`) 실패 시 `[DoD gate]` / `[Bash guard]` prefix 포함 Windows-specific 진단 메시지 출력 — 9009 계열 launch failure 일반 설명 + WindowsApps 대표 원인 + 4단 해결책 (WSL2 전환 / App execution aliases 끄기 / PATH 재정렬 / `REIN_PYTHON` 지정).
+- `pre-edit-dod-gate.sh` 와 `pre-bash-guard.sh` 의 `log_block()` 함수가 raw `python3` 대신 `"${PYTHON_RUNNER[@]}"` 사용 → resolver 실패 경로에서도 stderr noise 없이 일관 동작.
+- `pre-edit-dod-gate.sh` 의 pending incident count 검증 블록 (`rein-aggregate-incidents.py --count-pending`) 도 resolver 경유로 호출 (기존 fail-closed 경로 유지).
+
+### Testing
+
+- `tests/hooks/test-python-runner.sh` 신규 (12 tests) — fake python stub, fake uname, `REIN_PYTHON` injection reject, venv priority over `py -3`, WindowsApps case-mixed 감지, exit code 10/11/12 분기, bash array safety (공백 포함 경로), MSYS 에서 diagnostics 출력 / POSIX 에서 silent 검증.
+- `tests/hooks/test-extract-hook-json.sh` 신규 (16 tests) — valid 단일/다중 field, invalid JSON, missing (with/without `--default`), CRLF 정상 처리, Unicode, Windows 경로 backslash, array index, `--array-of --subfield`, `--strip-newlines`, `--input-file`, bracket 정규화, type mismatch, non-UTF-8 decode error, wildcard reject.
+- `tests/hooks/test-dod-gate.sh` + `tests/hooks/test-pre-bash-guard.sh` 에 Windows stub 시뮬레이션 시나리오 추가 — fake python3 = exit 49 + fake uname MSYS 조건에서 hook 이 exit 2 + stderr 진단 키워드(`9009`, `WSL2`, `App execution aliases`) 를 emit 하는지 assert.
+
+### CI
+
+- `.github/workflows/tests.yml` `tests-windows-advisory` job 확장 — `command -v py` probe 선행 + 부재 시 `actions/setup-python@v5` (3.12) 로 fallback + `runner.temp` 에 fake `python3` (exit 49) stub 주입 후 `tests/hooks/test-python-runner.sh` 실행으로 resolver fallback 검증. `continue-on-error: true` 유지 (advisory 경계).
+
+### Unsupported modifications
+
+local hook 수정 (예: `pre-bash-guard` 의 fail-closed 를 `exit 0` 으로 변경해 gate 를 우회) 은 언제든 기술적으로 가능하지만, 그 시점에 rein 의 gate 보장은 무효가 됩니다. 이 경로는 **unsupported local fork** 로 간주하며 rein 의 트래킹/지원 대상이 아닙니다.
+
 ## v0.10.0 (2026-04-20) — Follow-up issues 2/3/4/5: tests CI + brainstorming + codex modes + incident classifier
 
 ### Added
