@@ -177,7 +177,12 @@ python3 scripts/rein-generate-skill-mcp-guide.py
 [ ] 관련 문서(주석, README) 업데이트
 [ ] Self-review 완료 — 내가 리뷰어라면 승인할 수 있는가?
 [ ] 빠뜨린 규칙이 있으면 trail/incidents/ 초안 작성
+[ ] 이 DoD 의 변경이 **테스트 파일을 건드리는 경우에 한해**: 새/수정 테스트에
+    bad-test pattern 없음 (test 이름이 design term 사용 시 assertion 이 design
+    명세와 일치). 변경 파일에 test 없으면 "N/A (no test change)" 로 표시 허용.
 ```
+
+> 이유: test 미포함 DoD (문서만, config 만) 에도 강제하면 marker 비대해지고 실제 test 변경 시의 주의가 약해진다. PR 의 실제 위험 지점만 겨냥 (test-oracle-design §4).
 
 ---
 
@@ -284,3 +289,16 @@ Incident 파일 포맷:
 - PR 단위: 하나의 기능 또는 버그 수정 (여러 기능 혼합 금지)
 - 머지 전 self-review 완료 필수
 - `.env`, `secrets/`, 개인 인증 정보 커밋 절대 금지
+
+---
+
+## 12. Governance stage (v1.1.0+)
+
+`.claude/.rein-state/governance.json` 이 DoD coverage enforcement 강도를 제어한다.
+
+- **Stage 1 (기본값, 파일 부재 포함)** — advisory. DoD `covers` mismatch → `.dod-coverage-advisory` 생성, 차단 없음.
+- **Stage 2** — blocking. Active DoD (Tier 1 마커 또는 Tier 2 최신-mtime) mismatch → `.dod-coverage-mismatch` + `pre-bash-guard` 가 `git commit` / 테스트 차단.
+- **Stage 3** — Stage 2 + 편집된 legacy `docs/YYYY-MM-DD/*-plan.md` 에도 동일.
+- Malformed config 는 **모든 stage 에서 fail-closed**. Stage 1 silent downgrade 금지.
+
+dev 에서 stage 를 수동으로 올린다. `.claude/.rein-state/` 는 `.gitignore` + main 제외 (사용자 프로젝트는 파일 부재 = Stage 1 로 자동 작동).

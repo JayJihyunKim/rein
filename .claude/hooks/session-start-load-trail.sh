@@ -63,8 +63,45 @@ emit_file_block() {
 
 # 이전 세션 잔존 마커 초기화
 rm -f "$PROJECT_DIR/trail/dod/.session-has-src-edit" 2>/dev/null
+# .incident-decision-deferred 는 세션 스코프 — 새 세션에서 재질문 되도록 삭제
+rm -f "$PROJECT_DIR/trail/dod/.incident-decision-deferred" 2>/dev/null
 
 cd "$PROJECT_DIR" || exit 0
+
+# Legacy-shipped pending 자동 healing (rein-heal-legacy-pending.py)
+# git tag 에 이미 포함된 dev-only 문서 (dev commit ts <= tag ts) 의 .pending 을
+# .reviewed (reviewer=retrospective-shipped-<tag>) 로 auto-stamp.
+# **Freshness check**: pending marker 의 created= 가 tag 이전이어야 heal 됨 (fresh
+# unreviewed pending 은 gate 유지).
+# 실패 시: 전체 stderr 를 suppress 하지 않고 1 줄 warning 만 세션 로그에 기록 —
+# python3 resolution 문제가 silent 하게 사라지지 않도록.
+HEAL_SCRIPT="$PROJECT_DIR/scripts/rein-heal-legacy-pending.py"
+if [ -f "$HEAL_SCRIPT" ]; then
+  # python3 해석은 hook lib 의 portable 경로 사용 (PYTHON_RUNNER bash array 계약).
+  # python-runner.sh 를 source 해 resolve_python() 으로 적절한 interpreter 선택.
+  HEAL_LOG="$PROJECT_DIR/trail/incidents/rein-heal-session.log"
+  if [ -f "$SCRIPT_DIR/lib/python-runner.sh" ]; then
+    # shellcheck source=./lib/python-runner.sh
+    . "$SCRIPT_DIR/lib/python-runner.sh"
+    if resolve_python 2>/dev/null; then
+      HEAL_ERR=$("${PYTHON_RUNNER[@]}" "$HEAL_SCRIPT" --quiet 2>&1 >/dev/null); HEAL_RC=$?
+    else
+      HEAL_RC=127
+      HEAL_ERR="resolve_python failed — no usable python interpreter"
+    fi
+  else
+    # python-runner.sh 부재 시 fallback — 단일 토큰만 지원, multi-token runner 깨짐.
+    HEAL_ERR=$(python3 "$HEAL_SCRIPT" --quiet 2>&1 >/dev/null); HEAL_RC=$?
+  fi
+  if [ ${HEAL_RC:-1} -ne 0 ]; then
+    # 실패 경로 visible 로 남김 — gate 가 계속 block 하면 여기 로그 확인
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] rein-heal-legacy-pending FAILED rc=$HEAL_RC: $HEAL_ERR" \
+      >> "$HEAL_LOG" 2>/dev/null || true
+    # 세션 컨텍스트에도 짧은 경고 (agent 가 인지)
+    echo "### ⚠️ rein-heal-legacy-pending 실패 (rc=$HEAL_RC) — $HEAL_LOG 참조"
+    echo
+  fi
+fi
 
 echo "## trail 세션 시작 컨텍스트"
 echo

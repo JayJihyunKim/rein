@@ -15,7 +15,25 @@ Second opinion (brainstorm 반박, spec sanity, refactor tradeoff 이중 검증)
 
 ---
 
-## 2. Running a Task
+## 2. Running a review
+
+`/codex-review` 는 `scripts/rein-codex-review.sh` wrapper 를 호출한다.
+Wrapper 가 context assembly, envelope 4 slots, codex exec, stamp 생성을 담당한다.
+
+### Usage
+- Interactive (code review): `bash scripts/rein-codex-review.sh`
+- Automated (agent, code review): `bash scripts/rein-codex-review.sh --non-interactive`
+- Spec review (plan review): stdin 맨 앞에 `[NON_INTERACTIVE] spec review for plan: <path>` marker. wrapper 가 spec-review mode 로 분기.
+- Spec review (design review): stdin 맨 앞에 `[NON_INTERACTIVE] spec review for design: <path>` marker.
+
+### Mode 별 stamp 규칙 (CRITICAL)
+- **Code review mode**: PASS 시 `trail/dod/.codex-reviewed` 생성 (기존 pre-bash-guard gate 통과용). `.review-pending` 이 있으면 제거. stamp 에 `diff_base: <sha>` 라인 포함 (GI-codex-review-diff-base).
+- **Spec review mode (plan 또는 design)**: `.codex-reviewed` **절대 생성 안 함**. `.review-pending` 도 건드리지 않음. verdict 만 stdout 으로 방출. caller 가 `bash scripts/rein-mark-spec-reviewed.sh <path> <reviewer>` 를 별도로 호출해 `trail/dod/.spec-reviews/*.reviewed` 를 생성할 책임.
+- Rationale: `.codex-reviewed` 는 code commit/test gate. spec review 가 이를 찍으면 코드 변경 없이도 gate 통과 → rein 규율 붕괴.
+
+### Legacy interactive model selection
+
+아래는 wrapper 가 없던 시기의 manual invocation 절차로, 현재는 wrapper 가 담당한다. 참고용으로 남긴다.
 
 1. Ask the user (via `AskUserQuestion`) which model to run: `gpt-5.4` (default, config.toml 기본값) or `gpt-5.3-codex`.
 2. Ask the user (via `AskUserQuestion`) which reasoning effort to use: `low`, `medium`, or `high`.
@@ -79,6 +97,8 @@ Codex 실패 (에러/타임아웃) 시 Sonnet 기반 대체 리뷰 경로:
 ## 5. Stamp 생성 (필수)
 
 리뷰 완료 후 반드시 `trail/dod/.codex-reviewed` 를 생성한다. stamp 없으면 `pre-bash-guard.sh` 가 테스트/커밋을 차단한다.
+
+**Plan A Phase 6 이후**: `scripts/rein-codex-review.sh` wrapper 가 code-review mode PASS 시 자동 생성한다. 아래 필드 규격은 wrapper 가 emit 하는 포맷의 canonical 정의이며, Sonnet 셀프리뷰 / 수동 경로에서는 여전히 caller 가 같은 필드로 stamp 를 생성한다.
 
 ### 5.1 Stamp 필드
 

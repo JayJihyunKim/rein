@@ -13,6 +13,15 @@ VALIDATOR="$PROJECT_DIR/scripts/rein-validate-coverage-matrix.py"
 # shellcheck source=./lib/python-runner.sh
 . "$SCRIPT_DIR/lib/python-runner.sh"
 
+# Plan A §2 (GI-path-policy-lib): path classification lives in a shared
+# library. If the library is missing, fail-closed rather than silently
+# degrading — a missing library means the hook would apply no classifier
+# and validate *every* Write, or worse, skip every Write.
+if ! . "$SCRIPT_DIR/lib/path-policy.sh" 2>/dev/null; then
+  echo "BLOCKED: [post-edit-plan-coverage] path-policy library missing at $SCRIPT_DIR/lib/path-policy.sh" >&2
+  exit 2
+fi
+
 [ -f "$VALIDATOR" ] || exit 0  # validator 없으면 no-op
 
 # Post-hook: Python 미해결 시 조용히 skip (세션 차단 금지).
@@ -46,15 +55,18 @@ fi
 
 mkdir -p "$DOD_DIR"
 
-is_plan_path() {
-  # Mirror canonical matcher from post-write-spec-review-gate.sh but restrict to plans.
+# Plan A §2 consumer: is_plan_path from the shared library expects a
+# repo-relative path (GI-path-policy-input-contract). This wrapper handles
+# the "absolute path → repo-relative" normalization that was previously
+# inlined here.
+_is_plan_abs() {
   local abs="$1"
   local rel
   case "$abs" in
     "$PROJECT_DIR"/*) rel="${abs#$PROJECT_DIR/}" ;;
     *) return 1 ;;
   esac
-  [[ "$rel" =~ ^(docs(/[^/]+)*/plans/.+\.md|plans/.+\.md)$ ]]
+  is_plan_path "$rel"
 }
 
 # Helpers for managing the marker as a deduped line-list of failed plan paths.
@@ -88,7 +100,7 @@ while IFS= read -r FILE_PATH; do
   [ -z "$FILE_PATH" ] && continue
   ABS=$("${PYTHON_RUNNER[@]}" -c "import os,sys; print(os.path.abspath(sys.argv[1]))" "$FILE_PATH" 2>/dev/null)
   [ -z "$ABS" ] && continue
-  is_plan_path "$ABS" || continue
+  _is_plan_abs "$ABS" || continue
   [ -f "$ABS" ] || continue  # 편집된 파일이 실제로 존재해야 검증 가능
 
   # Run validator once, capture stderr + exit code.

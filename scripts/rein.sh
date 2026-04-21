@@ -17,8 +17,675 @@ warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 fatal() { echo -e "${RED}Fatal: $*${NC}" >&2; exit 1; }
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
+
+# ---------------------------------------------------------------------------
+# detect_platform()
+# Returns "posix" on Linux/Darwin, "windows_git_bash" on MINGW*/MSYS*.
+# Exits 1 (prints error to stderr) on unsupported platforms.
+# Plan C Task 1.1.
+# ---------------------------------------------------------------------------
+detect_platform() {
+  case "$(uname -s)" in
+    Linux|Darwin) echo "posix" ;;
+    MINGW*|MSYS*) echo "windows_git_bash" ;;
+    *) echo "unsupported: $(uname -s)" >&2; return 1 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# write_atomic <path> <content>
+# Writes <content> to <path> via temp-file + rename, so a concurrent reader
+# never sees a partial write. Plan C Task 1.2 (BG-file-state-atomic-write).
+#
+# The temp-file name combines PID + shell-level-random so concurrent writers
+# (running as subshells that inherit $$) don't collide on the staging name.
+# ---------------------------------------------------------------------------
+write_atomic() {
+  local path="$1" content="$2"
+  # BASHPID differs in subshells; RANDOM adds extra entropy so parallel
+  # invocations inside ( ... ) & ( ... ) & never pick the same tmp path.
+  local tmp="${path}.tmp.${BASHPID:-$$}.${RANDOM}${RANDOM}"
+  printf '%s' "$content" > "$tmp"
+  mv -f "$tmp" "$path"
+}
+
+# ---------------------------------------------------------------------------
+# State / jobs dir helpers — fixed paths, relative to project root.
+# Plan C Task 1.2 (BG-file-state-layout).
+# ---------------------------------------------------------------------------
+rein_state_dir()     { echo ".claude/.rein-state"; }
+rein_base_dir()      { echo ".claude/.rein-state/base"; }
+rein_conflicts_dir() { echo ".claude/.rein-state/conflicts"; }
+rein_jobs_dir()      { echo ".claude/cache/jobs"; }
+
+# ---------------------------------------------------------------------------
+# is_text_file <path>
+# Returns 0 if the extension matches rein's snapshot-eligible text set,
+# 1 otherwise. Extension match is case-sensitive on purpose — rein's own
+# template files always use lowercase extensions, and treating README.MD
+# as snapshot-eligible would imply a policy we don't guarantee.
+# Plan C Task 2.1 (RU-snapshot-textfile-only).
+# ---------------------------------------------------------------------------
+is_text_file() {
+  case "$1" in
+    *.md|*.sh|*.py|*.json|*.yml|*.yaml|*.txt|*.toml) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# sha256_of <path>
+# Portable sha256 wrapper: sha256sum (Linux) / shasum (macOS) / openssl fallback.
+# Emits only the hex digest, empty string on failure.
+# Plan C Task 2.2 — used by the v2 update path.
+# ---------------------------------------------------------------------------
+sha256_of() {
+  local f="$1"
+  [ -f "$f" ] || { echo ""; return; }
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$f" 2>/dev/null | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$f" 2>/dev/null | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$f" 2>/dev/null | awk '{print $NF}'
+  else
+    echo ""
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# rein_manifest_helper
+# Absolute path to scripts/rein-manifest-v2.py. Resolves via BASH_SOURCE so
+# it works both when rein.sh is executed directly and when sourced from
+# tests (--source-only). Cached across calls.
+# Plan C Task 2.2.
+# ---------------------------------------------------------------------------
+_REIN_MANIFEST_HELPER=""
+rein_manifest_helper() {
+  if [ -z "$_REIN_MANIFEST_HELPER" ]; then
+    local src="${BASH_SOURCE[0]:-$0}"
+    local dir
+    dir=$(cd "$(dirname "$src")" 2>/dev/null && pwd -P)
+    _REIN_MANIFEST_HELPER="$dir/rein-manifest-v2.py"
+  fi
+  echo "$_REIN_MANIFEST_HELPER"
+}
+
+# ---------------------------------------------------------------------------
+# is_first_update_v2
+# Returns 0 (true) if the current update should take the v2 first-update
+# path (preserve text files + seed base). Triggers on:
+#   - no manifest at all (fresh install — nothing to compare)
+#   - manifest schema_version == "1" (legacy install, not yet migrated)
+#   - base snapshot directory missing (partial migration)
+# Otherwise returns 1 — the v2 steady-state update path handles subsequent
+# updates via 3-way merge (Phase 3).
+# Plan C Task 2.2 (RU-first-update-preserves-modified-files).
+# ---------------------------------------------------------------------------
+is_first_update_v2() {
+  local manifest=".claude/.rein-manifest.json"
+  [ ! -f "$manifest" ] && return 0
+  local schema
+  schema=$(python3 "$(rein_manifest_helper)" schema "$manifest" 2>/dev/null)
+  [ "$schema" = "1" ] && return 0
+  [ ! -d "$(rein_base_dir)" ] && return 0
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# apply_first_update_text <template_root> <rel_path>
+# Apply the v1 → v2 first-update policy to a single text file:
+#   - If user file is absent    → install incoming, seed base=incoming.
+#                                  log "installed: <rel>".
+#   - If user == incoming       → no-op, seed base=incoming, log no change.
+#   - If user != incoming       → PRESERVE user, seed base=incoming,
+#                                  log "preserved: <rel> (modified since install)".
+# Never overwrites the user's on-disk content. Binary/non-text paths must
+# NOT call this helper — they use the legacy 2-way path.
+# Plan C Task 2.2 (RU-first-update-preserves-modified-files,
+#                  RU-first-update-seeds-base-for-textfiles-only).
+# ---------------------------------------------------------------------------
+apply_first_update_text() {
+  local template_root="$1" rel="$2"
+  local incoming="$template_root/$rel"
+  [ -f "$incoming" ] || { echo "apply_first_update_text: missing incoming $incoming" >&2; return 2; }
+
+  local base="$(rein_base_dir)/$rel"
+  mkdir -p "$(dirname "$base")"
+
+  if [ ! -f "$rel" ]; then
+    mkdir -p "$(dirname "$rel")"
+    cp "$incoming" "$rel"
+    cp "$incoming" "$base"
+    echo "installed: $rel"
+    return 0
+  fi
+
+  local hu hi
+  hu=$(sha256_of "$rel")
+  hi=$(sha256_of "$incoming")
+  if [ "$hu" = "$hi" ]; then
+    cp "$incoming" "$base"
+    return 0
+  fi
+
+  cp "$incoming" "$base"
+  echo "preserved: $rel (modified since install)"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _rein_rej_slug <rel>
+# Produces a filename-safe slug from a relative path for use as the
+# conflict artifact name. Replaces '/' with '-' and strips any other
+# character that isn't [A-Za-z0-9.-] to '-'.
+# ---------------------------------------------------------------------------
+_rein_rej_slug() {
+  printf '%s' "$1" | tr '/' '-' | tr -c 'A-Za-z0-9.-' '-'
+}
+
+# ---------------------------------------------------------------------------
+# Staging manifest helpers — Plan C Task 3.3 (RU-update-manifest-atomic-only).
+#
+# The v2 update path never mutates the live manifest directly. Instead:
+#   1. stage_manifest_begin — create/reset a staging manifest next to the
+#      live file. Any stale staging from a previously-interrupted run is
+#      discarded (with a warning) so that we never mix payloads.
+#   2. stage_manifest_add <rel> <sha> — upsert one entry into the staging
+#      manifest. Atomic on a per-call basis (via rein-manifest-v2.py).
+#   3. stage_manifest_commit — atomically rename the staging file onto the
+#      live manifest path. After this, the live manifest reflects the
+#      entire update; before this, it reflects the prior state.
+#
+# This matches the plan's contract: user-facing files may be half-updated
+# on an interrupted run, but the live manifest is either the prior
+# snapshot or the new snapshot, never a partial blend.
+# ---------------------------------------------------------------------------
+staging_manifest_path() { echo "$(rein_state_dir)/manifest.next.json"; }
+
+# manifest_path() is already defined earlier in this file for v1 callers.
+# The v2 path re-uses that function (it takes a project_dir and returns
+# "$project_dir/.claude/.rein-manifest.json"). v2 code always calls it with
+# "." so the path is relative to the CWD — same contract as the v1 flow.
+
+stage_manifest_begin() {
+  local stage; stage=$(staging_manifest_path)
+  mkdir -p "$(rein_state_dir)"
+  if [ -f "$stage" ]; then
+    warn "warning: stale staging manifest detected at $stage, discarding"
+    rm -f "$stage"
+  fi
+  # Initialize a fresh v2 manifest at the staging path.
+  python3 "$(rein_manifest_helper)" init "$stage" "$VERSION"
+}
+
+stage_manifest_add() {
+  local rel="$1" sha="$2"
+  local stage; stage=$(staging_manifest_path)
+  [ -f "$stage" ] || { echo "stage_manifest_add: call stage_manifest_begin first" >&2; return 2; }
+  python3 "$(rein_manifest_helper)" add "$stage" "$rel" "$sha" "$VERSION"
+}
+
+stage_manifest_commit() {
+  local stage; stage=$(staging_manifest_path)
+  local live; live=$(manifest_path ".")
+  [ -f "$stage" ] || { echo "stage_manifest_commit: nothing to commit ($stage missing)" >&2; return 2; }
+  mkdir -p "$(dirname "$live")"
+  mv -f "$stage" "$live"
+}
+
+# ---------------------------------------------------------------------------
+# safe_cp_base <incoming_src> <base_dst> <rel>
+# Copies an incoming template file into the base-snapshot location. On any
+# failure (typically EACCES when the base dir is read-only for tests), it
+# emits a .rej artifact under rein_conflicts_dir/ and returns 1 — callers
+# treat that as a conflict (RU-update-base-write-failure-as-conflict).
+# Success path returns 0 with base updated byte-for-byte.
+# Plan C Task 3.5.
+# ---------------------------------------------------------------------------
+safe_cp_base() {
+  local src="$1" dst="$2" rel="$3"
+  mkdir -p "$(dirname "$dst")" 2>/dev/null || true
+  if cp "$src" "$dst" 2>/dev/null; then
+    return 0
+  fi
+  local rc=$?
+  local ts slug rej
+  ts=$(date -u +'%Y-%m-%dT%H-%M-%S')
+  slug=$(_rein_rej_slug "$rel")
+  mkdir -p "$(rein_conflicts_dir)"
+  rej="$(rein_conflicts_dir)/${ts}-${slug}.base-write-failed.rej"
+  printf 'base-write-failed: errno_exit=%s rel=%s dst=%s\n' "$rc" "$rel" "$dst" > "$rej"
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# count_prune_candidates <project_dir> <template_dir>
+# Returns (stdout) the number of files currently recorded in the manifest
+# that are absent from the incoming template. Plan C Task 4.1 helper for
+# report_prune_count (RU-update-default-shows-prune-count).
+#
+# Implementation note: silently returns 0 when the manifest is missing or
+# unreadable — callers use this for an informational one-liner, so they
+# must not fail because a fresh install has no manifest yet.
+# ---------------------------------------------------------------------------
+count_prune_candidates() {
+  local project_dir="$1" template_dir="$2"
+  local mf; mf=$(manifest_path "$project_dir")
+  if [ ! -f "$mf" ]; then
+    echo 0
+    return 0
+  fi
+  python3 - "$mf" "$template_dir" <<'PY'
+import json, os, sys
+mf, template_root = sys.argv[1], sys.argv[2]
+try:
+    with open(mf) as f:
+        data = json.load(f)
+except Exception:
+    print(0); sys.exit(0)
+files = (data.get("files") or {}).keys()
+gone = [rel for rel in files if not os.path.exists(os.path.join(template_root, rel))]
+print(len(gone))
+PY
+}
+
+# ---------------------------------------------------------------------------
+# report_prune_count <project_dir> <template_dir>
+# Emits the "N file(s) removed from template since last update" line when
+# count_prune_candidates > 0, silent otherwise. Used by cmd_update's
+# default (non-prune) path. Plan C Task 4.1.
+# ---------------------------------------------------------------------------
+report_prune_count() {
+  local project_dir="$1" template_dir="$2"
+  local gone
+  gone=$(count_prune_candidates "$project_dir" "$template_dir")
+  if [ "$gone" -gt 0 ]; then
+    echo "ℹ️  $gone file(s) removed from template since last update. Run 'rein update --prune' to review."
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# _classify_prune_candidates <project_dir> <template_dir>
+# Emits TSV lines to stdout classifying every manifest-tracked file that is
+# absent from the current template:
+#   SAFE\t<rel>       — on-disk content matches recorded sha → safe to delete
+#   MODIFIED\t<rel>   — user has edited → preserve
+#   GONE\t<rel>       — already deleted by the user → nothing to do
+#   UNSAFE\t<rel>\t…  — path escapes project root → refuse to touch
+# Shared by prune_review + prune_apply. Plan C Task 4.2.
+# ---------------------------------------------------------------------------
+_classify_prune_candidates() {
+  local project_dir="$1" template_dir="$2"
+  local mf; mf=$(manifest_path "$project_dir")
+  [ -f "$mf" ] || return 0
+  python3 - "$mf" "$template_dir" "$project_dir" <<'PY'
+import json, os, sys, hashlib
+mf, template_root, project_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+project_abs = os.path.realpath(project_dir)
+
+try:
+    with open(mf) as f:
+        data = json.load(f)
+except Exception:
+    sys.exit(0)
+
+files = data.get("files") or {}
+gone_from_template = sorted(
+    rel for rel in files if not os.path.exists(os.path.join(template_root, rel))
+)
+
+def sha256(path):
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+def is_safe(rel):
+    if not rel or os.path.isabs(rel):
+        return False
+    norm = os.path.normpath(rel)
+    if norm.startswith("..") or os.path.isabs(norm):
+        return False
+    if any(p == ".." for p in norm.split(os.sep)):
+        return False
+    full = os.path.realpath(os.path.join(project_abs, norm))
+    try:
+        common = os.path.commonpath([project_abs, full])
+    except ValueError:
+        return False
+    return common == project_abs and full != project_abs
+
+for rel in gone_from_template:
+    if not is_safe(rel):
+        print(f"UNSAFE\t{rel}\trefusing to touch path outside project")
+        continue
+    full = os.path.join(project_abs, rel)
+    recorded = (files.get(rel) or {}).get("sha256", "")
+    if not os.path.exists(full):
+        print(f"GONE\t{rel}")
+        continue
+    cur = sha256(full)
+    if cur and cur == recorded:
+        print(f"SAFE\t{rel}")
+    else:
+        print(f"MODIFIED\t{rel}")
+PY
+}
+
+# ---------------------------------------------------------------------------
+# prune_review <project_dir> <template_dir>
+# Print SAFE/MODIFIED/GONE/UNSAFE classification. Never deletes.
+# Exit 0 regardless of counts.
+# Plan C Task 4.2 (RU-prune-review-without-confirm).
+# ---------------------------------------------------------------------------
+prune_review() {
+  local project_dir="$1" template_dir="$2"
+  local plan; plan=$(mktemp)
+  _classify_prune_candidates "$project_dir" "$template_dir" > "$plan"
+  local safe_count mod_count gone_count unsafe_count
+  safe_count=$(awk -F'\t' '$1=="SAFE"{c++} END{print c+0}' "$plan")
+  mod_count=$(awk -F'\t' '$1=="MODIFIED"{c++} END{print c+0}' "$plan")
+  gone_count=$(awk -F'\t' '$1=="GONE"{c++} END{print c+0}' "$plan")
+  unsafe_count=$(awk -F'\t' '$1=="UNSAFE"{c++} END{print c+0}' "$plan")
+
+  echo "Prune review (dry-run, use --prune --confirm to apply):"
+  echo "  SAFE     (delete): $safe_count"
+  echo "  MODIFIED (keep):   $mod_count"
+  echo "  GONE     (noop):   $gone_count"
+  if [ "$unsafe_count" -gt 0 ]; then
+    echo "  UNSAFE   (skip):   $unsafe_count"
+  fi
+  if [ "$safe_count" -gt 0 ] || [ "$mod_count" -gt 0 ]; then
+    echo
+    awk -F'\t' '$1=="SAFE"     {print "  SAFE     " $2}' "$plan"
+    awk -F'\t' '$1=="MODIFIED" {print "  MODIFIED " $2}' "$plan"
+  fi
+  rm -f "$plan"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# prune_apply <project_dir> <template_dir>
+# Move SAFE files into .rein-prune-backup-<ts>/ (preserving project-rel
+# layout), leaving MODIFIED + GONE + UNSAFE untouched. Safe to call in
+# steady state — creates the backup dir lazily only when there is at least
+# one candidate.
+# Plan C Task 4.2 (RU-prune-confirm-requires-flag, RU-remove-backup shared helper).
+# ---------------------------------------------------------------------------
+prune_apply() {
+  local project_dir="$1" template_dir="$2"
+  local plan; plan=$(mktemp)
+  _classify_prune_candidates "$project_dir" "$template_dir" > "$plan"
+  local ts backup_dir moved preserved
+  ts=$(date +'%Y-%m-%dT%H-%M-%S')
+  backup_dir="$project_dir/.rein-prune-backup-$ts"
+  moved=0
+  preserved=0
+
+  local line kind rel
+  while IFS= read -r line; do
+    kind=$(printf '%s' "$line" | cut -f1)
+    rel=$(printf '%s' "$line" | cut -f2)
+    case "$kind" in
+      SAFE)
+        if [ -f "$project_dir/$rel" ]; then
+          mkdir -p "$backup_dir/$(dirname "$rel")"
+          mv "$project_dir/$rel" "$backup_dir/$rel"
+          moved=$((moved + 1))
+        fi
+        ;;
+      MODIFIED)
+        preserved=$((preserved + 1))
+        ;;
+      # GONE / UNSAFE — nothing to do
+    esac
+  done < "$plan"
+  rm -f "$plan"
+
+  echo "✓ Pruned $moved file(s). Preserved $preserved modified file(s)."
+  if [ "$moved" -gt 0 ]; then
+    echo "  Backup: $backup_dir/"
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# do_update_v2 <template_root> <rel1> <rel2> ...
+# Per-file transactional update loop for the v2 steady-state path
+# (Plan C Task 3.2 / RU-update-per-file-content-immediate + Task 3.4 /
+#  RU-update-exit-code-partial-conflict).
+#
+# For each text file, invokes three_way_merge. Non-text files are surfaced
+# via _REIN_UPDATE_NONTEXT so the caller can loop them through the legacy
+# 2-way path. The caller must call stage_manifest_begin before this and
+# stage_manifest_commit after — do_update_v2 only calls stage_manifest_add
+# on clean merges, so conflict files retain their prior manifest sha.
+#
+# Globals set (reset on every call):
+#   _REIN_UPDATE_UPDATES   — count of files cleanly merged / fast-forwarded
+#   _REIN_UPDATE_CONFLICTS — count of conflict files (user preserved, .rej written)
+#   _REIN_UPDATE_FATAL     — 1 if an unrecoverable error was seen, else 0
+#   _REIN_UPDATE_NONTEXT   — space-separated list of non-text rel paths
+#
+# Return codes (mirror Plan C Task 3.4 exit-code mapping):
+#   0 — all clean
+#   1 — one or more conflicts, transaction can complete
+#   2 — fatal error mid-loop (staging manifest left intact for inspection)
+# ---------------------------------------------------------------------------
+do_update_v2() {
+  local template_root="$1"; shift
+  _REIN_UPDATE_UPDATES=0
+  _REIN_UPDATE_CONFLICTS=0
+  _REIN_UPDATE_FATAL=0
+  _REIN_UPDATE_NONTEXT=""
+
+  local rel
+  for rel in "$@"; do
+    if ! is_text_file "$rel"; then
+      _REIN_UPDATE_NONTEXT="${_REIN_UPDATE_NONTEXT:+$_REIN_UPDATE_NONTEXT }$rel"
+      continue
+    fi
+    local incoming="$template_root/$rel"
+    if [ ! -f "$incoming" ]; then
+      # Template no longer carries the file — not our job here; prune is
+      # handled in Phase 4. Skip with no sha stage.
+      continue
+    fi
+    local user_p="$rel"
+    local base_p="$(rein_base_dir)/$rel"
+
+    local rc=0
+    three_way_merge "$user_p" "$base_p" "$incoming" "$rel" || rc=$?
+
+    case "$rc" in
+      0)
+        _REIN_UPDATE_UPDATES=$((_REIN_UPDATE_UPDATES + 1))
+        stage_manifest_add "$rel" "$(sha256_of "$incoming")"
+        ;;
+      1)
+        _REIN_UPDATE_CONFLICTS=$((_REIN_UPDATE_CONFLICTS + 1))
+        ;;
+      *)
+        _REIN_UPDATE_FATAL=1
+        echo "fatal: three_way_merge failed for $rel (rc=$rc)" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  if [ "$_REIN_UPDATE_CONFLICTS" -gt 0 ]; then
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# three_way_merge <user_path> <base_path> <incoming_path> <rel_for_record>
+#
+# Return codes:
+#   0 — clean: user updated (or unchanged) to converged state, base refreshed
+#   1 — conflict: user and base preserved byte-for-byte, .rej written
+#   2 — fatal (e.g., git merge-file crashed with signal)
+#
+# Decision matrix (sha256 comparison):
+#   - user missing                                  → cp incoming→user, cp incoming→base (first install)
+#   - all three equal                               → no-op
+#   - user != base but user == incoming             → cp incoming→base (user already caught up)
+#   - user == base and base != incoming             → cp incoming→{user, base} (clean fast-forward)
+#   - user != base and base == incoming             → no-op (user-only changes)
+#   - user != base and user != incoming             → true 3-way:
+#         git merge-file -p user base incoming > merged
+#         success → mv merged → user, cp incoming → base
+#         conflict markers → preserve user + base unchanged, write .rej
+#
+# Plan C Task 3.1 (RU-three-way-merge-*).
+# ---------------------------------------------------------------------------
+three_way_merge() {
+  local user="$1" base="$2" incoming="$3" rel="$4"
+
+  [ -f "$incoming" ] || { echo "three_way_merge: missing incoming $incoming" >&2; return 2; }
+
+  # First install — user absent ⇒ install incoming, then seed base.
+  # If the base-seed fails we keep the user file (already installed) and
+  # report a conflict per RU-update-base-write-failure-as-conflict.
+  if [ ! -f "$user" ]; then
+    mkdir -p "$(dirname "$user")"
+    cp "$incoming" "$user"
+    if ! safe_cp_base "$incoming" "$base" "$rel"; then
+      return 1
+    fi
+    return 0
+  fi
+
+  # base may not exist yet if the caller is in a partially-migrated state.
+  # Try to seed it; if that fails, degrade to conflict immediately — we
+  # cannot safely run 3-way without a base, and silently overwriting the
+  # user would violate RU-three-way-merge-no-silent-overwrite.
+  if [ ! -f "$base" ]; then
+    if ! safe_cp_base "$incoming" "$base" "$rel"; then
+      return 1
+    fi
+    # Continue with the rest of the decision tree so user is still
+    # reconciled against incoming if the contents differ.
+  fi
+
+  local hu hb hi
+  hu=$(sha256_of "$user")
+  hb=$(sha256_of "$base")
+  hi=$(sha256_of "$incoming")
+
+  # All equal — nothing to do.
+  if [ "$hu" = "$hi" ] && [ "$hb" = "$hi" ]; then
+    return 0
+  fi
+
+  # User already converged to incoming — only base lagged.
+  if [ "$hu" = "$hi" ]; then
+    if ! safe_cp_base "$incoming" "$base" "$rel"; then
+      return 1
+    fi
+    return 0
+  fi
+
+  # User untouched since install (user == base), base != incoming → fast-forward.
+  # Update user first (via temp+mv for atomicity), then refresh base. If
+  # base-write fails after user was already advanced, the user is now at
+  # the incoming content — not a silent overwrite of unrelated user edits
+  # since hu == hb, so the user had never diverged — but we still must
+  # report conflict so the caller doesn't mark the manifest forward.
+  if [ "$hu" = "$hb" ]; then
+    local utmp="${user}.update.${BASHPID:-$$}.${RANDOM}"
+    cp "$incoming" "$utmp"
+    mv -f "$utmp" "$user"
+    if ! safe_cp_base "$incoming" "$base" "$rel"; then
+      return 1
+    fi
+    return 0
+  fi
+
+  # User-only changes, template unchanged (base == incoming). Nothing to do.
+  if [ "$hb" = "$hi" ]; then
+    return 0
+  fi
+
+  # True 3-way merge required. git merge-file works in place, so stage
+  # a temp that starts as a copy of user, then merge into it. We avoid
+  # toggling 'set -e' here because mutating the shell option from inside
+  # a function leaks state to the caller; instead, swallow failure via
+  # '|| rc=$?' so the function never mutates the caller's errexit state.
+  local tmp="${user}.merge.${BASHPID:-$$}.${RANDOM}"
+  cp "$user" "$tmp"
+
+  local rc=0
+  git merge-file -p "$tmp" "$base" "$incoming" > "${tmp}.out" 2>/dev/null || rc=$?
+
+  if [ "$rc" = "0" ]; then
+    mv -f "${tmp}.out" "$user"
+    rm -f "$tmp"
+    if ! safe_cp_base "$incoming" "$base" "$rel"; then
+      # User content landed successfully; base refresh failed. Manifest
+      # stays at the prior sha (caller decides via conflict count) and a
+      # .rej artifact has been written by safe_cp_base.
+      return 1
+    fi
+    return 0
+  fi
+
+  # rc 1..127 = number of conflicts reported by merge-file. Anything else
+  # (signal termination, binary file, etc.) is a fatal error.
+  if [ "$rc" -ge 1 ] && [ "$rc" -le 127 ]; then
+    local ts slug rej
+    ts=$(date -u +'%Y-%m-%dT%H-%M-%S')
+    slug=$(_rein_rej_slug "$rel")
+    mkdir -p "$(rein_conflicts_dir)"
+    rej="$(rein_conflicts_dir)/${ts}-${slug}.rej"
+    mv -f "${tmp}.out" "$rej"
+    rm -f "$tmp"
+    return 1
+  fi
+
+  rm -f "$tmp" "${tmp}.out"
+  return 2
+}
+
+# ---------------------------------------------------------------------------
+# ensure_gitignore_entries()
+# Appends rein operational-hygiene entries to ./.gitignore if missing.
+# Idempotent for partially-migrated installs — each pattern is checked and
+# appended independently. A header line is added the first time any entry
+# is appended during the current invocation so we don't spam headers on
+# repeat calls with nothing to add.
+# Plan C Task 1.3 (RU-backup-dirs-gitignored, RU-snapshot-storage-location-ignored).
+# ---------------------------------------------------------------------------
+ensure_gitignore_entries() {
+  local gi=".gitignore"
+  [ -f "$gi" ] || touch "$gi"
+
+  local header_written=0
+  local pat
+  for pat in \
+    '.rein-prune-backup-*/' \
+    '.rein-remove-backup-*/' \
+    '/.claude/.rein-state/' \
+    '/.claude/cache/jobs/'
+  do
+    if ! grep -qF "$pat" "$gi"; then
+      if [ "$header_written" = "0" ]; then
+        # Ensure separation from preceding content, then emit the header once.
+        printf '\n# rein operational hygiene (Spec C / Plan C Task 1.3)\n' >> "$gi"
+        header_written=1
+      fi
+      printf '%s\n' "$pat" >> "$gi"
+    fi
+  done
+}
 
 # ---------------------------------------------------------------------------
 # Temp dir + cleanup
@@ -316,6 +983,18 @@ COPY_TARGETS=(
   ".github/workflows/weekly-agent-evolution.yml"
   "AGENTS.md"
   "REIN_SETUP_GUIDE.md"
+  # Plan C helpers — manifest v2 + 3-way merge + anchored segment matcher.
+  # Shipped so user projects can invoke rein update / rein remove without
+  # falling back to an unbundled Python helper. Tracked explicitly rather
+  # than via scripts/rein-*.py wildcard per branch-strategy.md (Task 10.0).
+  "scripts/rein-manifest-v2.py"
+  "scripts/rein-path-match.py"
+  # Plan C Phase 7 — standalone completion wrapper for `rein job start`.
+  # Lives in a file (not inlined via `declare -f`) because the wrapper body
+  # contains a python3 heredoc that doesn't round-trip through nested
+  # `bash -c "$(declare -f ...)"` quoting. COPY_TARGETS ships it to user
+  # projects; branch-strategy.md lists it under ✅ 포함.
+  "scripts/rein-job-wrapper.sh"
 )
 
 TRAIL_DIRS=(
@@ -913,6 +1592,7 @@ Usage:
   rein new <project-name>           Create a new project from template
   rein merge [flags]                Merge template into current project
   rein update [flags]               Update current project from template
+  rein remove [flags]               Remove rein-tracked files (see 'rein remove --help')
   rein --version                    Show version
   rein --help                       Show this help
 
@@ -969,6 +1649,10 @@ cmd_new() {
   # Generate initial manifest so future updates can prune safely
   manifest_generate "$dest_dir" "$TEMPLATE_DIR"
 
+  # Plan C Task 1.3 — seed .gitignore with rein operational-hygiene entries
+  # so base snapshots, prune/remove backups, and job logs never land in git.
+  ( cd "$dest_dir" && ensure_gitignore_entries )
+
   echo ""
   info "Created project '$project_name' with $file_count files."
   echo ""
@@ -1023,6 +1707,10 @@ cmd_merge() {
   # ALL_OVERWRITE may have been set by --all/--yes flag in main(); preserve
   # that. Only reset to false if it has not been set explicitly.
   : "${ALL_OVERWRITE:=false}"
+
+  # Plan C Task 1.3 — top up rein operational-hygiene entries in the user
+  # project's .gitignore. Idempotent; safe to call on every update.
+  ensure_gitignore_entries
 
   local added=0
   local overwritten=0
@@ -1092,6 +1780,303 @@ cmd_merge() {
 }
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# rein_path_match_helper
+# Absolute path to scripts/rein-path-match.py. Cached across calls.
+# Mirrors rein_manifest_helper. Plan C Task 5.2.
+# ---------------------------------------------------------------------------
+_REIN_PATH_MATCH_HELPER=""
+rein_path_match_helper() {
+  if [ -z "$_REIN_PATH_MATCH_HELPER" ]; then
+    local src="${BASH_SOURCE[0]:-$0}"
+    local dir
+    dir=$(cd "$(dirname "$src")" 2>/dev/null && pwd -P)
+    _REIN_PATH_MATCH_HELPER="$dir/rein-path-match.py"
+  fi
+  echo "$_REIN_PATH_MATCH_HELPER"
+}
+
+# ---------------------------------------------------------------------------
+# path_matches <pattern> <rel>
+# Bash wrapper around rein-path-match.py. Returns 0 if match, 1 otherwise.
+# Plan C Task 5.2.
+# ---------------------------------------------------------------------------
+path_matches() {
+  local pattern="$1" rel="$2"
+  local result
+  result=$(python3 "$(rein_path_match_helper)" "$pattern" "$rel" 2>/dev/null || echo "false")
+  [ "$result" = "true" ]
+}
+
+# ---------------------------------------------------------------------------
+# _rein_file_is_modified <rel>
+# Compares the on-disk sha256 of <rel> against the sha recorded in the
+# manifest. Returns 0 (true) if content differs or the file is absent but
+# recorded (both of those cases mean "don't blindly remove").
+# Plan C Task 5.4 helper.
+# ---------------------------------------------------------------------------
+_rein_file_is_modified() {
+  local rel="$1"
+  [ -f "$rel" ] || return 1   # nothing to preserve if file is already gone
+  local recorded
+  recorded=$(python3 "$(rein_manifest_helper)" read "$(manifest_path .)" "$rel" 2>/dev/null || echo "")
+  [ -n "$recorded" ] || return 1  # not tracked — caller shouldn't try to remove
+  local cur
+  cur=$(sha256_of "$rel")
+  [ "$recorded" != "$cur" ]
+}
+
+# ---------------------------------------------------------------------------
+# _rein_remove_backup_and_delete <backup_dir> <rel1> <rel2> ...
+# Shared helper for prune_apply + cmd_remove. For each rel:
+#   - If file is tracked-and-modified (sha mismatch): preserve in place,
+#     echo "preserved (modified): <rel>".
+#   - Else: mkdir -p the mirror path under <backup_dir>, mv the file into
+#     it (byte-preserving), increment the removed counter.
+#
+# Emits one summary line:
+#   "✓ Removed N file(s). Preserved M modified file(s). Backup: <dir>/"
+#   (Backup line omitted when N == 0.)
+# Plan C Task 5.4 + 5.5 (RU-remove-modified-preserved-no-force-flag,
+#                        RU-remove-backup shared helper).
+# ---------------------------------------------------------------------------
+_rein_remove_backup_and_delete() {
+  local backup_dir="$1"; shift
+  local removed=0 preserved=0
+  local rel
+  for rel in "$@"; do
+    [ -e "$rel" ] || continue
+    if _rein_file_is_modified "$rel"; then
+      echo "preserved (modified): $rel"
+      preserved=$((preserved + 1))
+      continue
+    fi
+    mkdir -p "$backup_dir/$(dirname "$rel")"
+    mv "$rel" "$backup_dir/$rel"
+    removed=$((removed + 1))
+  done
+  echo "✓ Removed $removed file(s). Preserved $preserved modified file(s)."
+  if [ "$removed" -gt 0 ]; then
+    echo "  Backup: $backup_dir/"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# _rein_remove_usage
+# Prints the rein remove help text. Exits with the caller's desired code.
+# ---------------------------------------------------------------------------
+_rein_remove_usage() {
+  cat <<'EOF'
+Usage:
+  rein remove --path <glob> --confirm     Remove files matching <glob>
+                                          (anchored segment matcher: '*' =
+                                          one segment, '**' = zero or more).
+                                          User-modified files are preserved.
+  rein remove --all --confirm             Remove ALL rein-tracked files.
+                                          TTY only — requires typed 'DELETE'.
+  rein remove --dry-run                   Preview all tracked files that
+                                          would be targeted. No deletion.
+
+  rein remove --help                      Show this help.
+
+Safety:
+  - Deleted files land in .rein-remove-backup-<ts>/ (project root).
+  - User-modified files are ALWAYS preserved in place (no --force flag).
+  - --all --confirm rejects non-interactive stdin (pipe / redirect / heredoc).
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# cmd_remove <args...>
+# Dispatcher for 'rein remove'. Parses --path/--all/--confirm/--dry-run,
+# enforces the scope-flag requirement (RU-remove-requires-scope-flag), and
+# delegates to:
+#   - _rein_remove_dry_run
+#   - _rein_remove_path_apply <glob>
+#   - _rein_remove_all_apply
+# The TTY-only gate for --all --confirm is enforced inside
+# _rein_remove_all_apply (RU-remove-all-requires-typed-confirmation, Plan C
+# Task 5.3).
+# ---------------------------------------------------------------------------
+cmd_remove() {
+  local have_path=0 have_all=0 have_confirm=0 have_dry=0 have_help=0
+  local path_glob=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --path)
+        have_path=1
+        [ $# -lt 2 ] && { error "--path requires a <glob> argument"; exit 2; }
+        path_glob="$2"
+        shift 2
+        ;;
+      --all)      have_all=1;     shift ;;
+      --confirm)  have_confirm=1; shift ;;
+      --dry-run)  have_dry=1;     shift ;;
+      --help|-h)  have_help=1;    shift ;;
+      *)
+        error "unknown flag: $1"
+        _rein_remove_usage >&2
+        exit 2
+        ;;
+    esac
+  done
+
+  if [ "$have_help" = "1" ]; then
+    _rein_remove_usage
+    exit 0
+  fi
+
+  if [ "$have_path" = "0" ] && [ "$have_all" = "0" ] && [ "$have_dry" = "0" ]; then
+    # No scope flag at all
+    if [ "$have_confirm" = "1" ]; then
+      cat >&2 <<'EOF'
+Error: 'rein remove --confirm' requires either --path <glob> or --all.
+  To remove specific files: rein remove --path '.claude/skills/foo/*' --confirm
+  To remove ALL rein files:  rein remove --all --confirm   (requires typed confirmation)
+EOF
+      exit 2
+    fi
+    # No flags at all → usage + exit 2
+    _rein_remove_usage >&2
+    exit 2
+  fi
+
+  # Prefer --dry-run even when other flags are also present — it's purely
+  # informational and must never cause side effects.
+  if [ "$have_dry" = "1" ]; then
+    _rein_remove_dry_run
+    exit 0
+  fi
+
+  if [ "$have_confirm" = "0" ]; then
+    error "rein remove requires --confirm to actually remove files (use --dry-run to preview)"
+    exit 2
+  fi
+
+  if [ "$have_all" = "1" ] && [ "$have_path" = "1" ]; then
+    error "rein remove: cannot combine --all with --path"
+    exit 2
+  fi
+
+  if [ "$have_path" = "1" ]; then
+    _rein_remove_path_apply "$path_glob"
+    exit $?
+  fi
+
+  if [ "$have_all" = "1" ]; then
+    _rein_remove_all_apply
+    exit $?
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# _rein_remove_dry_run
+# Lists every manifest-tracked file. Used to preview the total scope
+# without choosing a specific glob. No filesystem mutation.
+# ---------------------------------------------------------------------------
+_rein_remove_dry_run() {
+  local mf; mf=$(manifest_path ".")
+  if [ ! -f "$mf" ]; then
+    echo "(no manifest — nothing is tracked yet)"
+    return 0
+  fi
+  echo "Dry-run: rein remove would consider these tracked files:"
+  python3 "$(rein_manifest_helper)" list "$mf" | sed 's/^/  /'
+}
+
+# ---------------------------------------------------------------------------
+# _rein_remove_path_apply <glob>
+# Remove all manifest-tracked files whose relpath matches <glob>, skipping
+# user-modified files (preserved) and logging backups.
+# ---------------------------------------------------------------------------
+_rein_remove_path_apply() {
+  local glob="$1"
+  local mf; mf=$(manifest_path ".")
+  if [ ! -f "$mf" ]; then
+    error "no manifest — nothing to remove"
+    exit 2
+  fi
+  local targets=()
+  local rel
+  while IFS= read -r rel; do
+    [ -z "$rel" ] && continue
+    if path_matches "$glob" "$rel"; then
+      targets+=("$rel")
+    fi
+  done < <(python3 "$(rein_manifest_helper)" list "$mf")
+
+  if [ "${#targets[@]}" = "0" ]; then
+    echo "No tracked files match pattern: $glob"
+    return 0
+  fi
+
+  local ts; ts=$(date +'%Y-%m-%dT%H-%M-%S')
+  local backup=".rein-remove-backup-$ts"
+  _rein_remove_backup_and_delete "$backup" "${targets[@]}"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _rein_remove_all_apply
+# TTY-only typed-DELETE gate for 'rein remove --all --confirm'.
+#
+# CRITICAL SECURITY CONTRACT (Plan C v3):
+#   - [ ! -t 0 ]  → non-interactive stdin → immediate exit 2.
+#   - 'script -q' / 'expect' / any other TTY-mock is deliberately not
+#     special-cased — if the test harness actually attaches a PTY, the
+#     gate activates; pipes / redirects / heredocs all short-circuit.
+#   - NO --yes / --force / --no-confirm bypass exists. Those strings
+#     are rejected at the cmd_remove dispatcher layer as unknown flags.
+# ---------------------------------------------------------------------------
+_rein_remove_all_apply() {
+  if [ ! -t 0 ]; then
+    cat >&2 <<'EOF'
+aborted: --all --confirm requires a TTY (interactive typed 'DELETE').
+non-interactive stdin (pipe, redirect, heredoc) is rejected by design.
+EOF
+    exit 2
+  fi
+
+  cat <<'EOF'
+This will remove ALL files tracked by the rein manifest.
+User-modified files will be preserved.
+Backup will be written to .rein-remove-backup-<ts>/.
+Type DELETE to confirm (or anything else to abort):
+EOF
+  printf '> '
+  local input=""
+  read -r input || input=""
+  if [ "$input" != "DELETE" ]; then
+    echo "aborted" >&2
+    exit 2
+  fi
+
+  local mf; mf=$(manifest_path ".")
+  if [ ! -f "$mf" ]; then
+    error "no manifest — nothing to remove"
+    exit 2
+  fi
+
+  local targets=()
+  local rel
+  while IFS= read -r rel; do
+    [ -z "$rel" ] && continue
+    targets+=("$rel")
+  done < <(python3 "$(rein_manifest_helper)" list "$mf")
+
+  if [ "${#targets[@]}" = "0" ]; then
+    echo "No tracked files to remove."
+    return 0
+  fi
+
+  local ts; ts=$(date +'%Y-%m-%dT%H-%M-%S')
+  local backup=".rein-remove-backup-$ts"
+  _rein_remove_backup_and_delete "$backup" "${targets[@]}"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # parse_flags(args...)
 # Sets ALL_OVERWRITE / PRUNE_MODE / PRUNE_CONFIRM globals based on flags
 # present in the remaining args. Unknown flags trigger an error.
@@ -1144,6 +2129,540 @@ parse_flags() {
 }
 
 # ---------------------------------------------------------------------------
+# rein job * — background job infrastructure (Plan C Phase 7–8).
+#
+# Design §5: three files per job under .claude/cache/jobs/:
+#   <jid>.json    meta: {name, cmd, cwd, started_at, transport, finished_at, exit_code}
+#   <jid>.status  one of: running / success / failed / unknown_dead
+#   <jid>.exit    decimal exit code, written atomically by rein_job_wrapper
+#   <jid>.pid     live pid (removed when wrapper finishes)
+#   <jid>.log     merged stdout/stderr
+# All writes go through temp-file + mv so a reader never sees a partial
+# line (BG-file-state-atomic-write).
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# rein_job_wrapper — completion writer (Task 7.3, BG-job-completion-writer).
+# Must be defined at the top so `declare -f rein_job_wrapper` can capture
+# its body and hand it to the detached child. The detach paths (POSIX
+# setsid / MINGW subshell) re-source this definition inside the child so
+# no process-local state is shared with the caller's shell.
+#
+# Args: pidf exitf statf metaf log -- <command argv...>
+# Contract:
+#   - writes pid atomically
+#   - runs command with stdin redirected to /dev/null (BG-no-interactive-jobs)
+#   - writes exit code atomically
+#   - flips .status to success|failed
+#   - updates meta with finished_at + exit_code
+#   - removes .pid on the way out
+# ---------------------------------------------------------------------------
+rein_job_wrapper() {
+  local pidf="$1" exitf="$2" statf="$3" metaf="$4" log="$5"
+  shift 5
+  # Atomic write: own pid.
+  printf '%s' "$$" > "${pidf}.tmp.$$" && mv -f "${pidf}.tmp.$$" "$pidf"
+  printf '%s' "running" > "${statf}.tmp.$$" && mv -f "${statf}.tmp.$$" "$statf"
+  # Run the command. stdin closed per no-interactive contract. We swallow
+  # errexit failure from the command itself — the rc is the signal.
+  local rc=0
+  "$@" >"$log" 2>&1 </dev/null || rc=$?
+  printf '%s' "$rc" > "${exitf}.tmp.$$" && mv -f "${exitf}.tmp.$$" "$exitf"
+  local final
+  if [ "$rc" -eq 0 ]; then final=success; else final=failed; fi
+  printf '%s' "$final" > "${statf}.tmp.$$" && mv -f "${statf}.tmp.$$" "$statf"
+  python3 - "$metaf" "$rc" <<'PY' 2>/dev/null || true
+import json, os, sys, time
+meta_path, rc = sys.argv[1], int(sys.argv[2])
+try:
+    with open(meta_path) as f:
+        m = json.load(f)
+except Exception:
+    m = {}
+m["finished_at"] = int(time.time())
+m["exit_code"] = rc
+tmp = meta_path + ".tmp." + str(os.getpid())
+with open(tmp, "w") as f:
+    json.dump(m, f)
+os.replace(tmp, meta_path)
+PY
+  rm -f "$pidf"
+}
+
+# ---------------------------------------------------------------------------
+# _rein_job_launch — dispatch detach to the platform-specific helper.
+# Task 7.2 shell_mode transform happens HERE (plan says: "맨 앞에서 transform
+# 먼저 수행") so wrapper remains argv-only and platform paths share the
+# already-transformed "$@".
+# ---------------------------------------------------------------------------
+_rein_job_launch() {
+  local pidf="$1" exitf="$2" statf="$3" metaf="$4" log="$5" shell_mode="$6"
+  shift 6
+
+  # Task 7.2 (BG-job-start-shell-opt-in): wrap argv in `bash -c <expr>` when
+  # the caller passed --shell. Default path is argv-only so shell metachars
+  # are literal (BG-job-start-default-argv-transport).
+  if [ "$shell_mode" = "1" ]; then
+    # Join with a single space. If the caller passed multiple argv after
+    # --shell (e.g. `--shell -- foo 'bar baz'`), join them and hand the
+    # joined string to bash -c as a single expression. This is lossy for
+    # multi-token arrays; callers should supply exactly one expression
+    # after --, matching the design.
+    local expr="$*"
+    set -- bash -c "$expr"
+  fi
+
+  local platform
+  platform=$(detect_platform) || return $?
+  case "$platform" in
+    posix)           _rein_job_launch_posix "$pidf" "$exitf" "$statf" "$metaf" "$log" "$@" ;;
+    windows_git_bash) _rein_job_launch_mingw "$pidf" "$exitf" "$statf" "$metaf" "$log" "$@" ;;
+    *) echo "unsupported platform: $platform" >&2; return 1 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# _rein_wrapper_script_path — absolute path to the standalone wrapper script.
+# Resolves next to rein.sh so it is shippable via COPY_TARGETS and can be
+# invoked without re-embedding the wrapper body inside `bash -c "$(declare
+# -f …)"` (the heredoc-in-bash-c path runs into nested-quote pitfalls).
+# Cached per process.
+# ---------------------------------------------------------------------------
+_REIN_WRAPPER_SCRIPT=""
+_rein_wrapper_script_path() {
+  if [ -z "$_REIN_WRAPPER_SCRIPT" ]; then
+    local src="${BASH_SOURCE[0]:-$0}"
+    local dir
+    dir=$(cd "$(dirname "$src")" 2>/dev/null && pwd -P)
+    _REIN_WRAPPER_SCRIPT="$dir/rein-job-wrapper.sh"
+  fi
+  echo "$_REIN_WRAPPER_SCRIPT"
+}
+
+# ---------------------------------------------------------------------------
+# _rein_job_launch_posix — Task 7.4 (BG-job-detach-posix-setsid-with-pid).
+# Uses setsid when available so the child becomes a session leader and the
+# recorded pid doubles as the process-group id for cmd_job_stop. Falls back
+# to nohup when setsid is missing (rare on modern Linux/Darwin but possible
+# in minimal containers).
+# ---------------------------------------------------------------------------
+_rein_job_launch_posix() {
+  local pidf="$1" exitf="$2" statf="$3" metaf="$4" log="$5"
+  shift 5
+  local wrapper
+  wrapper="$(_rein_wrapper_script_path)"
+  if command -v setsid >/dev/null 2>&1; then
+    setsid bash "$wrapper" "$pidf" "$exitf" "$statf" "$metaf" "$log" "$@" \
+      </dev/null >/dev/null 2>&1 &
+  else
+    nohup bash "$wrapper" "$pidf" "$exitf" "$statf" "$metaf" "$log" "$@" \
+      </dev/null >/dev/null 2>&1 &
+  fi
+  disown "$!" 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# _rein_job_launch_mingw — Task 7.5 (BG-job-detach-windows-git-bash-subshell-pid).
+# MINGW64 / MSYS2 Git Bash usually does not ship setsid. Prefer it when
+# present (some installs have it via coreutils); otherwise detach via a
+# `( ... & )` subshell so the child reparents off the interactive shell.
+# ---------------------------------------------------------------------------
+_rein_job_launch_mingw() {
+  local pidf="$1" exitf="$2" statf="$3" metaf="$4" log="$5"
+  shift 5
+  local wrapper
+  wrapper="$(_rein_wrapper_script_path)"
+  if command -v setsid >/dev/null 2>&1; then
+    setsid bash "$wrapper" "$pidf" "$exitf" "$statf" "$metaf" "$log" "$@" \
+      </dev/null >/dev/null 2>&1 &
+  else
+    ( bash "$wrapper" "$pidf" "$exitf" "$statf" "$metaf" "$log" "$@" \
+        </dev/null >/dev/null 2>&1 & )
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# cmd_job_start — Task 7.1 / 7.2.
+# CLI: rein job start <name> [--shell] -- <cmd argv...>
+# Returns within ~1s by detaching the job and emitting the id. Argv path
+# keeps shell metachars literal; --shell wraps in `bash -c <expr>`.
+# ---------------------------------------------------------------------------
+cmd_job_start() {
+  local name="" shell_mode=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --shell) shell_mode=1; shift ;;
+      --)      shift; break ;;
+      -*)      echo "unknown flag: $1" >&2; return 2 ;;
+      *)       if [ -z "$name" ]; then name="$1"; shift
+               else break; fi ;;
+    esac
+  done
+  [ -n "$name" ] || { echo "usage: rein job start <name> [--shell] -- <cmd...>" >&2; return 2; }
+  [ $# -gt 0 ]   || { echo "usage: rein job start <name> [--shell] -- <cmd...>" >&2; return 2; }
+
+  local ts hex jid jd
+  ts=$(date +%s)
+  hex=$(printf '%04x' $((RANDOM & 0xFFFF)))
+  jid="${name}-${ts}-${hex}"
+  jd="$(rein_jobs_dir)"
+  mkdir -p "$jd"
+
+  local metaf="$jd/$jid.json"
+  local pidf="$jd/$jid.pid"
+  local statf="$jd/$jid.status"
+  local exitf="$jd/$jid.exit"
+  local log="$jd/$jid.log"
+
+  local transport="argv"
+  [ "$shell_mode" = "1" ] && transport="shell"
+
+  local cwd joined_cmd
+  cwd="$(pwd)"
+  # Join cmd argv into a single representational string for the meta file.
+  # This is informational (display in `rein job list`); the real execution
+  # always uses the argv vector directly.
+  joined_cmd="$*"
+
+  python3 - "$metaf" "$name" "$transport" "$cwd" "$ts" "$joined_cmd" <<'PY'
+import json, os, sys
+metaf, name, transport, cwd, ts, cmd = sys.argv[1:7]
+m = {
+    "name": name,
+    "transport": transport,
+    "cwd": cwd,
+    "started_at": int(ts),
+    "cmd": cmd,
+}
+tmp = metaf + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(m, f)
+os.replace(tmp, metaf)
+PY
+
+  # Initialise status + log so status probe + tail never hit ENOENT before
+  # the wrapper writes its first atomic update.
+  write_atomic "$statf" "running"
+  : > "$log"
+
+  _rein_job_launch "$pidf" "$exitf" "$statf" "$metaf" "$log" "$shell_mode" "$@"
+
+  echo "started: $jid"
+  echo "log: $log"
+
+  # Best-effort async GC so long-lived repos don't accumulate stale logs.
+  # Failures (missing python3, concurrent GC, etc.) are swallowed because
+  # GC is a hygiene task, not a correctness one.
+  ( cmd_job_gc >/dev/null 2>&1 & ) 2>/dev/null || true
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _probe_pid_alive <pid> — Task 8.1.
+# Platform-aware liveness probe:
+#   POSIX → `kill -0 <pid>` is the canonical "is this pid alive" check.
+#   MINGW → `tasklist /FI "PID eq <pid>" /NH /FO CSV` with MSYS2_ARG_CONV_EXCL
+#           to stop MSYS rewriting `/FI` into a POSIX path.
+# Returns 0 if alive, 1 if not, 2 on unsupported platform.
+# ---------------------------------------------------------------------------
+_probe_pid_alive() {
+  local pid="$1"
+  [ -n "$pid" ] || return 1
+  local platform
+  platform=$(detect_platform) || return 2
+  case "$platform" in
+    posix)
+      kill -0 "$pid" 2>/dev/null
+      ;;
+    windows_git_bash)
+      MSYS2_ARG_CONV_EXCL="*" tasklist /FI "PID eq $pid" /NH /FO CSV 2>/dev/null \
+        | grep -q ",\"$pid\","
+      ;;
+    *) return 2 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# cmd_job_status <jid> — Task 8.1 (BG-job-status-running-check).
+# Prints status + (for settled jobs) exit + duration. Detects stale jobs
+# whose .status is still "running" but whose recorded pid is no longer alive;
+# rewrites state files to "unknown_dead" and reports that.
+# ---------------------------------------------------------------------------
+cmd_job_status() {
+  local jid="${1:-}"
+  [ -n "$jid" ] || { echo "usage: rein job status <job-id>" >&2; return 2; }
+  local jd; jd="$(rein_jobs_dir)"
+  local metaf="$jd/$jid.json"
+  local statf="$jd/$jid.status"
+  local pidf="$jd/$jid.pid"
+  local exitf="$jd/$jid.exit"
+  [ -f "$metaf" ] || { echo "unknown job: $jid" >&2; return 2; }
+
+  local status
+  status=$(cat "$statf" 2>/dev/null || echo "unknown")
+
+  # Stale detection — .status claims running but no live pid behind it.
+  if [ "$status" = "running" ]; then
+    local pid
+    pid=$(cat "$pidf" 2>/dev/null || echo "")
+    if [ -n "$pid" ] && ! _probe_pid_alive "$pid"; then
+      write_atomic "$statf" "unknown_dead"
+      write_atomic "$exitf" "-1"
+      status="unknown_dead"
+    elif [ -z "$pid" ] && [ ! -f "$pidf" ]; then
+      # .pid missing but .status=running — wrapper exited between our reads
+      # or a partial start. Trust the .exit if present; otherwise mark dead.
+      if [ -f "$exitf" ]; then
+        local ec
+        ec=$(cat "$exitf")
+        if [ "$ec" = "0" ]; then
+          write_atomic "$statf" "success"; status="success"
+        else
+          write_atomic "$statf" "failed"; status="failed"
+        fi
+      else
+        write_atomic "$statf" "unknown_dead"
+        write_atomic "$exitf" "-1"
+        status="unknown_dead"
+      fi
+    fi
+  fi
+
+  python3 - "$metaf" "$status" "$exitf" <<'PY'
+import json, os, sys, time
+metaf, status, exitf = sys.argv[1:4]
+try:
+    with open(metaf) as f: m = json.load(f)
+except Exception:
+    m = {}
+started = m.get("started_at", 0)
+finished = m.get("finished_at")
+print(f"status: {status}")
+if status == "running":
+    age = int(time.time()) - started if started else 0
+    print(f"  (started {age}s ago)")
+else:
+    ec = m.get("exit_code")
+    if ec is None and os.path.exists(exitf):
+        try: ec = open(exitf).read().strip()
+        except Exception: ec = "?"
+    if ec is None: ec = "?"
+    print(f"exit: {ec}")
+    if finished and started:
+        print(f"duration: {int(finished) - int(started)}s")
+PY
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# cmd_job_stop_posix <pid> — Task 8.2 (BG-job-stop-posix-process-group).
+# Sends SIGTERM to the process group (`kill -TERM -<pid>`), waits briefly
+# for graceful shutdown, escalates to SIGKILL if still alive. When the
+# pgroup signal fails (job started without setsid — pid is not a pgid),
+# falls back to single-pid kill and warns once on stderr.
+# ---------------------------------------------------------------------------
+cmd_job_stop_posix() {
+  local pid="$1"
+  local target
+  if kill -TERM "-$pid" 2>/dev/null; then
+    echo "sent SIGTERM to process group $pid"
+    target="-$pid"
+  else
+    echo "warning: job started without setsid; killing single PID only" >&2
+    kill -TERM "$pid" 2>/dev/null || true
+    target="$pid"
+  fi
+
+  local i
+  for i in 1 2 3 4 5 6 7 8; do
+    if ! _probe_pid_alive "$pid"; then
+      echo "pid $pid exited gracefully"
+      return 0
+    fi
+    sleep 0.25
+  done
+
+  # Escalate.
+  if kill -KILL "$target" 2>/dev/null; then
+    echo "escalated to SIGKILL"
+  else
+    # Target gone on its own between the wait and the escalate — still OK.
+    :
+  fi
+  for i in 1 2 3 4; do
+    _probe_pid_alive "$pid" || return 0
+    sleep 0.25
+  done
+  echo "warning: pid $pid still alive after SIGKILL" >&2
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# cmd_job_stop_mingw <pid> — Task 8.3 (BG-job-stop-windows-git-bash-tree).
+# SIGTERM first (respected on MINGW by processes spawned via Git Bash),
+# then `taskkill /F /T /PID` to tree-kill on Windows if the pid is still
+# alive. /T walks the child tree; /F forces termination.
+# ---------------------------------------------------------------------------
+cmd_job_stop_mingw() {
+  local pid="$1"
+  kill -TERM "$pid" 2>/dev/null || true
+  local i
+  for i in 1 2 3 4 5 6 7 8; do
+    if ! _probe_pid_alive "$pid"; then
+      echo "pid $pid exited gracefully"
+      return 0
+    fi
+    sleep 0.25
+  done
+  if MSYS2_ARG_CONV_EXCL="*" taskkill /F /T /PID "$pid" >/dev/null 2>&1; then
+    echo "escalated to taskkill /F /T"
+  fi
+  for i in 1 2 3 4; do
+    _probe_pid_alive "$pid" || return 0
+    sleep 0.25
+  done
+  echo "warning: pid $pid still alive after taskkill" >&2
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# cmd_job_stop <jid> — dispatcher (Task 8.2/8.3).
+# ---------------------------------------------------------------------------
+cmd_job_stop() {
+  local jid="${1:-}"
+  [ -n "$jid" ] || { echo "usage: rein job stop <job-id>" >&2; return 2; }
+  local jd; jd="$(rein_jobs_dir)"
+  local pidf="$jd/$jid.pid"
+  local metaf="$jd/$jid.json"
+  if [ ! -f "$metaf" ]; then
+    echo "unknown job: $jid" >&2; return 2
+  fi
+  if [ ! -f "$pidf" ]; then
+    echo "job not running or already finished: $jid" >&2; return 2
+  fi
+  local pid
+  pid=$(cat "$pidf" 2>/dev/null || echo "")
+  [ -n "$pid" ] || { echo "pid file empty for $jid" >&2; return 2; }
+
+  local platform
+  platform=$(detect_platform) || return 2
+  case "$platform" in
+    posix)           cmd_job_stop_posix "$pid" ;;
+    windows_git_bash) cmd_job_stop_mingw "$pid" ;;
+    *) echo "unsupported platform for stop" >&2; return 2 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# cmd_job_tail <jid> [--lines N] — Task 8.4 (BG-job-tail-default-50-lines).
+# Prints the last N lines of the job log (default 50). Shorter logs are
+# printed in full; no error on jobs still writing.
+# ---------------------------------------------------------------------------
+cmd_job_tail() {
+  local jid="" n=50
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --lines) n="${2:-}"; shift 2 ;;
+      -*) echo "unknown flag: $1" >&2; return 2 ;;
+      *)  if [ -z "$jid" ]; then jid="$1"; shift
+          else echo "unexpected arg: $1" >&2; return 2; fi ;;
+    esac
+  done
+  [ -n "$jid" ] || { echo "usage: rein job tail <job-id> [--lines N]" >&2; return 2; }
+  case "$n" in ''|*[!0-9]*) echo "--lines must be a positive integer" >&2; return 2 ;; esac
+  local log; log="$(rein_jobs_dir)/$jid.log"
+  [ -f "$log" ] || { echo "no log for job: $jid" >&2; return 2; }
+  tail -n "$n" "$log"
+}
+
+# ---------------------------------------------------------------------------
+# cmd_job_list — Task 8.5 (BG-job-list-split-running-recent).
+# Two-section output: RUNNING (currently live jobs) + RECENT (last 10
+# finished, most recently started first). Empty sections still print their
+# headers so downstream tools can pipe safely.
+# ---------------------------------------------------------------------------
+cmd_job_list() {
+  local jd; jd="$(rein_jobs_dir)"
+  if [ ! -d "$jd" ]; then
+    echo "RUNNING:"
+    echo "RECENT:"
+    return 0
+  fi
+  python3 - "$jd" <<'PY'
+import json, os, sys, glob
+jd = sys.argv[1]
+jobs = []
+for metaf in sorted(glob.glob(os.path.join(jd, "*.json"))):
+    try:
+        with open(metaf) as f: m = json.load(f)
+    except Exception:
+        continue
+    base = os.path.basename(metaf)
+    jid = base[:-5] if base.endswith(".json") else base
+    statf = metaf[:-5] + ".status"
+    status = "unknown"
+    if os.path.exists(statf):
+        try: status = open(statf).read().strip()
+        except Exception: pass
+    jobs.append({"jid": jid, "status": status, **m})
+running = [j for j in jobs if j.get("status") == "running"]
+recent  = [j for j in jobs if j.get("status") != "running"]
+recent.sort(key=lambda x: -x.get("started_at", 0))
+recent = recent[:10]
+print("RUNNING:")
+for j in running:
+    print(f"  {j['jid']}  (started {j.get('started_at','?')})")
+print("RECENT:")
+for j in recent:
+    ec = j.get("exit_code", "?")
+    print(f"  {j['jid']}  {j.get('status','?')}({ec})")
+PY
+}
+
+# ---------------------------------------------------------------------------
+# cmd_job_gc — Task 8.6 (BG-cleanup-gc).
+# Two-tier retention:
+#   - .log    kept for 7 days after finished_at
+#   - .json / .exit / .status kept for 30 days
+# .pid is always absent by the time we run (wrapper removes it), so this
+# function does not try to touch it. Silently skips still-running jobs.
+#
+# Called both via `rein job gc` and asynchronously from `rein job start`
+# so long-lived repos don't accumulate stale logs.
+# ---------------------------------------------------------------------------
+cmd_job_gc() {
+  local jd; jd="$(rein_jobs_dir)"
+  [ -d "$jd" ] || return 0
+  python3 - "$jd" <<'PY'
+import json, os, sys, time, glob
+jd = sys.argv[1]
+now = time.time()
+for metaf in glob.glob(os.path.join(jd, "*.json")):
+    try:
+        with open(metaf) as f: m = json.load(f)
+    except Exception:
+        continue
+    finished = m.get("finished_at")
+    if not finished:
+        continue  # still running — skip
+    age_days = (now - float(finished)) / 86400.0
+    base = metaf[:-5]  # strip .json
+    if age_days > 7:
+        for ext in (".log",):
+            p = base + ext
+            if os.path.exists(p):
+                try: os.remove(p)
+                except OSError: pass
+    if age_days > 30:
+        for ext in (".json", ".exit", ".status"):
+            p = base + ext
+            if os.path.exists(p):
+                try: os.remove(p)
+                except OSError: pass
+PY
+}
+
+# ---------------------------------------------------------------------------
 # main()
 # ---------------------------------------------------------------------------
 main() {
@@ -1173,6 +2692,30 @@ main() {
       parse_flags "$@"
       cmd_merge
       ;;
+    remove)
+      shift
+      cmd_remove "$@"
+      ;;
+    job)
+      shift
+      if [[ $# -eq 0 ]]; then
+        error "rein job requires a subcommand (start|status|stop|tail|list|gc)"
+        exit 1
+      fi
+      local subcmd="$1"; shift
+      case "$subcmd" in
+        start)  cmd_job_start "$@" ;;
+        status) cmd_job_status "$@" ;;
+        stop)   cmd_job_stop "$@" ;;
+        tail)   cmd_job_tail "$@" ;;
+        list)   cmd_job_list "$@" ;;
+        gc)     cmd_job_gc "$@" ;;
+        *)
+          error "unknown job subcommand '$subcmd' (want: start|status|stop|tail|list|gc)"
+          exit 1
+          ;;
+      esac
+      ;;
     --version|-v)
       echo "rein $VERSION"
       ;;
@@ -1186,6 +2729,13 @@ main() {
       ;;
   esac
 }
+
+# --source-only mode — tests source this file to load functions without running main.
+# Example: `source scripts/rein.sh --source-only` then invoke detect_platform etc.
+# Plan C Task 1.1.
+if [[ "${1:-}" == "--source-only" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 # Only invoke main when executed directly. Tests can source this file with
 # REIN_SOURCED=1 to load all functions without triggering main.

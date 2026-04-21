@@ -237,6 +237,12 @@ Starting with v0.7.0, the CLI install path changed from `/usr/local/bin/rein` to
 
 ## Version History
 
+### v1.1.0 (2026-04-21) — drift-prevention trio: governance-integrity + test-oracle + rein-update-hygiene
+- **governance-integrity**: validator v2 (subcommand CLI) + rein-govcheck self-test + path-policy library + DoD `covers:` section + codex-review wrapper + governance stage config (Stage 1/2/3 rollout)
+- **rein-update-hygiene**: manifest v2 + 3-way merge (`git merge-file`) + user edits preserved on first update + `.rej` separation + `rein update --prune` review/confirm split + new **`rein remove`** command (scope flag required, anchored segment matcher)
+- **rein job infra**: drop-in replacement for long foreground commands — `rein job start/status/stop/tail/list/gc` (POSIX setsid pgroup + MINGW `taskkill /F /T` tree kill, file-based atomic state). Claude Code integration guide `.claude/rules/background-jobs.md`
+- Compatibility: DoD `covers:` stays advisory (promoted to blocking at governance Stage ≥ 2), validator v1 CLI shim preserved, `rein update` automigrates v1→v2. Details: [CHANGELOG](CHANGELOG.md)
+
 ### v1.0.0 (2026-04-21) — workflow hardening: codex skill split + docs path reorg + plan-writer auto-review
 - major workflow hardening — codex skill split (`/codex-review`, `/codex-ask`, clean break) + docs path reorg (`docs/superpowers/` → `docs/`) + plan-writer auto codex review ([NON_INTERACTIVE] marker)
 - **Breaking**: old `/codex` / `/codex review` / `/codex ask` slash commands removed. Migration: see [CHANGELOG](CHANGELOG.md) "Migration guide" section

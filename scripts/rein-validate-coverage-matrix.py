@@ -1,37 +1,206 @@
 #!/usr/bin/env python3
-"""Validate design→plan coverage matrix.
+"""Validate design→plan→DoD coverage (Plan A Phase 3 — validator v2).
 
 Usage:
-    rein-validate-coverage-matrix.py <plan-file>
+    rein-validate-coverage-matrix.py plan <plan-file>
+    rein-validate-coverage-matrix.py dod  <dod-file>
+    rein-validate-coverage-matrix.py <plan-file>   # legacy shim (deprecated)
 
 Exit codes:
-    0 — plan is valid, or plan has no coverage matrix section (legacy)
-    2 — validation failure; details on stderr
-    3 — usage error (bad args, file not found)
+    0 — valid (or legacy plan with no coverage matrix; or DoD with no
+        '## 범위 연결' section — advisory-only per v1 compat).
+    2 — validation failure, or usage error. Details on stderr.
+    3 — (retained only for some legacy paths; new callers should treat
+        anything non-zero as failure.)
+
+Timeouts:
+    The validator itself does not enforce a timeout — callers (e.g.
+    pre-edit-dod-gate.sh) are responsible for wrapping invocations in
+    ``timeout 30 python3 …`` and promoting a 124 exit to a
+    ``.dod-coverage-mismatch`` marker (GI-validator-v2-timeout-fail-closed).
+    This file intentionally documents the contract so the hook can point at
+    a single source of truth.
+
+Design references:
+    docs/specs/2026-04-21-governance-integrity-design.md §3
 """
 from __future__ import annotations
 
 import re
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
+# ---------- Shared regex / headings ----------
 
 MATRIX_HEADING = "## Design 범위 커버리지 매트릭스"
+SCOPE_ITEMS_HEADING = "## Scope Items"
+RANGE_LINK_HEADING = "## 범위 연결"
+
 DESIGN_REF_RE = re.compile(r"^>\s*design\s*ref:\s*(.+?)\s*$", re.IGNORECASE)
 MATRIX_ROW_RE = re.compile(
     r"^\|\s*(?P<id>[A-Za-z0-9_\-]+)\s*\|\s*(?P<status>implemented|deferred)\s*\|\s*(?P<loc>.+?)\s*\|\s*$"
 )
-SCOPE_ITEMS_HEADING = "## Scope Items"
 SCOPE_ROW_RE = re.compile(r"^\|\s*(?P<id>[A-Za-z0-9_\-]+)\s*\|\s*.+?\s*\|\s*$")
 COVERS_RE = re.compile(r"^covers:\s*\[(?P<ids>.*?)\]\s*$", re.MULTILINE)
+
+# DoD-specific: exact line shapes inside the '## 범위 연결' section.
+DOD_PLAN_REF_RE = re.compile(r"^plan\s*ref:\s*(.+?)\s*$", re.IGNORECASE)
+DOD_WORK_UNIT_RE = re.compile(r"^work\s*unit:\s*(.+?)\s*$", re.IGNORECASE)
+DOD_COVERS_RE = re.compile(r"^covers:\s*\[(?P<ids>.*?)\]\s*$")
 
 
 def err(msg: str) -> None:
     print(f"coverage-matrix: {msg}", file=sys.stderr)
 
 
+# ---------- Scope-ID version parser (Plan B Task 4.1) ------------------
+#
+# design 의 frontmatter 상단에서 ``scope-id-version`` 메타를 읽는다.
+# rule: .claude/rules/design-plan-coverage.md §1.3
+#   - frontmatter 없음 → "v1" (legacy 호환)
+#   - scope-id-version: v1 → "v1"
+#   - scope-id-version: v2 → "v2"
+#   - 그 외 값 → "unknown" (호출자가 fail-closed 처리)
+
+SCOPE_ID_VERSION_RE = re.compile(
+    r"^\s*scope-id-version\s*:\s*(?P<value>\S+)\s*$", re.IGNORECASE
+)
+
+
+def parse_scope_id_version(design_path: Path) -> str:
+    """Return ``"v1"`` / ``"v2"`` / ``"unknown"``.
+
+    ``v1`` is returned when the frontmatter block is absent entirely (legacy
+    compat). ``unknown`` signals that a frontmatter was present but carried
+    an unrecognised version token — caller must fail-closed.
+    """
+    if not design_path.exists():
+        return "v1"
+    try:
+        lines = design_path.read_text(encoding="utf-8").splitlines()[:40]
+    except Exception:
+        return "v1"
+    # Frontmatter block: starts at very first line with '---' and ends at
+    # next '---' line. Anything outside is ignored.
+    if not lines or lines[0].strip() != "---":
+        return "v1"
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        m = SCOPE_ID_VERSION_RE.match(line)
+        if m:
+            val = m.group("value").lower()
+            if val in {"v1", "v2"}:
+                return val
+            return "unknown"
+    return "v1"
+
+
+# ---------- kind column parser (Plan B Task 4.2) -----------------------
+#
+# v2 design 의 ``## Scope Items`` 표는 ``| ID | kind | 설명 |`` 3 열 포맷을
+# 허용한다. 기존 2 열 포맷 (``| ID | 설명 |``) 도 호환.
+# ``kind: behavioral-contract`` 로 태그된 ID 는 plan work unit covers 에
+# 포함될 때 해당 DoD 체크박스를 필수화한다.
+
+SCOPE_KIND_ROW_RE = re.compile(
+    r"^\|\s*(?P<id>[A-Za-z0-9_\-]+)\s*\|\s*(?P<kind>[A-Za-z0-9_\-]+)\s*\|\s*.+?\s*\|\s*$"
+)
+
+
+def parse_kind_from_scope_items(design_path: Path) -> dict[str, str]:
+    """Return {id: kind} mapping.
+
+    Returns empty dict when the design lacks a ``## Scope Items`` table or
+    when the table has no ``kind`` column (i.e. 2-column legacy format).
+    """
+    if not design_path.exists():
+        return {}
+    lines = design_path.read_text(encoding="utf-8").splitlines()
+    in_section = False
+    result: dict[str, str] = {}
+    for line in lines:
+        if line.strip() == SCOPE_ITEMS_HEADING:
+            in_section = True
+            continue
+        if in_section and line.startswith("## "):
+            break
+        if not in_section:
+            continue
+        m = SCOPE_KIND_ROW_RE.match(line)
+        if not m:
+            continue
+        rid = m.group("id")
+        kind = m.group("kind")
+        # Skip the header row and the markdown separator rows.
+        if rid.lower() in {"id", "scope id", "-"} or re.fullmatch(r"-+", rid):
+            continue
+        if kind.lower() in {"kind", "-"} or re.fullmatch(r"-+", kind):
+            continue
+        result[rid] = kind.lower()
+    return result
+
+
+# ---------- plan work unit covers parser (Plan B Task 4.2) -------------
+#
+# Applicability 판정 기준 = DoD 의 ``work unit:`` 필드가 가리키는 plan 의
+# heading 바로 다음 줄의 ``covers: [...]``. DoD 자체의 covers 는 적용 판정
+# 에 사용하지 않는다 (Round 2 HIGH subset loophole 차단).
+
+# Accept markdown headings at any level (##, ###, ####) with flexible
+# surrounding whitespace. The heading text is normalised via ``_normalise``
+# before comparison.
+HEADING_RE = re.compile(r"^#{2,6}\s+(?P<text>.+?)\s*$")
+
+
+def _normalise_heading(text: str) -> str:
+    """Lower-case + collapse consecutive whitespace to single space.
+
+    This is what the exact-match rule should compare to avoid brittle
+    literal matching (trailing whitespace, tabs, etc.).
+    """
+    return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def parse_plan_work_unit_covers(plan_path: Path, work_unit: str) -> set[str] | None:
+    """Return the covers set of the plan work unit matching ``work_unit``.
+
+    ``None`` is returned when the work unit heading is not found in the plan
+    — callers decide whether to treat this as a warning or error. The
+    search is heading-agnostic (Gate/Phase/Task/Step names are all OK) and
+    normalises whitespace for matching.
+    """
+    if not plan_path.exists() or not work_unit:
+        return None
+    lines = plan_path.read_text(encoding="utf-8").splitlines()
+    target = _normalise_heading(work_unit)
+
+    for i, line in enumerate(lines):
+        m = HEADING_RE.match(line)
+        if not m:
+            continue
+        if _normalise_heading(m.group("text")) != target:
+            continue
+        # Found the heading — scan forward for the first ``covers:`` line
+        # until the next heading (any level) is hit.
+        for nxt in lines[i + 1 :]:
+            if HEADING_RE.match(nxt):
+                break
+            cv = COVERS_RE.match(nxt)
+            if cv:
+                ids_raw = cv.group("ids")
+                return {x.strip() for x in ids_raw.split(",") if x.strip()}
+        # Heading matched but no covers: line before the next heading.
+        return set()
+    return None
+
+
+# ---------- Plan parser (v1 behavior preserved) ----------
+
+
 def parse_scope_ids_from_design(design_path: Path) -> set[str] | None:
-    """Return set of IDs in design's '## Scope Items' table. None if no section."""
+    """Return set of IDs in design's '## Scope Items' table. None if no table."""
     if not design_path.exists():
         err(f"design file not found: {design_path}")
         return None
@@ -48,7 +217,7 @@ def parse_scope_ids_from_design(design_path: Path) -> set[str] | None:
             m = SCOPE_ROW_RE.match(line)
             if m:
                 rid = m.group("id")
-                if rid.lower() in {"id", "scope id", "-"} or re.fullmatch(r"-+", rid):  # header/separator
+                if rid.lower() in {"id", "scope id", "-"} or re.fullmatch(r"-+", rid):
                     continue
                 ids.add(rid)
     if not ids:
@@ -57,11 +226,10 @@ def parse_scope_ids_from_design(design_path: Path) -> set[str] | None:
 
 
 def parse_plan(plan_path: Path) -> dict:
-    """Extract matrix rows, design ref, and covers: entries from plan."""
+    """Extract matrix rows, design ref, and covers: entries from a plan."""
     text = plan_path.read_text(encoding="utf-8")
     lines = text.splitlines()
 
-    # Locate matrix section
     matrix_start = None
     for i, line in enumerate(lines):
         if line.strip() == MATRIX_HEADING:
@@ -70,9 +238,8 @@ def parse_plan(plan_path: Path) -> dict:
     if matrix_start is None:
         return {"has_matrix": False}
 
-    # Parse matrix content until next "## "
     design_ref = None
-    matrix: dict[str, tuple[str, str]] = {}  # id -> (status, loc)
+    matrix: dict[str, tuple[str, str]] = {}
     duplicates: list[str] = []
     for line in lines[matrix_start + 1 :]:
         if line.startswith("## "):
@@ -91,7 +258,6 @@ def parse_plan(plan_path: Path) -> dict:
                 duplicates.append(rid)
             matrix[rid] = (m.group("status"), m.group("loc"))
 
-    # Parse covers: lines
     covers: list[set[str]] = []
     for m in COVERS_RE.finditer(text):
         ids_raw = m.group("ids")
@@ -108,7 +274,11 @@ def parse_plan(plan_path: Path) -> dict:
     }
 
 
-def validate(plan_path: Path) -> int:
+def validate_plan(plan_path: Path) -> int:
+    """Return 0 on success, 2 on validation failure.
+
+    Emits structured errors to stderr prefixed with ``coverage-matrix:``.
+    """
     parsed = parse_plan(plan_path)
     if not parsed["has_matrix"]:
         err(f"WARN: no coverage matrix in {plan_path} — skipped (legacy plan)")
@@ -116,17 +286,23 @@ def validate(plan_path: Path) -> int:
 
     failures: list[str] = []
 
-    # design ref required
     ref = parsed.get("design_ref")
     if not ref:
         failures.append("missing '> design ref: <path>' in matrix section")
     else:
-        # Resolve design path relative to plan file or repo root
         candidates = [plan_path.parent / ref, Path.cwd() / ref, Path(ref)]
         design_path = next((p for p in candidates if p.exists()), None)
         if design_path is None:
             failures.append(f"design ref path not found: {ref}")
         else:
+            # Plan B Task 4.1 — emit scope-id-version (v1 legacy / v2 / unknown).
+            sid_version = parse_scope_id_version(design_path)
+            err(f"scope-id-version={sid_version}")
+            if sid_version == "unknown":
+                failures.append(
+                    f"design {design_path} has an unrecognised "
+                    f"scope-id-version (fail-closed)"
+                )
             design_ids = parse_scope_ids_from_design(design_path)
             if design_ids is None:
                 failures.append(f"design {design_path} has no '## Scope Items' table")
@@ -135,21 +311,20 @@ def validate(plan_path: Path) -> int:
                 missing = design_ids - matrix_ids
                 extra = matrix_ids - design_ids
                 if missing:
-                    failures.append(
-                        f"design IDs missing from matrix: {sorted(missing)}"
-                    )
+                    failures.append(f"design IDs missing from matrix: {sorted(missing)}")
                 if extra:
-                    failures.append(
-                        f"matrix contains IDs not in design: {sorted(extra)}"
-                    )
+                    failures.append(f"matrix contains IDs not in design: {sorted(extra)}")
 
-    # Duplicates
     if parsed["duplicates"]:
-        failures.append(f"duplicate IDs in matrix: {sorted(set(parsed['duplicates']))}")
+        failures.append(
+            f"duplicate IDs in matrix: {sorted(set(parsed['duplicates']))}"
+        )
 
-    # covers: consistency
     implemented = {
         rid for rid, (status, _) in parsed["matrix"].items() if status == "implemented"
+    }
+    deferred = {
+        rid for rid, (status, _) in parsed["matrix"].items() if status == "deferred"
     }
     all_covered: set[str] = set()
     for cov in parsed["covers"]:
@@ -158,9 +333,7 @@ def validate(plan_path: Path) -> int:
             failures.append(
                 f"covers: references IDs not in matrix: {sorted(unknown)}"
             )
-        deferred_ref = cov & {
-            rid for rid, (status, _) in parsed["matrix"].items() if status == "deferred"
-        }
+        deferred_ref = cov & deferred
         if deferred_ref:
             failures.append(
                 f"covers: references deferred IDs (must be implemented): {sorted(deferred_ref)}"
@@ -169,7 +342,8 @@ def validate(plan_path: Path) -> int:
     uncovered = implemented - all_covered
     if uncovered:
         failures.append(
-            f"matrix rows marked 'implemented' but no covers: references them: {sorted(uncovered)}"
+            f"matrix rows marked 'implemented' but no covers: references them: "
+            f"{sorted(uncovered)}"
         )
 
     if failures:
@@ -180,15 +354,311 @@ def validate(plan_path: Path) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        err("usage: rein-validate-coverage-matrix.py <plan-file>")
-        return 3
+# ---------- DoD parser (new in v2) ----------
+
+
+@dataclass
+class DodContext:
+    path: Path
+    plan_ref: str | None = None
+    work_unit: str | None = None
+    covers: list[str] = field(default_factory=list)
+    has_range_link: bool = False
+
+
+def parse_dod(dod_path: Path) -> DodContext:
+    """Extract the ``## 범위 연결`` block from a DoD file.
+
+    Returns an empty-ish ``DodContext`` if no such section exists (legacy
+    DoD files are valid per v1 compat; callers decide whether to warn).
+    """
+    ctx = DodContext(path=dod_path)
+    if not dod_path.exists():
+        return ctx
+    text = dod_path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+
+    section_start = None
+    for i, line in enumerate(lines):
+        if line.strip() == RANGE_LINK_HEADING:
+            section_start = i
+            break
+    if section_start is None:
+        return ctx
+
+    ctx.has_range_link = True
+    for line in lines[section_start + 1 :]:
+        if line.startswith("## "):
+            break
+        if ctx.plan_ref is None:
+            m = DOD_PLAN_REF_RE.match(line)
+            if m:
+                ctx.plan_ref = m.group(1).strip()
+                continue
+        if ctx.work_unit is None:
+            m = DOD_WORK_UNIT_RE.match(line)
+            if m:
+                ctx.work_unit = m.group(1).strip()
+                continue
+        m = DOD_COVERS_RE.match(line)
+        if m:
+            ids_raw = m.group("ids")
+            ids = [x.strip() for x in ids_raw.split(",") if x.strip()]
+            # Per spec: collect the union across any covers: lines inside
+            # the section (there should usually be at most one).
+            ctx.covers.extend(ids)
+
+    return ctx
+
+
+def _resolve_plan_ref(dod_path: Path, plan_ref: str) -> Path | None:
+    """Resolve a DoD's plan_ref to an existing file path, or return None."""
+    candidates = [dod_path.parent / plan_ref, Path.cwd() / plan_ref, Path(plan_ref)]
+    return next((p for p in candidates if p.exists()), None)
+
+
+def validate_dod(dod_path: Path) -> int:
+    """Return 0 on success, 2 on validation failure.
+
+    Behavior:
+      * No ``## 범위 연결`` section → WARN + exit 0 (v1 compat / legacy DoD).
+      * Section present but ``plan ref:`` missing → exit 2.
+      * Section present, plan_ref resolves, ``covers:`` IDs must all be
+        ``implemented`` in the plan's matrix (GI-validator-v2-dod-covers-subset).
+        Unknown IDs, deferred IDs, or broken plan_ref → exit 2.
+    """
+    ctx = parse_dod(dod_path)
+    if not ctx.has_range_link:
+        err(f"WARN: no '## 범위 연결' in {dod_path} — skipped (legacy DoD)")
+        return 0
+
+    failures: list[str] = []
+
+    if not ctx.plan_ref:
+        failures.append("missing 'plan ref: <path>' under '## 범위 연결'")
+    if not ctx.covers:
+        failures.append("missing 'covers: [ID, ...]' under '## 범위 연결'")
+
+    if failures:
+        err(f"validation failed for {dod_path}:")
+        for f in failures:
+            err(f"  - {f}")
+        return 2
+
+    plan_path = _resolve_plan_ref(dod_path, ctx.plan_ref)  # type: ignore[arg-type]
+    if plan_path is None:
+        err(f"validation failed for {dod_path}:")
+        err(f"  - plan ref path not found: {ctx.plan_ref}")
+        return 2
+
+    parsed = parse_plan(plan_path)
+    if not parsed.get("has_matrix"):
+        err(f"validation failed for {dod_path}:")
+        err(
+            f"  - plan {plan_path} has no '## Design 범위 커버리지 매트릭스' — "
+            f"cannot validate covers"
+        )
+        return 2
+
+    matrix = parsed["matrix"]  # id -> (status, loc)
+    implemented = {rid for rid, (st, _) in matrix.items() if st == "implemented"}
+    deferred = {rid for rid, (st, _) in matrix.items() if st == "deferred"}
+    covers_set = set(ctx.covers)
+
+    unknown = covers_set - set(matrix.keys())
+    deferred_ref = covers_set & deferred
+    not_implemented = covers_set - implemented - unknown - deferred_ref
+
+    if unknown or deferred_ref or not_implemented:
+        err(f"validation failed for {dod_path}:")
+        if unknown:
+            err(f"  - DoD covers references unknown IDs: {sorted(unknown)}")
+        if deferred_ref:
+            err(
+                f"  - DoD covers references deferred IDs "
+                f"(must be implemented): {sorted(deferred_ref)}"
+            )
+        if not_implemented:
+            err(
+                f"  - DoD covers references non-implemented IDs: "
+                f"{sorted(not_implemented)}"
+            )
+        return 2
+
+    # Plan B Task 4.2 — behavioral-contract checkbox enforcement.
+    #
+    # Applicability rule: kind-tagged bc IDs must intersect the **plan work
+    # unit covers** (NOT the DoD's own covers). DoD covers can omit the bc
+    # ID as a drift attempt — the plan work unit is the load-bearing
+    # source of truth.
+    _enforce_behavioral_contract_checkbox(dod_path, ctx, plan_path)
+
+    return 0
+
+
+def _read_test_oracle_severity_hard() -> bool:
+    """Return the ``severity_hard`` flag from ``.claude/.rein-state/test-oracle.json``.
+
+    Default when the file is absent or malformed: ``False`` (warn-only).
+    This differs from Spec A ``governance.json`` which fails closed on
+    malformed config — test-oracle is observation-first per Spec B §7.
+    """
+    path = Path.cwd() / ".claude" / ".rein-state" / "test-oracle.json"
+    if not path.exists():
+        return False
+    try:
+        import json
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return bool(data.get("severity_hard", False))
+    except Exception:
+        return False
+
+
+# Matches ``- [ ] ...behavioral-contract test...`` or ``- [x] ...`` variants.
+BC_CHECKBOX_RE = re.compile(
+    r"^[-*]\s*\[[ xX]\]\s+.*behavioral-contract\s+test", re.MULTILINE
+)
+
+
+def _enforce_behavioral_contract_checkbox(
+    dod_path: Path, ctx: DodContext, plan_path: Path
+) -> int:
+    """Emit WARN (warn-only) or raise exit 2 (severity_hard=true).
+
+    Returns 0 on pass / warn-only, 2 on hard failure. Callers that want
+    exit-code propagation should check the return value — the main
+    validate_dod caller exits immediately on 2 via sys.exit in the wrapper.
+    """
+    # Resolve the design for this plan to read scope-id-version + kinds.
+    parsed = parse_plan(plan_path)
+    ref = parsed.get("design_ref")
+    if not ref:
+        return 0
+    candidates = [plan_path.parent / ref, Path.cwd() / ref, Path(ref)]
+    design_path = next((p for p in candidates if p.exists()), None)
+    if design_path is None:
+        return 0
+    if parse_scope_id_version(design_path) != "v2":
+        return 0  # v1 or unknown — no bc enforcement here
+
+    kinds = parse_kind_from_scope_items(design_path)
+    bc_ids = {rid for rid, k in kinds.items() if k == "behavioral-contract"}
+    if not bc_ids:
+        return 0  # design has no kind column or no behavioral-contract tag
+
+    # Applicability: intersect with **plan work unit covers** (NOT DoD covers).
+    if not ctx.work_unit:
+        err(
+            f"WARN: {dod_path} has no 'work unit:' under '## 범위 연결' — "
+            f"behavioral-contract applicability skipped (Stage 1 compat)"
+        )
+        return 0
+    wu_covers = parse_plan_work_unit_covers(plan_path, ctx.work_unit)
+    if wu_covers is None:
+        err(
+            f"WARN: {dod_path} work unit '{ctx.work_unit}' not found in "
+            f"plan {plan_path} — behavioral-contract applicability skipped"
+        )
+        return 0
+    triggered = bc_ids & wu_covers
+    if not triggered:
+        return 0  # no bc ID under this work unit — no checkbox required
+
+    # Check the DoD body for the behavioral-contract test checkbox.
+    try:
+        text = dod_path.read_text(encoding="utf-8")
+    except Exception:
+        text = ""
+    if BC_CHECKBOX_RE.search(text):
+        return 0  # checkbox present (regardless of [ ] vs [x])
+
+    # Missing checkbox: observation-first rollout.
+    hard = _read_test_oracle_severity_hard()
+    if hard:
+        err(
+            f"validation failed for {dod_path}:"
+        )
+        err(
+            f"  - behavioral-contract test 체크박스가 필요합니다 (plan work "
+            f"unit '{ctx.work_unit}' covers: {sorted(triggered)}). "
+            f"severity_hard=true"
+        )
+        # Raise exit 2 by re-entering sys.exit — simpler than threading.
+        sys.exit(2)
+    err(
+        f"WARN: {dod_path} — behavioral-contract test 체크박스 누락 "
+        f"(plan work unit '{ctx.work_unit}' covers bc IDs: {sorted(triggered)}). "
+        f"severity_hard=false (warn-only)"
+    )
+    return 0
+
+
+# ---------- CLI dispatcher ----------
+
+
+USAGE = (
+    "usage:\n"
+    "  rein-validate-coverage-matrix.py plan <plan-file>\n"
+    "  rein-validate-coverage-matrix.py dod  <dod-file>\n"
+    "  rein-validate-coverage-matrix.py <plan-file>   # deprecated legacy shim"
+)
+
+
+def _usage_error(msg: str = "") -> int:
+    if msg:
+        err(msg)
+    err(USAGE)
+    return 2
+
+
+def validate_plan_cli(argv: list[str]) -> int:
+    # argv is the subcommand-stripped argv (i.e. [script, file] or [file]).
+    if len(argv) < 2:
+        return _usage_error("plan subcommand requires <plan-file>")
     plan_path = Path(argv[1])
     if not plan_path.exists():
         err(f"plan file not found: {plan_path}")
-        return 3
-    return validate(plan_path)
+        return 2
+    return validate_plan(plan_path)
+
+
+def validate_dod_cli(argv: list[str]) -> int:
+    if len(argv) < 2:
+        return _usage_error("dod subcommand requires <dod-file>")
+    dod_path = Path(argv[1])
+    if not dod_path.exists():
+        err(f"dod file not found: {dod_path}")
+        return 2
+    return validate_dod(dod_path)
+
+
+def main(argv: list[str]) -> int:
+    # argv layout: [script, ...]
+    if len(argv) < 2:
+        return _usage_error()
+
+    first = argv[1]
+    # New-style: explicit 'plan' / 'dod' subcommand.
+    if first == "plan":
+        # Forward the subcommand-stripped tail.
+        return validate_plan_cli(argv[1:])
+    if first == "dod":
+        return validate_dod_cli(argv[1:])
+
+    # Legacy shim: if the first arg is an existing file, treat as the old
+    # CLI and emit a deprecation warning on stderr (so the caller/user
+    # notices and migrates), then forward to the plan subcommand.
+    candidate = Path(first)
+    if candidate.is_file():
+        print(
+            "coverage-matrix: deprecated — use 'plan <file>' subcommand. "
+            "Forwarding as plan.",
+            file=sys.stderr,
+        )
+        return validate_plan_cli(["plan", first])
+
+    return _usage_error(f"unknown subcommand or missing file: {first}")
 
 
 if __name__ == "__main__":

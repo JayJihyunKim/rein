@@ -1,5 +1,31 @@
 # Changelog
 
+## [v1.1.0] - 2026-04-21
+
+### Added
+
+- **rein-govcheck** (`scripts/rein-govcheck.py`): governance self-test that scans AGENTS.md / `.claude/CLAUDE.md` / `.claude/orchestrator.md` / hooks for every `scripts/rein-*.{sh,py}` reference and validates each (ast.parse for Python, `bash -n` for shell). CI workflow `.github/workflows/govcheck.yml` runs it on dev.
+- **path-policy lib** (`.claude/hooks/lib/path-policy.sh`): single-source `is_plan_path` / `is_spec_path` matchers (canonical + legacy dated `docs/YYYY-MM-DD/*-{plan,design}.md`). Removes inline regex duplication from hooks.
+- **validator v2 subcommands** (`scripts/rein-validate-coverage-matrix.py`): `plan <path>` and `dod <path>` explicit subcommands. Legacy 1-arg CLI preserved as shim.
+- **DoD `## 범위 연결` section**: plan_ref / work_unit / covers metadata in DoDs; validator v2 enforces `covers ⊆ matrix.implemented` (advisory in Stage 1, blocking in Stage 2+).
+- **codex-review wrapper** (`scripts/rein-codex-review.sh`): centralized context assembly (diff base, active DoD, plan/design refs, scope items, covers, claim sources, changed files), 4-slot envelope (Code defects / Design Alignment / Test Alignment / Claim Audit), `CODEX_BIN` injection seam for tests. CRITICAL spec-review mode invariant: `[NON_INTERACTIVE] spec review for plan:/design:` marker in stdin → wrapper never writes `.codex-reviewed` or touches `.review-pending`.
+- **governance stage config** (`.claude/.rein-state/governance.json`, `.claude/hooks/lib/governance-stage.sh`): Stage 1 (advisory) / Stage 2 (blocking active DoD) / Stage 3 (blocking legacy-dated plan) gradual rollout. File absent = Stage 1 (fail-safe default). Malformed config = fail-closed at every stage.
+- **rein update manifest v2 + 3-way merge** (`scripts/rein.sh`, `scripts/rein-manifest-v2.py`): on first update from a v1 manifest the update loop preserves text-file user edits and seeds a base snapshot under `.claude/.rein-state/base/` instead of prompting. Subsequent updates run `git merge-file` 3-way against the base, writing conflict `.rej` under `.claude/.rein-state/conflicts/` when merge markers appear. `rein update --prune` splits into review (dry-run) vs `--prune --confirm` (backup to `.rein-prune-backup-<ts>/`).
+- **rein remove** (`scripts/rein.sh`, `scripts/rein-path-match.py`): new command with mandatory scope flag — `--path <glob>` (anchored segment matcher, never matches outside rein-installed paths) or `--all --confirm` (typed DELETE confirmation, TTY-only). Modified files always preserved; backups live in `.rein-remove-backup-<ts>/`.
+- **rein job** (`scripts/rein.sh`, `scripts/rein-job-wrapper.sh`): new background job infrastructure for long-running commands. `rein job start <name> [--shell] -- <cmd>` detaches the command (setsid preferred, nohup / `( ... & )` fallbacks), writes atomic `.claude/cache/jobs/<jid>.{json,status,exit,log}`, returns within ~1s. Supporting subcommands: `rein job status/stop/tail/list/gc`. POSIX uses `kill -TERM -<pid>` pgroup; MINGW uses `taskkill /F /T /PID` tree kill with `MSYS2_ARG_CONV_EXCL="*"`.
+- **background-jobs rule** (`.claude/rules/background-jobs.md`): Claude Code integration guide — `rein job` replaces foreground long-sync commands and cross-turn BashOutput state. Loaded via `@import` in `.claude/CLAUDE.md`.
+- **anchored-segment path matcher** (`scripts/rein-path-match.py`): shared glob implementation for `rein remove --path`. Segment-level anchoring — `*.md` matches `foo.md` but not `foo/bar.md`; `**` crosses segments explicitly.
+- **`.gitignore` entries** for `.claude/.rein-state/`, `.rein-prune-backup-*/`, `.rein-remove-backup-*/`, `.claude/cache/jobs/`.
+
+### Changed
+
+- **pre-edit-dod-gate**: now invokes validator v2 under `timeout 30` with §4.2 tier × exit-code outcome table (Tier 1 mismatch → `.dod-coverage-mismatch` + exit 2; Tier 2 → `.dod-coverage-advisory` + non-blocking). Previous 5-minute session cache (`.claude/cache/dod-gate-validator*`) removed — every invocation runs the validator fresh, closing the stale-pass drift class.
+- **pre-bash-guard**: `BLOCK_MARKERS` array now consumes both `.coverage-mismatch` (legacy plan) and `.dod-coverage-mismatch` (new DoD). `.dod-coverage-advisory` is explicitly non-blocking.
+
+### Breaking
+
+- None. Validator v1 CLI shim preserved; Stage 1 default reproduces pre-v1.1.0 "advisory only" behavior. DoD `covers:` field still advisory — upgraded to required only when governance Stage ≥ 2.
+
 ## [v1.0.0] - 2026-04-21
 
 ### Breaking changes

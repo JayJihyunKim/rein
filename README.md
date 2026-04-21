@@ -259,6 +259,12 @@ v0.7.0 부터 CLI 설치 경로가 `/usr/local/bin/rein` → `$HOME/.rein/bin/re
 
 ## 버전 히스토리
 
+### v1.1.0 (2026-04-21) — drift 방지 trio: governance-integrity + test-oracle + rein-update-hygiene
+- **governance-integrity**: validator v2 (subcommand CLI) + rein-govcheck self-test + path-policy 공용화 + DoD `covers:` 섹션 + codex-review wrapper + governance stage config (Stage 1/2/3 rollout)
+- **rein-update-hygiene**: manifest v2 + 3-way merge (`git merge-file`) + first-update 시 user edit 보존 + `.rej` 분리 + `rein update --prune` review/confirm 분리 + **`rein remove`** 신설 (scope flag 강제, anchored segment matcher)
+- **rein job infra**: 긴 sync 명령 대체 — `rein job start/status/stop/tail/list/gc` (POSIX setsid pgroup + MINGW `taskkill /F /T` tree kill, 파일 기반 atomic state). Claude Code 통합 가이드 `.claude/rules/background-jobs.md`
+- 호환성: DoD `covers:` advisory 유지 (Stage 2+ 에서 blocking 승격), validator v1 CLI shim 유지, `rein update` 는 v1→v2 automigrate. 상세: [CHANGELOG](CHANGELOG.md)
+
 ### v1.0.0 (2026-04-21) — workflow hardening: codex skill 분리 + docs 경로 정리 + plan-writer 자동 review
 - workflow hardening 대규모 정리 — codex skill 분리 (`/codex-review`, `/codex-ask`, clean break) + docs 경로 (`docs/superpowers/` → `docs/`) + plan-writer 자동 codex review ([NON_INTERACTIVE] marker)
 - **Breaking**: 기존 `/codex` / `/codex review` / `/codex ask` 슬래시 명령 제거. 마이그레이션: [CHANGELOG](CHANGELOG.md) "Migration guide" 섹션

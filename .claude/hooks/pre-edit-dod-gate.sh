@@ -12,23 +12,38 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=./lib/python-runner.sh
 . "$SCRIPT_DIR/lib/python-runner.sh"
 
+# Plan A Phase 4 — shared libraries (GI-dod-gate-selector-shared-with-codex-review,
+# GI-governance-stage-config). Missing either library is fail-closed: a
+# silently degraded DoD gate is the drift we are trying to prevent.
+if ! . "$SCRIPT_DIR/lib/select-active-dod.sh" 2>/dev/null; then
+  echo "BLOCKED: [DoD gate] select-active-dod library missing at $SCRIPT_DIR/lib/select-active-dod.sh" >&2
+  exit 2
+fi
+if ! . "$SCRIPT_DIR/lib/governance-stage.sh" 2>/dev/null; then
+  echo "BLOCKED: [DoD gate] governance-stage library missing at $SCRIPT_DIR/lib/governance-stage.sh" >&2
+  exit 2
+fi
+
 BLOCKS_LOG="$PROJECT_DIR/trail/incidents/blocks.log"
 BLOCKS_LOG_JSONL="$PROJECT_DIR/trail/incidents/blocks.jsonl"
 DOD_DIR="$PROJECT_DIR/trail/dod"
 INBOX_DIR="$PROJECT_DIR/trail/inbox"
 SRC_EDIT_MARKER="$DOD_DIR/.session-has-src-edit"
-CACHE_KEY=$(echo "${PROJECT_DIR}" | md5 -q 2>/dev/null || echo "${PROJECT_DIR}" | md5sum 2>/dev/null | cut -c1-8)
 
-# 캐시 키에 dod/inbox 디렉토리의 최신 mtime 을 혼입 (Codex 리뷰 완화책):
-# inbox 파일이 생기는 순간 디렉토리 mtime 이 갱신되어 캐시가 즉시 무효화됨.
-DIR_MTIME=$(
-  {
-    portable_mtime_epoch "$DOD_DIR"
-    portable_mtime_epoch "$INBOX_DIR"
-  } | sort -nr | head -1
-)
-CACHE="/tmp/.claude-dod-${CACHE_KEY}-${DIR_MTIME:-0}"
-CACHE_TTL=300  # 5분
+# Plan A Phase 4 Task 4.3 (GI-dod-gate-cache-invalidation): session cache
+# removed. The selector + validator are cheap enough to run on every hook
+# invocation; any cache would re-introduce stale-pass drift. The legacy
+# /tmp/.claude-dod-<key>-<mtime> variables are intentionally no longer
+# declared.
+
+# Markers produced by this gate (Plan A §4.2 table):
+DOD_MISMATCH_MARKER="$DOD_DIR/.dod-coverage-mismatch"    # blocking
+DOD_ADVISORY_MARKER="$DOD_DIR/.dod-coverage-advisory"    # non-blocking
+
+# Validator invocation (Plan A Phase 3 + 4): wrapped in `timeout 30` by
+# this hook per GI-validator-v2-timeout-fail-closed.
+VALIDATOR_PATH="$PROJECT_DIR/scripts/rein-validate-coverage-matrix.py"
+VALIDATOR_TIMEOUT_S=30
 
 log_block() {
   local reason="$1"
@@ -137,6 +152,23 @@ if [ "$IS_SOURCE" = false ]; then
   exit 0
 fi
 
+# --- Governance stage (Plan A §6, GI-governance-stage-config) ---
+# Fail-closed on malformed / unknown stage: "silent Stage 1 downgrade" is a
+# bypass path. Stage 1 (default / file-absent) is advisory; Stage 2/3 is
+# blocking. INVALID → block all Edits until config is fixed.
+GOVERNANCE_STAGE=$(cd "$PROJECT_DIR" && read_governance_stage)
+if [ "$GOVERNANCE_STAGE" = "INVALID" ]; then
+  mkdir -p "$PROJECT_DIR/trail/incidents"
+  printf '%s\t%s\n' "$(date -u +%FT%TZ)" "invalid_stage" \
+    >> "$PROJECT_DIR/trail/incidents/governance-config-invalid.log" 2>/dev/null || true
+  mkdir -p "$DOD_DIR"
+  touch "$DOD_MISMATCH_MARKER"
+  echo "BLOCKED: [DoD gate] corrupt .claude/.rein-state/governance.json." >&2
+  echo "  fix or remove the file to re-initialize to Stage 1 (advisory)." >&2
+  log_block "governance config invalid" "$FILE_PATH"
+  exit 2
+fi
+
 # --- Incident Review Pending 검사 (cache 보다 앞. self-heal 포함) ---
 # cache hit 로 우회되면 안 되는 gate. 항상 실시간 검증.
 INCIDENT_STAMP="$DOD_DIR/.incident-review-pending"
@@ -176,14 +208,12 @@ if [ -f "$INCIDENT_STAMP" ]; then
   fi
 fi
 
-# --- 캐시 확인 ---
-if [ -f "$CACHE" ]; then
-  CACHE_AGE=$(( $(date +%s) - $(portable_mtime_epoch "$CACHE") ))
-  if [ "$CACHE_AGE" -lt "$CACHE_TTL" ]; then
-    touch "$SRC_EDIT_MARKER" 2>/dev/null
-    exit 0
-  fi
-fi
+# Plan A Phase 4 Task 4.3 (GI-dod-gate-cache-invalidation):
+# The 5-min /tmp/.claude-dod-* session cache was removed here.
+# Every DoD-gate invocation now runs the selector + validator from scratch.
+# Benefit: "stale pass" class of drift is structurally impossible.
+# Cost: one extra validator subprocess (~500ms) per Edit/Write. Well under
+# the 30s timeout defined by GI-validator-v2-timeout-fail-closed.
 
 # --- Pending DoD 판정 (inbox-매칭 기반) ---
 # pending = 신 포맷 dod 파일 존재 AND 같은 slug 의 inbox 파일 없음
@@ -365,7 +395,75 @@ fi
 # END routing-gate
 
 if [ "$DOD_FOUND" = true ]; then
-  touch "$CACHE"
+  # Plan A Phase 4 Task 4.2 (GI-dod-gate-validator-call):
+  # Run the active-DoD validator through the 30s timeout wrapper and
+  # enforce the §4.2 tier/exit-code table. This block is a no-op
+  # (exit 0) when no DoD candidate exists (tier=0), preserving the
+  # original "DoD file exists → permit edit" behavior.
+  SAD_LINE=$( cd "$PROJECT_DIR" && select_active_dod )
+  SAD_TIER=$(printf '%s' "$SAD_LINE" | cut -f1)
+  SAD_PATH=$(printf '%s' "$SAD_LINE" | cut -f2)
+  SAD_REASON=$(printf '%s' "$SAD_LINE" | cut -f3)
+
+  if [ "$SAD_TIER" = "0" ] || [ -z "$SAD_PATH" ]; then
+    # No candidate DoD has '## 범위 연결' — silently pass through.
+    # This is the common case for legacy DoDs; Stage 1 (advisory) does
+    # not require 범위 연결. Emit no stderr to avoid polluting every
+    # Edit/Write with a warning.
+    touch "$SRC_EDIT_MARKER" 2>/dev/null
+    exit 0
+  fi
+
+  # Validator call with 30s timeout.
+  if ! command -v timeout >/dev/null 2>&1; then
+    # macOS BSD doesn't ship GNU timeout by default; fall through to
+    # no-wrap invocation but still honor the "block on validator fail"
+    # contract. The validator is bounded by its own implementation.
+    VEXIT=0
+    ( cd "$PROJECT_DIR" && "${PYTHON_RUNNER[@]}" "$VALIDATOR_PATH" dod "$SAD_PATH" 2>&1 ) >/dev/null || VEXIT=$?
+  else
+    VEXIT=0
+    ( cd "$PROJECT_DIR" && timeout "$VALIDATOR_TIMEOUT_S" "${PYTHON_RUNNER[@]}" "$VALIDATOR_PATH" dod "$SAD_PATH" 2>&1 ) >/dev/null || VEXIT=$?
+  fi
+
+  # Apply the §4.2 outcome table (tier × validator-result → marker + exit).
+  case "$SAD_TIER:$VEXIT" in
+    1:0)
+      rm -f "$DOD_MISMATCH_MARKER" "$DOD_ADVISORY_MARKER"
+      ;;
+    1:124)
+      mkdir -p "$PROJECT_DIR/trail/incidents"
+      printf '%s\tdod\t%s\ttimeout\n' "$(date -u +%FT%TZ)" "$SAD_PATH" \
+        >> "$PROJECT_DIR/trail/incidents/validator-timeout.log" 2>/dev/null || true
+      touch "$DOD_MISMATCH_MARKER"
+      echo "BLOCKED: [DoD gate] validator timeout on $SAD_PATH — fail-closed (Tier 1)." >&2
+      log_block "validator timeout (tier 1)" "$SAD_PATH"
+      exit 2
+      ;;
+    1:*)
+      touch "$DOD_MISMATCH_MARKER"
+      rm -f "$DOD_ADVISORY_MARKER"
+      echo "BLOCKED: [DoD gate] DoD validator failed for $SAD_PATH (exit $VEXIT, Tier 1 marker)." >&2
+      echo "  fix the DoD's '## 범위 연결' covers: to reference 'implemented' IDs from the plan matrix." >&2
+      log_block "dod covers mismatch (tier 1)" "$SAD_PATH"
+      exit 2
+      ;;
+    2:0)
+      rm -f "$DOD_ADVISORY_MARKER"
+      ;;
+    2:124)
+      mkdir -p "$PROJECT_DIR/trail/incidents"
+      printf '%s\tdod\t%s\ttimeout\n' "$(date -u +%FT%TZ)" "$SAD_PATH" \
+        >> "$PROJECT_DIR/trail/incidents/validator-timeout.log" 2>/dev/null || true
+      touch "$DOD_ADVISORY_MARKER"
+      echo "WARNING: [DoD gate] validator timeout on $SAD_PATH — advisory only (Tier 2)." >&2
+      ;;
+    2:*)
+      touch "$DOD_ADVISORY_MARKER"
+      echo "WARNING: [DoD gate] DoD validator failed for $SAD_PATH (exit $VEXIT, Tier 2 advisory — non-blocking)." >&2
+      ;;
+  esac
+
   touch "$SRC_EDIT_MARKER" 2>/dev/null
   exit 0
 else

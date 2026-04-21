@@ -183,14 +183,25 @@ check_review_stamp() {
 }
 
 # --- Coverage matrix gate (pytest/commit 차단, 리뷰 stamp 검사보다 선행) ---
-COVERAGE_MARKER="$PROJECT_DIR/trail/dod/.coverage-mismatch"
-if [ -f "$COVERAGE_MARKER" ]; then
-  if echo "$COMMAND" | grep -qE "(pytest|jest|vitest|mocha|npm run test|npm test|yarn test|pnpm test|python -m pytest|npx jest|npx vitest|git commit|bash tests/)"; then
-    echo "BLOCKED: coverage matrix 검증 실패 마커 존재 ($COVERAGE_MARKER)." >&2
-    echo "  plan 을 수정해 validator 를 통과시키거나, 예외 승인 후 마커를 직접 삭제하세요." >&2
-    log_block "coverage-mismatch" "$COMMAND"
-    exit 2
-  fi
+# Plan A Phase 5 (GI-dod-mismatch-marker-consumer): BLOCK_MARKERS is an array
+# so the guard consumes both the legacy plan-level marker and the new DoD-level
+# marker. Advisory (non-blocking) markers like .dod-coverage-advisory must NOT
+# be listed here — they are informational only and do not gate commits/tests.
+# Iteration order determines which marker's message surfaces first when more
+# than one is present; we keep legacy first for message stability.
+BLOCK_MARKERS=(
+  "$PROJECT_DIR/trail/dod/.coverage-mismatch"
+  "$PROJECT_DIR/trail/dod/.dod-coverage-mismatch"
+)
+if echo "$COMMAND" | grep -qE "(pytest|jest|vitest|mocha|npm run test|npm test|yarn test|pnpm test|python -m pytest|npx jest|npx vitest|git commit|bash tests/)"; then
+  for marker in "${BLOCK_MARKERS[@]}"; do
+    if [ -f "$marker" ]; then
+      echo "BLOCKED: coverage matrix 검증 실패 마커 존재 ($marker)." >&2
+      echo "  plan/DoD 을 수정해 validator 를 통과시키거나, 예외 승인 후 마커를 직접 삭제하세요." >&2
+      log_block "coverage-mismatch" "$COMMAND"
+      exit 2
+    fi
+  done
 fi
 
 # --- Codex 리뷰 stamp 검사 (테스트 실행 시) ---

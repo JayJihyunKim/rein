@@ -11,6 +11,14 @@ SPEC_REVIEWS_DIR="$DOD_DIR/.spec-reviews"
 # shellcheck source=./lib/python-runner.sh
 . "$SCRIPT_DIR/lib/python-runner.sh"
 
+# Plan A §2 (GI-path-policy-lib): shared path classifier. Fail-closed if
+# library is missing — silent degrade to "no matcher" would stop creating
+# pending markers for real specs, defeating the spec review gate.
+if ! . "$SCRIPT_DIR/lib/path-policy.sh" 2>/dev/null; then
+  echo "BLOCKED: [post-write-spec-review-gate] path-policy library missing at $SCRIPT_DIR/lib/path-policy.sh" >&2
+  exit 2
+fi
+
 # Post-hook: Python 미해결 시 조용히 skip (세션 차단 금지).
 resolve_python 2>/dev/null
 rc=$?
@@ -65,7 +73,10 @@ compute_hash() {
   fi
 }
 
-# 절대경로 정규화 + canonical 매칭
+# Plan A §2 consumer: canonical = design spec (is_spec_path) OR plan
+# (is_plan_path). The shared library (GI-path-policy-lib) expects
+# repo-relative input; this wrapper does the absolute → relative
+# normalization locally (GI-path-policy-input-contract).
 is_canonical_spec() {
   local abs="$1"
   local rel
@@ -73,7 +84,7 @@ is_canonical_spec() {
     "$PROJECT_DIR"/*) rel="${abs#$PROJECT_DIR/}" ;;
     *) return 1 ;;  # repo 외부는 canonical 아님
   esac
-  [[ "$rel" =~ ^(docs(/[^/]+)*/(specs|plans)/.+\.md|specs/.+\.md|plans/.+\.md)$ ]]
+  is_spec_path "$rel" || is_plan_path "$rel"
 }
 
 # 각 파일에 대해 마커 생성 (while 루프가 subshell을 생성하므로 미리 mkdir)
