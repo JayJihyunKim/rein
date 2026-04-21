@@ -203,9 +203,10 @@ claude
 
 | Skill | Role |
 |-------|------|
-| `brainstorming` | Rein-native brainstorming. Validates feasibility/compatibility against the existing system before converging on options; writes artifacts to `docs/superpowers/brainstorms/`. Takes precedence over `superpowers:brainstorming`. |
+| `brainstorming` | Rein-native brainstorming. Validates feasibility/compatibility against the existing system before converging on options; writes artifacts to `docs/brainstorms/`. Takes precedence over `superpowers:brainstorming`. |
 | `writing-plans` | Converts a design/spec into an implementation plan with coverage matrix + `covers:` tags. Rein-native; takes precedence over `superpowers:writing-plans`. |
-| `codex` | Two modes: `/codex review` (code review, stamp, severity escalation, Sonnet fallback) and `/codex ask` (second opinion — stamp-less, always a new session, no `resume --last`). |
+| `codex-review` | Code review mode. Creates `trail/dod/.codex-reviewed` stamp, applies severity escalation, and supports Sonnet fallback on codex failure. The only skill that generates the review gate stamp. |
+| `codex-ask` | Second-opinion mode. Stamp-less. Always starts a new `codex exec` session (no `resume --last`) to guarantee an independent perspective for brainstorm rebuttals, spec sanity, or refactor tradeoffs. |
 | `repo-audit` | Repository health check (stale rules, missing tests) |
 | `incidents-to-rule` | Repeated failures → auto-generate AGENTS.md rule candidates |
 | `incidents-to-agent` | Repeated patterns → generate agent candidates |
@@ -236,15 +237,19 @@ Starting with v0.7.0, the CLI install path changed from `/usr/local/bin/rein` to
 
 ## Version History
 
+### v1.0.0 (2026-04-21) — workflow hardening: codex skill split + docs path reorg + plan-writer auto-review
+- major workflow hardening — codex skill split (`/codex-review`, `/codex-ask`, clean break) + docs path reorg (`docs/superpowers/` → `docs/`) + plan-writer auto codex review ([NON_INTERACTIVE] marker)
+- **Breaking**: old `/codex` / `/codex review` / `/codex ask` slash commands removed. Migration: see [CHANGELOG](CHANGELOG.md) "Migration guide" section
+
 ### v0.10.1 (2026-04-20) — Structural fix for Windows Git Bash/MSYS `python3 exit 49`
 - New `.claude/hooks/lib/python-runner.sh` (shared Python resolver, bash-array based) and `.claude/hooks/lib/extract-hook-json.py` (argparse-based JSON stdin extractor)
 - All 8 hooks migrated from inline `echo "$INPUT" | python3 -c ...` patterns to the helper path, so Windows launch failures (9009 class) / WindowsApps stubs / JSON parse errors are diagnosed distinctly
 - Pre-hook blocks now emit Windows-specific diagnostics with `[DoD gate]` / `[Bash guard]` prefix (WSL2, App execution aliases, `REIN_PYTHON`, venv guidance)
 - Details: [CHANGELOG](CHANGELOG.md) · README "Windows Git Bash diagnostics" section
 
-### v0.10.0 (2026-04-20) — rein-native brainstorming + /codex ask + tests CI + incident classifier
-- New rein-native `brainstorming` skill — validates feasibility/compatibility against the existing system before converging on options (artifacts under `docs/superpowers/brainstorms/`)
-- Split `/codex` into `/codex review` (Mode A, review stamp) and `/codex ask` (Mode B, second opinion, stamp-less, no `resume --last`)
+### v0.10.0 (2026-04-20) — rein-native brainstorming + codex second-opinion + tests CI + incident classifier
+- New rein-native `brainstorming` skill — validates feasibility/compatibility against the existing system before converging on options (artifacts under `docs/brainstorms/`)
+- Introduced two modes for the `codex` skill — Mode A (review stamp) and Mode B (second opinion, stamp-less, no `resume --last`). v1.0.0 later performs a clean-break split into the separate `/codex-review` and `/codex-ask` skills
 - New `.github/workflows/tests.yml` — runs the full hook + script suites on push/PR across ubuntu + macOS (windows advisory). Maintainer-only (rein-dev)
 - New incident `agent_eligible` classification — `/incidents-to-agent` now auto-excludes hook-source bug patterns (`false`)
 - Router excludes `superpowers:brainstorming` / `superpowers:writing-plans` by id prefix so rein-native skills take precedence

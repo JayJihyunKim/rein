@@ -14,7 +14,7 @@ description: 변경된 코드에 대해 현재 보안 레벨 기준으로 취약
 - 보안 리뷰 stamp 생성 (`trail/dod/.security-reviewed`)
 
 ## 담당하지 않는 것
-- 일반 코드 품질 리뷰 → `/codex` 스킬 또는 `code-reviewer` 스킬
+- 일반 코드 품질 리뷰 → `/codex-review` 스킬 또는 `code-reviewer` 스킬
 - 기능 구현 → `feature-builder`
 - 정적 분석 도구 실행 (LLM 기반 리뷰만 수행)
 

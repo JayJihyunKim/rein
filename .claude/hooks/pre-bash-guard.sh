@@ -139,7 +139,7 @@ check_review_stamp() {
   if [ -f "$REVIEW_PENDING" ]; then
     if [ ! -f "$REVIEW_STAMP" ]; then
       echo "BLOCKED: 코드 변경 후 codex 리뷰가 실행되지 않았습니다." >&2
-      echo "/codex 스킬로 코드 리뷰를 실행하세요." >&2
+      echo "/codex-review 스킬로 코드 리뷰를 실행하세요." >&2
       log_block "코드 편집 후 리뷰 미실행 (${context})" "$COMMAND"
       return 1
     fi
@@ -163,7 +163,7 @@ check_review_stamp() {
   # 시간 기반 TTL 은 제거 — .review-pending 비교가 "코드 변경 후 재리뷰" 를 정확히 담당한다
   if [ ! -f "$REVIEW_STAMP" ]; then
     echo "BLOCKED: Codex 코드 리뷰가 실행되지 않았습니다." >&2
-    echo "${context} 전에 /codex 스킬로 코드 리뷰를 실행하세요." >&2
+    echo "${context} 전에 /codex-review 스킬로 코드 리뷰를 실행하세요." >&2
     echo "리뷰 완료 후 trail/dod/.codex-reviewed 파일이 생성되어야 합니다." >&2
     log_block "Codex 리뷰 미실행 (${context})" "$COMMAND"
     return 1

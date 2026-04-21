@@ -33,7 +33,7 @@ plan 문서는 `## Design 범위 커버리지 매트릭스` 섹션에 아래 포
 ```markdown
 ## Design 범위 커버리지 매트릭스
 
-> design ref: docs/superpowers/specs/foo-design.md
+> design ref: docs/specs/foo-design.md
 
 | Scope ID | 상태 | 위치/사유 |
 |----------|------|----------|

@@ -13,8 +13,8 @@
 | 새 서비스 생성 | `build-from-scratch.md` | `feature-builder` | 해당 언어 디렉토리 |
 | 기술 조사 | `research-task.md` | `researcher` | — |
 | 아이디어 정제 (brainstorming) | — | `brainstorming` 스킬 | — |
-| 코드 리뷰 | — | `/codex review` (fallback: `code-reviewer` 스킬 → `general-purpose`) | — |
-| 독립 관점 질의 (second opinion) | — | `/codex ask` 스킬 | — |
+| 코드 리뷰 | — | `/codex-review` (fallback: `code-reviewer` 스킬 → `general-purpose`) | — |
+| 독립 관점 질의 (second opinion) | — | `/codex-ask` 스킬 | — |
 | 보안 리뷰 | — | `security-reviewer` | — |
 | 문서 작성 | — | `docs-writer` | — |
 | plan 작성 | — | `plan-writer` | — |
@@ -23,12 +23,12 @@
 
 아이디어 → brainstorming → spec → plan → 구현 → 리뷰.
 
-1. **brainstorming 스킬** — `docs/superpowers/brainstorms/YYYY-MM-DD-<slug>.md` 작성 (Problem / Constraints / Options / Chosen / Rejected / Open Questions)
+1. **brainstorming 스킬** — `docs/brainstorms/YYYY-MM-DD-<slug>.md` 작성 (Problem / Constraints / Options / Chosen / Rejected / Open Questions)
 2. spec 작성 시 `brainstorm ref:` 로 해당 brainstorm 을 가리킴 (soft v1 권고)
 3. **plan-writer 에이전트** 가 spec 의 Scope Items 를 읽어 `writing-plans` 스킬로 plan 작성 (coverage matrix + covers)
-4. 구현 → `/codex review` → `security-reviewer`
+4. 구현 → `/codex-review` → `security-reviewer`
 
-의심스러운 결정이 있으면 임의 단계에서 `/codex ask` 로 독립 관점을 구할 수 있다 (stamp 없음, resume 금지).
+의심스러운 결정이 있으면 임의 단계에서 `/codex-ask` 로 독립 관점을 구할 수 있다 (stamp 없음, resume 금지).
 
 ---
 
@@ -62,7 +62,7 @@
 Agent Teams 사용 시:
 - 각 서브 에이전트에게 독립적인 DoD를 부여한다
 - 서브 에이전트 결과를 메인 컨텍스트로 가져올 때는 요약본만 포함한다
-- 병렬 결과 머지 시 `/codex` 스킬 (fallback: `code-reviewer` 스킬 → `general-purpose` 에이전트) 로 최종 검토한다
+- 병렬 결과 머지 시 `/codex-review` 스킬 (fallback: `code-reviewer` 스킬 → `general-purpose` 에이전트) 로 최종 검토한다
 
 ---
 

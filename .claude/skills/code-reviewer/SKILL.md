@@ -1,9 +1,9 @@
 ---
 name: code-reviewer
-description: /codex 장애 시 fallback 리뷰어. 변경된 코드에 대해 AGENTS.md rules + 체크리스트 기반으로 리뷰하고 stamp 생성.
+description: /codex-review 장애 시 fallback 리뷰어. 변경된 코드에 대해 AGENTS.md rules + 체크리스트 기반으로 리뷰하고 stamp 생성.
 triggers:
-  - /codex 호출 타임아웃
-  - /codex 호출 에러(exit non-zero)
+  - /codex-review 호출 타임아웃
+  - /codex-review 호출 에러(exit non-zero)
   - superpowers:code-reviewer 미설치 + codex 자체 불가 환경
 ---
 
@@ -11,11 +11,11 @@ triggers:
 
 ## 실행 조건
 
-이 스킬은 `/codex` 리뷰 게이트를 대체하지 않는다. AGENTS.md §5-1 / `.claude/skills/codex/SKILL.md` 의 규정은 "codex 실패 시에만 fallback" 이며, 본 스킬은 그 fallback 경로의 rein-native 구현이다. 사용자의 임의 요청만으로는 호출하지 않는다.
+이 스킬은 `/codex-review` 리뷰 게이트를 대체하지 않는다. AGENTS.md §5-1 / `.claude/skills/codex-review/SKILL.md` 의 규정은 "codex 실패 시에만 fallback" 이며, 본 스킬은 그 fallback 경로의 rein-native 구현이다. 사용자의 임의 요청만으로는 호출하지 않는다.
 
-1. **codex_timeout** — `/codex` 호출이 타임아웃
-2. **codex_error** — `/codex` 가 exit non-zero 로 실패
-3. **no_superpowers_plugin** — `superpowers:code-reviewer` 플러그인이 없고 `/codex` 경로도 사용 불가
+1. **codex_timeout** — `/codex-review` 호출이 타임아웃
+2. **codex_error** — `/codex-review` 가 exit non-zero 로 실패
+3. **no_superpowers_plugin** — `superpowers:code-reviewer` 플러그인이 없고 `/codex-review` 경로도 사용 불가
 
 아래 "Stamp 생성" 섹션의 `fallback_reason` 필드에는 위 slug (codex_timeout / codex_error / no_superpowers_plugin) 중 하나를 그대로 기입한다.
 
@@ -89,7 +89,7 @@ triggers:
 
 ## 리뷰 에스컬레이션 흐름
 
-AGENTS.md §5-1 / `.claude/skills/codex/SKILL.md` 의 표와 일치한다.
+AGENTS.md §5-1 / `.claude/skills/codex-review/SKILL.md` 의 표와 일치한다.
 
 | 라운드 결과 | 규모 | 다음 행동 |
 |-----------|------|----------|
@@ -103,6 +103,20 @@ AGENTS.md §5-1 / `.claude/skills/codex/SKILL.md` 의 표와 일치한다.
 ## Stamp 생성
 
 이슈가 없을 때만 본 스킬 이름으로 stamp 를 생성한다. `<REASON>` 은 "실행 조건" 섹션의 slug (codex_timeout / codex_error / no_superpowers_plugin) 중 하나로 교체한다. Low / Medium(≤3줄) 잔존 시에는 수정 후 self-review stamp 로 전환 (아래 블록 참조).
+
+### Spec-review fallback 분기 (CRITICAL, v1.0.0+)
+
+이 스킬이 **`[NON_INTERACTIVE] spec review for plan:` 또는 `design:` prefix 가 붙은 prompt** 로 호출된 경우 (plan-writer 의 codex 실패 fallback 경로), 아래 "Stamp 생성" 블록 (`.codex-reviewed` 생성, `.review-pending` 삭제) 을 **실행하지 않는다**.
+
+근거: `.codex-reviewed` 는 코드리뷰 게이트 stamp. spec review fallback 에서 이 stamp 를 찍으면 코드 변경 없이도 gate 통과 가능 → rein 규율 오염.
+
+Spec-review fallback 동작:
+1. 리뷰 수행 (AGENTS.md rules + 체크리스트) — 내용 자체는 동일
+2. verdict 만 caller (plan-writer) 에게 반환 — PASS / NEEDS-FIX / REJECT
+3. **stamp 생성 없음**. `.review-pending` 건드리지 않음
+4. caller 가 PASS 시 `bash scripts/rein-mark-spec-reviewed.sh <path> code-reviewer-rein-sonnet-fallback` 호출 — spec-review 전용 stamp (`trail/dod/.spec-reviews/<hash>.reviewed`) 생성
+
+**Code-review 경로 (일반 fallback, `[NON_INTERACTIVE] spec review` prefix 없음)**: 아래 기존 Stamp 생성 규정 그대로 (`.codex-reviewed` 생성).
 
 ~~~bash
 REASON=codex_timeout     # 실제 호출 사유로 교체

@@ -237,11 +237,11 @@ claude
 
 | 작업 | 추천 에이전트 | 주요 스킬 |
 |---|---|---|
-| 기능 추가 | feature-builder | `brainstorming` (brownfield) → writing-plans → `/codex review` |
-| 버그 수정 | feature-builder | systematic-debugging, `/codex review` |
+| 기능 추가 | feature-builder | `brainstorming` (brownfield) → writing-plans → `/codex-review` |
+| 버그 수정 | feature-builder | systematic-debugging, `/codex-review` |
 | 설계 | docs-writer / plan-writer | `brainstorming` → writing-plans |
-| 리팩토링 | feature-builder | `brainstorming`, `/codex review`, repo-audit |
-| 독립 관점 질의 | — | `/codex ask` (stamp 없음, 세션 컨텍스트 오염 회피) |
+| 리팩토링 | feature-builder | `brainstorming`, `/codex-review`, repo-audit |
+| 독립 관점 질의 | — | `/codex-ask` (stamp 없음, 세션 컨텍스트 오염 회피) |
 
 > `brainstorming` / `writing-plans` 는 rein-native 스킬입니다. superpowers 플러그인의 동명 스킬보다 우선 매칭됩니다.
 
@@ -259,15 +259,19 @@ v0.7.0 부터 CLI 설치 경로가 `/usr/local/bin/rein` → `$HOME/.rein/bin/re
 
 ## 버전 히스토리
 
+### v1.0.0 (2026-04-21) — workflow hardening: codex skill 분리 + docs 경로 정리 + plan-writer 자동 review
+- workflow hardening 대규모 정리 — codex skill 분리 (`/codex-review`, `/codex-ask`, clean break) + docs 경로 (`docs/superpowers/` → `docs/`) + plan-writer 자동 codex review ([NON_INTERACTIVE] marker)
+- **Breaking**: 기존 `/codex` / `/codex review` / `/codex ask` 슬래시 명령 제거. 마이그레이션: [CHANGELOG](CHANGELOG.md) "Migration guide" 섹션
+
 ### v0.10.1 (2026-04-20) — Windows Git Bash/MSYS `python3 exit 49` 구조적 해결
 - `.claude/hooks/lib/python-runner.sh` (공용 Python resolver, bash array 기반) + `.claude/hooks/lib/extract-hook-json.py` (argparse 기반 JSON stdin 추출 helper) 도입
 - 8개 훅의 inline `echo "$INPUT" | python3 -c ...` 패턴을 helper 경유 호출로 전부 교체. Windows launch failure(9009 계열) / WindowsApps stub / JSON 파싱 실패를 구분 진단
 - pre-hook 차단 시 `[DoD gate]` / `[Bash guard]` prefix 포함 Windows-specific 진단 메시지 (WSL2 / App execution aliases / `REIN_PYTHON` / venv 안내) 출력
 - 상세: [CHANGELOG](CHANGELOG.md) · README "Windows Git Bash 진단" 섹션
 
-### v0.10.0 (2026-04-20) — rein-native brainstorming + /codex ask + tests CI + incident classifier
-- rein-native `brainstorming` skill 신설 — brownfield 에서 feasibility·compatibility 를 선검증한 뒤 선택지를 수렴 (산출물 `docs/superpowers/brainstorms/`)
-- `/codex` 를 `/codex review` (Mode A, 리뷰 stamp) + `/codex ask` (Mode B, second opinion, stamp 없음, `resume --last` 금지) 로 분리
+### v0.10.0 (2026-04-20) — rein-native brainstorming + codex second-opinion + tests CI + incident classifier
+- rein-native `brainstorming` skill 신설 — brownfield 에서 feasibility·compatibility 를 선검증한 뒤 선택지를 수렴 (산출물 `docs/brainstorms/`)
+- 기존 `codex` 단일 스킬에 두 모드를 도입 — Mode A (리뷰 stamp) + Mode B (second opinion, stamp 없음, `resume --last` 금지). v1.0.0 clean-break 로 `/codex-review` + `/codex-ask` 두 스킬로 최종 분리됨
 - `.github/workflows/tests.yml` 신설 — ubuntu/macOS 에서 전체 hook + script 테스트를 push/PR 마다 자동 실행. rein-dev 전용
 - incident `agent_eligible` 분류 필드 도입 — `/incidents-to-agent` 가 hook-source bug 패턴 (`false`) 을 자동 제외
 - router 가 `superpowers:brainstorming`/`superpowers:writing-plans` 를 id prefix 로 차단하여 rein-native 스킬이 우선 매칭됨

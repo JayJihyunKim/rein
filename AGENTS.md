@@ -45,7 +45,7 @@
 
 설계 문서(spec, plan 등)는 반드시 다음 경로 중 하나에 작성한다:
 
-- `docs/**/specs/**.md` (예: `docs/superpowers/specs/foo-design.md`)
+- `docs/**/specs/**.md` (예: `docs/specs/foo-design.md`)
 - `docs/**/plans/**.md`
 - `docs/specs/**.md` / `docs/plans/**.md`
 - `specs/**.md` / `plans/**.md` (루트)
@@ -54,17 +54,17 @@
 
 #### 리뷰 강제
 
-**설계 문서 작성 직후, 구현으로 넘어가기 전에 반드시 `/codex review` 스킬로 리뷰를 실행하고 per-spec stamp 를 등록한다:**
+**설계 문서 작성 직후, 구현으로 넘어가기 전에 반드시 `/codex-review` 스킬로 리뷰를 실행하고 per-spec stamp 를 등록한다:**
 
 ```bash
-# 1. /codex review 스킬로 리뷰 실행 (Mode A — stamp 생성, severity escalation)
-/codex review <spec 경로>
+# 1. /codex-review 스킬로 리뷰 실행 (Mode A — stamp 생성, severity escalation)
+/codex-review <spec 경로>
 
 # 2. 리뷰 완료 후 per-spec stamp 등록
 bash scripts/rein-mark-spec-reviewed.sh docs/specs/foo.md codex
 ```
 
-> 설계 결정이 의심스러울 때는 별도로 `/codex ask` (Mode B, stamp 없음) 로 독립 관점을 구할 수 있다. Mode B 결과는 리뷰 stamp 를 대체하지 않는다.
+> 설계 결정이 의심스러울 때는 별도로 `/codex-ask` (Mode B, stamp 없음) 로 독립 관점을 구할 수 있다. Mode B 결과는 리뷰 stamp 를 대체하지 않는다.
 
 리뷰가 해소되지 않은 상태에서 소스 파일(`src/`, `app/`, `scripts/` 등)을 편집하려 하면 `pre-edit-dod-gate` 가 차단한다.
 
@@ -72,7 +72,7 @@ bash scripts/rein-mark-spec-reviewed.sh docs/specs/foo.md codex
 
 plan 문서는 `## Design 범위 커버리지 매트릭스` 섹션을 포함하고 각 work unit(Gate/Phase/Task 등) 에 `covers: [ID, ...]` 메타데이터를 표기할 것을 권장한다. 매트릭스 섹션이 없는 legacy plan 은 validator 가 경고만 출력하며 차단하지 않는다. 자세한 절차는 `.claude/workflows/design-to-plan.md` 참조. `post-edit-plan-coverage.sh` 훅이 자동 검증하고 실패 시 `trail/dod/.coverage-mismatch` 마커로 commit/test 를 차단한다.
 
-#### `/codex review` 장애 시 Fallback
+#### `/codex-review` 장애 시 Fallback
 
 1. **대체 리뷰어**: rein 자체 `code-reviewer` 스킬 (`.claude/skills/code-reviewer/`) 또는 `general-purpose` 에이전트에게 리뷰 요청 후:
    ```bash
@@ -101,7 +101,7 @@ pending 마커는 원래 경로를 기억한다. 이동/리네임 후 gate 가 "
 
 #### Canonical 외 경로
 
-훅이 감지하지 못하므로 **메인테이너가 수동으로** `/codex review` 를 거쳐야 한다. 품질 위험은 사용자 책임.
+훅이 감지하지 못하므로 **메인테이너가 수동으로** `/codex-review` 를 거쳐야 한다. 품질 위험은 사용자 책임.
 
 ---
 
@@ -184,7 +184,7 @@ python3 scripts/rein-generate-skill-mcp-guide.py
 ## 5-1. 코드 리뷰 필수 규칙 (sub-agent 포함)
 
 - 소스 코드(.ts, .py, .sh, .json 등)를 수정한 **모든 에이전트(sub-agent 포함)**는 작업 완료 전 반드시 codex 리뷰를 실행한다
-- codex 리뷰: `/codex review` (Mode A) 호출 → `trail/dod/.codex-reviewed` stamp 생성. `/codex ask` (Mode B) 는 second opinion 전용이므로 리뷰 stamp 를 대체할 수 없다.
+- codex 리뷰: `/codex-review` (Mode A) 호출 → `trail/dod/.codex-reviewed` stamp 생성. `/codex-ask` (Mode B) 는 second opinion 전용이므로 리뷰 stamp 를 대체할 수 없다.
 - codex 실패(에러/타임아웃) 시에만 sonnet 폴백 허용 — 그 외 사유로 sonnet 리뷰 대체 금지
 - sonnet 폴백 시 stamp에 `fallback_reason` 기록 필수
 - 리뷰 없이 결과를 반환하거나 테스트/커밋 시도 시 hook이 차단함 (exit 2)

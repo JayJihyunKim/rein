@@ -32,6 +32,7 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 @.claude/rules/testing.md
 @.claude/rules/security.md
 @.claude/rules/subagent-review.md
+@.claude/rules/branch-strategy.md
 @.claude/rules/design-plan-coverage.md
 
 ---
@@ -87,8 +88,8 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
    → 수정 시 `python3 scripts/rein-route-record.py override ...` 로 overrides.yaml 에 기록
 4. **IMPLEMENT** — 승인된 조합의 에이전트/스킬/MCP를 활용하여 소스 코드 편집
 5. **CODEX REVIEW** — 구현 완료 후 반드시 Codex로 코드 리뷰 실행
-   → `/codex review` 스킬 (Mode A) 로 변경된 파일에 대해 리뷰 요청. `/codex ask` (Mode B — second opinion) 는 stamp 를 생성해서는 안 되며 리뷰 gate 를 대체하지 않는다.
-   → 리뷰 완료 후 `trail/dod/.codex-reviewed` stamp 를 `/codex review` 스킬이 생성 (수동 touch 는 `.claude/rules/subagent-review.md` 예외 조건에서만 허용)
+   → `/codex-review` 스킬 (Mode A) 로 변경된 파일에 대해 리뷰 요청. `/codex-ask` (Mode B — second opinion) 는 stamp 를 생성해서는 안 되며 리뷰 gate 를 대체하지 않는다.
+   → 리뷰 완료 후 `trail/dod/.codex-reviewed` stamp 를 `/codex-review` 스킬이 생성 (수동 touch 는 `.claude/rules/subagent-review.md` 예외 조건에서만 허용)
 6. **SECURITY REVIEW** — Codex 리뷰 완료 후 보안 리뷰 실행
    → `security-reviewer` 에이전트가 `.claude/security/profile.yaml`의 보안 레벨 기준으로 리뷰
    → 리뷰 완료 후 `touch trail/dod/.security-reviewed`로 stamp 생성

@@ -88,7 +88,7 @@ if [ -d "$SPEC_REVIEWS_DIR" ]; then
     echo '```'
     printf '%s' "$PENDING_LIST"
     echo '```'
-    echo "소스 편집 전 \`/codex\` 로 리뷰하거나 대체 경로로 해소 필요."
+    echo "소스 편집 전 \`/codex-review\` 로 리뷰하거나 대체 경로로 해소 필요."
     echo
   fi
 fi

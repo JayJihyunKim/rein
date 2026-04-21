@@ -1,5 +1,46 @@
 # Changelog
 
+## [v1.0.0] - 2026-04-21
+
+### Breaking changes
+
+- **Codex skill slash command 제거**: `/codex`, `/codex review`, `/codex ask` 명령 모두 제거. 새 명령 `/codex-review`, `/codex-ask` 로 교체. Deprecation wrapper 없음 (clean break).
+- **Major bump**: v0.10.x → v1.0.0. semantic versioning 기준 breaking slash-command rename 으로 major 상향.
+
+### Changed
+
+- **문서 경로 정리**: `docs/superpowers/{specs,plans,brainstorms,reports}` → `docs/{specs,plans,brainstorms,reports}`. rein 이 superpowers 미의존을 선언한 이후 남은 drift 해소. main 제외 대상이므로 사용자 프로젝트 영향 없음.
+- **plan-writer 자동 codex review**: plan 작성 완료 시 `/codex-review` 를 자동 호출 (`[NON_INTERACTIVE]` prompt marker 기반). PASS 시 spec-review stamp 자동 생성. NEEDS-FIX/REJECT 시 사용자 핸드오프 (self-fix loop 없음 — structured diff protocol 미완성으로 인한 의도적 제외).
+
+### Added
+
+- codex-review skill 에 non-interactive mode — `[NON_INTERACTIVE]` prompt marker 포함 시 AskUserQuestion skip + default (`gpt-5.4`/`high`/`read-only`) 사용. `[MODEL:...]`, `[EFFORT:...]`, `[SANDBOX:...]` marker 로 override.
+- 신규 skills: `.claude/skills/codex-review/`, `.claude/skills/codex-ask/` (Mode A / Mode B 분리).
+
+### Migration guide
+
+**구 `/codex` 호출 → 새 `/codex-review`**:
+- 기존: `/codex review` 또는 `/codex` 만
+- 이후: `/codex-review`
+- CLAUDE.md, AGENTS.md, 본인 프로젝트의 agent/skill 문서에서 같은 패턴 grep 후 치환:
+  ```bash
+  # Perl lookahead 로 이미 치환된 /codex-* 는 건너뛰고 bare /codex 도 처리한다:
+  rg -l '/codex\b' .claude AGENTS.md README.md | \
+    xargs perl -i -pe 's|/codex review|/codex-review|g; s|/codex ask|/codex-ask|g; s|/codex(?![\w-])|/codex-review|g'
+  ```
+
+**구 `/codex ask` 호출 → 새 `/codex-ask`**:
+- 기존: `/codex ask`
+- 이후: `/codex-ask`
+
+**구 `docs/superpowers/` 참조**:
+- main 제외 대상이라 사용자 프로젝트 영향 없음.
+- rein-dev 메인테이너는 각 docs/ 갱신 + moved docs 내부 cross-ref 확인 필요 (v1.0.0 에서 자동 완료됨).
+
+### Unsupported modifications
+
+local hook 수정 (예: `pre-bash-guard` 의 fail-closed 를 `exit 0` 으로 변경) 은 언제든 기술적으로 가능하지만, 그 시점에 rein 의 gate 보장은 무효 (unsupported local fork). 이 경로는 rein 의 트래킹 대상이 아님.
+
 ## v0.10.1 (2026-04-20) — Windows Git Bash/MSYS `python3 exit 49` 구조적 해결
 
 ### Fixed
@@ -46,23 +87,23 @@ local hook 수정 (예: `pre-bash-guard` 의 fail-closed 를 `exit 0` 으로 변
 
 - **tests CI workflow** (`.github/workflows/tests.yml`): push + PR 트리거, ubuntu+macOS matrix primary, windows-latest advisory (`continue-on-error`). `bash tests/hooks/run-all.sh` + `bash tests/scripts/run-all.sh` 전체 green 을 자동 검증. `github.repository == 'JayJihyunKim/rein-dev'` 가드로 fork/template 방어, `mirror-to-public.yml` 가 main 배포 시 strip.
 - **`tests/scripts/run-all.sh`**: scripts 테스트 모음 순차 runner. 개별 `bash <file>` 로 실행하여 실패 전염 방지. 리스트에 적힌 파일이 누락되면 CI 를 red 로 전환 (rename/typo 감지).
-- **rein-native `brainstorming` skill** (`.claude/skills/brainstorming/`): brownfield 에서 feasibility·compatibility 를 선검증한 뒤 선택지를 수렴한다. 산출물 포맷 (Problem/Constraints/Options/Chosen/Rejected/Open Questions) 고정, 저장 위치 `docs/superpowers/brainstorms/YYYY-MM-DD-<slug>.md`. greenfield 는 얇은 경로로 분기.
-- **`/codex ask` subcommand**: Codex 를 Claude 세션 컨텍스트에 오염되지 않은 독립 관점 에이전트로 호출. stamp 생성 없음, `resume --last` 금지, 항상 새 `codex exec` 세션.
+- **rein-native `brainstorming` skill** (`.claude/skills/brainstorming/`): brownfield 에서 feasibility·compatibility 를 선검증한 뒤 선택지를 수렴한다. 산출물 포맷 (Problem/Constraints/Options/Chosen/Rejected/Open Questions) 고정, 저장 위치 `docs/brainstorms/YYYY-MM-DD-<slug>.md`. greenfield 는 얇은 경로로 분기.
+- **`/codex-ask` subcommand** (당시 `codex ask` 하위 커맨드, v1.0.0 에서 별도 스킬 `/codex-ask` 로 분리): Codex 를 Claude 세션 컨텍스트에 오염되지 않은 독립 관점 에이전트로 호출. stamp 생성 없음, `resume --last` 금지, 항상 새 `codex exec` 세션.
 - **incident `agent_eligible` classification field**: `scripts/rein-mark-incident-processed.py` 에 `--set-agent-eligible {true|false|unknown}` + `--set-root-cause <label>` 옵션. `/incidents-to-agent` Step 1 이 `agent_eligible != false` 를 필터로 사용하여 hook-source bug 패턴을 자동 분리. 기존 incident 파일 (필드 없음) 은 `unknown` 해석으로 기존 동작 유지 (backfill 불요).
 - **`tests/scripts/test-incident-agent-eligible.sh`**: 분류 필드 회귀 6 케이스 (backward compat, append, update, combined, invalid rejection, no-arg rejection).
 
 ### Changed
 
-- **`/codex` subcommand split**: `.claude/skills/codex/SKILL.md` 을 Mode A (`/codex review` — 기존 리뷰 게이트) / Mode B (`/codex ask` — second opinion) 로 재구성. 하위 커맨드 없이 `/codex` 만 호출하면 backward compat 로 Mode A 해석. `AGENTS.md`, `.claude/CLAUDE.md`, `.claude/orchestrator.md` 의 `/codex` 언급을 `/codex review` 로 명시화.
+- **codex skill subcommand split**: `.claude/skills/codex/SKILL.md` 을 Mode A (리뷰 게이트, v1.0.0 에서 `/codex-review` 스킬로 분리) / Mode B (second opinion, v1.0.0 에서 `/codex-ask` 스킬로 분리) 로 재구성. 하위 커맨드 없이 단독 호출 시 backward compat 로 Mode A 해석. `AGENTS.md`, `.claude/CLAUDE.md`, `.claude/orchestrator.md` 의 codex 언급을 리뷰/질의 모드로 명시화.
 - **Smart router registry (`.claude/router/registry.yaml`)**: `description_keywords` 에서 `"brainstorm"` 제거 → rein-native brainstorming 이 자동 추천 대상에 포함. `id_globs` 에 `superpowers:brainstorming` / `superpowers:writing-plans` 추가 → 외부 중복 스킬은 id prefix 로 차단되어 rein-native 우선. Claude 가 orchestrator.md:83 지시에 따라 이 두 키를 모두 라우팅 매칭에서 참조한다.
 - **`writing-plans` skill**: design 문서에 `brainstorm ref:` 가 있으면 plan 상단 메타에도 옮겨 적어 brainstorm→design→plan 추적성 유지 (soft v1 권고).
-- **`.claude/orchestrator.md`**: 라우팅 테이블에 brainstorming / `/codex ask` 항목 추가, brainstorm→spec→plan 체인 섹션 신설.
+- **`.claude/orchestrator.md`**: 라우팅 테이블에 brainstorming / `/codex-ask` 항목 추가, brainstorm→spec→plan 체인 섹션 신설.
 - **`.claude/rules/branch-strategy.md`**: `.github/workflows/tests.yml` 을 main 제외 목록에 명시.
 - **`.github/workflows/mirror-to-public.yml`**: `tests.yml` 도 strip 대상에 추가 (이중 방어).
 
 ### Notes
 
-- v0.10.0 은 rein-native 프로세스의 공백을 메우는 릴리스다. design→plan coverage 강제 뒤에 brainstorm→spec 의 구조화 연결이 추가되었고, 코드 리뷰 전용이던 `/codex` 가 second-opinion 용도까지 확장되었다. 사용자 프로젝트에는 `tests.yml` 이 설치되지 않는다 (rein-dev 전용).
+- v0.10.0 은 rein-native 프로세스의 공백을 메우는 릴리스다. design→plan coverage 강제 뒤에 brainstorm→spec 의 구조화 연결이 추가되었고, 코드 리뷰 전용이던 codex 스킬이 second-opinion 용도까지 확장되었다 (v1.0.0 에서 `/codex-review` + `/codex-ask` 로 clean-break 분리). 사용자 프로젝트에는 `tests.yml` 이 설치되지 않는다 (rein-dev 전용).
 
 ## v0.9.1 (2026-04-20) — Hotfix: `rein merge` hook exec bit propagation
 
@@ -114,12 +155,12 @@ local hook 수정 (예: `pre-bash-guard` 의 fail-closed 를 `exit 0` 으로 변
   - `inbox-compress.sh` → `trail-rotate.sh` (1-release wrapper alias 유지)
   - `post-edit-lint.sh` 이분할: `post-edit-hygiene.sh` (언어중립) + `post-edit-lint.sh.example` (언어별 autofix 템플릿)
   - `task-completed-incident.sh` 제거 — 기능은 `stop-session-gate.sh` 내부 helper 로 통합
-- **AGENTS.md `/codex` fallback 체인**: `superpowers:code-reviewer` → rein 자체 `code-reviewer` 스킬 (외부 플러그인 미의존).
+- **AGENTS.md `/codex-review` fallback 체인**: `superpowers:code-reviewer` → rein 자체 `code-reviewer` 스킬 (외부 플러그인 미의존).
 
 ### Added
 
 - `.claude/skills/writing-plans/` — rein 자체 plan 작성 스킬 (superpowers:writing-plans 대체).
-- `.claude/skills/code-reviewer/` — rein 자체 코드 리뷰어 스킬 (/codex 장애 시 fallback).
+- `.claude/skills/code-reviewer/` — rein 자체 코드 리뷰어 스킬 (`/codex-review` 장애 시 fallback).
 - `.claude/agents/plan-writer.md` — design → plan 변환 전담.
 - `scripts/rein-aggregate-incidents.py advisory-summary` — per-pattern/session 집계 CLI.
 - `scripts/rein-route-record.py doctor` — legacy feedback-log / overrides 엔트리의 invalid_ids 자동 이관.

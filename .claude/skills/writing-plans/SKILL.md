@@ -18,7 +18,7 @@ design 문서의 `## Scope Items` 표에서 ID 를 추출하고, Phase/Task 로 
 
 2. **Phase/Task 분해** — 수집한 ID 를 논리적 묶음으로 나눠 Phase N / Task N.M 계층을 설계한다. 각 Phase 는 독립 배포 가능 단위를 권장한다.
 
-3. **Plan 파일 작성 경로** — 프로젝트의 plan 디렉토리 하위 (`docs/**/plans/YYYY-MM-DD-<slug>-implementation.md` 형태) 에 저장. rein-dev 는 `docs/superpowers/plans/` 를 사용하지만 경로는 프로젝트 자유. 날짜는 작업 시작일, slug 는 design 파일명과 일치시킨다.
+3. **Plan 파일 작성 경로** — 프로젝트의 plan 디렉토리 하위 (`docs/**/plans/YYYY-MM-DD-<slug>-implementation.md` 형태) 에 저장. rein-dev 는 `docs/plans/` 를 사용하지만 경로는 프로젝트 자유. 날짜는 작업 시작일, slug 는 design 파일명과 일치시킨다.
 
 4. **Matrix + covers 기입** — `## Design 범위 커버리지 매트릭스` 섹션을 작성하고, `design ref:` 줄에 design 파일의 repo-root 기준 상대경로를 기입한다. 각 Phase/Task heading 바로 다음 줄에 `covers: [ID, ...]` 를 기입한다. `deferred` 상태 항목은 사유 + 후속 위치를 반드시 명시한다. design 문서에 `brainstorm ref:` 줄이 있으면 plan 문서 상단 메타에도 그대로 옮겨 적어 brainstorm→design→plan 추적성을 유지한다 (soft v1 권고).
 
@@ -110,7 +110,7 @@ Plan 작성 완료: docs/**/plans/YYYY-MM-DD-<slug>-implementation.md
 - Validator: exit 0
 
 다음 단계:
-1. /codex 로 plan 문서 리뷰 요청
+1. /codex-review 로 plan 문서 리뷰 요청
 2. 리뷰 통과 후 bash scripts/rein-mark-spec-reviewed.sh <plan-file> 실행
 3. subagent-driven-development 스킬 (또는 executing-plans) 으로 plan 실행
 ```
