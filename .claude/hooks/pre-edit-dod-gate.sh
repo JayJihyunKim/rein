@@ -133,9 +133,31 @@ if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
 
-# --- 경로 기반 면제 ---
+# --- 경로 기반 면제 (runtime state + operational data + git infra only) ---
+# M1 (2026-04-22 retro-review-sweep): 기존 blanket `*/.claude/*` exemption 제거.
+# 배경: .claude/rules/*, .claude/skills/**, .claude/agents/*, .claude/workflows/*,
+#   .claude/CLAUDE.md, .claude/orchestrator.md, AGENTS.md 는 branch-strategy.md
+#   기준 main 포함 (사용자 repo 로 복사되는 source). DoD 없이 편집되면 안 됨.
+# 면제 대상은 runtime state / 운영 데이터 / git 인프라 파일만.
 case "$FILE_PATH" in
-  */.claude/*|*/trail/*|*.gitkeep|*.gitignore)
+  # .gitignore 는 **어느 디렉토리에 있든** 항상 source (main-포함, tracking 정책
+  # 변경 가능). Runtime-state 경로 (.claude/cache/) 에 있어도 예외 아님. 이
+  # 최상단 match 는 아래 exit 0 들이 .gitignore 를 가로채지 못하도록 보호한다.
+  # Codex Round 2 finding: 예전 순서에서는 .claude/cache/.gitignore 가
+  # `*/.claude/cache/*` 에 먼저 잡혀 bypass 됐음.
+  */.gitignore|.gitignore)
+    :  # fall through to IS_SOURCE check below
+    ;;
+  # Runtime state — hook/validator 가 자동 기록. Edit/Write 로 올 일 거의 없지만 안전용.
+  */.claude/cache/*|*/.claude/.rein-state/*)
+    exit 0
+    ;;
+  # Trail 운영 데이터 — DoD 파일 자체가 여기 살고, inbox/daily/weekly/incidents/decisions 포함.
+  */trail/*)
+    exit 0
+    ;;
+  # Git 인프라 파일 — .gitkeep 만 면제 (디렉토리 placeholder).
+  *.gitkeep)
     exit 0
     ;;
 esac
@@ -143,7 +165,24 @@ esac
 # --- 소스 디렉토리 한정 gate ---
 IS_SOURCE=false
 case "$FILE_PATH" in
+  # 일반 소스 경로 (사용자 프로젝트 코드). `*/hooks/*` 가 `.claude/hooks/*` 도 잡음.
   */src/*|*/app/*|*/services/*|*/apps/*|*/lib/*|*/components/*|*/hooks/*|*/store/*|*/types/*|*/models/*|*/schemas/*|*/repositories/*|*/routers/*|*/alembic/*|*/scripts/*|scripts/*)
+    IS_SOURCE=true
+    ;;
+  # rein-internal source — branch-strategy.md 의 main 포함 경로.
+  # 사용자 repo 로 복사되므로 편집 시 DoD 필수.
+  */.claude/rules/*|*/.claude/skills/*|*/.claude/agents/*|*/.claude/workflows/*)
+    IS_SOURCE=true
+    ;;
+  */.claude/CLAUDE.md|*/.claude/orchestrator.md|*/.claude/settings.json)
+    IS_SOURCE=true
+    ;;
+  # AGENTS.md at any depth (repo root 또는 subdir 모두).
+  */AGENTS.md|AGENTS.md)
+    IS_SOURCE=true
+    ;;
+  # .gitignore — main 포함. tracking 정책 변경 가능.
+  */.gitignore|.gitignore)
     IS_SOURCE=true
     ;;
 esac
@@ -444,7 +483,7 @@ if [ "$DOD_FOUND" = true ]; then
       touch "$DOD_MISMATCH_MARKER"
       rm -f "$DOD_ADVISORY_MARKER"
       echo "BLOCKED: [DoD gate] DoD validator failed for $SAD_PATH (exit $VEXIT, Tier 1 marker)." >&2
-      echo "  fix the DoD's '## 범위 연결' covers: to reference 'implemented' IDs from the plan matrix." >&2
+      echo "  fix the DoD's '## 범위 연결' coverage list to reference 'implemented' IDs from the plan matrix." >&2
       log_block "dod covers mismatch (tier 1)" "$SAD_PATH"
       exit 2
       ;;

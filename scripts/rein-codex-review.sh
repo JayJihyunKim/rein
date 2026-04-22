@@ -135,7 +135,65 @@ SAD_TIER=$(printf '%s' "$SAD_LINE" | cut -f1)
 SAD_PATH=$(printf '%s' "$SAD_LINE" | cut -f2)
 SAD_REASON=$(printf '%s' "$SAD_LINE" | cut -f3)
 
+# ---- Shared path resolver (H1, 2026-04-22 retro-review-sweep). --------
+#
+# Mirrors scripts/rein-validate-coverage-matrix.py::_resolve_plan_ref.
+# Both tools must resolve file references the same way so the envelope
+# and validator agree on "does this file exist?". Divergence was the
+# root cause of the v1.1.0 `design_ref: ../specs/...` silent failure.
+#
+# Args: $1=reference string, $2=base file used for relative resolution.
+# Stdout: absolute path of first existing candidate (or empty if none).
+# Exit: 0 if resolved, 1 if no candidate exists.
+# Candidates tried in order:
+#   1. <dirname($2)>/$1          (base-file-relative; most specific)
+#   2. $PROJECT_DIR/$1           (repo-relative)
+#   3. $1                        (CWD-relative / absolute)
+_resolve_relative_path() {
+  local ref="$1"
+  local base_file="$2"
+  local candidate
+  local base_dir
+
+  if [ -z "$ref" ]; then
+    return 1
+  fi
+
+  if [ -n "$base_file" ] && [ -f "$base_file" ]; then
+    base_dir=$(cd "$(dirname "$base_file")" 2>/dev/null && pwd)
+    if [ -n "$base_dir" ]; then
+      candidate="$base_dir/$ref"
+      if [ -f "$candidate" ]; then
+        (cd "$(dirname "$candidate")" && printf '%s/%s\n' "$(pwd)" "$(basename "$candidate")")
+        return 0
+      fi
+    fi
+  fi
+
+  candidate="$PROJECT_DIR/$ref"
+  if [ -f "$candidate" ]; then
+    (cd "$(dirname "$candidate")" && printf '%s/%s\n' "$(pwd)" "$(basename "$candidate")")
+    return 0
+  fi
+
+  if [ -f "$ref" ]; then
+    (cd "$(dirname "$ref")" && printf '%s/%s\n' "$(pwd)" "$(basename "$ref")")
+    return 0
+  fi
+
+  return 1
+}
+
 # 4d. Plan ref from active DoD `## 범위 연결` section.
+#
+# Single-plan contract (per .claude/rules/design-plan-coverage.md). Phase 2
+# (integration DoD) will lift this; until then we return the first plan_ref
+# only and use `_count_dod_plan_refs` + gap header to flag duplicates.
+#
+# Annotation strip (H2, 2026-04-22): only the canonical annotations
+# `(Team [A-Z])` or `(<bare identifier>)` are stripped. A path that itself
+# contains parentheses (e.g. `docs/plans/foo(v2).md`) is preserved — the
+# previous greedy `\(.*\)` strip would have truncated it.
 _parse_dod_plan_ref() {
   local dod="$1"
   [ -f "$dod" ] || return 0
@@ -143,27 +201,79 @@ _parse_dod_plan_ref() {
     /^## 범위 연결/ {in_sec=1; next}
     in_sec && /^## / {in_sec=0}
     in_sec && /^plan[[:space:]]*ref:/ {
-      sub(/^plan[[:space:]]*ref:[[:space:]]*/, "");
-      sub(/[[:space:]]*\(.*\)[[:space:]]*$/, "");
-      print; exit
+      line=$0
+      sub(/^plan[[:space:]]*ref:[[:space:]]*/, "", line)
+      # Strip only recognized annotation suffixes.
+      if (match(line, /[[:space:]]+\((Team[[:space:]]+[A-Z]|[A-Za-z0-9_-]+)\)[[:space:]]*$/) > 0) {
+        line=substr(line, 1, RSTART-1)
+      }
+      # Trim trailing whitespace if any remains.
+      sub(/[[:space:]]+$/, "", line)
+      print line; exit
     }
   ' "$dod"
 }
+
+# Count plan_ref lines within the DoD `## 범위 연결` section.
+# Used to flag MULTIPLE_FAIL_CLOSED state when a DoD carries more than one.
+_count_dod_plan_refs() {
+  local dod="$1"
+  [ -f "$dod" ] || { echo 0; return 0; }
+  awk '
+    BEGIN {count=0}
+    /^## 범위 연결/ {in_sec=1; next}
+    in_sec && /^## / {in_sec=0}
+    in_sec && /^plan[[:space:]]*ref:/ {count++}
+    END {print count+0}
+  ' "$dod"
+}
+
 PLAN_REF=""
+PLAN_REF_COUNT=0
+PLAN_REF_RAW=""  # first ref string as parsed (no resolve applied yet)
 if [ -n "$SAD_PATH" ]; then
-  PLAN_REF=$(_parse_dod_plan_ref "$SAD_PATH" 2>/dev/null || true)
+  PLAN_REF_RAW=$(_parse_dod_plan_ref "$SAD_PATH" 2>/dev/null || true)
+  PLAN_REF_COUNT=$(_count_dod_plan_refs "$SAD_PATH" 2>/dev/null || echo 0)
+  if [ -n "$PLAN_REF_RAW" ]; then
+    PLAN_REF=$(_resolve_relative_path "$PLAN_REF_RAW" "$SAD_PATH" || true)
+  fi
 fi
 
-# 4e. Design ref from plan's `> design ref:` line.
+# H2 warning — duplicate plan refs are Phase-2 territory. Wrapper proceeds
+# with first ref only and records state in the envelope gap header.
+if [ "$PLAN_REF_COUNT" -gt 1 ]; then
+  echo "WARNING: [codex-review] '$SAD_PATH' declares $PLAN_REF_COUNT plan refs; using first only (integration DoD is Phase 2)" >&2
+fi
+
+# 4e. Design ref from plan. Supports two equivalent syntaxes observed in
+# the spec corpus:
+#   - `> design ref: <path>`          (blockquote form; Plan A canonical)
+#   - `Design Reference: <path>`      (top-level form; seen in some specs)
+# Returned path is resolved against the plan file's parent → PROJECT_DIR →
+# as-is (`_resolve_relative_path`). If the target file does not exist, we
+# return empty so `design_state` becomes MISSING (H1 truthful detection).
 _parse_plan_design_ref() {
   local plan="$1"
   [ -f "$plan" ] || return 0
-  grep -iE '^>[[:space:]]*design[[:space:]]*ref:' "$plan" 2>/dev/null \
+  local raw
+  raw=$(grep -iE '^>[[:space:]]*design[[:space:]]*ref:' "$plan" 2>/dev/null \
     | head -1 \
-    | sed -E 's/^>[[:space:]]*design[[:space:]]*ref:[[:space:]]*//I' || true
+    | sed -E 's/^>[[:space:]]*design[[:space:]]*ref:[[:space:]]*//I' || true)
+  if [ -z "$raw" ]; then
+    raw=$(grep -iE '^design[[:space:]]*reference:' "$plan" 2>/dev/null \
+      | head -1 \
+      | sed -E 's/^design[[:space:]]*reference:[[:space:]]*//I' || true)
+  fi
+  [ -z "$raw" ] && return 0
+  _resolve_relative_path "$raw" "$plan" || true
 }
 DESIGN_REF=""
+DESIGN_REF_RAW=""
 if [ -n "$PLAN_REF" ]; then
+  # Preserve raw string for diagnostics, resolve for real use.
+  DESIGN_REF_RAW=$(grep -iE '^>[[:space:]]*design[[:space:]]*ref:|^design[[:space:]]*reference:' "$PLAN_REF" 2>/dev/null \
+    | head -1 \
+    | sed -E 's/^>?[[:space:]]*design[[:space:]]*(ref|reference):[[:space:]]*//I' || true)
   DESIGN_REF=$(_parse_plan_design_ref "$PLAN_REF" 2>/dev/null || true)
 fi
 
@@ -235,16 +345,34 @@ build_envelope() {
   fi
 
   # 6.2 Step 2: "High process gap" header when context is incomplete.
+  # H1 (2026-04-22): design_state is judged on BOTH resolved path AND scope
+  # items extraction success. Previous behavior judged only on raw string
+  # non-emptiness, silently reporting "present" for unresolvable refs.
+  # H2 (2026-04-22): plan_state flags MULTIPLE_FAIL_CLOSED when DoD carries
+  # duplicate `plan ref:` lines (integration DoD is Phase 2).
   local gap_lines=""
   local plan_state="present"
   local design_state="present"
   local covers_state="present"
   local base_state="present"
-  [ -z "$PLAN_REF" ] && plan_state="MISSING"
-  [ -z "$DESIGN_REF" ] && design_state="MISSING"
+  if [ -z "$PLAN_REF" ]; then
+    plan_state="MISSING"
+  fi
+  if [ "$PLAN_REF_COUNT" -gt 1 ]; then
+    plan_state="MULTIPLE_FAIL_CLOSED (using first of $PLAN_REF_COUNT)"
+  fi
+  if [ -z "$DESIGN_REF" ]; then
+    if [ -n "$DESIGN_REF_RAW" ]; then
+      design_state="MISSING (unresolved ref: $DESIGN_REF_RAW)"
+    else
+      design_state="MISSING"
+    fi
+  elif [ -z "$SCOPE_ITEMS" ]; then
+    design_state="UNUSABLE (resolved to $DESIGN_REF but no '## Scope Items' section)"
+  fi
   [ -z "$COVERS" ] && covers_state="MISSING"
   [ -z "$DIFF_BASE" ] && base_state="MISSING"
-  if [ "$plan_state" = "MISSING" ] || [ "$design_state" = "MISSING" ] \
+  if [ "$plan_state" != "present" ] || [ "$design_state" != "present" ] \
      || [ "$covers_state" = "MISSING" ]; then
     cat <<HDR
 High process gap — required context missing:

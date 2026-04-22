@@ -45,17 +45,39 @@ Second opinion 전용 — Claude 주 세션의 컨텍스트와 **독립적** 인
 | Second opinion (추가 질의) | `read-only` | **새 세션**, resume 금지 |
 | 다른 디렉토리에서 실행 | `read-only` | `-C <DIR>` 추가 |
 
+### 실행 모드 — Bash 도구로 호출 시 foreground 전용
+
+Bash 도구로 `codex exec` 를 호출할 때는 **foreground + TTY 등가 조건**이 반드시 성립해야 한다. 아래는 `.claude/rules/background-jobs.md` 예외 절의 codex 계열 규칙이다. 실패 시 codex 가 sandbox/auth 초기화에서 hang (증상: 네트워크 연결 0개, CPU 0, `~/.codex/sessions/` 에 세션 파일 미생성).
+
+- `run_in_background: false` 명시 — Bash 도구의 장기 실행 auto-background 전환을 막는다
+- timeout 상한: `low ≤120s`, `medium ≤180s`, `high ≤300s`. 600s harness limit 을 넘어가면 prompt 를 쪼갠다
+- 출력은 `> <file> 2>&1` 로 직접 파일에 쓰고 `Read` 로 확인한다. `| tail -N` 금지 — EOF 까지 버퍼링되어 부분 출력이 안 보이고 hang 디버깅도 막힌다
+- stdin 은 `< /dev/null` 로 명시 close (codex 가 stdin 을 대기하지 않도록)
+
+올바른 호출 예:
+
+```bash
+codex exec -m gpt-5.4 --config model_reasoning_effort="high" \
+  --sandbox read-only --full-auto \
+  -C /Users/jihyun/Local_Projects/claude-code-ai-native \
+  "<prompt>" < /dev/null > /tmp/codex-ask.out 2>&1
+# 이후 Read /tmp/codex-ask.out
+```
+
+Hang 감지 시: `lsof -p <pid> -i` 결과가 비어 있거나 (`ps -o %cpu` 가 0 인 채 sleep 상태) → kill 후 재호출. 재호출은 동일 조건으로 foreground.
+
 ---
 
-## 3. Stamp 미생성 정책
+## 3. Stamp / DoD 자발 생성 금지
 
 **의도적으로 생성하지 않는다**. Second opinion 은 "관점 제공" 이지 "승인 게이트" 가 아니다.
 
 - `trail/dod/.codex-reviewed` 같은 stamp 파일을 **절대 만들지 않는다**.
 - 다른 어떤 리뷰 marker 도 touch 하지 않는다.
 - `.review-pending` 등 기존 marker 도 건드리지 않는다.
+- `trail/dod/dod-*.md` 같은 **DoD 파일도 자발적으로 생성하지 않는다**. DoD 는 주 세션의 작업 기준 문서이며, second opinion 세션이 자동으로 만들면 주 세션 라우팅/승인 흐름을 건너뛰게 된다.
 
-리뷰 게이트가 필요한 경우 (테스트/커밋 통과가 목적) 는 반드시 `/codex-review` (Mode A) 를 사용한다. 실수로 `/codex-ask` 결과로 stamp 를 생성하면 리뷰 없이 테스트/커밋이 통과되어 `pre-bash-guard.sh` 의 게이트가 무력화된다.
+리뷰 게이트가 필요한 경우 (테스트/커밋 통과가 목적) 는 반드시 `/codex-review` (Mode A) 를 사용한다. 실수로 `/codex-ask` 결과로 stamp 를 생성하면 리뷰 없이 테스트/커밋이 통과되어 `pre-bash-guard.sh` 의 게이트가 무력화된다. DoD 를 자발 생성하면 `pre-edit-dod-gate.sh` 가 요구하는 주 세션 routing 단계가 생략된 채 편집 권한이 생기는 우회 경로가 된다.
 
 ---
 
@@ -111,3 +133,8 @@ Second opinion 전용 — Claude 주 세션의 컨텍스트와 **독립적** 인
 - `codex exec` 가 non-zero exit → 사용자에게 보고 후 재시도 여부 질의. **폴백 없음** — Second opinion 은 리뷰 게이트가 아니므로 실패해도 작업 차단이 발생하지 않는다.
 - 고위험 플래그는 기본적으로 사용하지 않는다. `/codex-ask` 는 `--sandbox read-only` 고정이므로 `--sandbox danger-full-access` / `--full-auto` 의 위험 조합이 발생하지 않는다.
 - 출력에 경고나 부분 결과가 포함되면 요약 후 `AskUserQuestion` 으로 다음 질의 방향 확인.
+- **Hang 증상 탐지** (§2 실행 모드 절 참고):
+  - `codex` 프로세스가 수 분 이상 진행 없음 + CPU 0 + 네트워크 연결 0개 → auth/sandbox 초기화 단계에서 멈춤
+  - 체크: `lsof -p <pid> -i` 결과 비어있으면 API 요청조차 못 보낸 상태. `ps -o stat,%cpu,etime -p <pid>` 로 Sleep 상태 확인
+  - 대응: kill 후 **foreground + stdin close + 직접 파일 출력** 형태로 재호출 (`> /tmp/out 2>&1 < /dev/null`, `run_in_background: false`)
+  - 배경: Bash 도구 auto-background 전환 시 stdin 이 unix socket 으로 붙어 codex 초기화 실패. 근거: `.claude/rules/background-jobs.md` 예외 절 + `trail/dod/dod-2026-04-22-codex-foreground-policy.md`

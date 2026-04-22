@@ -10,6 +10,26 @@
 - `BashOutput` 같이 **세션 단위**로 상태를 들고 가는 방식으로 턴 경계를 넘는 상태를 보관하기 — BashOutput 은 지금 세션이 끝나면 사라진다. rein job 은 파일 기반이라 세션을 넘어 살아남는다
 - "그냥 `&` 로 백그라운드 돌리자" — PID/log/status 가 분산되어 stop/tail 이 어렵고 reparenting 도 불안정
 
+### 예외 — codex 계열 명령은 foreground 전용
+
+`codex exec` / `/codex-review` / `/codex-ask` (그리고 codex CLI 일반) 은 위 규칙의 **예외**. `rein job` 도 Bash background 도 쓰지 않는다. Bash 도구가 장기 실행 명령을 auto-background 로 전환하면 stdin 이 unix socket 으로 붙어 codex 의 sandbox/auth 초기화가 hang 한다 (네트워크 연결 0개, CPU 0, OpenAI API 요청 미도달). 반드시 foreground + TTY 또는 wrapper (`scripts/rein-codex-review.sh` — stdin 을 명시 소비) 로 호출한다.
+
+실행 형식:
+
+```bash
+# Direct codex exec — stdin close + 직접 파일 출력 + run_in_background:false
+codex exec -m <model> --config model_reasoning_effort="<effort>" \
+  --sandbox read-only --full-auto -C <workdir> "<prompt>" \
+  < /dev/null > /tmp/codex.out 2>&1
+# 이후 Read 로 /tmp/codex.out 확인
+```
+
+- Bash 도구 호출 시 `run_in_background: false` 명시
+- timeout: effort 기준 타이트하게 — low ≤120s, medium ≤180s, high ≤300s. 600s harness 한계 넘어가면 prompt 쪼개기
+- 출력 pipe 는 `| tail -N` 금지 (EOF 까지 버퍼링되어 부분 출력 미도달). `> file 2>&1` 로 직접 파일에 쓰고 Read 로 읽기
+
+근거: 2026-04-22 세션 재현 — `codex exec ... | tail -200` 을 7분 timeout 으로 호출 → Bash 가 auto-background → 24분 hang, 복구 불가. 상세: `trail/dod/dod-2026-04-22-codex-foreground-policy.md`, memory `feedback_codex_foreground.md`.
+
 ## 권장 패턴
 
 ```bash

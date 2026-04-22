@@ -1,5 +1,21 @@
 # Changelog
 
+> **Versioning policy (2026-04-22~)**: 버전 bump 는 `.claude/rules/versioning.md` 의 **Rule A/B/C** 를 따른다 — (A) 변경 유형별 bump (user-facing breaking=major, new feature=minor, fix=patch, internal=no bump), (B) 같은 날 복수 bump 금지 (hotfix 예외), (C) CHANGELOG 는 user-facing 만. 규칙 제정 이전 릴리즈 (v1.1.0 이하) 중 **v1.0.0 → v1.1.0 (2026-04-21 당일 2회차)** 는 Rule B 기준 위반이었으나 bump 값 자체는 Rule A 정당 (rein job / rein remove / 3-way merge 등 신규 user-facing CLI). 소급 롤백 없음. 이 policy 부터 새 규칙 적용.
+
+## [v1.1.1] - 2026-04-22
+
+### Fixed
+
+- **DoD gate bypass**: `.claude/hooks/pre-edit-dod-gate.sh` 가 `.claude/rules/*`, `.claude/skills/**`, `.claude/agents/*`, `.claude/workflows/*`, `.claude/CLAUDE.md`, `.claude/orchestrator.md`, `.claude/settings.json`, `AGENTS.md`, `.gitignore` 편집 시 DoD 를 요구한다. 이전 버전은 blanket `.claude/**` 면제로 이들 main-포함 source 편집이 DoD 없이 통과됐다. `.claude/cache/**`, `.claude/.rein-state/**`, `trail/**`, `.gitkeep` 는 계속 면제 (runtime state + placeholder).
+- **codex-review wrapper 의 design_ref resolve**: `scripts/rein-codex-review.sh` 가 plan 의 `> design ref: ../specs/foo.md` 같은 plan-relative 경로를 올바르게 해석한다. 이전 버전은 문자열 그대로 사용해 파일을 못 찾으면서도 envelope 에는 `design_ref: present` 로 거짓 보고했다. 이제 resolve 실패 시 `MISSING (unresolved ref: <raw>)` 로 정직하게 표기.
+- **plan 의 `Design Reference:` 상단 형식 지원**: wrapper 와 validator 양쪽 모두 `> design ref:` 블록인용과 top-level `Design Reference:` 형식을 동등 허용. 이전 validator 는 전자만 지원해 parity 가 깨져 있었다.
+- **DoD 의 `plan ref:` annotation strip**: validator 가 `plan ref: path.md (Team A)` 형태의 팀/라벨 suffix 를 strip 한다. 허용된 패턴은 `(Team <LETTER>)` 와 `(<식별자>)` 만 — 경로명 자체 괄호 (`plan(v2).md`) 는 보존.
+- **Multi `plan ref:` DoD fail-closed**: DoD 의 `## 범위 연결` 섹션에 `plan ref:` 가 2개 이상이면 validator 가 명시적 에러로 exit 2. 기존 v1.1.0 DoD 는 `PHASE_2_GRANDFATHER_DODS` 예외로 WARN + matrix union 검증 (Phase 2 integration DoD 스키마 랜딩 시 이 리스트에서 제거 예정).
+
+### Security
+
+- v1.1.0 retrospective security review 완료. 4 Low findings (defense-in-depth, 모두 non-blocking). Critical/High/Medium 0. `trail/dod/.security-reviewed` cycle 을 `v1.1.0-retro+phase1` 로 갱신.
+
 ## [v1.1.0] - 2026-04-21
 
 ### Added

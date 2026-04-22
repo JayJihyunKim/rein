@@ -37,7 +37,14 @@ MATRIX_HEADING = "## Design 범위 커버리지 매트릭스"
 SCOPE_ITEMS_HEADING = "## Scope Items"
 RANGE_LINK_HEADING = "## 범위 연결"
 
-DESIGN_REF_RE = re.compile(r"^>\s*design\s*ref:\s*(.+?)\s*$", re.IGNORECASE)
+# Plan's design_ref appears in either the blockquote form `> design ref:` or
+# the top-level form `Design Reference:` per docs/specs/2026-04-21-governance-
+# integrity-design.md §5. Both must resolve identically (H1 parity — wrapper
+# now also recognises both; the drift flagged by codex 2026-04-22 Round 1).
+DESIGN_REF_RE = re.compile(
+    r"^(?:>\s*design\s*ref|design\s*reference)\s*:\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
 MATRIX_ROW_RE = re.compile(
     r"^\|\s*(?P<id>[A-Za-z0-9_\-]+)\s*\|\s*(?P<status>implemented|deferred)\s*\|\s*(?P<loc>.+?)\s*\|\s*$"
 )
@@ -45,9 +52,42 @@ SCOPE_ROW_RE = re.compile(r"^\|\s*(?P<id>[A-Za-z0-9_\-]+)\s*\|\s*.+?\s*\|\s*$")
 COVERS_RE = re.compile(r"^covers:\s*\[(?P<ids>.*?)\]\s*$", re.MULTILINE)
 
 # DoD-specific: exact line shapes inside the '## 범위 연결' section.
-DOD_PLAN_REF_RE = re.compile(r"^plan\s*ref:\s*(.+?)\s*$", re.IGNORECASE)
+#
+# Annotation strip (H2, 2026-04-22 retro-review-sweep): the ``plan ref:``
+# value may carry an optional team/label annotation suffix such as
+# ``(Team A)`` or ``(governance)``. Those are stripped by the regex below so
+# downstream consumers treat the path the same regardless of annotation.
+# A broader ``\(.*\)`` strip was considered but rejected — legitimate paths
+# may themselves contain parentheses, and a greedy pattern would truncate
+# them. Only bare identifiers and ``Team <LETTER>`` forms are recognised.
+DOD_PLAN_REF_RE = re.compile(
+    r"^plan\s*ref:\s*(?P<path>.+?)"
+    r"(?:\s+\((?:Team\s+[A-Z]|[A-Za-z0-9_\-]+)\))?"
+    r"\s*$",
+    re.IGNORECASE,
+)
 DOD_WORK_UNIT_RE = re.compile(r"^work\s*unit:\s*(.+?)\s*$", re.IGNORECASE)
 DOD_COVERS_RE = re.compile(r"^covers:\s*\[(?P<ids>.*?)\]\s*$")
+
+
+# ---------- Phase 2 grandfather list (H2, 2026-04-22) -----------------
+#
+# DoDs shipped prior to the Phase 2 "integration DoD" schema may carry
+# multiple ``plan ref:`` lines inside their ``## 범위 연결`` section. The
+# Phase 1 fix fails closed on this shape for any new DoD, but legacy
+# artefacts need a retro path so the codebase itself can be reviewed and
+# migrated. Paths here are repo-relative.
+#
+# When/how entries leave this list:
+#   * Phase 2 (integration DoD schema) lands in a separate spec+plan.
+#   * Each grandfathered DoD is migrated to the ``dod_type: integration``
+#     form, which uses a single consolidated block per plan.
+#   * Upon migration, the entry is removed from this set in the same
+#     commit. The test suite enforces that the set is non-empty only
+#     while Phase 2 is outstanding.
+PHASE_2_GRANDFATHER_DODS: frozenset[str] = frozenset({
+    "trail/dod/dod-2026-04-21-drift-prevention-implementation.md",
+})
 
 
 def err(msg: str) -> None:
@@ -241,6 +281,14 @@ def parse_plan(plan_path: Path) -> dict:
     design_ref = None
     matrix: dict[str, tuple[str, str]] = {}
     duplicates: list[str] = []
+    # Whole-file pre-scan for top-level `Design Reference:` (spec §5 requires
+    # both forms to be accepted; wrapper scans the whole plan and validator
+    # must match that breadth for parity — drift flagged by codex 2026-04-22).
+    for line in lines:
+        m = DESIGN_REF_RE.match(line)
+        if m:
+            design_ref = m.group(1).strip()
+            break
     for line in lines[matrix_start + 1 :]:
         if line.startswith("## "):
             break
@@ -360,7 +408,8 @@ def validate_plan(plan_path: Path) -> int:
 @dataclass
 class DodContext:
     path: Path
-    plan_ref: str | None = None
+    plan_ref: str | None = None            # first plan_ref (single-plan contract)
+    all_plan_refs: list[str] = field(default_factory=list)  # all, for grandfather
     work_unit: str | None = None
     covers: list[str] = field(default_factory=list)
     has_range_link: bool = False
@@ -371,6 +420,12 @@ def parse_dod(dod_path: Path) -> DodContext:
 
     Returns an empty-ish ``DodContext`` if no such section exists (legacy
     DoD files are valid per v1 compat; callers decide whether to warn).
+
+    H2 (2026-04-22): collects every ``plan ref:`` line into
+    ``ctx.all_plan_refs`` (preserving order) so callers can detect
+    multi-plan DoDs and invoke the grandfather path when applicable.
+    ``ctx.plan_ref`` stays as the first matching ref (single-plan
+    contract), keeping existing call sites unchanged.
     """
     ctx = DodContext(path=dod_path)
     if not dod_path.exists():
@@ -390,11 +445,13 @@ def parse_dod(dod_path: Path) -> DodContext:
     for line in lines[section_start + 1 :]:
         if line.startswith("## "):
             break
-        if ctx.plan_ref is None:
-            m = DOD_PLAN_REF_RE.match(line)
-            if m:
-                ctx.plan_ref = m.group(1).strip()
-                continue
+        m = DOD_PLAN_REF_RE.match(line)
+        if m:
+            path = m.group("path").strip()
+            ctx.all_plan_refs.append(path)
+            if ctx.plan_ref is None:
+                ctx.plan_ref = path
+            continue
         if ctx.work_unit is None:
             m = DOD_WORK_UNIT_RE.match(line)
             if m:
@@ -417,15 +474,34 @@ def _resolve_plan_ref(dod_path: Path, plan_ref: str) -> Path | None:
     return next((p for p in candidates if p.exists()), None)
 
 
+def _dod_is_grandfathered(dod_path: Path) -> bool:
+    """Return True if ``dod_path`` is on the Phase-2 grandfather list.
+
+    Compares using the repo-relative path form (relative to CWD) which is
+    the canonical form used in the grandfather set and in spec references.
+    """
+    try:
+        rel = dod_path.resolve().relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        rel = dod_path.as_posix()
+    return rel in PHASE_2_GRANDFATHER_DODS
+
+
 def validate_dod(dod_path: Path) -> int:
     """Return 0 on success, 2 on validation failure.
 
     Behavior:
       * No ``## 범위 연결`` section → WARN + exit 0 (v1 compat / legacy DoD).
       * Section present but ``plan ref:`` missing → exit 2.
-      * Section present, plan_ref resolves, ``covers:`` IDs must all be
-        ``implemented`` in the plan's matrix (GI-validator-v2-dod-covers-subset).
-        Unknown IDs, deferred IDs, or broken plan_ref → exit 2.
+      * Section present with **more than one** ``plan ref:`` line → fail
+        closed (exit 2), unless ``dod_path`` is on
+        :data:`PHASE_2_GRANDFATHER_DODS`, in which case the validator falls
+        back to matrix-union validation across all referenced plans and
+        emits a WARN. (H2, 2026-04-22 retro-review-sweep.)
+      * Section present, single plan_ref resolves, ``covers:`` IDs must all
+        be ``implemented`` in the plan's matrix
+        (GI-validator-v2-dod-covers-subset). Unknown IDs, deferred IDs, or
+        broken plan_ref → exit 2.
     """
     ctx = parse_dod(dod_path)
     if not ctx.has_range_link:
@@ -445,22 +521,55 @@ def validate_dod(dod_path: Path) -> int:
             err(f"  - {f}")
         return 2
 
-    plan_path = _resolve_plan_ref(dod_path, ctx.plan_ref)  # type: ignore[arg-type]
-    if plan_path is None:
-        err(f"validation failed for {dod_path}:")
-        err(f"  - plan ref path not found: {ctx.plan_ref}")
-        return 2
-
-    parsed = parse_plan(plan_path)
-    if not parsed.get("has_matrix"):
+    # H2 — multi plan_ref handling (2026-04-22).
+    is_grandfathered = _dod_is_grandfathered(dod_path)
+    if len(ctx.all_plan_refs) > 1 and not is_grandfathered:
         err(f"validation failed for {dod_path}:")
         err(
-            f"  - plan {plan_path} has no '## Design 범위 커버리지 매트릭스' — "
-            f"cannot validate covers"
+            f"  - DoD declares {len(ctx.all_plan_refs)} 'plan ref:' lines "
+            f"under '## 범위 연결'. Integration DoD (multi-plan) support is "
+            f"Phase 2 of the retro-review-sweep rollout. For now, either "
+            f"split this DoD into one per plan, or consolidate the plans "
+            f"into a single umbrella plan. If this DoD predates Phase 1, "
+            f"add it to PHASE_2_GRANDFATHER_DODS in "
+            f"scripts/rein-validate-coverage-matrix.py."
         )
         return 2
+    if len(ctx.all_plan_refs) > 1 and is_grandfathered:
+        err(
+            f"WARN: {dod_path} has {len(ctx.all_plan_refs)} plan refs "
+            f"(grandfathered for Phase 2; covers validated as matrix union)"
+        )
 
-    matrix = parsed["matrix"]  # id -> (status, loc)
+    # Matrix union collection across plan_refs (single entry for the common
+    # single-plan case; multi-plan only for grandfather).
+    plans_resolved: list[tuple[str, Path]] = []
+    for ref in ctx.all_plan_refs:
+        resolved = _resolve_plan_ref(dod_path, ref)
+        if resolved is None:
+            err(f"validation failed for {dod_path}:")
+            err(f"  - plan ref path not found: {ref}")
+            return 2
+        plans_resolved.append((ref, resolved))
+
+    # Load each plan's matrix.
+    union_matrix: dict[str, tuple[str, str]] = {}
+    primary_plan_path: Path | None = None
+    for ref, plan_path in plans_resolved:
+        parsed = parse_plan(plan_path)
+        if not parsed.get("has_matrix"):
+            err(f"validation failed for {dod_path}:")
+            err(
+                f"  - plan {plan_path} has no '## Design 범위 커버리지 매트릭스' — "
+                f"cannot validate covers"
+            )
+            return 2
+        if primary_plan_path is None:
+            primary_plan_path = plan_path
+        # Union; later entries win on duplicate IDs (unlikely in practice).
+        union_matrix.update(parsed["matrix"])
+
+    matrix = union_matrix
     implemented = {rid for rid, (st, _) in matrix.items() if st == "implemented"}
     deferred = {rid for rid, (st, _) in matrix.items() if st == "deferred"}
     covers_set = set(ctx.covers)
@@ -491,7 +600,12 @@ def validate_dod(dod_path: Path) -> int:
     # unit covers** (NOT the DoD's own covers). DoD covers can omit the bc
     # ID as a drift attempt — the plan work unit is the load-bearing
     # source of truth.
-    _enforce_behavioral_contract_checkbox(dod_path, ctx, plan_path)
+    #
+    # For multi-plan (grandfather) DoDs we pick the first plan as the
+    # reference point; migration to Phase 2 integration DoD schema will
+    # define per-plan work_unit mapping explicitly.
+    if primary_plan_path is not None:
+        _enforce_behavioral_contract_checkbox(dod_path, ctx, primary_plan_path)
 
     return 0
 
