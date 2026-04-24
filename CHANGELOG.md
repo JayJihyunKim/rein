@@ -6,22 +6,16 @@
 
 ### Fixed
 
-- **`rein update` — 3-way merge / manifest v2 가 실제로 실행됨**: v1.1.0 CHANGELOG 가 약속한 "manifest v2 + 3-way merge" 동작이 production CLI 경로 (`rein update` / `rein merge` → `cmd_merge`) 에서 호출되지 않는 dead-code 상태였다. 본 릴리즈에서 `cmd_merge` 를 v2 dispatcher 로 재작성해 첫 update 시 `is_first_update_v2` → `apply_first_update_text` (user 수정 preserve + base seed), 이후 update 시 `stage_manifest_begin` + `do_update_v2` (text 파일 `git merge-file` 3-way merge) + non-text legacy fallback + `stage_manifest_commit` 를 실제 호출한다.
-- **manifest_generate 의 v2 manifest 덮어쓰기 방지** (Round 1/2 codex-review 에서 발견): `cmd_merge` 말미의 `manifest_generate` 호출 제거 (Round 1) + `prune_impl` 이 --confirm 경로에서 호출하던 `manifest_generate` 도 제거 (Round 2). `manifest_generate` 는 schema_version="1" 하드코딩이라 v2 staging commit 직후 덮어쓰면 다음 update 에서 `is_first_update_v2` 가 다시 true 를 반환. 제거로 v2 staging 이 단일 authoritative writer. `manifest_validate` 는 schema "1" 또는 "2" 를 모두 허용하도록 완화.
-- **prune 스냅샷 순서 수정** (Round 2 codex-review 에서 발견): 이전 구현은 스냅샷을 `stage_manifest_commit` 뒤에 캡처해 snapshot 이 post-update 상태만 담아 prune 이 0 candidates 를 보고 template-removed 파일이 정리되지 않던 문제. 스냅샷 캡처를 cmd_merge 초반 (모든 manifest mutation 이전) 으로 이동 → prune_impl 이 OLD tracked set 과 NEW template 을 정확히 비교.
-- **exec bit 영구 drift (`rein update` 후 Permission denied)**: `cmd_merge` 가 `diff -q` content-only 비교로 mode 불일치를 무시해 0644 user + 0755 template 시나리오에서 user 파일이 0644 로 고정되던 문제 수정. non-text 경로에서 내용이 같아도 `copy_file` 을 호출해 chmod+x 로직이 도달하도록 강제.
-- **`three_way_merge` exec bit 보호**: 3-way merge 경로의 3개 user-write 사이트 (first install cp, fast-forward mv, merge success mv) 각각 이후 `[[ -x "$incoming" && ! -x "$user" ]] && chmod +x "$user"` 블록 추가. `git merge-file -p` 결과가 shell redirect 로 0644 로 떨어지는 edge case 방어.
-- **non-text skip 시 staging 오염 방지** (Round 1 codex-review Medium): user 가 prompt 에서 `skip` 을 선택해 자기 파일을 보존한 경우에도 `stage_manifest_add` 로 incoming sha 를 staging 하던 문제 수정. do_update_v2 의 conflict 정책과 대칭.
+- **`rein update` 후 Permission denied**: 일부 훅 파일의 실행 권한이 사라지던 현상 수정. 내용이 같더라도 mode 가 다르면 이제 갱신된다.
+- **3-way merge 가 실제로 동작**: v1.1.0 CHANGELOG 가 약속했던 사용자 수정 보존 + template 병합이 production `rein update` 경로에 연결됐다. v1.1.0 ~ v1.1.1 사용자는 legacy 2-way prompt 만 경험했음.
 
-### Internal
+### Removed
 
-- **CI: `rein-route-record doctor` 서브커맨드 제거** — v0.8.0 router schema migration 용 일회성 명령이었고 이후 schema 안정화로 실사용 기록 없음. macOS CI runner 에 PyYAML 미설치 환경에서 `import yaml as pyyaml` 하드 임포트로 테스트 실패 원인이었다. `scripts/rein-route-record.py::cmd_doctor` + 2개 helper (`_migrate_feedback_entries`, `_migrate_override_entries`) + argparse `doctor` 서브파서 제거. `tests/scripts/test-route-record-doctor.sh` 삭제, `tests/scripts/run-all.sh` 에서 제거. `tests/scripts/test-route-record-validation.sh` 의 `import yaml` 을 regex 기반 검증으로 교체.
-- **CI: Linux test harness `/bin` 심볼릭 링크 우회** — Ubuntu `/bin → /usr/bin` 에서 `with_missing_python` 이 `/bin/python3` 를 노출해 3개 테스트가 실패하던 문제 수정. `tests/hooks/lib/test-harness.sh::with_missing_python` 이 `PATH="$d"` (tmpdir only) 를 사용하도록 변경, `bash sh sleep sort wc` 를 tmpdir 심볼릭에 추가해 `/bin` 의존 제거.
+- **`rein-route-record doctor` 서브커맨드** — v0.8.0 일회성 migration 명령. v0.8.0 ~ v1.1.1 사이 `rein update` 한 프로젝트는 이미 migration 완료. 신규 설치는 현재 schema 로 시작하므로 실행할 일 없음.
 
-### 지속되는 고지
+### Behind the scenes
 
-- v1.1.0 의 "manifest v2 + 3-way merge" 기능은 설계/구현/테스트는 v1.1.0 에 들어가 있었으나 **CLI 디스패치 wire-up 이 누락**된 상태로 shipped. v1.1.2 에서야 실제 사용자 update 경로에서 동작. v1.1.0 / v1.1.1 에서 `rein update` 를 수행한 프로젝트는 legacy 2-way prompt 경로만 경험했다.
-- Round 1 codex-review 가 wire-up 자체의 2차 고장 (`cmd_merge` 말미의 `manifest_generate` 덮어쓰기) 을 잡아냈고, Round 2 codex-review 가 3차 고장 두 건 (prune 스냅샷 순서 + `prune_impl` 의 `manifest_generate` 경로) 을 추가로 잡아내 v1.1.2 릴리즈 전에 모두 수정됐다. helper-only 테스트가 CLI 경로를 검증하지 못했던 gap 은 CLI-level regression test (`tests/scripts/test-cmd-merge-v2-manifest.sh`) 로 보완 — plain update 2회 + `--prune --confirm` 로 template-removed 파일이 실제로 삭제되는지까지 검증.
+실행 경로 정합성 + CI 안정화. 구현 디테일은 git log 참조.
 
 ## [v1.1.1] - 2026-04-22
 
