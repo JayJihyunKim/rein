@@ -17,7 +17,7 @@ warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 fatal() { echo -e "${RED}Fatal: $*${NC}" >&2; exit 1; }
 
-VERSION="1.1.3"
+VERSION="1.1.4"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
@@ -880,6 +880,36 @@ _install_cli_helpers() {
       continue
     fi
   done
+}
+
+# _ensure_cli_helpers_present
+# Self-heal entry called from cmd_merge right after ensure_gitignore_entries.
+# Detects stranded installs where rein.sh exists but one or more CLI-adjacent
+# helpers (CLI_HELPER_SCRIPTS) are missing from the bin directory, and
+# restores them from the freshly cloned TEMPLATE_DIR. Idempotent — no-op
+# when all helpers are present. Does nothing if TEMPLATE_DIR is unset or if
+# the cli_path cannot be resolved (both are indicative of a test-only code
+# path that wouldn't hit a real install anyway).
+# Plan — v1.1.4 hotfix (chicken-and-egg recovery for v1.0.x/v1.1.0–v1.1.2 →
+# v1.1.3 self-updaters + structural defense against same-version drift).
+_ensure_cli_helpers_present() {
+  # If we were not yet set up by cmd_merge, skip (source-only test paths).
+  [ -n "${TEMPLATE_DIR:-}" ] || return 0
+  local cli_path cli_dir
+  cli_path=$(current_cli_path 2>/dev/null) || return 0
+  [ -n "$cli_path" ] || return 0
+  cli_dir=$(cd "$(dirname "$cli_path")" 2>/dev/null && pwd -P) || return 0
+  [ -n "$cli_dir" ] || return 0
+  local helper missing=0
+  for helper in "${CLI_HELPER_SCRIPTS[@]}"; do
+    if [ ! -f "$cli_dir/$helper" ]; then
+      missing=1
+      break
+    fi
+  done
+  [ "$missing" -eq 1 ] || return 0
+  info "Recovering missing CLI helpers from template into $cli_dir ..."
+  _install_cli_helpers "$TEMPLATE_DIR" "$cli_dir"
 }
 
 self_update_apply() {
@@ -1797,6 +1827,18 @@ cmd_merge() {
   # Plan C Task 1.3 — top up rein operational-hygiene entries in the user
   # project's .gitignore. Idempotent; safe to call on every update.
   ensure_gitignore_entries
+
+  # v1.1.4 hotfix: self-heal missing CLI-adjacent helpers before any code
+  # path tries to invoke them. Covers the chicken-and-egg case where a
+  # pre-v1.1.3 CLI self-updated to v1.1.3 — the v1.1.2 self_update_apply
+  # only replaced rein.sh, leaving helpers absent. Because self_update_check
+  # now sees `tv == VERSION` on subsequent runs, self_update_apply (which
+  # in v1.1.3+ DOES copy helpers) is never re-entered. Without this
+  # self-heal the user is stranded until a future version bump triggers
+  # self-update again. More generally: any same-version drift between
+  # rein.sh and its sibling helpers is now auto-recoverable from the
+  # freshly cloned template.
+  _ensure_cli_helpers_present
 
   # ---- Prune snapshot (must be taken BEFORE any manifest mutation) --------
   # Round 2 codex-review finding (Group 7 2026-04-24): if we snapshot the

@@ -2,6 +2,25 @@
 
 > **Versioning policy (2026-04-22~)**: 버전 bump 는 `.claude/rules/versioning.md` 의 **Rule A/B/C** 를 따른다 — (A) 변경 유형별 bump (user-facing breaking=major, new feature=minor, fix=patch, internal=no bump), (B) 같은 날 복수 bump 금지 (hotfix 예외), (C) CHANGELOG 는 user-facing 만. 규칙 제정 이전 릴리즈 (v1.1.0 이하) 중 **v1.0.0 → v1.1.0 (2026-04-21 당일 2회차)** 는 Rule B 기준 위반이었으나 bump 값 자체는 Rule A 정당 (rein job / rein remove / 3-way merge 등 신규 user-facing CLI). 소급 롤백 없음. 이 policy 부터 새 규칙 적용.
 
+## [v1.1.4] - 2026-04-24
+
+### Fixed
+
+- **v1.1.3 recovery chicken-egg** (critical): v1.1.3 CHANGELOG 는 "깨진 상태에서 `rein update` 한 번이면 자동 복구" 라고 썼지만 실제로는 v1.1.2 binary 가 self-update 를 실행해 rein.sh 만 교체 → 재시작된 v1.1.3 은 "이미 최신" 으로 판단해 self-update skip → helper 여전히 미설치 → 재crash. v1.1.4 는 `cmd_merge` 초반에 self-heal 을 추가 — helper 가 누락된 상태로 진입하면 즉시 템플릿에서 복구. stranded v1.1.3 사용자는 `rein update` 한 번이면 이제 정말로 자동 복구된다.
+- **Same-version helper drift 자동 복구**: self-update gate 는 버전 문자열만 보고 skip 하므로 rein.sh 와 sibling helpers 가 같은 버전인데 drift 난 상태 (이번 같은 케이스) 는 여태껏 자동 복구 경로가 없었다. 이제 `rein update` 실행 시 매번 helper 존재 여부를 검증 + 필요 시 복구.
+
+### Changed
+
+- **brainstorming skill: brownfield pre-question sanity gate** (docs-only bundle): `.claude/skills/brainstorming/SKILL.md` 에 **Brownfield Step 0 — Pre-question sanity check** 를 mandatory 로 추가. brownfield 에서 사용자에게 질문을 던지기 전 `/codex-ask` fresh session 으로 질문 초안의 전제 (assumption) 가 현재 코드베이스 구조에서 유효한지 검증한다. 기존에는 Step 1 (사용자 질문) 이 Step 2 (시스템 탐색) 이전에 배치돼 구조적으로 불가능한 전제를 담은 질문이 사용자 답변으로 굳어 spec/plan/DoD 전 구간을 오염시키는 결함이 있었다. 산출물 포맷에 `## Question Sanity Check (codex-ask)` 섹션 (brownfield 필수) 추가. greenfield 경로 불변. 근거: 2026-04-24 codex-ask (gpt-5.5 high) independent verdict.
+
+### Recovery 가이드 (정정)
+
+- v1.1.3 이하에서 `rein update` 후 "rein-manifest-v2.py: No such file or directory" 를 봤다면 `rein update` 를 한 번 더 실행하면 자동 복구됩니다 (이번에는 진짜로).
+- 수동 복구를 선호하면 template 을 clone 해서 `~/.rein/bin/` 에 3 개 helper 를 직접 cp 해도 됩니다.
+- 이미 v1.1.4 를 받은 사용자는 `rein update` 한 번으로 새 brainstorming Step 0 까지 함께 받게 됩니다 (self-update gate 는 버전 문자열만 비교하므로 skip 되지만, 이후 template 파일 전파 단계에서 `.claude/skills/brainstorming/SKILL.md` 가 갱신됨).
+
+> **Rule B hotfix 예외 3회차**: 같은 날 v1.1.2 → v1.1.3 → v1.1.4 누적. 사유 — v1.1.3 의 recovery claim 이 사실 chicken-egg 라 동작 안 한 claim-vs-reality 불일치. truthfulness 복구 + 구조적 same-version drift 영구 차단. brainstorming bundle 은 no-bump (docs-only) 로 v1.1.4 amend 편입.
+
 ## [v1.1.3] - 2026-04-24
 
 ### Fixed
