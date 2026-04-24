@@ -332,4 +332,11 @@ except Exception:
 " "$SNAPSHOT" 2>/dev/null || true
 fi
 
+# Cleanup: 현재 세션의 active-dod-choice flag 제거 (select-active-dod.sh 가
+# 생성한 "세션당 1회 로그" 세마포어). key 해석은 select-active-dod.sh 와
+# 동일: ${REIN_SESSION_ID:-${PPID:-$$}}. BYPASS / early-exit / gate-block 경로로
+# 빠진 flag 는 다음 SessionStart 의 1h sweep 이 정리함. 실패해도 exit 0 유지.
+_rein_dod_flag_key="${REIN_SESSION_ID:-${PPID:-$$}}"
+rm -f "$PROJECT_DIR/.claude/cache/active-dod-choice.session-${_rein_dod_flag_key}.flag" 2>/dev/null || true
+
 exit 0

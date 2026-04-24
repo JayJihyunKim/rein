@@ -70,6 +70,37 @@ if [ ! -t 0 ]; then
   PROMPT_BODY=$(cat)
 fi
 
+# ---- Parse [EFFORT:<level>] marker (SKILL.md §6.1/6.2). ---------------
+# Supported values: low | medium | high. Invalid (e.g. [EFFORT:low2],
+# [EFFORT:low-high], [EFFORT: ], [EFFORT:]) → stderr warning + fallback to
+# ~/.codex/config.toml default (no --config flag passed). All [EFFORT:...]
+# occurrences are stripped from PROMPT_BODY regardless of validity so codex
+# never receives the marker (§6.2 contract).
+#
+# The outer capture uses [^]]* (any non-']' content) so malformed values
+# are captured too, triggering the documented warn-and-fallback path.
+# The inner value is whitespace-trimmed before whitelist check so
+# "[EFFORT: medium ]" is accepted as medium.
+REIN_EFFORT=""
+if [ -n "$PROMPT_BODY" ]; then
+  _effort_raw=$(printf '%s' "$PROMPT_BODY" | grep -oE '\[EFFORT:[^]]*\]' 2>/dev/null | head -1 || true)
+  if [ -n "$_effort_raw" ]; then
+    # Strip leading/trailing whitespace around the inner value.
+    _effort_val=$(printf '%s' "$_effort_raw" | sed -E 's/^\[EFFORT:[[:space:]]*//; s/[[:space:]]*\]$//')
+    case "$_effort_val" in
+      low|medium|high)
+        REIN_EFFORT="$_effort_val"
+        ;;
+      *)
+        echo "WARNING: [codex-review] invalid effort '$_effort_val' in [EFFORT:...] marker; falling back to ~/.codex/config.toml default" >&2
+        ;;
+    esac
+    # Strip ALL [EFFORT:...] occurrences (valid or not, any inner content).
+    PROMPT_BODY=$(printf '%s' "$PROMPT_BODY" | sed -E 's/\[EFFORT:[^]]*\][[:space:]]*//g')
+  fi
+  unset _effort_raw _effort_val
+fi
+
 # ---- Mode detection (Task 6.1 Step 2a). -------------------------------
 
 # Marker patterns anchored to the start of the prompt.
@@ -592,9 +623,15 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   # Invoke codex (real or fake via CODEX_BIN).
   CODEX_OUT=""
   CODEX_RC=0
-  # We feed envelope on stdin. Additional codex flags could be forwarded
-  # via positional args; for now we keep it minimal.
-  if ! CODEX_OUT=$(printf '%s' "$ENVELOPE" | _invoke_codex 2>&1); then
+  # Assemble optional codex flags from parsed markers.
+  #   REIN_EFFORT → --config model_reasoning_effort="<level>" (TOML-quoted).
+  # Empty array is safely expanded with ${arr[@]+...} under `set -u`.
+  CODEX_ARGS=()
+  if [ -n "$REIN_EFFORT" ]; then
+    CODEX_ARGS+=(--config "model_reasoning_effort=\"$REIN_EFFORT\"")
+  fi
+  # Feed envelope on stdin. Args forwarded to `codex exec` via _invoke_codex.
+  if ! CODEX_OUT=$(printf '%s' "$ENVELOPE" | _invoke_codex ${CODEX_ARGS[@]+"${CODEX_ARGS[@]}"} 2>&1); then
     CODEX_RC=$?
     # Best-effort: emit output so caller can see what went wrong.
     printf '%s\n' "$CODEX_OUT"

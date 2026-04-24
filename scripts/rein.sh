@@ -17,7 +17,7 @@ warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 fatal() { echo -e "${RED}Fatal: $*${NC}" >&2; exit 1; }
 
-VERSION="1.1.1"
+VERSION="1.1.2"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
@@ -558,6 +558,9 @@ three_way_merge() {
   if [ ! -f "$user" ]; then
     mkdir -p "$(dirname "$user")"
     cp "$incoming" "$user"
+    # Finding 3 (2026-04-24): propagate exec bit even in edge cases where
+    # cp on the current filesystem does not reflect incoming mode.
+    if [[ -x "$incoming" && ! -x "$user" ]]; then chmod +x "$user"; fi
     if ! safe_cp_base "$incoming" "$base" "$rel"; then
       return 1
     fi
@@ -604,6 +607,10 @@ three_way_merge() {
     local utmp="${user}.update.${BASHPID:-$$}.${RANDOM}"
     cp "$incoming" "$utmp"
     mv -f "$utmp" "$user"
+    # Finding 3 (2026-04-24): mv across filesystems may fall back to
+    # cp-into-existing-dst, which preserves dst's prior mode instead of
+    # the incoming mode. Defensive chmod even on same-fs paths.
+    if [[ -x "$incoming" && ! -x "$user" ]]; then chmod +x "$user"; fi
     if ! safe_cp_base "$incoming" "$base" "$rel"; then
       return 1
     fi
@@ -629,6 +636,10 @@ three_way_merge() {
   if [ "$rc" = "0" ]; then
     mv -f "${tmp}.out" "$user"
     rm -f "$tmp"
+    # Finding 3 (2026-04-24): ${tmp}.out was written by shell redirect
+    # from `git merge-file -p`, so its mode is 0644-ish regardless of
+    # incoming's exec bit. Re-propagate exec bit when incoming has one.
+    if [[ -x "$incoming" && ! -x "$user" ]]; then chmod +x "$user"; fi
     if ! safe_cp_base "$incoming" "$base" "$rel"; then
       # User content landed successfully; base refresh failed. Manifest
       # stays at the prior sha (caller decides via conflict count) and a
@@ -1146,8 +1157,10 @@ PYEOF
 }
 
 # manifest_validate(project_dir)
-# Returns 0 if manifest exists and is parseable with schema_version=1,
-# 1 if missing, 2 if corrupt or unsupported schema.
+# Returns 0 if manifest exists and is parseable with schema_version "1" or "2",
+# 1 if missing, 2 if corrupt or unsupported schema. Accepts both schema versions
+# because v1.1.2+ commits a v2 manifest via stage_manifest_commit; legacy v1
+# manifests are still valid for pre-first-update projects.
 manifest_validate() {
   local mf
   mf=$(manifest_path "$1")
@@ -1156,7 +1169,8 @@ manifest_validate() {
 import json, sys
 with open(sys.argv[1]) as f:
     d = json.load(f)
-assert d.get("schema_version") == "1", "unsupported schema"
+schema = d.get("schema_version")
+assert schema in ("1", "2"), f"unsupported schema: {schema}"
 assert isinstance(d.get("files", {}), dict), "files must be object"
 PYEOF
   return 0
@@ -1402,8 +1416,13 @@ PYEOF
 
   if [[ "$confirm" == "true" && "$safe_count" -gt 0 ]]; then
     info "Backup written to: $backup_dir"
-    # Regenerate manifest to reflect deletions
-    manifest_generate "$project_dir" "$template_dir"
+    # Round 2 codex-review fix (Group 7 2026-04-24): previously called
+    # manifest_generate here, which hardcodes schema_version="1" and would
+    # clobber the v2 manifest that cmd_merge just committed via
+    # stage_manifest_commit. Since cmd_merge stages only files present in
+    # the current template (pruned files are already absent from the
+    # staged manifest), no further regeneration is needed: the live v2
+    # manifest already reflects the post-prune state correctly.
   elif [[ "$confirm" != "true" && "$safe_count" -gt 0 ]]; then
     echo "" >&2
     info "Run 'rein update --prune --confirm' to actually delete the $safe_count file(s) above."
@@ -1712,71 +1731,195 @@ cmd_merge() {
   # project's .gitignore. Idempotent; safe to call on every update.
   ensure_gitignore_entries
 
-  local added=0
-  local overwritten=0
-  local skipped=0
-
-  while IFS= read -r -d '' rel_path; do
-    local dest_file="$PWD/$rel_path"
-
-    if [[ -f "$dest_file" ]]; then
-      # Check if files are identical
-      if diff -q "$dest_file" "$TEMPLATE_DIR/$rel_path" >/dev/null 2>&1; then
-        # Identical — skip silently
-        skipped=$((skipped + 1))
-      else
-        # Different — prompt user
-        local action
-        action="$(prompt_conflict "$rel_path" "$TEMPLATE_DIR" "$PWD")"
-
-        case "$action" in
-          overwrite)
-            copy_file "$TEMPLATE_DIR" "$PWD" "$rel_path"
-            overwritten=$((overwritten + 1))
-            echo -e "  ${YELLOW}Overwritten${NC}: $rel_path" >&2
-            ;;
-          skip)
-            skipped=$((skipped + 1))
-            ;;
-          quit)
-            info "Aborted by user."
-            exit 0
-            ;;
-        esac
-      fi
-    else
-      # New file — copy without prompting
-      copy_file "$TEMPLATE_DIR" "$PWD" "$rel_path"
-      added=$((added + 1))
-      echo -e "  ${GREEN}Added${NC}: $rel_path" >&2
+  # ---- Prune snapshot (must be taken BEFORE any manifest mutation) --------
+  # Round 2 codex-review finding (Group 7 2026-04-24): if we snapshot the
+  # manifest AFTER stage_manifest_commit, the snapshot reflects the new
+  # manifest (current template files only), so prune sees zero candidates
+  # and template-removed files never get cleaned up. Take the snapshot
+  # here — pre-v2-commit — so prune_impl compares OLD tracked files vs
+  # NEW template and correctly identifies removals.
+  local prune_snapshot=""
+  if [[ "$PRUNE_MODE" == "true" ]]; then
+    local live_mf_pre
+    live_mf_pre=$(manifest_path "$PWD")
+    if [[ -f "$live_mf_pre" ]]; then
+      prune_snapshot=$(mktemp)
+      cp "$live_mf_pre" "$prune_snapshot"
     fi
+  fi
+
+  # ---- v2 update dispatcher (Group 7A hotfix, 2026-04-24) -----------------
+  # Wires cmd_merge to the v2 primitives that were shipped in v1.1.0 but
+  # never dispatched from the CLI entry point (dead-code regression).
+  #
+  #   - is_first_update_v2 true  → apply_first_update_text per text file
+  #                                 (preserve user + seed base), copy_file
+  #                                 for non-text.
+  #   - is_first_update_v2 false → stage_manifest_begin + do_update_v2
+  #                                 (three_way_merge per text file), legacy
+  #                                 2-way prompt for non-text, stage commit.
+  #
+  # Exit codes (propagated to the outer dispatcher):
+  #   0 — all clean or user approved overwrites
+  #   1 — ≥1 text-file 3-way conflict (user versions preserved, .rej written)
+  #   2 — fatal error inside do_update_v2 (staging manifest left for inspection)
+  # -----------------------------------------------------------------------
+  local added=0 updated=0 overwritten=0 identical=0 conflicts=0
+  local nontext_added=0 nontext_overwritten=0 nontext_identical=0
+  local final_rc=0
+
+  # Collect template rel paths up front so we can reason about the whole set.
+  local rels=()
+  while IFS= read -r -d '' rel_path; do
+    rels+=("$rel_path")
   done < <(list_copy_files "$TEMPLATE_DIR")
+
+  if is_first_update_v2; then
+    info "First-time v2 update — seeding base snapshot + preserving user modifications"
+    stage_manifest_begin
+    local rel_path
+    for rel_path in "${rels[@]}"; do
+      if is_text_file "$rel_path"; then
+        # apply_first_update_text stdout: "installed: <rel>" |
+        # "preserved: <rel> (modified since install)" | silent (== same)
+        # Capture so we can classify for the summary.
+        local fu_out fu_rc=0
+        fu_out=$(apply_first_update_text "$TEMPLATE_DIR" "$rel_path") || fu_rc=$?
+        if [[ $fu_rc -ne 0 ]]; then
+          error "apply_first_update_text failed for $rel_path (rc=$fu_rc)"
+          final_rc=2
+          continue
+        fi
+        case "$fu_out" in
+          installed:*) added=$((added + 1)); [[ -n "$fu_out" ]] && echo -e "  ${GREEN}Added${NC}: $rel_path" >&2 ;;
+          preserved:*) updated=$((updated + 1)); echo -e "  ${YELLOW}Preserved${NC}: $rel_path (user-modified)" >&2 ;;
+          *)           identical=$((identical + 1)) ;;
+        esac
+        # Apply Finding 3 / Issue 2 parity for new installs: if incoming is
+        # executable and user file exists but lacks exec bit, set it.
+        if [[ -f "$rel_path" && -x "$TEMPLATE_DIR/$rel_path" && ! -x "$rel_path" ]]; then
+          chmod +x "$rel_path" 2>/dev/null || true
+        fi
+        stage_manifest_add "$rel_path" "$(sha256_of "$TEMPLATE_DIR/$rel_path")"
+      else
+        # Non-text in first-update: mirror legacy path.
+        # stage_skipped=true when user chose to preserve their own version —
+        # symmetric with do_update_v2 conflict policy (never advance staged
+        # sha past the incoming version the user declined).
+        local stage_skipped=false
+        if [[ -f "$rel_path" ]]; then
+          if diff -q "$rel_path" "$TEMPLATE_DIR/$rel_path" >/dev/null 2>&1; then
+            # Issue 2 fix: identical content but mode may differ — force
+            # copy_file so chmod+x logic (copy_file body) runs.
+            copy_file "$TEMPLATE_DIR" "$PWD" "$rel_path"
+            nontext_identical=$((nontext_identical + 1))
+          else
+            local action; action="$(prompt_conflict "$rel_path" "$TEMPLATE_DIR" "$PWD")"
+            case "$action" in
+              overwrite) copy_file "$TEMPLATE_DIR" "$PWD" "$rel_path"; nontext_overwritten=$((nontext_overwritten + 1)); echo -e "  ${YELLOW}Overwritten${NC}: $rel_path" >&2 ;;
+              skip)      nontext_identical=$((nontext_identical + 1)); stage_skipped=true ;;
+              quit)      info "Aborted by user."; exit 0 ;;
+            esac
+          fi
+        else
+          copy_file "$TEMPLATE_DIR" "$PWD" "$rel_path"
+          nontext_added=$((nontext_added + 1))
+          echo -e "  ${GREEN}Added${NC}: $rel_path" >&2
+        fi
+        if [[ "$stage_skipped" != "true" ]]; then
+          stage_manifest_add "$rel_path" "$(sha256_of "$TEMPLATE_DIR/$rel_path")"
+        fi
+      fi
+    done
+    if [[ $final_rc -ne 2 ]]; then
+      stage_manifest_commit
+    fi
+  else
+    # v2 steady-state: 3-way merge text files, legacy 2-way for non-text.
+    stage_manifest_begin
+    local v2_rc=0
+    do_update_v2 "$TEMPLATE_DIR" "${rels[@]}" || v2_rc=$?
+
+    updated=$_REIN_UPDATE_UPDATES
+    conflicts=$_REIN_UPDATE_CONFLICTS
+
+    # Non-text fallback — _REIN_UPDATE_NONTEXT is space-separated.
+    if [[ -n "${_REIN_UPDATE_NONTEXT:-}" ]]; then
+      local nontext_rel
+      for nontext_rel in $_REIN_UPDATE_NONTEXT; do
+        # stage_skipped=true when user chose to preserve their own version —
+        # symmetric with do_update_v2 conflict policy (never advance staged
+        # sha past the incoming version the user declined).
+        local stage_skipped=false
+        if [[ -f "$nontext_rel" ]]; then
+          if diff -q "$nontext_rel" "$TEMPLATE_DIR/$nontext_rel" >/dev/null 2>&1; then
+            # Issue 2 fix: content identical → still call copy_file so
+            # mode propagation runs (fixes exec bit drift regression).
+            copy_file "$TEMPLATE_DIR" "$PWD" "$nontext_rel"
+            nontext_identical=$((nontext_identical + 1))
+          else
+            local action; action="$(prompt_conflict "$nontext_rel" "$TEMPLATE_DIR" "$PWD")"
+            case "$action" in
+              overwrite) copy_file "$TEMPLATE_DIR" "$PWD" "$nontext_rel"; nontext_overwritten=$((nontext_overwritten + 1)); echo -e "  ${YELLOW}Overwritten${NC}: $nontext_rel" >&2 ;;
+              skip)      nontext_identical=$((nontext_identical + 1)); stage_skipped=true ;;
+              quit)      info "Aborted by user."; exit 0 ;;
+            esac
+          fi
+        else
+          copy_file "$TEMPLATE_DIR" "$PWD" "$nontext_rel"
+          nontext_added=$((nontext_added + 1))
+          echo -e "  ${GREEN}Added${NC}: $nontext_rel" >&2
+        fi
+        if [[ "$stage_skipped" != "true" ]]; then
+          stage_manifest_add "$nontext_rel" "$(sha256_of "$TEMPLATE_DIR/$nontext_rel")"
+        fi
+      done
+    fi
+
+    if [[ $v2_rc -eq 2 ]]; then
+      error "fatal error during v2 update — staging manifest preserved at $(staging_manifest_path)"
+      exit 2
+    fi
+
+    stage_manifest_commit
+    final_rc=$v2_rc  # 0 or 1 (partial conflict)
+  fi
 
   scaffold_trail "$PWD" "$TEMPLATE_DIR" "true"
   substitute_vars "$PWD" "$project_name"
 
   echo ""
-  info "Done! Added: $added, Overwritten: $overwritten, Skipped/Identical: $skipped"
+  info "Update summary:"
+  [[ $added -gt 0 ]]              && echo "  added: $added"
+  [[ $updated -gt 0 ]]            && echo "  updated (3-way merge): $updated"
+  [[ $conflicts -gt 0 ]]          && echo -e "  ${YELLOW}conflicts${NC}: $conflicts (user versions kept; .rej files in $(rein_conflicts_dir))"
+  [[ $overwritten -gt 0 ]]        && echo "  overwritten: $overwritten"
+  [[ $identical -gt 0 ]]          && echo "  identical: $identical"
+  [[ $nontext_added -gt 0 ]]      && echo "  non-text added: $nontext_added"
+  [[ $nontext_overwritten -gt 0 ]] && echo "  non-text overwritten: $nontext_overwritten"
+  [[ $nontext_identical -gt 0 ]]  && echo "  non-text identical/mode-refreshed: $nontext_identical"
 
-  # ---- Prune (must run BEFORE manifest_generate) ----
-  # Why this order: prune compares the OLD manifest (from the previous
-  # install/update — recording what was tracked before this run) against the
-  # NEW template's file list. If we regenerated the manifest first, the old
-  # tracked files would be lost and prune would have nothing to compare.
+  # ---- Prune (uses the pre-commit snapshot taken earlier) ----
+  # The snapshot was captured at the top of cmd_merge before stage_manifest_*
+  # mutated the live manifest. That snapshot holds the OLD tracked-file set,
+  # which is what prune_impl needs to compare against the NEW template to
+  # identify removal candidates.
   if [[ "$PRUNE_MODE" == "true" ]]; then
-    local snapshot=""
-    local live_mf
-    live_mf=$(manifest_path "$PWD")
-    if [[ -f "$live_mf" ]]; then
-      snapshot=$(mktemp)
-      cp "$live_mf" "$snapshot"
-    fi
-    prune_impl "$PWD" "$TEMPLATE_DIR" "$PRUNE_CONFIRM" "$snapshot"
-    [[ -n "$snapshot" && -f "$snapshot" ]] && rm -f "$snapshot"
+    prune_impl "$PWD" "$TEMPLATE_DIR" "$PRUNE_CONFIRM" "$prune_snapshot"
+    [[ -n "$prune_snapshot" && -f "$prune_snapshot" ]] && rm -f "$prune_snapshot"
   fi
 
-  # Refresh manifest so it reflects post-merge (and post-prune) state
-  manifest_generate "$PWD" "$TEMPLATE_DIR"
+  # v2 manifest has already been committed atomically via stage_manifest_commit.
+  # manifest_generate writes schema_version="1" unconditionally (v1.1.0 legacy
+  # helper) — calling it here would clobber the v2 manifest we just committed,
+  # forcing is_first_update_v2 to return true on every subsequent update and
+  # effectively keeping the 3-way merge path dead. Finding from codex Round 1
+  # (Group 7 2026-04-24). If prune ran and removed files, those entries are
+  # still present in the committed manifest; that's a separate, pre-existing
+  # gap (prune does not update the manifest) and not introduced by this fix.
+  # TODO: make manifest_generate v2-aware; until then, skip it here.
+
+  exit "$final_rc"
 }
 
 # ---------------------------------------------------------------------------

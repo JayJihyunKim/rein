@@ -25,6 +25,9 @@ data/processed/
 # Claude Code 로컬 설정 (공유 불가)
 .claude/settings.local.json
 
+# Claude Code 런타임 lock 파일 (세션별 scheduled-tasks 동시성 제어)
+/.claude/scheduled_tasks.lock
+
 # rein runtime state (governance stage, base snapshots, etc).
 # rein-dev 메인테이너 repo 에서는 governance.json 을 `git add -f` 로 versioning.
 # 사용자 프로젝트 (rein init 후) 는 이 파일을 gitignore 로 유지해

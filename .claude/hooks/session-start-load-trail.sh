@@ -66,6 +66,14 @@ rm -f "$PROJECT_DIR/trail/dod/.session-has-src-edit" 2>/dev/null
 # .incident-decision-deferred 는 세션 스코프 — 새 세션에서 재질문 되도록 삭제
 rm -f "$PROJECT_DIR/trail/dod/.incident-decision-deferred" 2>/dev/null
 
+# active-dod-choice session flag sweep — select-active-dod.sh 의 "세션당 1회
+# 로그" 세마포어가 세션 종료 시 누락되어 누적되는 현상 보완. 1시간 초과된
+# flag 만 제거하므로 현재 진행 중인 다른 세션의 fresh flag 는 건드리지 않음.
+# find -mmin +60 은 GNU/BSD/MSYS find 모두 지원. 실패해도 세션 로딩은 계속.
+find "$PROJECT_DIR/.claude/cache" -maxdepth 1 -type f \
+  -name 'active-dod-choice.session-*.flag' \
+  -mmin +60 -delete 2>/dev/null || true
+
 cd "$PROJECT_DIR" || exit 0
 
 # Legacy-shipped pending 자동 healing (rein-heal-legacy-pending.py)
