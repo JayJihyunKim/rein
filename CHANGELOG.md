@@ -2,6 +2,19 @@
 
 > **Versioning policy (2026-04-22~)**: 버전 bump 는 `.claude/rules/versioning.md` 의 **Rule A/B/C** 를 따른다 — (A) 변경 유형별 bump (user-facing breaking=major, new feature=minor, fix=patch, internal=no bump), (B) 같은 날 복수 bump 금지 (hotfix 예외), (C) CHANGELOG 는 user-facing 만. 규칙 제정 이전 릴리즈 (v1.1.0 이하) 중 **v1.0.0 → v1.1.0 (2026-04-21 당일 2회차)** 는 Rule B 기준 위반이었으나 bump 값 자체는 Rule A 정당 (rein job / rein remove / 3-way merge 등 신규 user-facing CLI). 소급 롤백 없음. 이 policy 부터 새 규칙 적용.
 
+## [v1.1.3] - 2026-04-24
+
+### Fixed
+
+- **Self-update 가 helper 스크립트를 복사하지 않던 버그** (critical hotfix). v1.0.x / v1.1.0~v1.1.2 에서 self-update 한 사용자는 `~/.rein/bin/rein` 만 갱신되고 `rein-manifest-v2.py` / `rein-path-match.py` / `rein-job-wrapper.sh` 가 누락돼, 이후 `rein update` 가 v2 경로 진입 시 "No such file or directory" 로 crash 했다. v1.1.3 self-update 는 CLI helper 3개를 모두 함께 설치.
+- **신규 install.sh 경로도 동일 수정**: curl bootstrap 이 rein 본체 외에 helper 3개도 다운로드. fresh install 이 self-update 없이도 `rein update` 가 즉시 작동.
+
+### Recovery 가이드
+
+이미 깨진 상태라면 (`~/.rein/bin/` 에 helper 없음): `rein update` 한 번이면 v1.1.3 self-update 가 자동 복구.
+
+> **Rule B hotfix 예외**: v1.1.2 와 같은 날 2nd bump. 사유 — v1.0.x 이후 모든 self-update 사용자가 `rein update` 실행 불능 상태. Rule B 예외 조건 (설치 실패) 해당.
+
 ## [v1.1.2] - 2026-04-24
 
 ### Fixed

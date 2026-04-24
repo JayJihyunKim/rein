@@ -17,7 +17,7 @@ warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 fatal() { echo -e "${RED}Fatal: $*${NC}" >&2; exit 1; }
 
-VERSION="1.1.2"
+VERSION="1.1.3"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
@@ -829,6 +829,59 @@ self_update_check() {
 # Validates new file before replacing.
 # Caller is responsible for exec re-run after this returns.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# CLI-adjacent helper scripts. These must live in the same directory as the
+# `rein` executable (BASH_SOURCE[0] sibling) because rein_manifest_helper()
+# and friends resolve them via that path. Self-update and first-home install
+# copy the whole set — v1.1.3 hotfix for the case where pre-v1.1.3 users
+# self-updated and only got the main rein.sh refreshed, leaving the helper
+# slot broken (`rein-manifest-v2.py: No such file or directory`).
+# ---------------------------------------------------------------------------
+CLI_HELPER_SCRIPTS=(
+  "rein-manifest-v2.py"
+  "rein-path-match.py"
+  "rein-job-wrapper.sh"
+)
+
+# _install_cli_helpers <template_dir> <bin_dir>
+# Copies every CLI_HELPER_SCRIPTS entry from template_dir/scripts/ into
+# bin_dir via the same atomic tmp+mv pattern used for rein.sh itself. Emits
+# warnings (not fatals) when a helper is absent from the template — the main
+# rein.sh should still finish updating so the user has a working entry point
+# and can recover manually if needed.
+_install_cli_helpers() {
+  local template_dir="$1"
+  local bin_dir="$2"
+  local helper src dest tmp
+  for helper in "${CLI_HELPER_SCRIPTS[@]}"; do
+    src="$template_dir/scripts/$helper"
+    dest="$bin_dir/$helper"
+    if [[ ! -f "$src" ]]; then
+      warn "CLI helper missing in template: $helper (skipping)"
+      continue
+    fi
+    if [[ -L "$dest" ]]; then
+      warn "Refusing to overwrite symlink at $dest (skipping $helper)"
+      continue
+    fi
+    tmp=$(mktemp "${dest}.XXXXXX") || {
+      warn "mktemp failed for $helper (skipping)"
+      continue
+    }
+    if ! cp "$src" "$tmp"; then
+      rm -f "$tmp"
+      warn "Failed to copy $helper to $tmp (skipping)"
+      continue
+    fi
+    chmod +x "$tmp"
+    if ! mv "$tmp" "$dest"; then
+      rm -f "$tmp"
+      warn "Failed to install $helper to $dest"
+      continue
+    fi
+  done
+}
+
 self_update_apply() {
   local template_dir="$1"
   local tmpl_rein="$template_dir/scripts/rein.sh"
@@ -863,6 +916,16 @@ self_update_apply() {
     rm -f "$tmp"
     fatal "Failed to install new rein to $cli_path"
   }
+
+  # v1.1.3 hotfix: refresh CLI-adjacent helpers alongside rein.sh. Before
+  # this, self-updates that crossed v1.1.0 (which added the helpers) left
+  # users with a broken v2 update path because the helpers were never copied
+  # into the bin directory.
+  local cli_dir
+  cli_dir=$(cd "$(dirname "$cli_path")" 2>/dev/null && pwd -P)
+  if [[ -n "$cli_dir" ]]; then
+    _install_cli_helpers "$template_dir" "$cli_dir"
+  fi
 
   info "Self-updated: $cli_path"
 }
@@ -953,6 +1016,10 @@ install_to_new_home() {
   }
   chmod +x "$tmp"
   mv "$tmp" "$new_bin"
+
+  # v1.1.3 hotfix: install CLI-adjacent helpers alongside rein (same
+  # reason as self_update_apply — BASH_SOURCE sibling resolution).
+  _install_cli_helpers "$template_dir" "$HOME/.rein/bin"
 
   # KEEP IN SYNC WITH install.sh:write_env_file()
   if [[ -L "$new_env" ]]; then

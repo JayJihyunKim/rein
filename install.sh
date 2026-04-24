@@ -33,6 +33,17 @@ REIN_EXEC="$REIN_BIN/rein"
 REIN_ENV="$REIN_HOME/env"
 REIN_RAW_URL="${REIN_INSTALL_URL:-https://raw.githubusercontent.com/JayJihyunKim/rein/main/scripts/rein.sh}"
 
+# CLI-adjacent helpers must be installed beside rein so runtime resolution
+# (BASH_SOURCE sibling lookup inside rein.sh) succeeds on the first
+# `rein update`. Keep this list in sync with CLI_HELPER_SCRIPTS in
+# scripts/rein.sh (v1.1.3 hotfix — before this, fresh installs crashed on
+# first v2 update with `No such file or directory` for rein-manifest-v2.py).
+REIN_CLI_HELPERS=(
+  "rein-manifest-v2.py"
+  "rein-path-match.py"
+  "rein-job-wrapper.sh"
+)
+
 # reject_symlink(path) — abort if path is a symlink
 reject_symlink() {
   if [[ -L "$1" ]]; then
@@ -68,6 +79,51 @@ download_rein() {
   if [[ ! -s "$tmp" ]] || ! grep -q '^VERSION=' "$tmp"; then
     rm -f "$tmp"
     error "Downloaded file is not a valid rein.sh (missing VERSION)"
+  fi
+
+  chmod +x "$tmp"
+  reject_symlink "$dest"
+  mv "$tmp" "$dest"
+}
+
+# ---------------------------------------------------------------------------
+# download_cli_helper(name)
+# Fetches a CLI-adjacent helper into $REIN_BIN alongside rein. Mirrors
+# download_rein's atomic tmp+mv + REIN_INSTALL_SOURCE override. Non-fatal:
+# missing helpers warn but do not abort installation. v1.1.3 hotfix.
+# ---------------------------------------------------------------------------
+download_cli_helper() {
+  local name="$1"
+  local dest="$REIN_BIN/$name"
+  local tmp
+  tmp=$(mktemp "${dest}.XXXXXX")
+
+  if [[ -n "${REIN_INSTALL_SOURCE:-}" ]]; then
+    # Dev override: look for helper as sibling of REIN_INSTALL_SOURCE.
+    local src_dir
+    src_dir=$(cd "$(dirname "$REIN_INSTALL_SOURCE")" 2>/dev/null && pwd -P)
+    if [[ -n "$src_dir" && -f "$src_dir/$name" ]]; then
+      cp "$src_dir/$name" "$tmp"
+    else
+      rm -f "$tmp"
+      warn "CLI helper $name not found next to REIN_INSTALL_SOURCE (skipped)"
+      return 1
+    fi
+  else
+    # Strip the rein.sh basename from REIN_RAW_URL to derive the helper URL.
+    local base_url="${REIN_RAW_URL%/*}"
+    local url="$base_url/$name"
+    if ! curl -fsSL "$url" -o "$tmp" 2>/dev/null; then
+      rm -f "$tmp"
+      warn "Failed to download $name from $url (skipped)"
+      return 1
+    fi
+  fi
+
+  if [[ ! -s "$tmp" ]]; then
+    rm -f "$tmp"
+    warn "$name download is empty (skipped)"
+    return 1
   fi
 
   chmod +x "$tmp"
@@ -209,6 +265,21 @@ main() {
   check_old_install
   mkdir -p "$REIN_BIN"
   download_rein "$REIN_EXEC"
+
+  # v1.1.3 hotfix: install CLI-adjacent helpers beside rein. Before this,
+  # fresh installs were missing rein-manifest-v2.py etc. and crashed on
+  # first `rein update` entering the v2 path.
+  #
+  # Policy: missing/failed helper → warn + continue (do NOT abort install).
+  # download_cli_helper returns 1 on skip, so we swallow with `|| true`
+  # because install.sh runs under `set -e`. Rationale — main rein.sh must
+  # still land so the user has a working entry point; missing helper is
+  # recoverable via `rein update` later when reaching a complete template.
+  local helper
+  for helper in "${REIN_CLI_HELPERS[@]}"; do
+    download_cli_helper "$helper" || true
+  done
+
   write_env_file
   info "Installed: $REIN_EXEC"
   info "Env file:   $REIN_ENV"
