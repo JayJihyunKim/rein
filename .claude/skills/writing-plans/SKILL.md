@@ -114,3 +114,16 @@ Plan 작성 완료: docs/**/plans/YYYY-MM-DD-<slug>-implementation.md
 2. 리뷰 통과 후 bash scripts/rein-mark-spec-reviewed.sh <plan-file> 실행
 3. subagent-driven-development 스킬 (또는 executing-plans) 으로 plan 실행
 ```
+
+## 사용자 안내
+
+이 SKILL 의 결과를 사용자에게 보고할 때 다음 짧은 형식을 **먼저** 출력한다 (위 `Handoff 메시지 포맷` 블록은 그 다음에 그대로 이어 붙인다). 형식은 한 문장 또는 두 문장 — 결과 1줄 + 다음 액션 1줄.
+
+**성공 (plan 작성 + matrix 통과)**:
+> plan 작성 완료. design 의 Scope IDs N개 모두 cover 했고 validator 통과. 이제 /codex-review 로 plan 리뷰를 요청하면 됩니다.
+
+**Coverage validator 실패 (gap)**:
+> plan 의 coverage matrix 에 [gap 종류 — 미해결 ID N개 또는 unknown ID 등] 가 있어 validator 가 차단했어요. matrix/covers 를 수정한 뒤 다시 시도하세요.
+
+**Self-review 실패 (placeholder/stub 잔존)**:
+> plan 에 [placeholder 종류 — TODO / TBD 등] 이 남아 있어요. 실행 가능한 코드/경로로 교체한 뒤 다시 self-review 하세요.

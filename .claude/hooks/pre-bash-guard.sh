@@ -101,11 +101,17 @@ if [ -z "$COMMAND" ]; then
 fi
 
 # --- 즉시 차단: 파이프로 쉘 스크립트 실행 ---
-# 정규식은 파이프 뒤 bash/sh 토큰 다음에 공백 또는 라인 끝이 오는 경우만 매치한다.
-# 단어 경계를 요구하지 않으면 'grep "x\|shadcn"' 같이 alternation 인자에
-# sh- / bash- 로 시작하는 substring 이 있을 때 false-positive 로 차단됐다.
-if echo "$COMMAND" | grep -qE '\| *(bash|sh)( |$)'; then
+# 정규식 의도:
+#   - 파이프(`|`) **앞** 에 word-boundary (line 시작 또는 공백) → quote 안 substring
+#     (`grep "x|bash y"`, `grep "x\\|bash y"`) false-positive 회피
+#   - 파이프 뒤 bash/sh 토큰 + 공백 또는 라인 끝 → 'shadcn' 같이 sh-/bash- 로
+#     시작하는 substring false-positive 회피 (기존 fix 유지)
+# 차단 사유는 pipe 가 stdin 으로 임의 명령을 흘려넣어 hook 검증을 우회하는 경로이기 때문.
+# 우회 (정상 패턴): file redirect 으로 명령 source 를 명시 — 'bash X.sh < /tmp/input.txt'.
+if echo "$COMMAND" | grep -qE '(^|[[:space:]])\| *(bash|sh)( |$)'; then
   echo "BLOCKED: 파이프로 쉘 스크립트 실행은 허용되지 않습니다." >&2
+  echo "        대신 file redirect 사용: bash <script> < /tmp/<input>.txt" >&2
+  echo "        (이유: stdin pipe 는 hook 가 명령 source 를 검증할 수 없음)" >&2
   log_block "파이프 쉘 실행" "$COMMAND"
   exit 2
 fi

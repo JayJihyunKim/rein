@@ -10,7 +10,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./lib/python-runner.sh
 . "$SCRIPT_DIR/lib/python-runner.sh"
 
-PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# REIN_PROJECT_DIR_OVERRIDE: test sandbox 가 hook 을 격리 환경에서 호출할 때 사용.
+# 기본은 script 위치 기반 (실제 운영 동작 보존).
+PROJECT_DIR="${REIN_PROJECT_DIR_OVERRIDE:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 DOD_DIR="$PROJECT_DIR/trail/dod"
 
 INPUT=$(cat)
@@ -62,6 +64,25 @@ else
   echo "created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$MARKER"
   echo "WARNING: $FNAME 에 '## 라우팅 추천' 섹션이 없습니다. 다음 소스 편집이 차단됩니다." >&2
   echo "  orchestrator.md 의 '스마트 라우팅 절차' 를 따라 섹션을 추가하세요." >&2
+fi
+
+# Auto-write `.active-dod` when routing approval is final.
+# Mirror pre-edit-dod-gate.sh L407-416 contract:
+#   - extract `## 라우팅 추천` section only (first occurrence; awk in_sec)
+#   - match `^[[:space:]]*approved_by_user:[[:space:]]*true([[:space:]]*#.*)?[[:space:]]*$`
+#     (inline `#` comment allowed; section-outer key rejected)
+# Atomic via mktemp + mv. Idempotent — same target path overwrites without diff.
+SECTION=$(awk '
+  /^## 라우팅 추천/ {if (!seen) {in_sec=1; seen=1}; next}
+  in_sec && /^## / {in_sec=0}
+  in_sec {print}
+' "$FILE_PATH" 2>/dev/null)
+if printf '%s\n' "$SECTION" | grep -qE '^[[:space:]]*approved_by_user:[[:space:]]*true([[:space:]]*#.*)?[[:space:]]*$'; then
+  REPO_REL_PATH="${FILE_PATH#$PROJECT_DIR/}"
+  ACTIVE_MARKER="$DOD_DIR/.active-dod"
+  TMP_MARKER=$(mktemp "$DOD_DIR/.active-dod.tmp.XXXXXX") || exit 0
+  printf 'path=%s\n' "$REPO_REL_PATH" > "$TMP_MARKER"
+  mv "$TMP_MARKER" "$ACTIVE_MARKER" 2>/dev/null || rm -f "$TMP_MARKER"
 fi
 
 exit 0

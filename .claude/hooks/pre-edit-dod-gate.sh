@@ -133,6 +133,20 @@ if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
 
+# Path normalize — 그룹 6 P4 (2026-04-25). 묶음 A 의 PYTHON_RUNNER
+# os.path.normpath 패턴 재사용 (.claude/hooks/post-edit-review-gate.sh).
+# URL-encoded / `//` / `/./` 세그먼트 포함 경로 edge case 보호. 정규화 전/후
+# 불일치 시 stderr NOTICE 만 (gate 동작 변경 없음). resolver 부재 fallback
+# 은 원본 사용 (silent). 이후 case 매칭은 정규화된 FILE_PATH 사용.
+FILE_PATH_NORM=$("${PYTHON_RUNNER[@]}" -c \
+  'import os,sys; print(os.path.normpath(sys.argv[1]))' \
+  "$FILE_PATH" 2>/dev/null) || FILE_PATH_NORM=""
+[ -z "$FILE_PATH_NORM" ] && FILE_PATH_NORM="$FILE_PATH"
+if [ "$FILE_PATH_NORM" != "$FILE_PATH" ]; then
+  echo "NOTICE: pre-edit-dod-gate normalized path: $FILE_PATH → $FILE_PATH_NORM" >&2
+fi
+FILE_PATH="$FILE_PATH_NORM"
+
 # --- 경로 기반 면제 (runtime state + operational data + git infra only) ---
 # M1 (2026-04-22 retro-review-sweep): 기존 blanket `*/.claude/*` exemption 제거.
 # 배경: .claude/rules/*, .claude/skills/**, .claude/agents/*, .claude/workflows/*,

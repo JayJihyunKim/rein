@@ -172,3 +172,16 @@ STAMP
 ~~~
 
 에스컬레이션 후 작업자는 잔존 이슈를 검토하여 직접 수정하거나 추가 지시를 내린다.
+
+## 사용자 안내
+
+이 SKILL 의 결과를 사용자에게 보고할 때 다음 짧은 형식을 **먼저** 출력한다 (위 `## 코드 리뷰 결과` 템플릿 + Stamp 메타데이터는 그 다음에 그대로 이어 붙인다). 형식은 한 문장 또는 두 문장 — 결과 1줄 + 다음 액션 1줄.
+
+**리뷰 PASS (이슈 없음)**:
+> 코드 리뷰 통과. 차단급 결함 없습니다. 다음은 [code-review path 면 보안 리뷰 / spec-review fallback path 면 `bash scripts/rein-mark-spec-reviewed.sh` 로 per-spec stamp 등록].
+
+**리뷰 NEEDS-FIX (수정 필요)**:
+> 리뷰에서 N건 수정이 필요해요 — [Severity 요약, 예: "Medium 2건 + Low 1건"]. [핵심 1-2건과 다음 액션, 예: "printf 형식 mismatch + symlink 테스트 stderr 미검증. 고치고 재리뷰"].
+
+**3회차에도 High 잔존 (사람 에스컬레이션)**:
+> 리뷰 3회차에도 High N건이 남아 있어 사람 에스컬레이션이 필요합니다. stamp 의 잔존 이슈를 확인하고 직접 수정하거나 추가 지시를 내려주세요.

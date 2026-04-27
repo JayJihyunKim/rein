@@ -469,9 +469,25 @@ def parse_dod(dod_path: Path) -> DodContext:
 
 
 def _resolve_plan_ref(dod_path: Path, plan_ref: str) -> Path | None:
-    """Resolve a DoD's plan_ref to an existing file path, or return None."""
+    """Resolve a DoD's plan_ref to an existing file path inside the project.
+
+    Containment check (그룹 6 P1, 2026-04-25): each candidate must resolve
+    inside ``Path.cwd()``. ``../../../etc/passwd`` style refs are rejected
+    so the validator never reads PROJECT_DIR-external files smuggled in
+    via DoD ``plan ref:`` lines.
+    """
+    project_root = Path.cwd().resolve()
     candidates = [dod_path.parent / plan_ref, Path.cwd() / plan_ref, Path(plan_ref)]
-    return next((p for p in candidates if p.exists()), None)
+    for cand in candidates:
+        if not cand.exists():
+            continue
+        try:
+            cand.resolve().relative_to(project_root)
+        except ValueError:
+            # Outside project root — reject this candidate.
+            continue
+        return cand
+    return None
 
 
 def _dod_is_grandfathered(dod_path: Path) -> bool:
@@ -479,11 +495,24 @@ def _dod_is_grandfathered(dod_path: Path) -> bool:
 
     Compares using the repo-relative path form (relative to CWD) which is
     the canonical form used in the grandfather set and in spec references.
+
+    Hardening (그룹 6 P3, 2026-04-25):
+      - ``ValueError`` (resolved outside project root) → ``False``
+        (raw ``as_posix()`` fall-back removed; same-basename symlink could
+        otherwise spoof grandfather membership).
+      - Component-wise ``is_symlink()`` check — any symlink in the path
+        rejects grandfather (defense-in-depth against symlink redirection).
     """
+    project_root = Path.cwd().resolve()
     try:
-        rel = dod_path.resolve().relative_to(Path.cwd().resolve()).as_posix()
+        rel = dod_path.resolve().relative_to(project_root).as_posix()
     except ValueError:
-        rel = dod_path.as_posix()
+        return False
+    cur = project_root
+    for part in Path(rel).parts:
+        cur = cur / part
+        if cur.is_symlink():
+            return False
     return rel in PHASE_2_GRANDFATHER_DODS
 
 

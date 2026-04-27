@@ -39,7 +39,9 @@ set -euo pipefail
 # ---- Locate project dir (git repo root if possible). ------------------
 
 _script_dir=$(cd "$(dirname "$0")" && pwd)
-PROJECT_DIR="$(cd "$_script_dir/.." && pwd)"
+# REIN_PROJECT_DIR_OVERRIDE: test sandbox override (격리 환경에서 wrapper
+# function 단독 호출 시 사용). 기본은 script 위치 기반 (실제 운영 동작 보존).
+PROJECT_DIR="${REIN_PROJECT_DIR_OVERRIDE:-$(cd "$_script_dir/.." && pwd)}"
 
 # If invoked from outside PROJECT_DIR, still operate on PROJECT_DIR so
 # select_active_dod reads the correct trail/dod.
@@ -124,11 +126,34 @@ EMPTY_TREE_SHA="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 _resolve_diff_base() {
   local stamp="$PROJECT_DIR/trail/dod/.codex-reviewed"
   if [ -f "$stamp" ]; then
-    local base
-    base=$(grep -E '^diff_base:' "$stamp" | head -1 | sed 's/^diff_base:[[:space:]]*//' || true)
-    if [ -n "$base" ]; then
-      printf '%s' "$base"
-      return 0
+    # Staleness self-healing (묶음 C Phase 2):
+    # stamp.reviewed_at < HEAD commit ISO → ignore stamp + fall through to HEAD~1.
+    # NOTE: actual wrapper schema field is `reviewed_at:` (write_code_review_stamp L772).
+    # python3 exit: 0 = stale (s < h), 1 = fresh, 2 = parse failure (fail-safe = stale).
+    local stamp_iso head_iso
+    stamp_iso=$(grep -E '^reviewed_at:' "$stamp" | head -1 | sed 's/^reviewed_at:[[:space:]]*//')
+    head_iso=$(git -C "$PROJECT_DIR" log -1 --format=%cI HEAD 2>/dev/null || true)
+    if [ -n "$stamp_iso" ] && [ -n "$head_iso" ]; then
+      python3 -c '
+import sys
+from datetime import datetime
+try:
+  s = datetime.fromisoformat(sys.argv[1].replace("Z","+00:00"))
+  h = datetime.fromisoformat(sys.argv[2])
+  sys.exit(0 if s < h else 1)
+except Exception:
+  sys.exit(2)
+' "$stamp_iso" "$head_iso" 2>/dev/null
+      local rc=$?
+      # rc=1 (fresh) → use stamp's diff_base. rc=0 (stale) or rc=2 (parse fail) → fall through.
+      if [ "$rc" = "1" ]; then
+        local base
+        base=$(grep -E '^diff_base:' "$stamp" | head -1 | sed 's/^diff_base:[[:space:]]*//' || true)
+        if [ -n "$base" ]; then
+          printf '%s' "$base"
+          return 0
+        fi
+      fi
     fi
   fi
   # HEAD~1 if it exists.
@@ -142,6 +167,25 @@ _resolve_diff_base() {
 }
 
 DIFF_BASE=$(_resolve_diff_base)
+
+# 4a.1 Timestamp metadata for Claim Audit evidence-freshness rule.
+#   diff_base_iso = commit time of DIFF_BASE (ISO-8601 %cI).
+#   head_iso      = commit time of HEAD.
+#   Empty stdout on exit 0 (empty-tree SHA, untracked file) → "(unavailable)".
+#   `||` shortcut fallback is NOT used because git log returns 0 with empty
+#   stdout for those cases; explicit `-z` check is required.
+_resolve_commit_iso() {
+  local ref="$1"
+  local out
+  out=$(git -C "$PROJECT_DIR" log -1 --format=%cI "$ref" -- 2>/dev/null || true)
+  if [ -z "$out" ]; then
+    printf '(unavailable)'
+  else
+    printf '%s' "$out"
+  fi
+}
+DIFF_BASE_ISO=$(_resolve_commit_iso "$DIFF_BASE")
+HEAD_ISO=$(_resolve_commit_iso "HEAD")
 
 # 4b. Changed files vs. diff base. We prefer --cached first (staged), then
 # merged with working-tree unstaged so we capture everything the reviewer
@@ -180,6 +224,31 @@ SAD_REASON=$(printf '%s' "$SAD_LINE" | cut -f3)
 #   1. <dirname($2)>/$1          (base-file-relative; most specific)
 #   2. $PROJECT_DIR/$1           (repo-relative)
 #   3. $1                        (CWD-relative / absolute)
+# Project-root containment check (그룹 6 P1, 2026-04-25): refuse candidates
+# that resolve outside PROJECT_DIR — `../../../etc/passwd` style refs from
+# DoD `plan ref:` / `design ref:` are rejected so envelope never reads
+# external files.
+#
+# Round 3 fix (codex review High, 2026-04-25): use python3 os.path.realpath
+# on BOTH target and PROJECT_DIR so leaf-symlink escapes (e.g. target itself
+# being `repo/foo.md → /private/tmp/foo.md`) resolve through. The earlier
+# `pwd -P` only canonicalized `dirname(target)` and reattached `basename`
+# as text, leaving leaf-symlinks bypassable. commonpath comparison aligns
+# with the python validator's `relative_to` semantics for behavioral parity.
+_path_within_project() {
+  local target="$1"
+  python3 -c '
+import os, sys
+try:
+    project = os.path.realpath(sys.argv[1])
+    target = os.path.realpath(sys.argv[2])
+    common = os.path.commonpath([project, target])
+    sys.exit(0 if common == project else 1)
+except (ValueError, OSError):
+    sys.exit(1)
+' "$PROJECT_DIR" "$target" 2>/dev/null
+}
+
 _resolve_relative_path() {
   local ref="$1"
   local base_file="$2"
@@ -194,7 +263,7 @@ _resolve_relative_path() {
     base_dir=$(cd "$(dirname "$base_file")" 2>/dev/null && pwd)
     if [ -n "$base_dir" ]; then
       candidate="$base_dir/$ref"
-      if [ -f "$candidate" ]; then
+      if [ -f "$candidate" ] && _path_within_project "$candidate"; then
         (cd "$(dirname "$candidate")" && printf '%s/%s\n' "$(pwd)" "$(basename "$candidate")")
         return 0
       fi
@@ -202,12 +271,12 @@ _resolve_relative_path() {
   fi
 
   candidate="$PROJECT_DIR/$ref"
-  if [ -f "$candidate" ]; then
+  if [ -f "$candidate" ] && _path_within_project "$candidate"; then
     (cd "$(dirname "$candidate")" && printf '%s/%s\n' "$(pwd)" "$(basename "$candidate")")
     return 0
   fi
 
-  if [ -f "$ref" ]; then
+  if [ -f "$ref" ] && _path_within_project "$ref"; then
     (cd "$(dirname "$ref")" && printf '%s/%s\n' "$(pwd)" "$(basename "$ref")")
     return 0
   fi
@@ -363,6 +432,61 @@ _claim_sources() {
   printf '(no claim sources available)\n'
 }
 CLAIM_SOURCES=$(_claim_sources)
+
+# 4h.1 Claim source file-reference extraction for evidence-freshness rule.
+#
+# Scans CLAIM_SOURCES for repo-relative file paths matching a conservative
+# whitelist (.md/.sh/.py/.ya?ml/.json/.txt). Each candidate is filtered:
+#   1. regex must match as a whole token (surrounded by whitespace/BOL/EOL
+#      or markdown delimiters to avoid false positives inside words)
+#   2. security filter: paths containing ../, shell metachars (; ` $(), or
+#      newlines are skipped — prevents command injection into later git log
+#   3. existence check: `[ -f "$PROJECT_DIR/$path" ]` must succeed — a
+#      non-existent path would only yield noise in the envelope
+# At most 20 items are kept to bound envelope size.
+_extract_claim_source_file_refs() {
+  local input="$1"
+  [ -z "$input" ] && return 0
+  local count=0
+  local limit=20
+  # Extract candidate tokens using grep -oE on a permissive pattern, then
+  # apply security + existence filters in a pure-bash loop.
+  # The pattern requires at least one slash OR a leading dir-looking prefix
+  # so we don't pick up bare filenames that happen to end in .md.
+  local pattern='[A-Za-z0-9_./-]+\.(md|sh|py|yaml|yml|json|txt)'
+  local candidate
+  while IFS= read -r candidate; do
+    [ -z "$candidate" ] && continue
+    # Security filter: skip ../ traversal, shell metachars, newlines.
+    case "$candidate" in
+      *../*|*\;*|*\`*|*'$('*|*$'\n'*) continue ;;
+    esac
+    # Existence check against project root.
+    [ -f "$PROJECT_DIR/$candidate" ] || continue
+    printf '%s\n' "$candidate"
+    count=$((count + 1))
+    [ "$count" -ge "$limit" ] && break
+  done < <(printf '%s' "$input" | grep -oE "$pattern" 2>/dev/null || true)
+}
+
+# Emit `claim_source_iso_hints:` block if at least one extracted reference
+# exists. Each line shows `  <path>: <iso-or-unavailable>`. Mirrors
+# _resolve_commit_iso semantics for the empty-stdout-on-success case.
+_emit_claim_source_iso_hints() {
+  local paths
+  paths=$(_extract_claim_source_file_refs "$CLAIM_SOURCES")
+  [ -z "$paths" ] && return 0
+  printf '\nclaim_source_iso_hints:\n'
+  local p iso
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    iso=$(git -C "$PROJECT_DIR" log -1 --format=%cI -- "$p" 2>/dev/null || true)
+    if [ -z "$iso" ]; then
+      iso='(unavailable)'
+    fi
+    printf '  %s: %s\n' "$p" "$iso"
+  done <<< "$paths"
+}
 
 # ---- Envelope builder (Task 6.2). -------------------------------------
 
@@ -527,6 +651,42 @@ Required review sections (모두 응답에 포함해야 한다):
    4. Claim source 우선순위 (Spec A GI-codex-review-context-assembly 에서 주입):
       PR title/body > HEAD commit > DoD/plan top > (pre-commit) "unavailable"
 
+   5. Evidence freshness
+
+      context block 의 claim_source_iso_hints 각 항목에 대해 last-commit ISO 를
+      diff_base_iso 와 비교:
+
+      - last-commit ISO < diff_base_iso → "stale evidence", HIGH severity flag
+      - ISO = (unavailable) → freshness 판정 skip + advisory 기록만 (severity Low)
+
+      본 slot 응답에 plaintext 로 entity + timestamp + 판정을 명시.
+      (verdict 승격 강제는 sub-item 6 의 discrepancy 기준만 적용 —
+      freshness HIGH 는 slot 내부 severity flag 일 뿐 verdict 강제 아님)
+
+   6. Claim discrepancy escalation
+
+      sub-item 1 (numeric mapping) 에만 적용. expected 값과 관찰 값 관계에서
+      다음 중 하나 충족 시 **응답 첫 줄에 NEEDS-FIX 출력**:
+
+      (a) |expected - observed| / max(|expected|, 1) > 0.20
+      (b) 1:1 mapping 누락 항목 수 ≥ 1
+
+      sub-item 2 (feature name) / sub-item 3 (Matrix deferred 사유) 는
+      boolean/qualitative 이므로 본 rule 대상 아님 — 기존 High 판정 규칙 유지.
+      Evidence freshness (sub-item 5) 의 HIGH 판정도 본 rule 의 verdict 승격
+      대상이 **아님** (numeric mapping claim 전용).
+
+응답 출력 형식 (필수 — P2 verdict parser hardening, 2026-04-25):
+
+응답의 **마지막 줄**에 반드시 아래 한 줄을 출력한다 (parser 가 이 라인을 우선
+매칭한다):
+
+  FINAL_VERDICT: <PASS|NEEDS-FIX|REJECT>
+
+위 라인이 없으면 wrapper 는 첫 줄 keyword 매칭으로 fallback 하며, 둘 다 부재
+시 NEEDS-FIX 로 처리한다. 본문에서 판정을 분석한 뒤에도 마지막에 위 한 줄을
+반드시 다시 출력하라.
+
 SLOTS
 
   # 6.2 Step 4: structured context block.
@@ -535,6 +695,8 @@ SLOTS
 Context:
 
 diff_base: ${DIFF_BASE}
+diff_base_iso: ${DIFF_BASE_ISO}
+head_iso: ${HEAD_ISO}
 active_dod_tier: ${SAD_TIER}
 active_dod_path: ${SAD_PATH}
 active_dod_reason: ${SAD_REASON}
@@ -552,17 +714,50 @@ ${CHANGED_FILES:-(none)}
 
 claim_sources:
 ${CLAIM_SOURCES}
----
 CTX
+  # Optional per-file ISO hints (only emitted if any file ref detected).
+  _emit_claim_source_iso_hints
+  printf -- '---\n'
 }
 
 # ---- Codex invocation (Task 6.3). -------------------------------------
 
 CODEX_BIN="${CODEX_BIN:-codex}"
 
-# Verdict parser. Stdout search order: REJECT > NEEDS-FIX > PASS.
+# Verdict parser — 3-stage chain (P2 hardening, 2026-04-25).
+#
+# Stage 1: dedicated `FINAL_VERDICT: <keyword>` line (envelope 가 출력 형식
+#          섹션에서 codex 에게 명시 지시; parser 가 line-anchored 로 가장
+#          우선 매칭). REJECT > NEEDS-FIX > PASS 우선순위는 head -1 의 단일
+#          매치 라인 안에서만 결정 — 파일 안 첫 FINAL_VERDICT 라인이 verdict.
+#
+# Stage 2: legacy first-position keyword on any line (backward-compat —
+#          transition 기간에 envelope 지시 도달 전후 응답 패턴 동시 지원).
+#          Priority: REJECT > NEEDS-FIX > PASS. 본문에 'PASS analysis' 같은
+#          서술을 첫 컬럼이 아니라 들여써서 작성하면 false-match 방지.
+#
+# Stage 3: 둘 다 부재 → NEEDS-FIX (보수적 fallback 유지).
+#
+# 두 세션 연속 false-verdict 재현 (2026-04-24 claim-audit-hardening +
+# 2026-04-25 spec-flow-policy-hardening) 의 근본 해결.
 _parse_verdict() {
   local out="$1"
+  local fv_line
+  # Stage 1: FINAL_VERDICT line. case-insensitive, REJECT > NEEDS-FIX > PASS
+  # within the matched line (each line carries exactly one keyword anyway).
+  fv_line=$(printf '%s' "$out" \
+    | grep -iE '^[[:space:]]*FINAL_VERDICT:[[:space:]]*(REJECT|NEEDS[-_ ]?FIX|PASS)\b' \
+    | head -1 || true)
+  if [ -n "$fv_line" ]; then
+    if printf '%s' "$fv_line" | grep -qiE 'REJECT\b'; then
+      printf 'REJECT'; return 0
+    elif printf '%s' "$fv_line" | grep -qiE 'NEEDS[-_ ]?FIX\b'; then
+      printf 'NEEDS-FIX'; return 0
+    elif printf '%s' "$fv_line" | grep -qiE 'PASS\b'; then
+      printf 'PASS'; return 0
+    fi
+  fi
+  # Stage 2: legacy first-position keyword on any line.
   if printf '%s' "$out" | grep -qiE '^[[:space:]]*REJECT\b'; then
     printf 'REJECT'
   elif printf '%s' "$out" | grep -qiE '^[[:space:]]*NEEDS[-_ ]?FIX\b'; then
@@ -570,7 +765,7 @@ _parse_verdict() {
   elif printf '%s' "$out" | grep -qiE '^[[:space:]]*PASS\b'; then
     printf 'PASS'
   else
-    # Unknown verdict → treat as NEEDS-FIX (conservative).
+    # Stage 3: unknown → NEEDS-FIX.
     printf 'NEEDS-FIX'
   fi
 }

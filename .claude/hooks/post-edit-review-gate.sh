@@ -50,21 +50,29 @@ FOUND_SOURCE=false
 while IFS= read -r FILE_PATH; do
   [ -z "$FILE_PATH" ] && continue
 
-  # 제외 경로: trail/, docs/, *.md 파일 (루트 상대경로도 매치)
-  case "$FILE_PATH" in
+  # 경로 정규화 — `./trail/...`, `//trail/...`, 비정규 절대경로 edge case
+  # 보호 (need-to-confirm.md 그룹 8 item 2). python resolver 부재/실패 시
+  # 원본 사용 (post-hook 은 best-effort, silent fail 정책).
+  FILE_PATH_NORM=$("${PYTHON_RUNNER[@]}" -c \
+    'import os,sys; print(os.path.normpath(sys.argv[1]))' \
+    "$FILE_PATH" 2>/dev/null) || FILE_PATH_NORM=""
+  [ -z "$FILE_PATH_NORM" ] && FILE_PATH_NORM="$FILE_PATH"
+
+  # 제외 경로: trail/, docs/, *.md 파일 (정규화된 경로로 매치)
+  case "$FILE_PATH_NORM" in
     trail/*|*/trail/*|docs/*|*/docs/*|*.md)
       continue
       ;;
   esac
 
   # 소스 코드 확장자 확인
-  if echo "$FILE_PATH" | grep -qE "$SOURCE_EXT_PATTERN"; then
+  if echo "$FILE_PATH_NORM" | grep -qE "$SOURCE_EXT_PATTERN"; then
     FOUND_SOURCE=true
     break
   fi
 
   # Dockerfile (확장자 없음) 처리
-  BASENAME=$(basename "$FILE_PATH")
+  BASENAME=$(basename "$FILE_PATH_NORM")
   if [ "$BASENAME" = "Dockerfile" ] || echo "$BASENAME" | grep -qE "^Dockerfile\."; then
     FOUND_SOURCE=true
     break

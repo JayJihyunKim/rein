@@ -98,6 +98,9 @@ Hang 감지 시: `lsof -p <pid> -i` 결과가 비어 있거나 (`ps -o %cpu` 가
 | Stamp 생성    | **필수** (`.codex-reviewed`) | **절대 금지**           |
 | Resume --last | 같은 사이클 내 허용          | **금지** — 매번 새 세션 |
 | Sandbox       | 상황별 (기본 read-only)      | 항상 `read-only`        |
+| **Fallback**  | codex 실행 **실패** 시에만 Sonnet/code-reviewer/human fallback 허용 | **same-session Claude fallback 금지**. 독립 reviewer 부재 시 degraded / no-second-opinion 으로 명시 |
+
+Fallback 정책 비대칭 이유는 `.claude/skills/codex-review/SKILL.md` §1 Mode 대비 절 참조. 요지: Mode A 는 stamp 생성 자체가 게이트 통과 조건이므로 차순위 reviewer 허용, Mode B 는 "독립 관점" 이 본질이므로 same-session Claude 대체 불가.
 
 ---
 
@@ -132,6 +135,9 @@ Hang 감지 시: `lsof -p <pid> -i` 결과가 비어 있거나 (`ps -o %cpu` 가
 ## 6. Error Handling
 
 - `codex exec` 가 non-zero exit → 사용자에게 보고 후 재시도 여부 질의. **폴백 없음** — Second opinion 은 리뷰 게이트가 아니므로 실패해도 작업 차단이 발생하지 않는다.
+  - **Same-session Claude fallback 금지**: codex 가 실패했을 때 "그럼 Claude 가 직접 second opinion 을 내겠다" 는 경로는 **본질 위반**. Mode B 의 가치는 주 세션과 독립된 외부 관점이며, same-session Claude 는 정의상 독립 reviewer 가 아니다.
+  - **차순위 옵션**: (a) 시간을 두고 Mode B 재시도 (b) 호출자가 결과 없이 작업을 계속하되 "second opinion 부재" 사실을 의식적으로 인지 (c) 사용자에게 직접 검토 요청. (a)/(b)/(c) 어느 쪽도 stamp 나 marker 를 만들지 않는다.
+  - Mode A (`/codex-review`) 와의 비대칭: Mode A 는 stamp 생성 자체가 게이트 통과 조건이라 codex 실패 시 Sonnet/code-reviewer/human fallback 으로 stamp 를 만들 수 있다. Mode B 는 stamp 가 아예 없으므로 fallback 의 동기 자체가 다르다.
 - 고위험 플래그는 기본적으로 사용하지 않는다. `/codex-ask` 는 `--sandbox read-only` 고정이므로 `--sandbox danger-full-access` / `--full-auto` 의 위험 조합이 발생하지 않는다.
 - 출력에 경고나 부분 결과가 포함되면 요약 후 `AskUserQuestion` 으로 다음 질의 방향 확인.
 - **Hang 증상 탐지** (§2 실행 모드 절 참고):
@@ -139,3 +145,20 @@ Hang 감지 시: `lsof -p <pid> -i` 결과가 비어 있거나 (`ps -o %cpu` 가
   - 체크: `lsof -p <pid> -i` 결과 비어있으면 API 요청조차 못 보낸 상태. `ps -o stat,%cpu,etime -p <pid>` 로 Sleep 상태 확인
   - 대응: kill 후 **foreground + stdin close + 직접 파일 출력** 형태로 재호출 (`> /tmp/out 2>&1 < /dev/null`, `run_in_background: false`)
   - 배경: Bash 도구 auto-background 전환 시 stdin 이 unix socket 으로 붙어 codex 초기화 실패. 근거: `.claude/rules/background-jobs.md` 예외 절 + `trail/dod/dod-2026-04-22-codex-foreground-policy.md`
+
+---
+
+## 7. 사용자 안내
+
+Mode B 의 결과를 사용자에게 보고할 때 다음 짧은 형식을 **먼저** 출력한다 (운영자/디테일 codex 본문은 그 다음에 그대로 이어 붙인다). 형식은 한 문장 또는 두 문장 — 결과 1줄 + 다음 액션 1줄.
+
+**Sanity check / 반박 결과 — codex 가 invalid 지적 또는 빠진 변수 짚음**:
+> codex 가 [지적 핵심 — 예: "질문 초안에서 빠진 결정 변수 N개" 또는 "Option B 기각 근거의 허점 1건"] 을 짚어줬어요. [다음 액션 — 질문 재작성 / 결정 재고려 / 사용자 결정 받기].
+
+**Sanity check 통과 / 권고 수렴**:
+> codex 가 결론을 인정했습니다. [핵심 권고 한 줄, 있으면]. 다음 단계로 진행하세요.
+
+**codex 실행 실패 (No fallback)**:
+> codex 가 떠지지 않아 second opinion 을 받지 못했어요. Mode B 는 fallback 없습니다 — 시간을 두고 재시도하거나 사용자가 직접 검토하세요.
+
+이 짧은 안내 후에 기존 codex 본문을 그대로 emit 한다. **stamp 생성 금지** — Mode B 는 §3 에 따라 어떤 review marker 도 만들지 않는다.

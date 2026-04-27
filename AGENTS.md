@@ -259,7 +259,7 @@ Incident 파일 포맷:
 
 ## 9. trail 운영 규칙
 
-- `trail/index.md`: 프로젝트 현재 상태 **5~15줄** 유지 (매 세션 시작 시 읽는 유일한 상태 파일)
+- `trail/index.md`: 프로젝트 현재 상태 **5~25줄** 유지 (매 세션 시작 시 읽는 유일한 상태 파일). `stop-session-gate.sh` 가 범위 위반 시 차단
 - `trail/inbox/`: 세션 원본 로그 저장 (daily에서 요약 후 삭제)
 - `trail/daily/`: 하루 1회 압축 요약
 - `trail/weekly/`: 주 1회 재요약

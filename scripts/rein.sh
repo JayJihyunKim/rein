@@ -17,7 +17,7 @@ warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 fatal() { echo -e "${RED}Fatal: $*${NC}" >&2; exit 1; }
 
-VERSION="1.1.4"
+VERSION="1.2.0"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
@@ -1538,13 +1538,64 @@ copy_file() {
   local dst="$dest_dir/$rel_path"
 
   mkdir -p "$(dirname "$dst")"
-  cp "$src" "$dst"
 
-  # POSIX cp preserves the existing dst mode when dst already exists, so a
-  # project installed before the template got 100755 on its hooks keeps 644
-  # forever. Grant the exec bit when src has it; never revoke (minimal risk).
-  if [[ -x "$src" && ! -x "$dst" ]]; then
-    chmod +x "$dst"
+  # Refuse to overwrite a symlink at dst (need-to-confirm.md 그룹 4B, 2026-04-25).
+  # Mirrors _install_cli_helpers (above) + bc97752 family — prevents symlink
+  # redirection / TOCTOU when a malicious symlink at dst would otherwise
+  # cause `cp` to follow the link and overwrite an attacker-chosen path.
+  if [[ -L "$dst" ]]; then
+    warn "Refusing to overwrite symlink at $dst (skipping $rel_path)"
+    return 0
+  fi
+
+  # Capture pre-existing dst mode for additive OR (never-revoke).
+  local prev_dst_mode=""
+  if [[ -f "$dst" ]]; then
+    prev_dst_mode=$(stat -f '%Lp' "$dst" 2>/dev/null || stat -c '%a' "$dst" 2>/dev/null || echo "")
+  fi
+
+  # Atomic write — 묶음 D (d) advisory: cp → mktemp tmp → mode 적용 → mv.
+  # `_install_cli_helpers` (rein.sh:867) 패턴 재사용. `[[ -L $dst ]]` check 와
+  # 최종 dst 사이 race window 단축. mktemp 실패 시 fallback to direct cp
+  # (best-effort) — Round 2 fix: fallback 에서도 동일한 mode parity 로직 적용
+  # 해 atomicity 만 포기하고 grant-up / never-revoke contract 는 보존.
+  local tmp target
+  if tmp=$(mktemp "${dst}.XXXXXX" 2>/dev/null); then
+    cp "$src" "$tmp"
+    target="$tmp"
+  else
+    cp "$src" "$dst"
+    target="$dst"
+  fi
+
+  # Additive mode parity (need-to-confirm.md 그룹 4A, 2026-04-25 + 묶음 D
+  # advisory a/b/c):
+  #   - 권한 확대 (grant-up) 정책 — template 일관성 우선. 사용자 chmod 축소
+  #     (예: 0700) 도 src level 의 set bit 들로 grant up 됨 (의도된 trade-off).
+  #   - portable stat: macOS BSD `stat -f '%Lp'` → Linux GNU `stat -c '%a'` fallback.
+  #   - octal regex 검증 (^[0-7]+$) — 비정상 stat 출력 시 fallback path 강등.
+  #   - chmod -- 옵션 파싱 종료 — leading-dash dst 방어.
+  #   - target mode = src mode OR prev dst mode (octal). src 의 set bit 모두
+  #     grant + dst 의 추가 bit 보존 (never-revoke 정책, 회귀 test case 4 호환).
+  #   - stat 부재 환경 fallback: 기존 `chmod +x` grant only.
+  local src_mode
+  src_mode=$(stat -f '%Lp' "$src" 2>/dev/null || stat -c '%a' "$src" 2>/dev/null || echo "")
+  if [[ "$src_mode" =~ ^[0-7]+$ ]]; then
+    local combined
+    if [[ "$prev_dst_mode" =~ ^[0-7]+$ ]]; then
+      combined=$(printf '%o' "$((0$src_mode | 0$prev_dst_mode))")
+    else
+      combined="$src_mode"
+    fi
+    chmod -- "$combined" "$target"
+  elif [[ -x "$src" && ! -x "$target" ]]; then
+    chmod -- +x "$target"
+  fi
+
+  # Atomic rename — race window 단축 (advisory d). mktemp fallback 일 때는
+  # target == dst 라 mv skip.
+  if [[ "$target" != "$dst" ]]; then
+    mv -- "$tmp" "$dst"
   fi
 }
 

@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib/portable.sh"
 
 # sandbox/테스트용 override — 설정 시 이 값 사용, 아니면 기본 경로 계산
-PROJECT_DIR="${REIN_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+PROJECT_DIR="${REIN_PROJECT_DIR_OVERRIDE:-${REIN_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}}"
 
 BUDGET_BYTES="${REIN_BUDGET_BYTES:-65536}"
 USED_BYTES=0
@@ -73,6 +73,85 @@ rm -f "$PROJECT_DIR/trail/dod/.incident-decision-deferred" 2>/dev/null
 find "$PROJECT_DIR/.claude/cache" -maxdepth 1 -type f \
   -name 'active-dod-choice.session-*.flag' \
   -mmin +60 -delete 2>/dev/null || true
+
+# ---- 묶음 C Phase 3: `.active-dod` cleanup ----------------------------
+# 4 categories trigger removal (각각 incident log 기록):
+#   (a) path security violation (containment / traversal / metachars / empty)
+#   (b) target file missing
+#   (c) target lacks `## 범위 연결`
+#   (d) target archived (matching inbox or daily completion record — exact match)
+# Path validation 은 file -f / grep / glob 검사 보다 **선행** (Task 3.4).
+# `path=` 첫 줄만 채택 (Task 3.5 first-line contract; head -1).
+# POSIX-portable shell glob + case (find -regex GNU/BSD 비대칭 회피).
+ACTIVE_MARKER="$PROJECT_DIR/trail/dod/.active-dod"
+if [ -f "$ACTIVE_MARKER" ]; then
+  TARGET_PATH=$(grep '^path=' "$ACTIVE_MARKER" 2>/dev/null | head -1 | sed 's/^path=//')
+  REMOVE_REASON=""
+  if [ -z "$TARGET_PATH" ]; then
+    REMOVE_REASON="empty path"
+  elif ! printf '%s' "$TARGET_PATH" | grep -qE '^[a-zA-Z0-9_./-]+$'; then
+    REMOVE_REASON="path contains disallowed metachars"
+  elif printf '%s' "$TARGET_PATH" | grep -qE '(^|/)\.\.(/|$)'; then
+    REMOVE_REASON="path contains .. segment"
+  elif ! python3 -c '
+import os,sys
+project=os.path.realpath(sys.argv[1])
+target=os.path.realpath(os.path.join(project, sys.argv[2]))
+sys.exit(0 if os.path.commonpath([project, target]) == project else 1)
+' "$PROJECT_DIR" "$TARGET_PATH" 2>/dev/null; then
+    REMOVE_REASON="path resolves outside PROJECT_DIR"
+  elif [ ! -f "$PROJECT_DIR/$TARGET_PATH" ]; then
+    REMOVE_REASON="target file missing"
+  elif ! grep -qE '^## 범위 연결' "$PROJECT_DIR/$TARGET_PATH" 2>/dev/null; then
+    REMOVE_REASON="target lacks ## 범위 연결"
+  else
+    # Archived check: same slug in inbox or daily — EXACT match only.
+    SLUG=$(basename "$TARGET_PATH" .md | sed -E 's/^dod-[0-9]{4}-[0-9]{2}-[0-9]{2}-//')
+    if [ -n "$SLUG" ]; then
+      # Inbox: exact filename `<YYYY>-<MM>-<DD>-<SLUG>.md` (case re-validates).
+      for f in "$PROJECT_DIR/trail/inbox/"*-"${SLUG}".md; do
+        [ -e "$f" ] || continue
+        base=$(basename "$f")
+        case "$base" in
+          [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-"${SLUG}".md)
+            REMOVE_REASON="archived: matching inbox completion record"
+            break
+            ;;
+        esac
+      done
+      # Daily: heading line `^# <slug>` with trailing whitespace only (no substring).
+      # awk literal compare 로 SLUG metachar injection (예: 합법 slug `foo.bar` 가
+      # daily `# fooXbar` 와 ERE false-match) 차단. inbox case 글로브는 `.` literal
+      # 이라 안전; daily 만 grep -E → awk 로 비대칭 해소.
+      if [ -z "$REMOVE_REASON" ]; then
+        for daily_file in "$PROJECT_DIR/trail/daily/"*.md; do
+          [ -e "$daily_file" ] || continue
+          if awk -v slug="$SLUG" '
+            BEGIN { found=0 }
+            /^#[[:space:]]/ {
+              line = $0
+              sub(/^#[[:space:]]+/, "", line)
+              sub(/[[:space:]]+$/, "", line)
+              if (line == slug) { found=1; exit }
+            }
+            END { exit (found ? 0 : 1) }
+          ' "$daily_file" 2>/dev/null; then
+            REMOVE_REASON="archived: matching daily completion heading"
+            break
+          fi
+        done
+      fi
+    fi
+  fi
+  if [ -n "$REMOVE_REASON" ]; then
+    rm -f "$ACTIVE_MARKER" 2>/dev/null
+    mkdir -p "$PROJECT_DIR/trail/incidents" 2>/dev/null
+    printf '%s\t%s\t%s\n' \
+      "$(date -u +%FT%TZ)" "$REMOVE_REASON" "$TARGET_PATH" \
+      >> "$PROJECT_DIR/trail/incidents/active-dod-cleanup.log" 2>/dev/null || true
+  fi
+fi
+# ---- end 묶음 C Phase 3 ------------------------------------------------
 
 cd "$PROJECT_DIR" || exit 0
 

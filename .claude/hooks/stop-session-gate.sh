@@ -160,11 +160,19 @@ if [ "$INBOX_TODAY" = false ]; then
 fi
 
 # --- trail/index.md 갱신 확인 ---
-# 오늘 수정되었는지 (mtime 기준)
+# 오늘 수정되었는지 (mtime 기준) + 줄 수 규칙 (5~25줄, AGENTS.md §9)
 if [ -f "$INDEX_FILE" ]; then
   INDEX_DATE=$(date -r "$INDEX_FILE" +%Y-%m-%d 2>/dev/null || stat -c %y "$INDEX_FILE" 2>/dev/null | cut -d' ' -f1)
   if [ "$INDEX_DATE" != "$TODAY" ]; then
     MISSING="${MISSING}\n- trail/index.md가 오늘 갱신되지 않았습니다."
+  fi
+
+  # 줄 수 규칙 강제 (5~25줄). trail/index.md 상단 안내 주석 + AGENTS.md §9
+  # 가 같은 범위를 명시한다. 위반 시 차단 메시지에 현재 줄 수 표시
+  # (need-to-confirm.md 그룹 5 — 2026-04-25).
+  INDEX_LINES=$(wc -l < "$INDEX_FILE" 2>/dev/null | tr -d ' ' || echo 0)
+  if [ -n "$INDEX_LINES" ] && { [ "$INDEX_LINES" -lt 5 ] || [ "$INDEX_LINES" -gt 25 ]; }; then
+    MISSING="${MISSING}\n- trail/index.md가 ${INDEX_LINES}줄입니다. 5~25줄 범위로 유지하세요."
   fi
 fi
 
