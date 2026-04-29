@@ -34,8 +34,6 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 @.claude/rules/subagent-review.md
 @.claude/rules/design-plan-coverage.md
 @.claude/rules/background-jobs.md
-@.claude/rules/readme-style.md
-@.claude/rules/versioning.md
 
 ---
 

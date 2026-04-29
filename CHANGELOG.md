@@ -2,6 +2,17 @@
 
 > **Versioning policy (2026-04-22~)**: 버전 bump 는 `.claude/rules/versioning.md` 의 **Rule A/B/C** 를 따른다 — (A) 변경 유형별 bump (user-facing breaking=major, new feature=minor, fix=patch, internal=no bump), (B) 같은 날 복수 bump 금지 (hotfix 예외), (C) CHANGELOG 는 user-facing 만. 규칙 제정 이전 릴리즈 (v1.1.0 이하) 중 **v1.0.0 → v1.1.0 (2026-04-21 당일 2회차)** 는 Rule B 기준 위반이었으나 bump 값 자체는 Rule A 정당 (rein job / rein remove / 3-way merge 등 신규 user-facing CLI). 소급 롤백 없음. 이 policy 부터 새 규칙 적용.
 
+## v2.0.0 — 2026-04-28 (plugin-first restructure)
+
+- **Breaking**: `rein init` default mode 가 scaffold 에서 plugin 으로 변경. 기존 사용자는 `rein migrate` 또는 명시적 `--mode=scaffold`.
+- **New**: `rein migrate`, `rein publish`, `rein doctor` 명령 추가.
+- **New**: plugin 패키지 (rein-core, rein-stitch, rein-react, rein-remotion) Anthropic + 자체 marketplace publish.
+- **Behavior**: plugin 모드에서 `.claude/CLAUDE.md` 소유권이 사용자/Claude Code 로 환원. rein 이 미수정.
+- **Behavior**: router learning 데이터 가 `.claude/router/` → `.rein/policy/router/` 로 이동 (git mv 로 history 보존).
+- **Deprecation**: `--mode=scaffold` 는 v2.5+ 부터 warning. v3.0 에서 fallback-only 로 격하 검토.
+
+See plugin-first restructure spec/plan: docs/specs/2026-04-27-plugin-first-restructure.md, docs/plans/2026-04-27-plugin-first-restructure-plan.md
+
 ## [v1.2.1] - 2026-04-27
 
 > 누적 묶음 A (wrapper-hook quick wins) + B1 (copy_file hardening) + B2 (SKILL Step 7 UX) + D (defense-in-depth) + C (wrapper context lifecycle) + C-followup (pipe-bash hint) 를 한 번에 patch bump 으로 반영. Rule A 누적 = patch.
@@ -35,6 +46,7 @@
 
 - 본 릴리즈는 누적 6 묶음의 patch 통합 — 사용자 측 호환성 변경 없음. `rein update` 한 번이면 모두 반영.
 - Hook 동작은 모두 backward compatible — 기존 사용자 워크플로 영향 없음.
+- main commit `d70bff7` + tag `v1.2.1`. dev sync commit (본 entry) 으로 dev = main superset 유지 (단방향 원칙 회복).
 
 ## [v1.2.0] - 2026-04-24
 

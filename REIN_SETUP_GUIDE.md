@@ -103,6 +103,48 @@ git fetch template && git merge template/main
 | 히스토리 | 없음 (깨끗한 시작) | 없음 | 템플릿 커밋 히스토리 포함 |
 | 이후 업데이트 | 수동 | 수동 | `git merge template/main` |
 
+### v1.x → v2.0 Migration (`rein migrate`)
+
+v2.0 부터 `rein init` 의 기본 모드가 **plugin 모드** 로 변경됐습니다. 기존 v1.x 사용자(`scaffold` 모드로 설치된 repo)는 두 가지 선택지가 있습니다.
+
+**선택 A — 그대로 scaffold 모드 유지** (변경 없음)
+
+```bash
+rein update      # 기존처럼 작동, scaffold 모드 유지. 추가 작업 없음.
+```
+
+`rein init --mode=scaffold` 가 v2.5+ 부터 stderr deprecation warning 을 emit 하지만 **v3.0 까지는 정상 동작**합니다. 기존 워크플로 그대로 유지 가능.
+
+**선택 B — plugin 모드로 전환** (권장)
+
+```bash
+rein migrate     # 자동 변환:
+                 #   - .claude/.rein-manifest.json 제거
+                 #   - .claude/settings.json 에 plugin pin 추가
+                 #   - .claude/hooks/, .claude/skills/, .claude/agents/ 의 plugin 미러 파일 제거
+                 #     (scaffold-overlay 만 남기고 SSOT 는 plugin 으로 이관)
+                 #   - .rein/project.json 에 mode=plugin 기록
+                 #   - .rein/policy/router/ 로 router 학습 데이터 이관
+```
+
+전환 후 변화:
+- repo 가 가벼워짐 (수십 개 파일이 plugin 영역으로 이동)
+- `rein update` 대신 Claude Code 가 plugin marketplace 에서 자동 fetch
+- hook/skill 직접 수정이 필요하면 `.rein/policy/{hooks,rules}.yaml` 로 override 가능
+- 사용자 편집한 `.claude/CLAUDE.md` 는 plugin 모드에서 **건드리지 않음** (소유권 환원)
+
+전환 전 백업 권장:
+```bash
+cp -r .claude .claude.backup-pre-v2-migrate
+rein migrate
+# 문제 발생 시: rm -rf .claude && mv .claude.backup-pre-v2-migrate .claude
+```
+
+migrate 가 자동 처리하지 못하는 케이스(매우 광범위한 hook 커스터마이징 등)는 `--dry-run` 으로 미리 확인:
+```bash
+rein migrate --dry-run
+```
+
 ---
 
 ## 프레임워크 구조
@@ -252,6 +294,23 @@ Claude Code가 세션 시작 시 자동으로 읽는 순서:
 #### 1-5. `.claude/orchestrator.md` — 작업 라우팅
 
 프로젝트에서 사용하지 않는 작업 유형이 있다면 제거합니다. 예를 들어 ML이 없는 프로젝트라면 관련 라우팅을 삭제합니다.
+
+#### 1-6. Slash command 호출 규약 (플러그인 모드, v2.0+)
+
+플러그인 모드에서 Rein 의 스킬은 `/rein-core:` 네임스페이스 아래로 노출됩니다. 예를 들어 코드 리뷰 스킬은 `/rein-core:codex-review`, second-opinion 스킬은 `/rein-core:codex-ask` 로 호출합니다.
+
+##### Custom alias 권장
+설정 파일 `.claude/settings.json` 에 다음 추가 시 짧은 호출 가능:
+```json
+{
+  "aliases": {
+    "/cr": "/rein-core:codex-review",
+    "/ca": "/rein-core:codex-ask"
+  }
+}
+```
+
+`aliases` 는 **사용자 opt-in 커스터마이징**입니다. `rein init` 이 기본값으로 등록하지 않으므로 짧은 호출이 필요한 사용자만 추가하세요.
 
 ---
 

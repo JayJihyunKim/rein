@@ -124,7 +124,26 @@ rein new my-project && cd my-project && git init
 claude
 ```
 
+기존 디렉토리에 통합하려면 `rein init` (v2.0+ 부터 plugin 모드가 기본):
+
+```bash
+cd existing-project
+rein init                  # plugin 모드 (기본, v2.0+) — 가벼운 풋프린트
+rein init --mode=scaffold  # scaffold 모드 (legacy) — repo 에 모든 파일 직접 복사
+```
+
 > 상세 커스터마이징은 [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) 참조.
+
+### Plugin 모드 vs scaffold 모드 (v2.0+)
+
+| 항목 | plugin 모드 (기본) | scaffold 모드 (`--mode=scaffold`) |
+|---|---|---|
+| repo 에 추가되는 파일 | `.rein/project.json` + `.claude/settings.json` 의 plugin pin | 21개 (hooks/skills/agents/rules + AGENTS.md 등 전체 사본) |
+| 업데이트 방식 | Claude Code 가 plugin marketplace 에서 자동 fetch | `rein update` 가 3-way merge |
+| 사용자가 hooks 를 수정 | 불가 (plugin 영역). 커스텀이 필요하면 scaffold 모드 권장 | 가능 (사용자 repo 가 SSOT) |
+| 권장 대상 | 표준 흐름을 그대로 쓰고 싶은 대부분의 팀 | hook/rule 을 직접 fork 하여 커스터마이징하는 팀 |
+
+기존 사용자(v1.x → v2.0)는 `rein migrate` 로 plugin 모드로 전환하거나, 그대로 scaffold 모드로 유지할 수 있습니다 ([REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) 참조).
 
 ---
 
@@ -158,6 +177,21 @@ repo/
 | `rein --help` | 도움말 |
 
 고급 명령 (`rein job`, `rein remove`, 환경변수) 은 [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) 참조.
+
+### Slash command 호출
+
+플러그인 모드에서 Rein 의 스킬은 `/rein-core:` 네임스페이스 아래로 노출됩니다. 예시: `/rein-core:codex-review`, `/rein-core:codex-ask`.
+
+#### Custom alias 권장
+설정 파일 `.claude/settings.json` 에 다음 추가 시 짧은 호출 가능:
+```json
+{
+  "aliases": {
+    "/cr": "/rein-core:codex-review",
+    "/ca": "/rein-core:codex-ask"
+  }
+}
+```
 
 ---
 

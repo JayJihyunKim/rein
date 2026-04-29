@@ -1,0 +1,6 @@
+# .rein/cache/ holds local runtime state (governance.json, jobs/, inventory/,
+# active-dod-choice.log) for scaffold mode (Phase 3 Task 3.6). Everything in
+# this directory is per-environment and not committed; the .gitignore itself
+# is the only tracked file so the directory shape ships with the repo.
+*
+!.gitignore

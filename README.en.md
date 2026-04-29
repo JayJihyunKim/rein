@@ -124,7 +124,26 @@ rein new my-project && cd my-project && git init
 claude
 ```
 
+To integrate into an existing directory, use `rein init` (plugin mode is the v2.0+ default):
+
+```bash
+cd existing-project
+rein init                  # plugin mode (default in v2.0+) — light footprint
+rein init --mode=scaffold  # scaffold mode (legacy) — copies all files into the repo
+```
+
 > For detailed customization, see [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md).
+
+### Plugin mode vs scaffold mode (v2.0+)
+
+| Item | Plugin mode (default) | Scaffold mode (`--mode=scaffold`) |
+|---|---|---|
+| Files added to your repo | `.rein/project.json` + plugin pin in `.claude/settings.json` | 21 files (hooks/skills/agents/rules + AGENTS.md, etc. — full copy) |
+| Update path | Claude Code fetches from the plugin marketplace | `rein update` performs a 3-way merge |
+| User edits hooks | Not directly (plugin owns the hooks). Pick scaffold mode for custom forks. | Yes — your repo is the source of truth. |
+| Recommended for | Most teams that want the standard flow as-is | Teams that fork hooks/rules and customize them |
+
+Existing users (v1.x → v2.0) can switch to plugin mode with `rein migrate`, or stay on scaffold mode without changes ([REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md)).
 
 ---
 
@@ -158,6 +177,21 @@ repo/
 | `rein --help` | Show help |
 
 Advanced commands (`rein job`, `rein remove`, environment variables) are documented in [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md).
+
+### Slash command invocation
+
+In plugin mode, Rein's skills are exposed under the `/rein-core:` namespace. Examples: `/rein-core:codex-review`, `/rein-core:codex-ask`.
+
+#### Recommended custom alias
+Add the following to `.claude/settings.json` for shorter invocations:
+```json
+{
+  "aliases": {
+    "/cr": "/rein-core:codex-review",
+    "/ca": "/rein-core:codex-ask"
+  }
+}
+```
 
 ---
 

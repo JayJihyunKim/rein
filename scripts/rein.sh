@@ -17,7 +17,7 @@ warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 fatal() { echo -e "${RED}Fatal: $*${NC}" >&2; exit 1; }
 
-VERSION="1.2.0"
+VERSION="2.0.0"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
@@ -58,7 +58,39 @@ write_atomic() {
 rein_state_dir()     { echo ".claude/.rein-state"; }
 rein_base_dir()      { echo ".claude/.rein-state/base"; }
 rein_conflicts_dir() { echo ".claude/.rein-state/conflicts"; }
-rein_jobs_dir()      { echo ".claude/cache/jobs"; }
+
+# Phase 3 Task 3.3: jobs path is mode-aware.
+#
+# Resolution order (preserves legacy installs without forcing migration):
+#   1. Plugin install — ${CLAUDE_PLUGIN_ROOT}/scripts/rein-state-paths.py jobs
+#      always wins when available. Plugin host always sets CLAUDE_PLUGIN_ROOT.
+#   2. Scaffold dev — plugins/rein-core/scripts/rein-state-paths.py jobs IF
+#      .rein/project.json explicitly opts into the new layout (mode set OR
+#      .rein/cache/ directory already exists). This avoids surprising legacy
+#      rein-dev clones (no .rein/project.json) by keeping their jobs in
+#      .claude/cache/jobs/ until ``rein migrate`` runs in Phase 4.
+#   3. Legacy fallback — .claude/cache/jobs.
+rein_jobs_dir() {
+  local resolver=""
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$CLAUDE_PLUGIN_ROOT/scripts/rein-state-paths.py" ]; then
+    resolver="$CLAUDE_PLUGIN_ROOT/scripts/rein-state-paths.py"
+  fi
+  if [ -z "$resolver" ] && [ -f ".rein/project.json" ] && [ -f "plugins/rein-core/scripts/rein-state-paths.py" ]; then
+    resolver="plugins/rein-core/scripts/rein-state-paths.py"
+  fi
+  if [ -z "$resolver" ] && [ -d ".rein/cache" ] && [ -f "plugins/rein-core/scripts/rein-state-paths.py" ]; then
+    resolver="plugins/rein-core/scripts/rein-state-paths.py"
+  fi
+  if [ -n "$resolver" ]; then
+    local resolved
+    resolved=$(python3 "$resolver" jobs 2>/dev/null || true)
+    if [ -n "$resolved" ]; then
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+  fi
+  echo ".claude/cache/jobs"
+}
 
 # ---------------------------------------------------------------------------
 # is_text_file <path>
@@ -1070,40 +1102,21 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Copy targets
+# Legacy v1.x copy targets (cmd_new + cmd_merge)
+#
+# Phase 5 Task 5.2 step 6 — the canonical SSOT for what ships into a user repo
+# is now plugins/rein-core/plugin.json (firstClass + scaffoldOverlay +
+# scaffoldExtras + scaffoldHelperScripts), reproduced by
+# scripts/rein-build-scaffold.py. The hardcoded top-level COPY_TARGETS array
+# has been retired to eliminate drift risk between the array and plugin.json.
+#
+# `cmd_new` (legacy `rein new <project>`) and `cmd_merge` (legacy `rein update`
+# scaffold-mode 3-way merge path) still need a flat list of repo-relative paths
+# to walk. They get it from `list_copy_files()`, which derives the list at
+# call time from the same scaffold contract. Phase 8/9 will move both commands
+# to delegate fully to rein-build-scaffold.py + manifest-v2; until then the
+# helper below is the single point that knows what "rein-managed" means.
 # ---------------------------------------------------------------------------
-COPY_TARGETS=(
-  ".claude/CLAUDE.md"
-  ".claude/settings.json"
-  ".claude/settings.local.json.example"
-  ".claude/orchestrator.md"
-  ".claude/hooks"
-  ".claude/rules"
-  ".claude/workflows"
-  ".claude/agents"
-  ".claude/registry"
-  ".claude/skills"
-  ".claude/security"
-  ".claude/router"
-  ".github/workflows/daily-trail-audit.yml"
-  ".github/workflows/issue-triage.yml"
-  ".github/workflows/repo-audit.yml"
-  ".github/workflows/weekly-agent-evolution.yml"
-  "AGENTS.md"
-  "REIN_SETUP_GUIDE.md"
-  # Plan C helpers — manifest v2 + 3-way merge + anchored segment matcher.
-  # Shipped so user projects can invoke rein update / rein remove without
-  # falling back to an unbundled Python helper. Tracked explicitly rather
-  # than via scripts/rein-*.py wildcard per branch-strategy.md (Task 10.0).
-  "scripts/rein-manifest-v2.py"
-  "scripts/rein-path-match.py"
-  # Plan C Phase 7 — standalone completion wrapper for `rein job start`.
-  # Lives in a file (not inlined via `declare -f`) because the wrapper body
-  # contains a python3 heredoc that doesn't round-trip through nested
-  # `bash -c "$(declare -f ...)"` quoting. COPY_TARGETS ships it to user
-  # projects; branch-strategy.md lists it under ✅ 포함.
-  "scripts/rein-job-wrapper.sh"
-)
 
 TRAIL_DIRS=(
   "trail/inbox"
@@ -1115,17 +1128,48 @@ TRAIL_DIRS=(
   "trail/agent-candidates"
 )
 
+# _legacy_scaffold_paths()
+# Returns the flat repo-relative path list that v1.x cmd_new/cmd_merge use to
+# enumerate rein-managed files. Internal helper — NOT a top-level module
+# variable. Kept private so the legacy paths cannot accidentally drift from
+# plugin.json's contract; the v2.0 install path uses rein-build-scaffold.py
+# directly (see install_scaffold_mode).
+_legacy_scaffold_paths() {
+  printf '%s\n' \
+    ".claude/CLAUDE.md" \
+    ".claude/settings.json" \
+    ".claude/settings.local.json.example" \
+    ".claude/orchestrator.md" \
+    ".claude/hooks" \
+    ".claude/rules" \
+    ".claude/workflows" \
+    ".claude/agents" \
+    ".claude/registry" \
+    ".claude/skills" \
+    ".claude/security" \
+    ".claude/router" \
+    ".github/workflows/daily-trail-audit.yml" \
+    ".github/workflows/issue-triage.yml" \
+    ".github/workflows/repo-audit.yml" \
+    ".github/workflows/weekly-agent-evolution.yml" \
+    "AGENTS.md" \
+    "REIN_SETUP_GUIDE.md" \
+    "scripts/rein-manifest-v2.py" \
+    "scripts/rein-path-match.py" \
+    "scripts/rein-job-wrapper.sh"
+}
+
 # ---------------------------------------------------------------------------
 # list_copy_files(template_dir)
-# Outputs NUL-terminated relative file paths for all COPY_TARGETS.
-# For files, prints directly. For directories, finds all files recursively
-# excluding .DS_Store.
+# Outputs NUL-terminated relative file paths for all rein-managed scaffold
+# targets (v1.x compatibility surface). For files, prints directly. For
+# directories, finds all files recursively excluding .DS_Store.
 # Output is NUL-terminated to safely handle filenames with spaces/newlines.
 # ---------------------------------------------------------------------------
 list_copy_files() {
   local template_dir="$1"
 
-  for target in "${COPY_TARGETS[@]}"; do
+  while IFS= read -r target; do
     local full_path="$template_dir/$target"
 
     if [[ ! -e "$full_path" ]]; then
@@ -1142,7 +1186,7 @@ list_copy_files() {
           printf '%s\0' "${abs_file#"$template_dir/"}"
         done
     fi
-  done
+  done < <(_legacy_scaffold_paths)
 }
 
 # ---------------------------------------------------------------------------
@@ -1757,11 +1801,20 @@ usage() {
   cat <<'EOF'
 Usage:
   rein new <project-name>           Create a new project from template
+  rein init [flags]                 Install rein into current git repo (v2.0+)
   rein merge [flags]                Merge template into current project
   rein update [flags]               Update current project from template
   rein remove [flags]               Remove rein-tracked files (see 'rein remove --help')
+  rein migrate [flags]              v1.x scaffold → v2.0 plugin migration (Phase 4)
+                                    Flags: --dry-run, --resume
   rein --version                    Show version
   rein --help                       Show this help
+
+Flags (init):
+  --mode=<plugin|scaffold>          plugin (default v2.0+) or full scaffold
+  --scope=<user|project|local|managed>
+                                    Settings.json scope for plugin entry
+                                    (default: project)
 
 Flags (merge / update):
   --all, --yes                      Auto-overwrite every conflict (CI friendly)
@@ -1779,6 +1832,434 @@ Manifest:
   manifest is created/refreshed on every 'rein new', 'rein merge', and
   'rein update'. User-modified files (sha256 mismatch) are never pruned.
 EOF
+}
+
+# ---------------------------------------------------------------------------
+# Phase 5: rein init / rein update — mode + scope flags
+#
+# Plugin-First Restructure (docs/plans/2026-04-27-plugin-first-restructure-plan.md
+# Phase 5 lines 1168-1370). MODE/SCOPE globals are set by parse_init_flags()
+# before cmd_init() dispatches to install_plugin_mode() / install_scaffold_mode().
+# ---------------------------------------------------------------------------
+MODE=""               # set by --mode=<plugin|scaffold>; defaults to "plugin"
+SCOPE=""              # set by --scope=<user|project|local|managed>; defaults to "project"
+
+# REIN_HOME = parent dir of scripts/ — used by install_*_mode to locate
+# rein-install-plugin-to-settings.py / rein-build-scaffold.py / rein-manifest-v2.py.
+# Resolved from the *currently executing* rein.sh (via BASH_SOURCE) so the source
+# of truth is always the rein-dev checkout that owns this CLI, not the user's
+# project. Tests source rein.sh in --source-only mode and rely on this.
+_phase5_rein_home() {
+  local script_path
+  script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # scripts/ lives one level under REIN_HOME
+  echo "$(dirname "$script_path")"
+}
+
+# parse_init_flags(args...)
+# Sets MODE / SCOPE globals from --mode=<x> / --mode <x> / --scope=<x> / --scope <x>.
+# Unknown flags trigger error. Validates values against allow-lists.
+parse_init_flags() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --mode=*) MODE="${1#--mode=}"; shift ;;
+      --mode)
+        if [[ $# -lt 2 ]]; then
+          error "--mode requires a value (plugin|scaffold)"; exit 1
+        fi
+        MODE="$2"; shift 2 ;;
+      --scope=*) SCOPE="${1#--scope=}"; shift ;;
+      --scope)
+        if [[ $# -lt 2 ]]; then
+          error "--scope requires a value (user|project|local|managed)"; exit 1
+        fi
+        SCOPE="$2"; shift 2 ;;
+      --no-self-update)
+        export REIN_NO_SELF_UPDATE=1; shift ;;
+      --)
+        shift; break ;;
+      -*)
+        error "unknown flag '$1' for rein init"; exit 1 ;;
+      *)
+        error "unexpected argument '$1' for rein init"; exit 1 ;;
+    esac
+  done
+
+  # Defaults — v2.0+ ships plugin-mode + project-scope by default.
+  MODE="${MODE:-plugin}"
+  SCOPE="${SCOPE:-project}"
+
+  case "$MODE" in
+    plugin|scaffold) ;;
+    *) error "unknown --mode '$MODE' (want: plugin|scaffold)"; exit 1 ;;
+  esac
+  case "$SCOPE" in
+    user|project|local|managed) ;;
+    *) error "unknown --scope '$SCOPE' (want: user|project|local|managed)"; exit 1 ;;
+  esac
+}
+
+# write_rein_project_json(target_root, mode)
+# Writes <target_root>/.rein/project.json with {mode, scope, version} by
+# delegating to scripts/rein-write-project-json.py — the canonical helper
+# that fsyncs the parent dir after os.replace for durable, crash-safe
+# write-last semantics (Phase 4 Task 4.10). No re-implementation here.
+write_rein_project_json() {
+  local target_root="$1"
+  local mode="$2"
+  local rein_home write_py
+  rein_home="$(_phase5_rein_home)"
+  write_py="$rein_home/scripts/rein-write-project-json.py"
+  if [[ ! -f "$write_py" ]]; then
+    error "rein-write-project-json.py missing at $write_py"; exit 1
+  fi
+  ( cd "$target_root" && python3 "$write_py" \
+      --mode "$mode" \
+      --scope "$SCOPE" \
+      --version "$VERSION" >/dev/null )
+}
+
+# write_rein_policy_templates(target_root)
+# Creates <target_root>/.rein/policy/{hooks,rules}.yaml empty templates.
+# Idempotent: existing files are not overwritten.
+write_rein_policy_templates() {
+  local target_root="$1"
+  local policy_dir="$target_root/.rein/policy"
+  mkdir -p "$policy_dir"
+  if [[ ! -f "$policy_dir/hooks.yaml" ]]; then
+    cat > "$policy_dir/hooks.yaml" <<'YAML'
+# .rein/policy/hooks.yaml — toggle plugin-shipped hooks (Phase 2 Task 2.7).
+# Add `<hook-name>: false` to disable a hook the plugin would otherwise enable.
+# Empty file = use plugin defaults (all hooks enabled).
+YAML
+  fi
+  if [[ ! -f "$policy_dir/rules.yaml" ]]; then
+    cat > "$policy_dir/rules.yaml" <<'YAML'
+# .rein/policy/rules.yaml — per-rule replace override (Phase 2 Task 2.8).
+# Add `<rule-name>: |` followed by the replacement rule body to override the
+# plugin-shipped text. Empty file = use plugin defaults.
+YAML
+  fi
+}
+
+# install_plugin_mode(target_root)
+# Plugin-mode rein init: register rein-core in the chosen scope's settings.json,
+# write .rein/project.json + .rein/policy/* templates, and ensure trail/ exists.
+# Does NOT write .claude/.rein-manifest.json (plugin manager owns those files).
+# Tasks 5.1, 5.3, 5.4, 5.5, 5.6.
+install_plugin_mode() {
+  local target_root="$1"
+  local rein_home
+  rein_home="$(_phase5_rein_home)"
+  local install_py="$rein_home/scripts/rein-install-plugin-to-settings.py"
+
+  if [[ ! -f "$install_py" ]]; then
+    error "rein-install-plugin-to-settings.py missing at $install_py"
+    exit 1
+  fi
+
+  # CLAUDE.md preservation guard — Task 5.6. plugin mode must never touch the
+  # user's CLAUDE.md (root or .claude/). Capture sha256 before/after, AND the
+  # presence flag so an absent-to-created regression is caught (codex
+  # Round 1 finding — plugin mode must "not touch" means file existence is
+  # part of the invariant, not just byte-equality of pre-existing content).
+  local sha_root_before="" sha_nested_before=""
+  local exists_root_before=0 exists_nested_before=0
+  if [[ -f "$target_root/CLAUDE.md" ]]; then
+    sha_root_before=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$target_root/CLAUDE.md")
+    exists_root_before=1
+  fi
+  if [[ -f "$target_root/.claude/CLAUDE.md" ]]; then
+    sha_nested_before=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$target_root/.claude/CLAUDE.md")
+    exists_nested_before=1
+  fi
+
+  # Run the plugin install helper from inside target_root so SCOPE-relative
+  # paths (.claude/settings.json, .claude/settings.local.json,
+  # .claude/managed-settings.json) anchor on the user repo. user-scope writes
+  # to ~/.claude/settings.json regardless of cwd.
+  # rein-core@^2.0.0 — pinned to the major plugin version, NOT the rein.sh
+  # CLI version (which still tracks pre-2.0 internal releases until Phase 9
+  # bumps VERSION=2.0.0). Plan §5.1 step 1.
+  ( cd "$target_root" && python3 "$install_py" \
+      --scope "$SCOPE" \
+      --plugin "rein-core=^2.0.0" >/dev/null )
+
+  # Write .rein/project.json + policy templates + ensure trail/ scaffolded.
+  write_rein_project_json "$target_root" "plugin"
+  write_rein_policy_templates "$target_root"
+  mkdir -p "$target_root/trail/inbox" \
+           "$target_root/trail/dod" \
+           "$target_root/trail/incidents" \
+           "$target_root/trail/decisions"
+  : > "$target_root/trail/inbox/.gitkeep"
+  : > "$target_root/trail/dod/.gitkeep"
+  : > "$target_root/trail/incidents/.gitkeep"
+  : > "$target_root/trail/decisions/.gitkeep"
+  if [[ ! -f "$target_root/trail/index.md" ]]; then
+    printf '# trail/index.md\n\n> rein 프로젝트 상태 — 매 세션 종료 시 갱신.\n' \
+      > "$target_root/trail/index.md"
+  fi
+
+  # --scope=local seeds .claude/settings.local.json into .gitignore (Task 5.4).
+  if [[ "$SCOPE" == "local" ]]; then
+    local gi="$target_root/.gitignore"
+    touch "$gi"
+    if ! grep -qxF '.claude/settings.local.json' "$gi"; then
+      printf '\n# rein local-scope settings (per-developer overrides)\n.claude/settings.local.json\n' >> "$gi"
+    fi
+  fi
+
+  # CLAUDE.md preservation guard — verify both byte equality (when pre-existing)
+  # AND presence parity (absent-to-created regression).
+  local exists_root_after=0 exists_nested_after=0
+  [[ -f "$target_root/CLAUDE.md" ]] && exists_root_after=1
+  [[ -f "$target_root/.claude/CLAUDE.md" ]] && exists_nested_after=1
+
+  if [[ "$exists_root_before" != "$exists_root_after" ]]; then
+    error "rein init plugin-mode unexpectedly created/removed $target_root/CLAUDE.md"
+    exit 1
+  fi
+  if [[ "$exists_nested_before" != "$exists_nested_after" ]]; then
+    error "rein init plugin-mode unexpectedly created/removed $target_root/.claude/CLAUDE.md"
+    exit 1
+  fi
+
+  if [[ -n "$sha_root_before" ]]; then
+    local sha_root_after
+    sha_root_after=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$target_root/CLAUDE.md")
+    if [[ "$sha_root_before" != "$sha_root_after" ]]; then
+      error "rein init plugin-mode unexpectedly modified $target_root/CLAUDE.md"
+      exit 1
+    fi
+  fi
+  if [[ -n "$sha_nested_before" ]]; then
+    local sha_nested_after
+    sha_nested_after=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$target_root/.claude/CLAUDE.md")
+    if [[ "$sha_nested_before" != "$sha_nested_after" ]]; then
+      error "rein init plugin-mode unexpectedly modified $target_root/.claude/CLAUDE.md"
+      exit 1
+    fi
+  fi
+}
+
+# _version_ge "X.Y.Z" "A.B.C" → exit 0 (true) iff X.Y.Z >= A.B.C.
+#
+# Behavior contract (Phase 8 Task 8.1, codex Round 1 fix):
+#   - Both arguments must match `^[0-9]+\.[0-9]+\.[0-9]+$` exactly. Anything
+#     else (empty, non-numeric, prerelease tags like "2.5.0-rc1", custom build
+#     suffixes) is rejected → exit 1 (treated as "not >="). This keeps the
+#     scaffold-deprecation gate quiet for non-release builds and prereleases.
+#   - The actual comparison is integer-tuple comparison, NOT `sort -V`. We
+#     observed on macOS that `printf '%s\n%s\n' "foo" "2.5.0" | sort -V -C`
+#     returns 0 (i.e., treats "foo" as <= "2.5.0"), which would falsely emit
+#     the warning. We also observed `sort -V` treats "2.5.0-rc1" >= "2.5.0",
+#     which is the wrong direction for prereleases. Pure-bash arithmetic
+#     comparison is portable across macOS BSD `sort`, GNU coreutils, MSYS2,
+#     and WSL2 with no surprises.
+_version_ge() {
+  local lhs="${1:-}" rhs="${2:-}"
+  local re='^[0-9]+\.[0-9]+\.[0-9]+$'
+  [[ "$lhs" =~ $re ]] || return 1
+  [[ "$rhs" =~ $re ]] || return 1
+  local IFS=.
+  # shellcheck disable=SC2206 # split on '.' is intentional
+  local lp=($lhs) rp=($rhs)
+  if   (( lp[0] != rp[0] )); then (( lp[0] > rp[0] ))
+  elif (( lp[1] != rp[1] )); then (( lp[1] > rp[1] ))
+  else                            (( lp[2] >= rp[2] ))
+  fi
+}
+
+# _scaffold_deprec_emit_if_ge_2_5_0
+# Emits the scaffold-mode deprecation warning to stderr when the running
+# rein.sh VERSION >= 2.5.0. Phase 8 Task 8.1: warning is emitted, install
+# proceeds (non-blocking). Removal/relegation is deferred to v3.0+ planning
+# (spec §4.2). The warning text is referenced by
+# tests/scripts/test-scaffold-deprecation-warning.sh.
+_scaffold_deprec_emit_if_ge_2_5_0() {
+  if _version_ge "$VERSION" "2.5.0"; then
+    cat >&2 <<'EOF'
+WARNING: --mode=scaffold is deprecated since v2.5.0.
+Plugin mode is the default and recommended path.
+See README and CHANGELOG for migration guide.
+--mode=scaffold will be removed or relegated to fallback-only in v3.0.
+EOF
+  fi
+}
+
+# install_scaffold_mode(target_root)
+# Scaffold-mode rein init: invoke rein-build-scaffold.py for the 3-source export
+# (plugin first-class + scaffoldOverlay + scaffoldExtras + scaffoldHelperScripts),
+# rsync into target_root, then generate .claude/.rein-manifest.json.
+# Tasks 5.2, 5.5. Phase 8 Task 8.1 prepends a v2.5+ deprecation warning.
+install_scaffold_mode() {
+  _scaffold_deprec_emit_if_ge_2_5_0
+  local target_root="$1"
+  local rein_home
+  rein_home="$(_phase5_rein_home)"
+  local build_py="$rein_home/scripts/rein-build-scaffold.py"
+  local manifest_py="$rein_home/scripts/rein-manifest-v2.py"
+
+  if [[ ! -f "$build_py" ]]; then
+    error "rein-build-scaffold.py missing at $build_py"; exit 1
+  fi
+  if [[ ! -f "$manifest_py" ]]; then
+    error "rein-manifest-v2.py missing at $manifest_py"; exit 1
+  fi
+  if ! command -v rsync >/dev/null 2>&1; then
+    error "rsync is required for rein init --mode=scaffold"; exit 1
+  fi
+
+  local tmp_export
+  tmp_export=$(mktemp -d -t rein-scaffold-XXXXXX)
+  if [[ -z "$tmp_export" || ! -d "$tmp_export" ]]; then
+    error "could not create tmp dir for scaffold export"; return 1
+  fi
+
+  # Run the rest under a single-shot cleanup pattern. We delegate the body
+  # to a nested function so we can rm -rf $tmp_export exactly once on every
+  # exit path (success, build failure, rsync failure, manifest failure,
+  # project.json failure, or unexpected error). Codex Round 1 finding —
+  # earlier per-call cleanup left tmp_export behind on post-rsync failures.
+  _phase5_scaffold_body() {
+    # 3-source export (plugin first-class + scaffoldOverlay + scaffoldExtras +
+    # scaffoldHelperScripts). --include-domain reserved for Phase 7.
+    if ! python3 "$build_py" \
+         --source "$rein_home/plugins/rein-core" \
+         --include-domain \
+         --out "$tmp_export" >&2; then
+      error "rein-build-scaffold.py failed"; return 1
+    fi
+
+    # rsync export tree into target_root. Trailing slash on source = "copy
+    # contents", matching plan §5.2 step 3. -a preserves timestamps, exec
+    # bits, and symlinks.
+    if ! mkdir -p "$target_root"; then
+      error "could not create target_root $target_root"; return 1
+    fi
+    if ! rsync -a "$tmp_export/" "$target_root/"; then
+      error "rsync to $target_root failed"; return 1
+    fi
+
+    # Generate manifest from what was actually rsynced.
+    local mf="$target_root/.claude/.rein-manifest.json"
+    if ! mkdir -p "$(dirname "$mf")"; then
+      error "could not create manifest dir"; return 1
+    fi
+    if ! python3 "$manifest_py" init "$mf" "$VERSION" >/dev/null; then
+      error "rein-manifest-v2.py init failed"; return 1
+    fi
+    if ! python3 - "$manifest_py" "$mf" "$VERSION" "$tmp_export" <<'PYEOF'
+import os, subprocess, sys, hashlib
+manifest_py, mf, version, tmp_export = sys.argv[1:5]
+for root, dirs, files in os.walk(tmp_export):
+    rel_root = os.path.relpath(root, tmp_export)
+    for fn in files:
+        full = os.path.join(root, fn)
+        rel = fn if rel_root == "." else os.path.join(rel_root, fn)
+        with open(full, "rb") as fh:
+            sha = hashlib.sha256(fh.read()).hexdigest()
+        subprocess.check_call([
+            "python3", manifest_py, "add", mf, rel, sha, version
+        ])
+PYEOF
+    then
+      error "manifest add loop failed"; return 1
+    fi
+
+    # .rein/project.json mode=scaffold + policy templates + trail/ (parity
+    # with plugin-mode init so downstream hooks find their dirs). Each post-
+    # rsync mutation is wrapped so any failure routes through the single
+    # cleanup line at the bottom of install_scaffold_mode.
+    if ! write_rein_project_json "$target_root" "scaffold"; then
+      error "write_rein_project_json failed"; return 1
+    fi
+    if ! write_rein_policy_templates "$target_root"; then
+      error "write_rein_policy_templates failed"; return 1
+    fi
+    if ! mkdir -p "$target_root/trail/inbox" \
+                  "$target_root/trail/dod" \
+                  "$target_root/trail/incidents" \
+                  "$target_root/trail/decisions"; then
+      error "mkdir trail/* failed"; return 1
+    fi
+    if [[ ! -f "$target_root/trail/index.md" ]]; then
+      if ! printf '# trail/index.md\n\n> rein 프로젝트 상태 — 매 세션 종료 시 갱신.\n' \
+           > "$target_root/trail/index.md"; then
+        error "could not seed trail/index.md"; return 1
+      fi
+    fi
+    return 0
+  }
+
+  local body_rc=0
+  _phase5_scaffold_body || body_rc=$?
+  rm -rf "$tmp_export"
+  unset -f _phase5_scaffold_body
+  return "$body_rc"
+}
+
+# cmd_init([flags])
+# Phase 5 entry point: install rein in the current directory (cwd) using the
+# requested mode + scope. cwd must be a git repo (so trail/ + .rein/ live in
+# version control alongside user code).
+cmd_init() {
+  parse_init_flags "$@"
+
+  if [[ ! -e ".git" ]]; then
+    error "rein init: not a git repository (no .git in current directory)"
+    exit 1
+  fi
+
+  local target_root="$PWD"
+
+  case "$MODE" in
+    plugin)   install_plugin_mode   "$target_root" ;;
+    scaffold) install_scaffold_mode "$target_root" ;;
+  esac
+
+  echo ""
+  info "rein init complete (mode=$MODE scope=$SCOPE version=$VERSION)."
+  if [[ "$MODE" == "plugin" ]]; then
+    info "  Plugin entry written to scope=$SCOPE settings.json."
+    info "  Use 'claude /plugin install rein-core' or restart Claude Code to activate."
+  else
+    info "  Scaffold installed under $target_root/.claude/."
+  fi
+}
+
+# update_plugin_mode(target_root)
+# Plugin-mode rein update: rein does not own plugin file content. Print
+# redirect message (Anthropic plugin manager handles updates) and exit 0.
+# Task 5.7.
+update_plugin_mode() {
+  local target_root="$1"
+  echo ""
+  info "rein update: plugin mode detected (.rein/project.json mode=plugin)."
+  info "  Claude Code's plugin manager handles plugin updates."
+  info "  Run '/plugin update' inside Claude Code, or bump the version pin in"
+  info "  $target_root/.claude/settings.json (or settings.local.json /"
+  info "  ~/.claude/settings.json depending on your scope)."
+  echo ""
+}
+
+# read_project_mode(target_root)
+# Reads .rein/project.json's "mode" field. Prints "plugin" / "scaffold".
+# Returns "scaffold" when project.json is absent (legacy v1.x install).
+read_project_mode() {
+  local target_root="$1"
+  python3 - "$target_root" <<'PYEOF'
+import json, os, sys
+target_root = sys.argv[1]
+p = os.path.join(target_root, ".rein", "project.json")
+try:
+    with open(p) as f:
+        d = json.load(f)
+    print(d.get("mode", "scaffold"))
+except (FileNotFoundError, json.JSONDecodeError):
+    print("scaffold")
+PYEOF
 }
 
 # ---------------------------------------------------------------------------
@@ -2990,14 +3471,83 @@ main() {
       parse_flags "$@"
       cmd_new "$project_name"
       ;;
+    init)
+      shift
+      cmd_init "$@"
+      ;;
     merge|update)
       shift
+      # Phase 5 Task 5.7 — branch on mode BEFORE the legacy 3-way merge path
+      # touches anything. plugin mode never runs cmd_merge: rein doesn't own
+      # the plugin's files (CLAUDE.md included), so update is a redirect.
+      if [[ -e ".git" ]]; then
+        local _phase5_mode
+        _phase5_mode="$(read_project_mode "$PWD")"
+        if [[ "$_phase5_mode" == "plugin" ]]; then
+          # Snapshot CLAUDE.md sha256 + presence flag to prove zero-touch.
+          # Presence parity catches absent→created regressions; byte equality
+          # catches in-place mutation. Both are enforced.
+          local _phase5_sha_root_before="" _phase5_sha_nested_before=""
+          local _phase5_exists_root_before=0 _phase5_exists_nested_before=0
+          if [[ -f "$PWD/CLAUDE.md" ]]; then
+            _phase5_sha_root_before=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$PWD/CLAUDE.md")
+            _phase5_exists_root_before=1
+          fi
+          if [[ -f "$PWD/.claude/CLAUDE.md" ]]; then
+            _phase5_sha_nested_before=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$PWD/.claude/CLAUDE.md")
+            _phase5_exists_nested_before=1
+          fi
+          update_plugin_mode "$PWD"
+          local _phase5_exists_root_after=0 _phase5_exists_nested_after=0
+          [[ -f "$PWD/CLAUDE.md" ]] && _phase5_exists_root_after=1
+          [[ -f "$PWD/.claude/CLAUDE.md" ]] && _phase5_exists_nested_after=1
+          [[ "$_phase5_exists_root_before" == "$_phase5_exists_root_after" ]] || {
+            error "rein update plugin-mode unexpectedly created/removed CLAUDE.md"
+            exit 1
+          }
+          [[ "$_phase5_exists_nested_before" == "$_phase5_exists_nested_after" ]] || {
+            error "rein update plugin-mode unexpectedly created/removed .claude/CLAUDE.md"
+            exit 1
+          }
+          if [[ -n "$_phase5_sha_root_before" ]]; then
+            local _phase5_sha_root_after
+            _phase5_sha_root_after=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$PWD/CLAUDE.md")
+            [[ "$_phase5_sha_root_before" == "$_phase5_sha_root_after" ]] || {
+              error "rein update plugin-mode unexpectedly modified CLAUDE.md"
+              exit 1
+            }
+          fi
+          if [[ -n "$_phase5_sha_nested_before" ]]; then
+            local _phase5_sha_nested_after
+            _phase5_sha_nested_after=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$PWD/.claude/CLAUDE.md")
+            [[ "$_phase5_sha_nested_before" == "$_phase5_sha_nested_after" ]] || {
+              error "rein update plugin-mode unexpectedly modified .claude/CLAUDE.md"
+              exit 1
+            }
+          fi
+          exit 0
+        fi
+      fi
       parse_flags "$@"
       cmd_merge
       ;;
     remove)
       shift
       cmd_remove "$@"
+      ;;
+    migrate)
+      # Phase 4 / Phase 9 Task 9.4: dispatch to the migrate orchestrator.
+      # The orchestrator (scripts/rein-migrate.sh) handles the v1.x scaffold
+      # → v2.0 plugin transition: lock → manifest cleanup → plugin install →
+      # router git mv → runtime init → project.json write-last → lock
+      # release. Forward all remaining argv (e.g., --dry-run, --resume).
+      shift
+      local _migrate_sh
+      _migrate_sh="$(_phase5_rein_home)/scripts/rein-migrate.sh"
+      if [[ ! -f "$_migrate_sh" ]]; then
+        error "rein-migrate.sh missing at $_migrate_sh"; exit 1
+      fi
+      bash "$_migrate_sh" "$@"
       ;;
     job)
       shift

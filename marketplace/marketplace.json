@@ -1,0 +1,21 @@
+{
+  "name": "rein-marketplace",
+  "version": "1.0.0",
+  "plugins": [
+    {
+      "name": "rein-stitch",
+      "description": "Rein Stitch design domain — UI design system + Remotion handoff",
+      "versions": []
+    },
+    {
+      "name": "rein-react",
+      "description": "Rein React domain — Stitch-to-React component generation + shadcn/ui patterns",
+      "versions": []
+    },
+    {
+      "name": "rein-remotion",
+      "description": "Rein Remotion domain — walkthrough video generation from Stitch projects",
+      "versions": []
+    }
+  ]
+}

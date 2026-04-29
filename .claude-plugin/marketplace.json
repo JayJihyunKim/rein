@@ -1,0 +1,27 @@
+{
+  "name": "rein-dev-local",
+  "owner": { "name": "rein-maintainer" },
+  "description": "Local development marketplace for rein plugins (pre-publish testing). Production users should use the published Anthropic/self-hosted marketplace.",
+  "plugins": [
+    {
+      "name": "rein-core",
+      "source": "./plugins/rein-core",
+      "description": "Rein AI Native Development Framework — core hooks, skills, agents"
+    },
+    {
+      "name": "rein-stitch",
+      "source": "./plugins/rein-stitch",
+      "description": "Rein Stitch design domain — UI design system + Remotion handoff"
+    },
+    {
+      "name": "rein-react",
+      "source": "./plugins/rein-react",
+      "description": "Rein React domain — Stitch-to-React component generation + shadcn/ui patterns"
+    },
+    {
+      "name": "rein-remotion",
+      "source": "./plugins/rein-remotion",
+      "description": "Rein Remotion domain — walkthrough video generation from Stitch projects"
+    }
+  ]
+}

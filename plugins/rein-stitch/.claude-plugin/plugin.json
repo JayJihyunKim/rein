@@ -1,0 +1,10 @@
+{
+  "name": "rein-stitch",
+  "version": "2.0.0",
+  "description": "Rein Stitch design domain — UI design system + Remotion handoff",
+  "dependencies": [],
+  "author": {
+    "name": "Rein Maintainers",
+    "url": "https://github.com/JayJihyunKim/rein-dev"
+  }
+}
