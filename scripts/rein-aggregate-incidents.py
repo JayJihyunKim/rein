@@ -263,13 +263,33 @@ def aggregate(project_dir: Path):
         atomic_write(watermark, str(total))
 
         # Write session state snapshot for SessionStart to detect abnormal termination.
+        # session_end 는 보존 (Stop hook 의 trap 또는 SessionStart 의 reset 만 변경).
+        snapshot_path = incidents_dir / ".last-aggregate-state.json"
+        prev_session_end = False
+        if snapshot_path.exists():
+            try:
+                with open(snapshot_path) as _f:
+                    _prev = json.load(_f)
+                if isinstance(_prev, dict):
+                    prev_session_end = bool(_prev.get("session_end", False))
+                else:
+                    print(
+                        f"WARNING: snapshot {snapshot_path} is not a dict "
+                        "— session_end defaults to False this cycle",
+                        file=sys.stderr,
+                    )
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError) as _e:
+                print(
+                    f"WARNING: snapshot {snapshot_path} unreadable ({_e}) "
+                    "— session_end defaults to False this cycle",
+                    file=sys.stderr,
+                )
         snapshot = {
             "watermark": total,
             "pending_hashes": list_pending_hashes(incidents_dir),
             "timestamp": now,
-            "session_end": False,
+            "session_end": prev_session_end,
         }
-        snapshot_path = incidents_dir / ".last-aggregate-state.json"
         atomic_write(snapshot_path, json.dumps(snapshot, ensure_ascii=False, indent=2))
 
         if created or updated:
@@ -319,6 +339,57 @@ def count_pending(project_dir: Path) -> int:
         except Exception:
             continue
     return n
+
+
+def set_session_end(project_dir: Path, value: bool) -> int:
+    """Atomic update of snapshot.session_end under aggregate flock (single-writer path).
+
+    Stop hook 의 trap EXIT 와 SessionStart 의 reset 이 모두 이 경로만 호출하도록
+    해 multi-writer race 를 제거한다. 다른 snapshot 필드 (watermark, pending_hashes,
+    timestamp) 는 변경하지 않는다.
+
+    Lock contention 시 silent (return 0) — hook 흐름을 차단하지 않는다.
+    """
+    incidents_dir = project_dir / "trail/incidents"
+    snapshot_path = incidents_dir / ".last-aggregate-state.json"
+    lock_path = incidents_dir / ".aggregate.lock"
+
+    incidents_dir.mkdir(parents=True, exist_ok=True)
+    fp = acquire_lock(lock_path)
+    if fp is None:
+        return 0
+    try:
+        snapshot = {}
+        if snapshot_path.exists():
+            try:
+                with open(snapshot_path) as f:
+                    snapshot = json.load(f)
+                if not isinstance(snapshot, dict):
+                    print(
+                        f"WARNING: snapshot {snapshot_path} is not a dict "
+                        "— rewriting with defaults",
+                        file=sys.stderr,
+                    )
+                    snapshot = {}
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+                print(
+                    f"WARNING: snapshot {snapshot_path} unreadable ({e}) "
+                    "— rewriting with defaults",
+                    file=sys.stderr,
+                )
+                snapshot = {}
+        snapshot["session_end"] = bool(value)
+        snapshot.setdefault("watermark", 0)
+        snapshot.setdefault("pending_hashes", [])
+        snapshot.setdefault("timestamp", utcnow_iso())
+        atomic_write(snapshot_path, json.dumps(snapshot, ensure_ascii=False, indent=2))
+        return 0
+    finally:
+        try:
+            fcntl.flock(fp, fcntl.LOCK_UN)
+            fp.close()
+        except Exception:
+            pass
 
 
 def cmd_advisory_summary(args) -> int:
@@ -410,11 +481,20 @@ if __name__ == "__main__":
         help="이 타임스탬프 이후 레코드만 집계"
     )
 
+    sse_parser = subparsers.add_parser(
+        "set-session-end",
+        help="snapshot 의 session_end 필드만 flock 안에서 atomic 갱신 (단일 writer 경로)"
+    )
+    sse_parser.add_argument("value", choices=["true", "false"])
+
     args = parser.parse_args()
     project_dir = Path(args.project_dir or ".").resolve()
 
     if args.subcommand == "advisory-summary":
         sys.exit(cmd_advisory_summary(args))
+
+    if args.subcommand == "set-session-end":
+        sys.exit(set_session_end(project_dir, args.value == "true"))
 
     if args.count_pending:
         print(count_pending(project_dir))

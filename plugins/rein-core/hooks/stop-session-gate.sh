@@ -24,6 +24,21 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib/project-dir.sh"
 PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 
+# session_end "퇴근 도장" — 어떤 exit 경로로 끝나든 trap EXIT 으로 marking.
+# 이 redefinition 으로 session_end=true 의 의미가 "Stop hook 이 어떤 경로로든
+# 실행은 됨" 이 된다. false 로 남는 것은 진짜 hook 미호출 (Ctrl+C / 터미널
+# 닫기 / Claude Code crash / SIGKILL) 만. SIGKILL 은 잡히지 않는데, 그 경우는
+# 진짜 abnormal 이라 false 로 남는 게 의도. 모든 쓰기는 aggregate 의
+# `set-session-end` subcommand 를 통해 flock 안에서 직렬화된다 (multi-writer
+# race 회피).
+_stamp_session_end_true() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+      --project-dir "$PROJECT_DIR" set-session-end true >/dev/null 2>&1 || true
+  fi
+}
+trap _stamp_session_end_true EXIT
+
 INBOX_DIR="$PROJECT_DIR/trail/inbox"
 DOD_DIR="$PROJECT_DIR/trail/dod"
 INDEX_FILE="$PROJECT_DIR/trail/index.md"
@@ -326,21 +341,7 @@ if [ -n "$MISSING" ]; then
   exit 2
 fi
 
-# snapshot session_end=true 기록 (Task 10)
-SNAPSHOT="$PROJECT_DIR/trail/incidents/.last-aggregate-state.json"
-if [ -f "$SNAPSHOT" ] && command -v python3 >/dev/null 2>&1; then
-  python3 -c "
-import json, sys
-try:
-    p = sys.argv[1]
-    d = json.load(open(p))
-    d['session_end'] = True
-    with open(p, 'w') as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
-except Exception:
-    pass
-" "$SNAPSHOT" 2>/dev/null || true
-fi
+# session_end=true 기록은 trap _stamp_session_end_true (스크립트 상단) 로 일원화.
 
 # Cleanup: 현재 세션의 active-dod-choice flag 제거 (select-active-dod.sh 가
 # 생성한 "세션당 1회 로그" 세마포어). key 해석은 select-active-dod.sh 와

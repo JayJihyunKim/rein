@@ -1,13 +1,20 @@
 #!/bin/bash
 # Hook: SessionStart
-# trail 프로젝트 상태를 세션 시작 시 에이전트 컨텍스트로 주입.
+# trail 프로젝트 상태를 세션 시작 시 에이전트 컨텍스트로 주입 (lean mode).
 #
 # 출력: stdout → Claude Code 가 additionalContext 로 흡수
 # 실패해도 세션은 계속됨 (항상 exit 0)
 #
-# 환경변수:
-#   REIN_NOW       — 기준 시각 (YYYY-MM-DD). 미설정 시 현재 시각. 테스트용
-#   REIN_BUDGET_BYTES — 총 누적 바이트 상한 (기본 65536). 초과 시 이후 파일은 제목만
+# Lean mode 정책 (2026-04-29~):
+#   - inbox/daily/weekly/MEMORY 전량 주입은 **하지 않는다**. raw 회고/절차
+#     텍스트가 stale anchoring 을 유발해 Claude 가 git 같은 권위 source 보다
+#     trail 을 우선시하는 문제가 관찰됐다. 자세한 회고:
+#     trail/dod/dod-2026-04-29-session-context-reduction.md
+#   - 주입 대상은 trail/index.md (5~25줄), pending spec review 요약,
+#     pending incident 카운트, freshness 경고 1줄. 그 외 trail 파일은
+#     필요 시 명시 read 로 가져온다.
+#   - hook 의 maintenance 책임은 그대로 유지: .active-dod cleanup, incident
+#     session stamp, legacy pending heal, skill/MCP guide regen.
 
 set -u
 
@@ -21,47 +28,18 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # git rev-parse / SCRIPT_DIR fallback / $PWD 순으로 결정.
 PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 
-BUDGET_BYTES="${REIN_BUDGET_BYTES:-65536}"
-USED_BYTES=0
-TRUNCATED=false
-
-# REIN_NOW 를 date 명령에 주입할 형식으로 정규화
-now_week_offset() {
-  # $1 = weeks ago (0,1,2,3)
-  local i="$1"
-  if [ -n "${REIN_NOW:-}" ]; then
-    # 고정 시각 기준
-    date -j -v-${i}w -f "%Y-%m-%d" "$REIN_NOW" +%G-W%V 2>/dev/null \
-      || date -d "$REIN_NOW ${i} weeks ago" +%G-W%V 2>/dev/null
-  else
-    date -v-${i}w +%G-W%V 2>/dev/null \
-      || date -d "${i} weeks ago" +%G-W%V 2>/dev/null
-  fi
-}
-
 emit_file_block() {
   # $1 = 파일 경로 (프로젝트 루트 기준 상대 경로)
+  # Lean mode: 예산 추적 없이 그대로 emit. 호출 대상은 index.md 1개.
   local rel="$1"
   local abs="$PROJECT_DIR/$rel"
   [ -f "$abs" ] || return 0
-
-  local sz
-  sz=$(portable_stat_size "$abs")
-
-  # 예산 초과 시 제목만 출력
-  if [ "$((USED_BYTES + sz))" -gt "$BUDGET_BYTES" ]; then
-    echo "### $rel (${sz}B, truncated — budget reached)"
-    echo
-    TRUNCATED=true
-    return 0
-  fi
 
   echo "### $rel"
   echo '```markdown'
   cat "$abs"
   echo '```'
   echo
-  USED_BYTES=$((USED_BYTES + sz))
 }
 
 # 이전 세션 잔존 마커 초기화
@@ -195,8 +173,11 @@ fi
 
 echo "## trail 세션 시작 컨텍스트"
 echo
-echo "> 자동 로드: index.md + inbox 전량 + daily 전량 + weekly 최근 4주"
-echo "> 예산: ${BUDGET_BYTES}B (초과 시 이후 파일은 제목만 표시)"
+echo "> 자동 로드: index.md + 미해결 게이트 요약 (lean mode — bulk trail off)"
+echo "> ⚠️ 이 컨텍스트는 비권위 캐시. release/git/branch/tag/publish 상태는"
+echo ">    답변 전에 반드시 \`git status\` / \`git log\` / \`git tag\` /"
+echo ">    \`git ls-remote\` 로 재검증한다. trail/inbox/daily/weekly 는 자동"
+echo ">    주입되지 않으며 필요 시 명시 read 로 가져온다."
 echo
 
 # 0. B2 pending spec review 요약 (있을 때만)
@@ -252,6 +233,12 @@ except Exception:
     fi
   fi
 
+  # session_end 도장 reset — 이번 세션의 stop hook 이 다시 도장 찍어야 의미 유지.
+  # ABNORMAL 판정/메시지 출력 직후, recovery aggregate 호출 직전에 위치해야 함
+  # (그 사이에 다른 reader 가 직전 세션의 stale true 를 읽지 않도록).
+  python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+    --project-dir "$PROJECT_DIR" set-session-end false >/dev/null 2>&1 || true
+
   # 세션 시작 시 aggregate 한 번 실행 (비정상 종료로 stop-gate 를 놓친 세션의
   # blocks.jsonl 신규 라인을 반영). flock 으로 동시성 안전.
   python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
@@ -289,40 +276,8 @@ except Exception:
   fi
 fi
 
-# 1. index.md
+# index.md — lean mode 의 유일한 파일 주입 대상
 emit_file_block "trail/index.md"
-
-# 2. inbox 전량
-if [ -d "trail/inbox" ]; then
-  for f in trail/inbox/*.md; do
-    [ -f "$f" ] || continue
-    emit_file_block "$f"
-  done
-fi
-
-# 3. daily 전량
-if [ -d "trail/daily" ]; then
-  for f in trail/daily/*.md; do
-    [ -f "$f" ] || continue
-    emit_file_block "$f"
-  done
-fi
-
-# 4. weekly: 최근 4주
-if [ -d "trail/weekly" ]; then
-  WEEKS=()
-  for i in 0 1 2 3; do
-    W=$(now_week_offset "$i")
-    [ -n "$W" ] && WEEKS+=("$W")
-  done
-  for w in "${WEEKS[@]}"; do
-    emit_file_block "trail/weekly/${w}.md"
-  done
-fi
-
-if [ "$TRUNCATED" = true ]; then
-  echo "> ⚠️ 예산 초과로 일부 파일이 제목만 표시됨. REIN_BUDGET_BYTES 로 상한 조정 가능."
-fi
 
 # Skill/MCP 인벤토리 스캔 + 가이드 출력 (D)
 # BEGIN D skill-mcp
