@@ -111,6 +111,7 @@ AI-assisted 워크플로에서는 모든 수정이 재요청입니다. AI-native
 2. **리뷰 통과 전엔 commit·테스트가 차단된다.** 리뷰 기록이 생기기 전까지 `git commit` 과 테스트 실행이 막힙니다.
 3. **증거가 자동으로 쌓이고 회전된다.** 새 작업은 `trail/inbox/` 에 기록됩니다. 다음 날 어제까지의 inbox 가 `daily/` 요약으로 병합되고, 7일 지난 daily 항목은 `weekly/` 로 병합됩니다. 다음 세션 시작 시 `trail/index.md` 만 자동 로드되며, 과거 요약은 필요 시 명시 read 합니다.
 4. **업데이트는 Claude Code 플러그인 매니저가 처리한다.** 플러그인이 자기 파일을 소유하므로 사용자 수정 파일은 건드리지 않습니다.
+5. **두 모델을 한 세션에서.** Rein 은 구현은 Claude 에, 코드 리뷰는 Codex 에 라우팅합니다 (Codex 미설치 시 자동으로 Claude fallback). 두 모델의 강점을 Claude Code 세션 안에서 그대로 활용하므로 도구를 전환할 필요가 없습니다.
 
 ---
 
@@ -129,12 +130,13 @@ AI-assisted 워크플로에서는 모든 수정이 재요청입니다. AI-native
 
 ### 요구사항
 
-| 항목 | 버전 |
-|---|---|
-| OS | macOS, Linux, Windows WSL2 |
-| Claude Code | 최신 버전 |
-| git | 임의 버전 |
-| bash | 3.2+ (hook 실행에만 사용) |
+| 항목 | 버전 | 비고 |
+|---|---|---|
+| OS | macOS, Linux, Windows WSL2 | — |
+| Claude Code | 최신 버전 | 필수 |
+| git | 임의 버전 | — |
+| bash | 3.2+ | hook 실행에만 사용 |
+| **Codex CLI** | 최신 버전 | **권장.** Rein 의 리뷰 게이트는 신뢰도 높은 리뷰를 위해 Codex 를 사용합니다. Codex 가 설치되어 있지 않으면 Rein 은 자동으로 Claude (`code-reviewer` 스킬) 로 fallback 하며, fallback 사유가 리뷰 기록에 남습니다. |
 
 ---
 

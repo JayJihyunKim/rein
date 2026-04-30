@@ -111,6 +111,7 @@ In an AI-assisted workflow, every fix is a re-prompt. In an AI-native workflow, 
 2. **Reviews block commits and tests.** Until a review record exists, `git commit` and test runners are blocked.
 3. **Evidence accumulates and rotates automatically.** New work lands in `trail/inbox/`. The next day, yesterday's inbox merges into a `daily/` summary; daily entries older than 7 days merge into `weekly/`. The next session auto-loads `trail/index.md` for project state — older summaries are read on demand.
 4. **Updates are handled by Claude Code's plugin manager.** Your customisations are not overwritten because the plugin owns its own files.
+5. **Two models, one session.** Rein routes implementation to Claude and code reviews to Codex (with automatic Claude fallback if Codex isn't installed) — both happen inside the same Claude Code session, so you never have to switch tools.
 
 ---
 
@@ -129,12 +130,13 @@ That's it. Claude scaffolds `trail/` and `.rein/` in your repo on the first sess
 
 ### Requirements
 
-| Item | Version |
-|---|---|
-| OS | macOS, Linux, Windows WSL2 |
-| Claude Code | Latest |
-| git | Any |
-| bash | 3.2+ (only for hook execution) |
+| Item | Version | Notes |
+|---|---|---|
+| OS | macOS, Linux, Windows WSL2 | — |
+| Claude Code | Latest | Required |
+| git | Any | — |
+| bash | 3.2+ | Only for hook execution |
+| **Codex CLI** | Latest | **Recommended.** Rein's review gate uses Codex for higher-trust reviews. If Codex is not installed, Rein automatically falls back to Claude (`code-reviewer` skill) with the fallback reason logged in the review record. |
 
 ---
 
