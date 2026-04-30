@@ -24,7 +24,7 @@ CLI contract:
 Output: writes ``.rein/project.json`` with the canonical schema::
 
     {
-      "mode": "plugin" | "scaffold",
+      "mode": "plugin",
       "scope": "user" | "project" | "local" | "managed",
       "version": "<semver>"
     }
@@ -39,7 +39,7 @@ import re
 import sys
 from pathlib import Path
 
-VALID_MODES = ("plugin", "scaffold")
+VALID_MODES = ("plugin",)
 VALID_SCOPES = ("user", "project", "local", "managed")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 

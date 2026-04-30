@@ -228,9 +228,8 @@ if [ "$GOVERNANCE_STAGE" = "INVALID" ]; then
     >> "$PROJECT_DIR/trail/incidents/governance-config-invalid.log" 2>/dev/null || true
   mkdir -p "$DOD_DIR"
   touch "$DOD_MISMATCH_MARKER"
-  # Phase 3 Task 3.2: governance.json path is now mode-aware. Surface the
-  # actually-resolved path so the user fixes the right file in plugin / scaffold
-  # / legacy installs alike.
+  # governance.json path is mode-aware. Surface the actually-resolved path so
+  # the user fixes the right file in plugin / legacy installs.
   GOVERNANCE_CONFIG_PATH=$(cd "$PROJECT_DIR" && resolve_governance_config_path)
   echo "BLOCKED: [DoD gate] corrupt $GOVERNANCE_CONFIG_PATH." >&2
   echo "  fix or remove the file to re-initialize to Stage 1 (advisory)." >&2

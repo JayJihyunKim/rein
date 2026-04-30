@@ -34,16 +34,16 @@ fi
 __REIN_GOVERNANCE_STAGE_LOADED=1
 
 # resolve_governance_config_path: prints the governance.json path honoring
-# rein-state-paths.py mode resolution (Plan §704-760, Phase 3 Task 3.2).
+# rein-state-paths.py mode resolution.
 #
 # Resolution order:
 #   1. ${CLAUDE_PLUGIN_ROOT}/scripts/rein-state-paths.py governance (plugin install)
-#   2. <repo>/plugins/rein-core/scripts/rein-state-paths.py governance (scaffold dev)
-#   3. Legacy ``.claude/.rein-state/governance.json`` (pre-Phase-3 installs)
+#   2. <repo>/plugins/rein-core/scripts/rein-state-paths.py governance (rein-dev source checkout)
+#   3. Legacy ``.claude/.rein-state/governance.json`` (pre-migration installs)
 #
-# The resolver may return a path that does not yet exist (scaffold mode with
-# no .rein/cache/governance.json yet). In that case we fall through to legacy
-# so existing dev installs keep working without migration.
+# The resolver may return a path that does not yet exist (e.g. rein-dev source
+# checkout with no .rein/cache/governance.json yet). In that case we fall
+# through to legacy so existing dev installs keep working without migration.
 resolve_governance_config_path() {
   local resolver="${CLAUDE_PLUGIN_ROOT:-}/scripts/rein-state-paths.py"
   local resolved=""
@@ -60,7 +60,7 @@ resolve_governance_config_path() {
     printf '%s\n' "$resolved"
     return 0
   fi
-  # Backward-compat fallback (legacy scaffold path, pre-Phase-3 installs).
+  # Backward-compat fallback (legacy v1.x path, pre-migration installs).
   printf '%s\n' ".claude/.rein-state/governance.json"
 }
 

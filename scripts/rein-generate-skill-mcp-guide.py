@@ -20,18 +20,13 @@ from pathlib import Path
 
 
 def _resolve_inventory_dir() -> Path:
-    """Return the inventory directory, mode-aware (Phase 3 Task 3.4).
+    """Return the inventory directory, mode-aware.
 
     Resolution order (matches rein_jobs_dir() in scripts/rein.sh):
       1. Plugin install — ${CLAUDE_PLUGIN_ROOT}/scripts/rein-state-paths.py
-      2. Scaffold dev with explicit opt-in (.rein/project.json or
+      2. rein-dev source checkout with explicit opt-in (.rein/project.json or
          .rein/cache/ already exists) — repo-local resolver
-      3. Legacy fallback — .claude/cache/
-
-    The resolver returns ``${CLAUDE_PLUGIN_DATA}/runtime/inventory`` in plugin
-    mode and ``.rein/cache/inventory`` in scaffold mode (no trailing slash).
-    Legacy fallback keeps existing rein-dev clones writing to
-    ``.claude/cache/`` until ``rein migrate`` runs in Phase 4.
+      3. Legacy fallback — .claude/cache/ (pre-migrate rein-dev clones)
     """
     resolver: Path | None = None
     plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT")

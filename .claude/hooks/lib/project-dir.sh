@@ -24,8 +24,8 @@
 #      back to cwd-git would let an unrelated repo capture trail/ writes when
 #      the hook is invoked by absolute path from outside (audit-integrity
 #      regression observed by codex review 2026-04-29).
-#   5. cd "$SCRIPT_DIR/../.." && pwd — legacy positional fallback (no trail/
-#      yet, e.g. fresh scaffold install before `rein init` finished).
+#   5. cd "$SCRIPT_DIR/../.." && pwd — positional fallback (no trail/ yet,
+#      e.g. fresh install before `rein init` finished).
 #   6. git rev-parse --show-toplevel from cwd — last attempt before $PWD.
 #   7. $PWD — final fallback.
 #

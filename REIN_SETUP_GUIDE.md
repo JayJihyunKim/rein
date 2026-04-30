@@ -103,41 +103,30 @@ git fetch template && git merge template/main
 | 히스토리 | 없음 (깨끗한 시작) | 없음 | 템플릿 커밋 히스토리 포함 |
 | 이후 업데이트 | 수동 | 수동 | `git merge template/main` |
 
-### v1.x → v2.0 Migration (`rein migrate`)
+### Legacy v1.x → v1.0.0 Migration (`rein migrate`)
 
-v2.0 부터 `rein init` 의 기본 모드가 **plugin 모드** 로 변경됐습니다. 기존 v1.x 사용자(`scaffold` 모드로 설치된 repo)는 두 가지 선택지가 있습니다.
-
-**선택 A — 그대로 scaffold 모드 유지** (변경 없음)
-
-```bash
-rein update      # 기존처럼 작동, scaffold 모드 유지. 추가 작업 없음.
-```
-
-`rein init --mode=scaffold` 가 v2.5+ 부터 stderr deprecation warning 을 emit 하지만 **v3.0 까지는 정상 동작**합니다. 기존 워크플로 그대로 유지 가능.
-
-**선택 B — plugin 모드로 전환** (권장)
+v1.0.0 OSS launch 시점에 `rein init` 은 **plugin 모드만 지원**합니다. 이전 dev cycle 의 v1.x scaffold install 이 있던 repo 는 `rein migrate` 로 plugin 모드로 전환하세요.
 
 ```bash
 rein migrate     # 자동 변환:
                  #   - .claude/.rein-manifest.json 제거
                  #   - .claude/settings.json 에 plugin pin 추가
                  #   - .claude/hooks/, .claude/skills/, .claude/agents/ 의 plugin 미러 파일 제거
-                 #     (scaffold-overlay 만 남기고 SSOT 는 plugin 으로 이관)
                  #   - .rein/project.json 에 mode=plugin 기록
                  #   - .rein/policy/router/ 로 router 학습 데이터 이관
 ```
 
 전환 후 변화:
 - repo 가 가벼워짐 (수십 개 파일이 plugin 영역으로 이동)
-- `rein update` 대신 Claude Code 가 plugin marketplace 에서 자동 fetch
+- 갱신은 `claude plugin update rein-core` (Claude Code plugin manager)
 - hook/skill 직접 수정이 필요하면 `.rein/policy/{hooks,rules}.yaml` 로 override 가능
 - 사용자 편집한 `.claude/CLAUDE.md` 는 plugin 모드에서 **건드리지 않음** (소유권 환원)
 
 전환 전 백업 권장:
 ```bash
-cp -r .claude .claude.backup-pre-v2-migrate
+cp -r .claude .claude.backup-pre-v1-migrate
 rein migrate
-# 문제 발생 시: rm -rf .claude && mv .claude.backup-pre-v2-migrate .claude
+# 문제 발생 시: rm -rf .claude && mv .claude.backup-pre-v1-migrate .claude
 ```
 
 migrate 가 자동 처리하지 못하는 케이스(매우 광범위한 hook 커스터마이징 등)는 `--dry-run` 으로 미리 확인:
