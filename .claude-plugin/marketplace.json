@@ -1,7 +1,7 @@
 {
-  "name": "rein-dev-local",
+  "name": "rein",
   "owner": { "name": "rein-maintainer" },
-  "description": "Local development marketplace for rein plugins (pre-publish testing). Production users should use the published Anthropic/self-hosted marketplace.",
+  "description": "Rein AI Native Development Framework marketplace. Install by adding this repository URL via Claude Code's `/plugins/marketplaces` → `Add marketplace`.",
   "plugins": [
     {
       "name": "rein",
