@@ -1,7 +1,7 @@
 {
   "name": "rein",
   "owner": { "name": "rein-maintainer" },
-  "description": "Rein AI Native Development Framework marketplace. Install by adding this repository URL via Claude Code's `/plugins/marketplaces` → `Add marketplace`.",
+  "description": "Rein AI Native Development Framework marketplace. Add this repository in Claude Code via `/plugin marketplace add JayJihyunKim/rein`, then `/plugin install rein@rein`.",
   "plugins": [
     {
       "name": "rein",
