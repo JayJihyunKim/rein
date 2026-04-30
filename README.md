@@ -7,9 +7,9 @@
   <h1>⚙️ Rein</h1>
 
   <p>
-    <strong>An AI-Native development framework for Claude Code that forces the agent to plan, leave evidence, and pass review before code lands.</strong>
+    <strong>Give your AI the reins — with the guardrails to actually let it run.</strong>
     <br>
-    Codify discipline in your repo, not in your prompts.
+    The Claude Code plugin that puts your team's review discipline directly in your repo.
   </p>
 
   <p>
