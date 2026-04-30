@@ -37,7 +37,7 @@ INSTALL_PLUGIN_PY="$SCRIPT_DIR/rein-install-plugin-to-settings.py"
 RUNTIME_INIT_PY="$SCRIPT_DIR/rein-runtime-init.py"
 PROJECT_JSON_PY="$SCRIPT_DIR/rein-write-project-json.py"
 
-REIN_PLUGIN_VERSION_DEFAULT="^2.0.0"
+REIN_PLUGIN_VERSION_DEFAULT="^1.0.0"
 
 # ---------------------------------------------------------------------------
 # Pre-flight: idempotency + incomplete-state detection
@@ -145,7 +145,7 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/rein}" \
 # step 6 — project.json atomic write-last (single source of truth for
 # completion).  Task 4.10 guarantees temp+rename + fsync.
 # ---------------------------------------------------------------------------
-VERSION="${REIN_MIGRATE_VERSION:-2.0.0}"
+VERSION="${REIN_MIGRATE_VERSION:-1.0.0}"
 python3 "$PROJECT_JSON_PY" \
   --mode plugin \
   --scope "$SCOPE" \

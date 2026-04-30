@@ -26,8 +26,6 @@
     ".github/workflows/weekly-agent-evolution.yml"
   ],
   "scaffoldHelperScripts": [
-    "scripts/rein-manifest-v2.py",
-    "scripts/rein-path-match.py",
     "scripts/rein-job-wrapper.sh"
   ]
 }

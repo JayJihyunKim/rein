@@ -89,9 +89,9 @@ trail/
 └── index.md    ← current project state (5-15 lines)
 ```
 
-### 4. Template updates don't clobber user edits
+### 4. Updates are owned by Claude Code's plugin manager
 
-`rein update` brings the Rein template up to date. User-modified files go through a **3-way merge** so edits are preserved automatically, and only real conflicts are surfaced. The CLI updates itself in the same run. No sudo required.
+Plugin updates run via `claude plugin update rein-core`. Your repo's hooks/skills/agents are owned by the plugin manifest, so updates do not touch user-modified files.
 
 ---
 
@@ -113,37 +113,21 @@ rein --version
 ## Quick Start
 
 ```bash
-# 1. Create project
-rein new my-project && cd my-project && git init
+# 1. Enter an existing git repo (rein init requires .git)
+cd existing-project
 
-# 2. Write current project state in trail/index.md (5-15 lines)
+# 2. rein init — install in plugin mode (the only install path)
+rein init
 
-# 3. Customize AGENTS.md for your project
+# 3. Write current project state in trail/index.md (5-15 lines)
 
-# 4. Run Claude Code — Rein automatically guides the workflow
+# 4. Customize AGENTS.md for your project
+
+# 5. Run Claude Code — Rein automatically guides the workflow
 claude
 ```
 
-To integrate into an existing directory, use `rein init` (plugin mode is the v2.0+ default):
-
-```bash
-cd existing-project
-rein init                  # plugin mode (default in v2.0+) — light footprint
-rein init --mode=scaffold  # scaffold mode (legacy) — copies all files into the repo
-```
-
-> For detailed customization, see [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md).
-
-### Plugin mode vs scaffold mode (v2.0+)
-
-| Item | Plugin mode (default) | Scaffold mode (`--mode=scaffold`) |
-|---|---|---|
-| Files added to your repo | `.rein/project.json` + plugin pin in `.claude/settings.json` | 21 files (hooks/skills/agents/rules + AGENTS.md, etc. — full copy) |
-| Update path | Claude Code fetches from the plugin marketplace | `rein update` performs a 3-way merge |
-| User edits hooks | Not directly (plugin owns the hooks). Pick scaffold mode for custom forks. | Yes — your repo is the source of truth. |
-| Recommended for | Most teams that want the standard flow as-is | Teams that fork hooks/rules and customize them |
-
-Existing users (v1.x → v2.0) can switch to plugin mode with `rein migrate`, or stay on scaffold mode without changes ([REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md)).
+`rein init` runs in Claude Code plugin mode. The `rein-core` plugin published on Claude Code marketplace automatically fetches hooks/skills/agents; your repo only retains `.rein/project.json` and the plugin pin in `.claude/settings.json`. See [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) for the full flow.
 
 ---
 
@@ -169,14 +153,13 @@ repo/
 
 | Command | Description |
 |---------|-------------|
-| `rein new <project>` | Create a new project from the template |
-| `rein merge` | Merge the template into an existing project |
-| `rein update` | Update to the latest template (includes CLI self-update) |
-| `rein update --prune` | Detect template-removed files (dry-run) |
+| `rein init` | Install the rein-core plugin into the current git repo (plugin-only) |
+| `rein update` | Print plugin update pointer (run `claude plugin update rein-core` for the actual update) |
+| `rein job <subcmd>` | Background jobs (start/status/stop/tail/list/gc) |
 | `rein --version` | Print version |
 | `rein --help` | Show help |
 
-Advanced commands (`rein job`, `rein remove`, environment variables) are documented in [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md).
+For environment variables and flags see [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md).
 
 ### Slash command invocation
 
@@ -230,13 +213,9 @@ Starting with v0.7.0, the CLI install path changed from `/usr/local/bin/rein` to
 
 ---
 
-## Latest release — v1.1.0 (2026-04-21)
+## Release history
 
-- **Update safety**: `rein update` auto-merges user edits without clobbering them. Only real conflicts prompt the user.
-- **Background jobs**: Long-running commands can be detached via `rein job` so the AI session is not blocked.
-- **Governance stages**: Per-project rule strictness can be staged from advisory to blocking.
-
-[See CHANGELOG.md for full release history](CHANGELOG.md)
+The first official launch is v1.0.0. For pre-v1 dev cycle history see the [archive](docs/changelog-archive/2026-04-pre-v1.md).
 
 ---
 

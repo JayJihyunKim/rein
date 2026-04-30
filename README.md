@@ -89,9 +89,9 @@ trail/
 └── index.md    ← 현재 프로젝트 상태 (5~15줄)
 ```
 
-### 4. 템플릿 업데이트가 사용자 수정을 파괴하지 않는다
+### 4. 업데이트는 Claude Code plugin manager 가 처리한다
 
-`rein update` 가 Rein 템플릿을 최신 버전으로 갱신합니다. 사용자가 수정한 파일은 **3-way merge** 로 자동 병합되고, 충돌하는 부분만 사용자에게 물어봅니다. CLI 자체도 함께 업데이트됩니다. sudo 불필요.
+플러그인 갱신은 `claude plugin update rein-core` 로 수행합니다. 사용자 repo 의 hooks/skills/agents 는 plugin manifest 가 소유하므로 업데이트가 사용자 수정 파일을 건드리지 않습니다.
 
 ---
 
@@ -113,37 +113,21 @@ rein --version
 ## 빠른 시작
 
 ```bash
-# 1. 프로젝트 생성
-rein new my-project && cd my-project && git init
+# 1. 기존 git repo 에 진입 (rein init 은 .git 이 있어야 동작)
+cd existing-project
 
-# 2. trail/index.md 에 프로젝트 현재 상태 기입 (5~15줄)
+# 2. rein init — plugin 모드로 설치 (유일한 install 경로)
+rein init
 
-# 3. AGENTS.md 를 프로젝트에 맞게 수정
+# 3. trail/index.md 에 프로젝트 현재 상태 기입 (5~15줄)
 
-# 4. Claude Code 실행 — Rein 이 자동으로 작업 플로우를 가이드합니다
+# 4. AGENTS.md 를 프로젝트에 맞게 수정
+
+# 5. Claude Code 실행 — Rein 이 자동으로 작업 플로우를 가이드합니다
 claude
 ```
 
-기존 디렉토리에 통합하려면 `rein init` (v2.0+ 부터 plugin 모드가 기본):
-
-```bash
-cd existing-project
-rein init                  # plugin 모드 (기본, v2.0+) — 가벼운 풋프린트
-rein init --mode=scaffold  # scaffold 모드 (legacy) — repo 에 모든 파일 직접 복사
-```
-
-> 상세 커스터마이징은 [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) 참조.
-
-### Plugin 모드 vs scaffold 모드 (v2.0+)
-
-| 항목 | plugin 모드 (기본) | scaffold 모드 (`--mode=scaffold`) |
-|---|---|---|
-| repo 에 추가되는 파일 | `.rein/project.json` + `.claude/settings.json` 의 plugin pin | 21개 (hooks/skills/agents/rules + AGENTS.md 등 전체 사본) |
-| 업데이트 방식 | Claude Code 가 plugin marketplace 에서 자동 fetch | `rein update` 가 3-way merge |
-| 사용자가 hooks 를 수정 | 불가 (plugin 영역). 커스텀이 필요하면 scaffold 모드 권장 | 가능 (사용자 repo 가 SSOT) |
-| 권장 대상 | 표준 흐름을 그대로 쓰고 싶은 대부분의 팀 | hook/rule 을 직접 fork 하여 커스터마이징하는 팀 |
-
-기존 사용자(v1.x → v2.0)는 `rein migrate` 로 plugin 모드로 전환하거나, 그대로 scaffold 모드로 유지할 수 있습니다 ([REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) 참조).
+`rein init` 은 Claude Code plugin 모드로 동작합니다. Claude Code marketplace 에 등록된 `rein-core` plugin 이 hooks/skills/agents 를 자동으로 fetch 하고, 사용자 repo 에는 `.rein/project.json` + `.claude/settings.json` 의 plugin pin 만 남습니다. 자세한 흐름은 [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) 를 참조하세요.
 
 ---
 
@@ -169,14 +153,13 @@ repo/
 
 | 명령어 | 설명 |
 |--------|------|
-| `rein new <project>` | 템플릿에서 새 프로젝트 생성 |
-| `rein merge` | 기존 프로젝트에 템플릿 병합 |
-| `rein update` | 템플릿 최신 버전으로 갱신 (CLI 자가 업데이트 포함) |
-| `rein update --prune` | 템플릿에서 제거된 파일 감지 (dry-run) |
+| `rein init` | 현재 git repo 에 rein-core plugin 설치 (plugin-only) |
+| `rein update` | plugin 갱신 안내 출력 (실제 갱신은 `claude plugin update rein-core`) |
+| `rein job <subcmd>` | 백그라운드 작업 (start/status/stop/tail/list/gc) |
 | `rein --version` | 버전 출력 |
 | `rein --help` | 도움말 |
 
-고급 명령 (`rein job`, `rein remove`, 환경변수) 은 [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) 참조.
+자세한 환경변수·플래그는 [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) 참조.
 
 ### Slash command 호출
 
@@ -230,13 +213,9 @@ v0.7.0 부터 CLI 설치 경로가 `/usr/local/bin/rein` → `$HOME/.rein/bin/re
 
 ---
 
-## 최근 릴리즈 — v1.1.0 (2026-04-21)
+## Release history
 
-- **업데이트 안정성**: `rein update` 가 사용자 수정을 파괴하지 않고 자동 병합. 충돌만 사용자에게 물어봄.
-- **백그라운드 작업**: 긴 명령은 `rein job` 으로 실행해 AI 세션을 막지 않음.
-- **Governance 단계화**: 프로젝트별로 규칙 엄격도를 advisory → blocking 단계별 승격 가능.
-
-[전체 릴리즈 히스토리는 CHANGELOG.md 참조](CHANGELOG.md)
+정식 launch 는 v1.0.0 부터입니다. 이전 dev cycle history 는 [archive](docs/changelog-archive/2026-04-pre-v1.md) 를 참조하세요.
 
 ---
 

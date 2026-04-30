@@ -19,7 +19,7 @@ CLI contract:
     rein-write-project-json.py \\
         --mode plugin \\
         --scope project \\
-        --version 2.0.0
+        --version 1.0.0
 
 Output: writes ``.rein/project.json`` with the canonical schema::
 
@@ -100,7 +100,7 @@ def write_project_json(mode: str, scope: str, version: str) -> Path:
         )
     if not SEMVER_RE.match(version):
         raise SystemExit(
-            f"invalid version {version!r}; expected semver (e.g. 2.0.0)"
+            f"invalid version {version!r}; expected semver (e.g. 1.0.0)"
         )
 
     payload = {

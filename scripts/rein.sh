@@ -17,7 +17,7 @@ warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 fatal() { echo -e "${RED}Fatal: $*${NC}" >&2; exit 1; }
 
-VERSION="2.0.0"
+VERSION="1.0.0"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
@@ -489,216 +489,6 @@ prune_apply() {
 }
 
 # ---------------------------------------------------------------------------
-# do_update_v2 <template_root> <rel1> <rel2> ...
-# Per-file transactional update loop for the v2 steady-state path
-# (Plan C Task 3.2 / RU-update-per-file-content-immediate + Task 3.4 /
-#  RU-update-exit-code-partial-conflict).
-#
-# For each text file, invokes three_way_merge. Non-text files are surfaced
-# via _REIN_UPDATE_NONTEXT so the caller can loop them through the legacy
-# 2-way path. The caller must call stage_manifest_begin before this and
-# stage_manifest_commit after — do_update_v2 only calls stage_manifest_add
-# on clean merges, so conflict files retain their prior manifest sha.
-#
-# Globals set (reset on every call):
-#   _REIN_UPDATE_UPDATES   — count of files cleanly merged / fast-forwarded
-#   _REIN_UPDATE_CONFLICTS — count of conflict files (user preserved, .rej written)
-#   _REIN_UPDATE_FATAL     — 1 if an unrecoverable error was seen, else 0
-#   _REIN_UPDATE_NONTEXT   — space-separated list of non-text rel paths
-#
-# Return codes (mirror Plan C Task 3.4 exit-code mapping):
-#   0 — all clean
-#   1 — one or more conflicts, transaction can complete
-#   2 — fatal error mid-loop (staging manifest left intact for inspection)
-# ---------------------------------------------------------------------------
-do_update_v2() {
-  local template_root="$1"; shift
-  _REIN_UPDATE_UPDATES=0
-  _REIN_UPDATE_CONFLICTS=0
-  _REIN_UPDATE_FATAL=0
-  _REIN_UPDATE_NONTEXT=""
-
-  local rel
-  for rel in "$@"; do
-    if ! is_text_file "$rel"; then
-      _REIN_UPDATE_NONTEXT="${_REIN_UPDATE_NONTEXT:+$_REIN_UPDATE_NONTEXT }$rel"
-      continue
-    fi
-    local incoming="$template_root/$rel"
-    if [ ! -f "$incoming" ]; then
-      # Template no longer carries the file — not our job here; prune is
-      # handled in Phase 4. Skip with no sha stage.
-      continue
-    fi
-    local user_p="$rel"
-    local base_p="$(rein_base_dir)/$rel"
-
-    local rc=0
-    three_way_merge "$user_p" "$base_p" "$incoming" "$rel" || rc=$?
-
-    case "$rc" in
-      0)
-        _REIN_UPDATE_UPDATES=$((_REIN_UPDATE_UPDATES + 1))
-        stage_manifest_add "$rel" "$(sha256_of "$incoming")"
-        ;;
-      1)
-        _REIN_UPDATE_CONFLICTS=$((_REIN_UPDATE_CONFLICTS + 1))
-        ;;
-      *)
-        _REIN_UPDATE_FATAL=1
-        echo "fatal: three_way_merge failed for $rel (rc=$rc)" >&2
-        return 2
-        ;;
-    esac
-  done
-
-  if [ "$_REIN_UPDATE_CONFLICTS" -gt 0 ]; then
-    return 1
-  fi
-  return 0
-}
-
-# ---------------------------------------------------------------------------
-# three_way_merge <user_path> <base_path> <incoming_path> <rel_for_record>
-#
-# Return codes:
-#   0 — clean: user updated (or unchanged) to converged state, base refreshed
-#   1 — conflict: user and base preserved byte-for-byte, .rej written
-#   2 — fatal (e.g., git merge-file crashed with signal)
-#
-# Decision matrix (sha256 comparison):
-#   - user missing                                  → cp incoming→user, cp incoming→base (first install)
-#   - all three equal                               → no-op
-#   - user != base but user == incoming             → cp incoming→base (user already caught up)
-#   - user == base and base != incoming             → cp incoming→{user, base} (clean fast-forward)
-#   - user != base and base == incoming             → no-op (user-only changes)
-#   - user != base and user != incoming             → true 3-way:
-#         git merge-file -p user base incoming > merged
-#         success → mv merged → user, cp incoming → base
-#         conflict markers → preserve user + base unchanged, write .rej
-#
-# Plan C Task 3.1 (RU-three-way-merge-*).
-# ---------------------------------------------------------------------------
-three_way_merge() {
-  local user="$1" base="$2" incoming="$3" rel="$4"
-
-  [ -f "$incoming" ] || { echo "three_way_merge: missing incoming $incoming" >&2; return 2; }
-
-  # First install — user absent ⇒ install incoming, then seed base.
-  # If the base-seed fails we keep the user file (already installed) and
-  # report a conflict per RU-update-base-write-failure-as-conflict.
-  if [ ! -f "$user" ]; then
-    mkdir -p "$(dirname "$user")"
-    cp "$incoming" "$user"
-    # Finding 3 (2026-04-24): propagate exec bit even in edge cases where
-    # cp on the current filesystem does not reflect incoming mode.
-    if [[ -x "$incoming" && ! -x "$user" ]]; then chmod +x "$user"; fi
-    if ! safe_cp_base "$incoming" "$base" "$rel"; then
-      return 1
-    fi
-    return 0
-  fi
-
-  # base may not exist yet if the caller is in a partially-migrated state.
-  # Try to seed it; if that fails, degrade to conflict immediately — we
-  # cannot safely run 3-way without a base, and silently overwriting the
-  # user would violate RU-three-way-merge-no-silent-overwrite.
-  if [ ! -f "$base" ]; then
-    if ! safe_cp_base "$incoming" "$base" "$rel"; then
-      return 1
-    fi
-    # Continue with the rest of the decision tree so user is still
-    # reconciled against incoming if the contents differ.
-  fi
-
-  local hu hb hi
-  hu=$(sha256_of "$user")
-  hb=$(sha256_of "$base")
-  hi=$(sha256_of "$incoming")
-
-  # All equal — nothing to do.
-  if [ "$hu" = "$hi" ] && [ "$hb" = "$hi" ]; then
-    return 0
-  fi
-
-  # User already converged to incoming — only base lagged.
-  if [ "$hu" = "$hi" ]; then
-    if ! safe_cp_base "$incoming" "$base" "$rel"; then
-      return 1
-    fi
-    return 0
-  fi
-
-  # User untouched since install (user == base), base != incoming → fast-forward.
-  # Update user first (via temp+mv for atomicity), then refresh base. If
-  # base-write fails after user was already advanced, the user is now at
-  # the incoming content — not a silent overwrite of unrelated user edits
-  # since hu == hb, so the user had never diverged — but we still must
-  # report conflict so the caller doesn't mark the manifest forward.
-  if [ "$hu" = "$hb" ]; then
-    local utmp="${user}.update.${BASHPID:-$$}.${RANDOM}"
-    cp "$incoming" "$utmp"
-    mv -f "$utmp" "$user"
-    # Finding 3 (2026-04-24): mv across filesystems may fall back to
-    # cp-into-existing-dst, which preserves dst's prior mode instead of
-    # the incoming mode. Defensive chmod even on same-fs paths.
-    if [[ -x "$incoming" && ! -x "$user" ]]; then chmod +x "$user"; fi
-    if ! safe_cp_base "$incoming" "$base" "$rel"; then
-      return 1
-    fi
-    return 0
-  fi
-
-  # User-only changes, template unchanged (base == incoming). Nothing to do.
-  if [ "$hb" = "$hi" ]; then
-    return 0
-  fi
-
-  # True 3-way merge required. git merge-file works in place, so stage
-  # a temp that starts as a copy of user, then merge into it. We avoid
-  # toggling 'set -e' here because mutating the shell option from inside
-  # a function leaks state to the caller; instead, swallow failure via
-  # '|| rc=$?' so the function never mutates the caller's errexit state.
-  local tmp="${user}.merge.${BASHPID:-$$}.${RANDOM}"
-  cp "$user" "$tmp"
-
-  local rc=0
-  git merge-file -p "$tmp" "$base" "$incoming" > "${tmp}.out" 2>/dev/null || rc=$?
-
-  if [ "$rc" = "0" ]; then
-    mv -f "${tmp}.out" "$user"
-    rm -f "$tmp"
-    # Finding 3 (2026-04-24): ${tmp}.out was written by shell redirect
-    # from `git merge-file -p`, so its mode is 0644-ish regardless of
-    # incoming's exec bit. Re-propagate exec bit when incoming has one.
-    if [[ -x "$incoming" && ! -x "$user" ]]; then chmod +x "$user"; fi
-    if ! safe_cp_base "$incoming" "$base" "$rel"; then
-      # User content landed successfully; base refresh failed. Manifest
-      # stays at the prior sha (caller decides via conflict count) and a
-      # .rej artifact has been written by safe_cp_base.
-      return 1
-    fi
-    return 0
-  fi
-
-  # rc 1..127 = number of conflicts reported by merge-file. Anything else
-  # (signal termination, binary file, etc.) is a fatal error.
-  if [ "$rc" -ge 1 ] && [ "$rc" -le 127 ]; then
-    local ts slug rej
-    ts=$(date -u +'%Y-%m-%dT%H-%M-%S')
-    slug=$(_rein_rej_slug "$rel")
-    mkdir -p "$(rein_conflicts_dir)"
-    rej="$(rein_conflicts_dir)/${ts}-${slug}.rej"
-    mv -f "${tmp}.out" "$rej"
-    rm -f "$tmp"
-    return 1
-  fi
-
-  rm -f "$tmp" "${tmp}.out"
-  return 2
-}
-
-# ---------------------------------------------------------------------------
 # ensure_gitignore_entries()
 # Appends rein operational-hygiene entries to ./.gitignore if missing.
 # Idempotent for partially-migrated installs — each pattern is checked and
@@ -1107,15 +897,7 @@ EOF
 # Phase 5 Task 5.2 step 6 — the canonical SSOT for what ships into a user repo
 # is now plugins/rein-core/plugin.json (firstClass + scaffoldOverlay +
 # scaffoldExtras + scaffoldHelperScripts), reproduced by
-# scripts/rein-build-scaffold.py. The hardcoded top-level COPY_TARGETS array
-# has been retired to eliminate drift risk between the array and plugin.json.
-#
-# `cmd_new` (legacy `rein new <project>`) and `cmd_merge` (legacy `rein update`
-# scaffold-mode 3-way merge path) still need a flat list of repo-relative paths
-# to walk. They get it from `list_copy_files()`, which derives the list at
-# call time from the same scaffold contract. Phase 8/9 will move both commands
-# to delegate fully to rein-build-scaffold.py + manifest-v2; until then the
-# helper below is the single point that knows what "rein-managed" means.
+# Legacy v1.x scaffold-mode helper retained for migration tooling references.
 # ---------------------------------------------------------------------------
 
 TRAIL_DIRS=(
@@ -1129,11 +911,8 @@ TRAIL_DIRS=(
 )
 
 # _legacy_scaffold_paths()
-# Returns the flat repo-relative path list that v1.x cmd_new/cmd_merge use to
-# enumerate rein-managed files. Internal helper — NOT a top-level module
-# variable. Kept private so the legacy paths cannot accidentally drift from
-# plugin.json's contract; the v2.0 install path uses rein-build-scaffold.py
-# directly (see install_scaffold_mode).
+# Internal helper retained for migration tooling — returns the flat
+# repo-relative path list of rein-managed files for v1.x → v1.0.0 migration.
 _legacy_scaffold_paths() {
   printf '%s\n' \
     ".claude/CLAUDE.md" \
@@ -1157,36 +936,6 @@ _legacy_scaffold_paths() {
     "scripts/rein-manifest-v2.py" \
     "scripts/rein-path-match.py" \
     "scripts/rein-job-wrapper.sh"
-}
-
-# ---------------------------------------------------------------------------
-# list_copy_files(template_dir)
-# Outputs NUL-terminated relative file paths for all rein-managed scaffold
-# targets (v1.x compatibility surface). For files, prints directly. For
-# directories, finds all files recursively excluding .DS_Store.
-# Output is NUL-terminated to safely handle filenames with spaces/newlines.
-# ---------------------------------------------------------------------------
-list_copy_files() {
-  local template_dir="$1"
-
-  while IFS= read -r target; do
-    local full_path="$template_dir/$target"
-
-    if [[ ! -e "$full_path" ]]; then
-      # Target doesn't exist in template; skip silently
-      continue
-    fi
-
-    if [[ -f "$full_path" ]]; then
-      printf '%s\0' "$target"
-    elif [[ -d "$full_path" ]]; then
-      # Use -print0 for safe handling of unusual filenames
-      find "$full_path" -type f ! -name ".DS_Store" -print0 | \
-        while IFS= read -r -d '' abs_file; do
-          printf '%s\0' "${abs_file#"$template_dir/"}"
-        done
-    fi
-  done < <(_legacy_scaffold_paths)
 }
 
 # ---------------------------------------------------------------------------
@@ -1220,83 +969,6 @@ manifest_sha256() {
   fi
 }
 
-# manifest_generate(project_dir, template_dir)
-# Build/refresh the manifest from the project_dir, using template_dir to
-# enumerate which files belong to rein. Preserves `installed_at` and
-# per-file `added_in` from any pre-existing manifest.
-manifest_generate() {
-  local project_dir="$1"
-  local template_dir="$2"
-  local mf
-  mf=$(manifest_path "$project_dir")
-
-  local list_file
-  list_file=$(mktemp)
-  # Track files copied via list_copy_files (rein-managed code/config).
-  #
-  # SCOPE NOTE: trail/ files are intentionally NOT tracked in the manifest:
-  #   - trail/index.md is a starter file that the project owner immediately
-  #     customizes; treating it as rein-tracked would mean prune sees it as
-  #     "removed from template" (because list_copy_files excludes trail/) and
-  #     would attempt to delete it.
-  #   - trail/<sub>/.gitkeep files are harmless directory markers; tracking
-  #     them would create the same false-positive prune target.
-  # The manifest contract is therefore: "tracks every rein-managed file
-  # under list_copy_files()". trail/ is user state, not rein-managed.
-  while IFS= read -r -d '' rel_path; do
-    local dest="$project_dir/$rel_path"
-    if [[ -f "$dest" ]]; then
-      printf '%s\t%s\n' "$rel_path" "$(manifest_sha256 "$dest")" >> "$list_file"
-    fi
-  done < <(list_copy_files "$template_dir")
-
-  python3 - "$mf" "$VERSION" "$list_file" <<'PYEOF'
-import json, os, sys, datetime
-
-mf, version, list_file = sys.argv[1], sys.argv[2], sys.argv[3]
-
-prev = {}
-prev_files = {}
-prev_installed_at = None
-if os.path.exists(mf):
-    try:
-        with open(mf) as f:
-            prev = json.load(f)
-        prev_files = prev.get("files", {}) or {}
-        prev_installed_at = prev.get("installed_at")
-    except Exception:
-        pass
-
-files = {}
-with open(list_file) as f:
-    for line in f:
-        line = line.rstrip("\n")
-        if not line:
-            continue
-        parts = line.split("\t", 1)
-        if len(parts) != 2:
-            continue
-        rel, sha = parts
-        added_in = prev_files.get(rel, {}).get("added_in", version)
-        files[rel] = {"sha256": sha, "added_in": added_in}
-
-now = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-manifest = {
-    "schema_version": "1",
-    "rein_version": version,
-    "installed_at": prev_installed_at or now,
-    "updated_at": now,
-    "files": files,
-}
-
-os.makedirs(os.path.dirname(mf), exist_ok=True)
-with open(mf, "w") as f:
-    json.dump(manifest, f, indent=2, sort_keys=True)
-    f.write("\n")
-PYEOF
-  rm -f "$list_file"
-}
-
 # manifest_validate(project_dir)
 # Returns 0 if manifest exists and is parseable with schema_version "1" or "2",
 # 1 if missing, 2 if corrupt or unsupported schema. Accepts both schema versions
@@ -1315,259 +987,6 @@ assert schema in ("1", "2"), f"unsupported schema: {schema}"
 assert isinstance(d.get("files", {}), dict), "files must be object"
 PYEOF
   return 0
-}
-
-# ---------------------------------------------------------------------------
-# Prune (deprecated-file removal)
-#
-# Logic: compare manifest's tracked files vs the current template's file list.
-# Files present in manifest but absent in template are "removal candidates".
-# For each candidate:
-#   - if dest does not exist: skip (already removed)
-#   - if dest sha256 == manifest sha256: SAFE delete
-#   - if dest sha256 != manifest sha256: USER MODIFIED — preserve + warn
-#
-# In dry-run mode (default) only the classification is printed.
-# In confirm mode, safe candidates are backed up to .rein-prune-backup-<ts>/
-# and then removed; the manifest is regenerated to reflect the new state.
-#
-# Files matched by .gitignore are always preserved (extra safety net).
-# ---------------------------------------------------------------------------
-prune_impl() {
-  local project_dir="$1"
-  local template_dir="$2"
-  local confirm="$3"           # "true" | "false"
-  local manifest_override="${4:-}"  # optional: path to a snapshot manifest to
-                                    # use instead of project_dir's current one
-                                    # (cmd_merge passes the pre-merge snapshot
-                                    # so prune sees the OLD file set).
-
-  local mf
-  if [[ -n "$manifest_override" && -f "$manifest_override" ]]; then
-    mf="$manifest_override"
-  else
-    mf=$(manifest_path "$project_dir")
-    # Validate only when using the live manifest. A snapshot from cmd_merge
-    # has already been validated implicitly (it was a copy of a prior file).
-    local mv_rc=0
-    manifest_validate "$project_dir" || mv_rc=$?
-    if [[ "$mv_rc" -ne 0 ]]; then
-      case "$mv_rc" in
-        1) warn "No manifest found — prune disabled until next 'rein update'." ;;
-        2) error "Manifest is corrupt or has unsupported schema; refusing to prune." ;;
-        *) error "Manifest validation failed with code $mv_rc" ;;
-      esac
-      return 0
-    fi
-  fi
-
-  # Build current template file list
-  local cur_list
-  cur_list=$(mktemp)
-  while IFS= read -r -d '' rel_path; do
-    printf '%s\n' "$rel_path" >> "$cur_list"
-  done < <(list_copy_files "$template_dir")
-
-  # Have python compute the candidate set, classify each, and emit actions
-  local plan
-  plan=$(mktemp)
-  python3 - "$mf" "$cur_list" "$project_dir" "$plan" <<'PYEOF'
-import json, os, sys, hashlib, subprocess
-
-mf, cur_list_path, project_dir, plan_path = sys.argv[1:5]
-
-# Resolve project_dir to an absolute, canonical form so containment checks
-# are reliable.
-project_dir_abs = os.path.realpath(project_dir)
-
-with open(mf) as f:
-    manifest = json.load(f)
-
-prev = set((manifest.get("files") or {}).keys())
-cur = set()
-with open(cur_list_path) as f:
-    for line in f:
-        line = line.rstrip("\n")
-        if line:
-            cur.add(line)
-
-candidates = sorted(prev - cur)
-
-def sha256(path):
-    h = hashlib.sha256()
-    try:
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                h.update(chunk)
-        return h.hexdigest()
-    except Exception:
-        return None
-
-def is_gitignored(path):
-    try:
-        rc = subprocess.call(
-            ["git", "check-ignore", "-q", path],
-            cwd=project_dir_abs,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        return rc == 0
-    except Exception:
-        return False
-
-def is_safe_relpath(rel):
-    """Reject paths that escape the project. Manifest entries must be:
-    - Non-empty
-    - Not absolute
-    - No '..' segments after normalization
-    - Resolved path must be strictly under project_dir
-    """
-    if not rel or os.path.isabs(rel):
-        return False
-    norm = os.path.normpath(rel)
-    if norm.startswith("..") or os.path.isabs(norm):
-        return False
-    parts = norm.split(os.sep)
-    if any(p == ".." for p in parts):
-        return False
-    full = os.path.realpath(os.path.join(project_dir_abs, norm))
-    # Must live under project_dir_abs (and not BE project_dir_abs itself).
-    try:
-        common = os.path.commonpath([project_dir_abs, full])
-    except ValueError:
-        return False
-    return common == project_dir_abs and full != project_dir_abs
-
-with open(plan_path, "w") as out:
-    for rel in candidates:
-        if not is_safe_relpath(rel):
-            out.write(f"UNSAFE\t{rel}\trefusing to touch path outside project\n")
-            continue
-        full = os.path.join(project_dir_abs, rel)
-        recorded = (manifest["files"].get(rel) or {}).get("sha256", "")
-        if not os.path.exists(full):
-            out.write(f"GONE\t{rel}\n")
-            continue
-        # Reject symlinks at the leaf (defense in depth — a symlink could
-        # point outside even if the rel path looks fine)
-        if os.path.islink(full):
-            out.write(f"UNSAFE\t{rel}\tsymlink not allowed\n")
-            continue
-        if is_gitignored(full):
-            out.write(f"IGNORED\t{rel}\n")
-            continue
-        actual = sha256(full)
-        if actual is None:
-            out.write(f"ERROR\t{rel}\tcannot read\n")
-            continue
-        if actual == recorded:
-            out.write(f"SAFE\t{rel}\t{recorded}\n")
-        else:
-            out.write(f"MODIFIED\t{rel}\n")
-PYEOF
-
-  rm -f "$cur_list"
-
-  # Read plan, emit user-facing report, optionally execute
-  local safe_count=0 modified_count=0 gone_count=0 ignored_count=0
-  local backup_dir=""
-  # backup_dir is created via mktemp below (after the report header) so that
-  # the directory name is unpredictable. See M2 fix.
-
-  # M2 fix: use mktemp -d so the backup dir name is unpredictable, blocking
-  # symlink-planting attacks against a guessed timestamp.
-  if [[ "$confirm" == "true" ]]; then
-    backup_dir=$(mktemp -d "$project_dir/.rein-prune-backup-XXXXXXXX") || {
-      error "Failed to create backup directory under $project_dir"
-      return 1
-    }
-  fi
-
-  echo "" >&2
-  echo -e "${BOLD}Prune analysis${NC}" >&2
-  echo "  manifest: $mf" >&2
-  echo "  mode:     $([[ "$confirm" == "true" ]] && echo 'CONFIRM (will delete)' || echo 'DRY-RUN (no changes)')" >&2
-  echo "" >&2
-
-  local unsafe_count=0
-  while IFS=$'\t' read -r kind rel rest; do
-    case "$kind" in
-      SAFE)
-        safe_count=$((safe_count + 1))
-        if [[ "$confirm" == "true" ]]; then
-          # TOCTOU re-check: confirm sha256 is STILL the recorded value
-          # immediately before deleting. The python plan recorded the
-          # expected sha as `rest`. If the file changed since classification,
-          # downgrade to MODIFIED and skip.
-          local now_sha
-          now_sha=$(manifest_sha256 "$project_dir/$rel")
-          if [[ "$now_sha" != "$rest" ]]; then
-            modified_count=$((modified_count + 1))
-            safe_count=$((safe_count - 1))
-            echo -e "  ${GREEN}PRESERVED${NC}: $rel  (modified after planning — TOCTOU guard)" >&2
-            continue
-          fi
-          # M1 fix: explicitly reject symlinks at the leaf right before cp/rm,
-          # in case a concurrent attacker swapped the file for a symlink
-          # between the python plan and this point. Without this, `cp` would
-          # follow the symlink and read the target's content into the backup
-          # (an information-disclosure window, bounded by sha collision).
-          if [[ -L "$project_dir/$rel" ]]; then
-            unsafe_count=$((unsafe_count + 1))
-            safe_count=$((safe_count - 1))
-            echo -e "  ${RED}REFUSED${NC}: $rel  (symlink appeared after planning — refusing)" >&2
-            continue
-          fi
-          mkdir -p "$backup_dir/$(dirname "$rel")"
-          # cp -P (no-dereference) is defensive even though we just checked
-          # the leaf is not a symlink. It also disables hardlink resolution
-          # via -P on platforms where that matters.
-          cp -P "$project_dir/$rel" "$backup_dir/$rel"
-          rm -f "$project_dir/$rel"
-          echo -e "  ${RED}DELETED${NC}: $rel  (backup: ${backup_dir##*/})" >&2
-        else
-          echo -e "  ${YELLOW}WOULD-DELETE${NC}: $rel" >&2
-        fi
-        ;;
-      MODIFIED)
-        modified_count=$((modified_count + 1))
-        echo -e "  ${GREEN}PRESERVED${NC}: $rel  (user-modified)" >&2
-        ;;
-      GONE)
-        gone_count=$((gone_count + 1))
-        ;;
-      IGNORED)
-        ignored_count=$((ignored_count + 1))
-        echo -e "  ${GREEN}PRESERVED${NC}: $rel  (gitignored)" >&2
-        ;;
-      UNSAFE)
-        unsafe_count=$((unsafe_count + 1))
-        echo -e "  ${RED}REFUSED${NC}: $rel  ($rest)" >&2
-        ;;
-      ERROR)
-        echo -e "  ${RED}ERROR${NC}: $rel  ($rest)" >&2
-        ;;
-    esac
-  done < "$plan"
-
-  rm -f "$plan"
-
-  echo "" >&2
-  echo -e "${BOLD}Summary${NC}: deleted=$safe_count, preserved-modified=$modified_count, preserved-ignored=$ignored_count, already-gone=$gone_count, refused-unsafe=$unsafe_count" >&2
-
-  if [[ "$confirm" == "true" && "$safe_count" -gt 0 ]]; then
-    info "Backup written to: $backup_dir"
-    # Round 2 codex-review fix (Group 7 2026-04-24): previously called
-    # manifest_generate here, which hardcodes schema_version="1" and would
-    # clobber the v2 manifest that cmd_merge just committed via
-    # stage_manifest_commit. Since cmd_merge stages only files present in
-    # the current template (pruned files are already absent from the
-    # staged manifest), no further regeneration is needed: the live v2
-    # manifest already reflects the post-prune state correctly.
-  elif [[ "$confirm" != "true" && "$safe_count" -gt 0 ]]; then
-    echo "" >&2
-    info "Run 'rein update --prune --confirm' to actually delete the $safe_count file(s) above."
-  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1800,48 +1219,33 @@ substitute_vars() {
 usage() {
   cat <<'EOF'
 Usage:
-  rein new <project-name>           Create a new project from template
-  rein init [flags]                 Install rein into current git repo (v2.0+)
-  rein merge [flags]                Merge template into current project
-  rein update [flags]               Update current project from template
-  rein remove [flags]               Remove rein-tracked files (see 'rein remove --help')
-  rein migrate [flags]              v1.x scaffold → v2.0 plugin migration (Phase 4)
+  rein init [flags]                 Install rein-core plugin into current git repo
+  rein update                       Show plugin update pointer (use 'claude plugin update rein-core')
+  rein migrate [flags]              v1.x scaffold → v1.0 plugin migration (legacy)
                                     Flags: --dry-run, --resume
+  rein job <subcmd>                 Background job (start|status|stop|tail|list|gc)
   rein --version                    Show version
   rein --help                       Show this help
 
 Flags (init):
-  --mode=<plugin|scaffold>          plugin (default v2.0+) or full scaffold
+  --mode=plugin                     Only 'plugin' mode is supported (default)
   --scope=<user|project|local|managed>
                                     Settings.json scope for plugin entry
                                     (default: project)
 
-Flags (merge / update):
-  --all, --yes                      Auto-overwrite every conflict (CI friendly)
-  --prune                           Dry-run: show files removed from template
-  --prune --confirm                 Actually delete unmodified deprecated files
-                                    (creates .rein-prune-backup-<ts>/ first)
-
 Environment:
   REIN_TEMPLATE_REPO                Override template repository URL
   CLAUDE_TEMPLATE_REPO              (deprecated) Alias for REIN_TEMPLATE_REPO
-
-Manifest:
-  rein tracks installed files in .claude/.rein-manifest.json so that updates
-  can detect user modifications and prune deprecated files safely. The
-  manifest is created/refreshed on every 'rein new', 'rein merge', and
-  'rein update'. User-modified files (sha256 mismatch) are never pruned.
 EOF
 }
 
 # ---------------------------------------------------------------------------
-# Phase 5: rein init / rein update — mode + scope flags
+# rein init — mode + scope flags
 #
-# Plugin-First Restructure (docs/plans/2026-04-27-plugin-first-restructure-plan.md
-# Phase 5 lines 1168-1370). MODE/SCOPE globals are set by parse_init_flags()
-# before cmd_init() dispatches to install_plugin_mode() / install_scaffold_mode().
+# MODE/SCOPE globals are set by parse_init_flags() before cmd_init() dispatches
+# to install_plugin_mode(). v1.0.0 OSS launch supports plugin mode only.
 # ---------------------------------------------------------------------------
-MODE=""               # set by --mode=<plugin|scaffold>; defaults to "plugin"
+MODE=""               # set by --mode=plugin (only valid value); defaults to "plugin"
 SCOPE=""              # set by --scope=<user|project|local|managed>; defaults to "project"
 
 # REIN_HOME = parent dir of scripts/ — used by install_*_mode to locate
@@ -1865,7 +1269,7 @@ parse_init_flags() {
       --mode=*) MODE="${1#--mode=}"; shift ;;
       --mode)
         if [[ $# -lt 2 ]]; then
-          error "--mode requires a value (plugin|scaffold)"; exit 1
+          error "--mode requires a value (plugin)"; exit 1
         fi
         MODE="$2"; shift 2 ;;
       --scope=*) SCOPE="${1#--scope=}"; shift ;;
@@ -1885,13 +1289,12 @@ parse_init_flags() {
     esac
   done
 
-  # Defaults — v2.0+ ships plugin-mode + project-scope by default.
   MODE="${MODE:-plugin}"
   SCOPE="${SCOPE:-project}"
 
   case "$MODE" in
-    plugin|scaffold) ;;
-    *) error "unknown --mode '$MODE' (want: plugin|scaffold)"; exit 1 ;;
+    plugin) ;;
+    *) error "invalid --mode '$MODE' (only 'plugin' is supported)"; exit 1 ;;
   esac
   case "$SCOPE" in
     user|project|local|managed) ;;
@@ -1978,12 +1381,10 @@ install_plugin_mode() {
   # paths (.claude/settings.json, .claude/settings.local.json,
   # .claude/managed-settings.json) anchor on the user repo. user-scope writes
   # to ~/.claude/settings.json regardless of cwd.
-  # rein@^2.0.0 — pinned to the major plugin version, NOT the rein.sh
-  # CLI version (which still tracks pre-2.0 internal releases until Phase 9
-  # bumps VERSION=2.0.0). Plan §5.1 step 1.
+  # rein@^1.0.0 — pinned to the major plugin version (v1.0.0 OSS launch).
   ( cd "$target_root" && python3 "$install_py" \
       --scope "$SCOPE" \
-      --plugin "rein=^2.0.0" >/dev/null )
+      --plugin "rein=^1.0.0" >/dev/null )
 
   # Write .rein/project.json + policy templates + ensure trail/ scaffolded.
   write_rein_project_json "$target_root" "plugin"
@@ -2088,118 +1489,6 @@ EOF
   fi
 }
 
-# install_scaffold_mode(target_root)
-# Scaffold-mode rein init: invoke rein-build-scaffold.py for the 3-source export
-# (plugin first-class + scaffoldOverlay + scaffoldExtras + scaffoldHelperScripts),
-# rsync into target_root, then generate .claude/.rein-manifest.json.
-# Tasks 5.2, 5.5. Phase 8 Task 8.1 prepends a v2.5+ deprecation warning.
-install_scaffold_mode() {
-  _scaffold_deprec_emit_if_ge_2_5_0
-  local target_root="$1"
-  local rein_home
-  rein_home="$(_phase5_rein_home)"
-  local build_py="$rein_home/scripts/rein-build-scaffold.py"
-  local manifest_py="$rein_home/scripts/rein-manifest-v2.py"
-
-  if [[ ! -f "$build_py" ]]; then
-    error "rein-build-scaffold.py missing at $build_py"; exit 1
-  fi
-  if [[ ! -f "$manifest_py" ]]; then
-    error "rein-manifest-v2.py missing at $manifest_py"; exit 1
-  fi
-  if ! command -v rsync >/dev/null 2>&1; then
-    error "rsync is required for rein init --mode=scaffold"; exit 1
-  fi
-
-  local tmp_export
-  tmp_export=$(mktemp -d -t rein-scaffold-XXXXXX)
-  if [[ -z "$tmp_export" || ! -d "$tmp_export" ]]; then
-    error "could not create tmp dir for scaffold export"; return 1
-  fi
-
-  # Run the rest under a single-shot cleanup pattern. We delegate the body
-  # to a nested function so we can rm -rf $tmp_export exactly once on every
-  # exit path (success, build failure, rsync failure, manifest failure,
-  # project.json failure, or unexpected error). Codex Round 1 finding —
-  # earlier per-call cleanup left tmp_export behind on post-rsync failures.
-  _phase5_scaffold_body() {
-    # 3-source export (plugin first-class + scaffoldOverlay + scaffoldExtras +
-    # scaffoldHelperScripts). --include-domain reserved for Phase 7.
-    if ! python3 "$build_py" \
-         --source "$rein_home/plugins/rein-core" \
-         --include-domain \
-         --out "$tmp_export" >&2; then
-      error "rein-build-scaffold.py failed"; return 1
-    fi
-
-    # rsync export tree into target_root. Trailing slash on source = "copy
-    # contents", matching plan §5.2 step 3. -a preserves timestamps, exec
-    # bits, and symlinks.
-    if ! mkdir -p "$target_root"; then
-      error "could not create target_root $target_root"; return 1
-    fi
-    if ! rsync -a "$tmp_export/" "$target_root/"; then
-      error "rsync to $target_root failed"; return 1
-    fi
-
-    # Generate manifest from what was actually rsynced.
-    local mf="$target_root/.claude/.rein-manifest.json"
-    if ! mkdir -p "$(dirname "$mf")"; then
-      error "could not create manifest dir"; return 1
-    fi
-    if ! python3 "$manifest_py" init "$mf" "$VERSION" >/dev/null; then
-      error "rein-manifest-v2.py init failed"; return 1
-    fi
-    if ! python3 - "$manifest_py" "$mf" "$VERSION" "$tmp_export" <<'PYEOF'
-import os, subprocess, sys, hashlib
-manifest_py, mf, version, tmp_export = sys.argv[1:5]
-for root, dirs, files in os.walk(tmp_export):
-    rel_root = os.path.relpath(root, tmp_export)
-    for fn in files:
-        full = os.path.join(root, fn)
-        rel = fn if rel_root == "." else os.path.join(rel_root, fn)
-        with open(full, "rb") as fh:
-            sha = hashlib.sha256(fh.read()).hexdigest()
-        subprocess.check_call([
-            "python3", manifest_py, "add", mf, rel, sha, version
-        ])
-PYEOF
-    then
-      error "manifest add loop failed"; return 1
-    fi
-
-    # .rein/project.json mode=scaffold + policy templates + trail/ (parity
-    # with plugin-mode init so downstream hooks find their dirs). Each post-
-    # rsync mutation is wrapped so any failure routes through the single
-    # cleanup line at the bottom of install_scaffold_mode.
-    if ! write_rein_project_json "$target_root" "scaffold"; then
-      error "write_rein_project_json failed"; return 1
-    fi
-    if ! write_rein_policy_templates "$target_root"; then
-      error "write_rein_policy_templates failed"; return 1
-    fi
-    if ! mkdir -p "$target_root/trail/inbox" \
-                  "$target_root/trail/dod" \
-                  "$target_root/trail/incidents" \
-                  "$target_root/trail/decisions"; then
-      error "mkdir trail/* failed"; return 1
-    fi
-    if [[ ! -f "$target_root/trail/index.md" ]]; then
-      if ! printf '# trail/index.md\n\n> rein 프로젝트 상태 — 매 세션 종료 시 갱신.\n' \
-           > "$target_root/trail/index.md"; then
-        error "could not seed trail/index.md"; return 1
-      fi
-    fi
-    return 0
-  }
-
-  local body_rc=0
-  _phase5_scaffold_body || body_rc=$?
-  rm -rf "$tmp_export"
-  unset -f _phase5_scaffold_body
-  return "$body_rc"
-}
-
 # cmd_init([flags])
 # Phase 5 entry point: install rein in the current directory (cwd) using the
 # requested mode + scope. cwd must be a git repo (so trail/ + .rein/ live in
@@ -2212,21 +1501,15 @@ cmd_init() {
     exit 1
   fi
 
-  local target_root="$PWD"
+  info "rein init: setting up plugin mode (scope=$SCOPE)..."
 
-  case "$MODE" in
-    plugin)   install_plugin_mode   "$target_root" ;;
-    scaffold) install_scaffold_mode "$target_root" ;;
-  esac
+  local target_root="$PWD"
+  install_plugin_mode "$target_root"
 
   echo ""
-  info "rein init complete (mode=$MODE scope=$SCOPE version=$VERSION)."
-  if [[ "$MODE" == "plugin" ]]; then
-    info "  Plugin entry written to scope=$SCOPE settings.json."
-    info "  Use 'claude /plugin install rein@rein-dev-local' or restart Claude Code to activate."
-  else
-    info "  Scaffold installed under $target_root/.claude/."
-  fi
+  info "rein init complete (mode=plugin scope=$SCOPE version=$VERSION)."
+  info "  Plugin entry written to scope=$SCOPE settings.json."
+  info "  Use 'claude /plugin install rein@rein-dev-local' or restart Claude Code to activate."
 }
 
 # update_plugin_mode(target_root)
@@ -2242,325 +1525,6 @@ update_plugin_mode() {
   info "  $target_root/.claude/settings.json (or settings.local.json /"
   info "  ~/.claude/settings.json depending on your scope)."
   echo ""
-}
-
-# read_project_mode(target_root)
-# Reads .rein/project.json's "mode" field. Prints "plugin" / "scaffold".
-# Returns "scaffold" when project.json is absent (legacy v1.x install).
-read_project_mode() {
-  local target_root="$1"
-  python3 - "$target_root" <<'PYEOF'
-import json, os, sys
-target_root = sys.argv[1]
-p = os.path.join(target_root, ".rein", "project.json")
-try:
-    with open(p) as f:
-        d = json.load(f)
-    print(d.get("mode", "scaffold"))
-except (FileNotFoundError, json.JSONDecodeError):
-    print("scaffold")
-PYEOF
-}
-
-# ---------------------------------------------------------------------------
-# cmd_new(project_name)
-# ---------------------------------------------------------------------------
-cmd_new() {
-  local project_name="$1"
-  local dest_dir="$project_name"
-
-  # 경로 검증: 상대/절대 경로 탈출 방지
-  if [[ "$project_name" == *..* ]] || [[ "$project_name" == /* ]] || [[ "$project_name" == */* ]]; then
-    error "project name must be a simple directory name (no '..', '/', or absolute paths)."
-    exit 1
-  fi
-
-  if [[ -e "$dest_dir" ]]; then
-    error "directory '$dest_dir' already exists."
-    exit 1
-  fi
-
-  # clone_template sets global TEMPLATE_DIR; do NOT use command substitution
-  clone_template
-
-  mkdir -p "$dest_dir"
-
-  local file_count=0
-  while IFS= read -r -d '' rel_path; do
-    copy_file "$TEMPLATE_DIR" "$dest_dir" "$rel_path"
-    file_count=$((file_count + 1))
-  done < <(list_copy_files "$TEMPLATE_DIR")
-
-  scaffold_trail "$dest_dir" "$TEMPLATE_DIR" "false"
-  substitute_vars "$dest_dir" "$project_name"
-
-  # Generate initial manifest so future updates can prune safely
-  manifest_generate "$dest_dir" "$TEMPLATE_DIR"
-
-  # Plan C Task 1.3 — seed .gitignore with rein operational-hygiene entries
-  # so base snapshots, prune/remove backups, and job logs never land in git.
-  ( cd "$dest_dir" && ensure_gitignore_entries )
-
-  echo ""
-  info "Created project '$project_name' with $file_count files."
-  echo ""
-  info "Next steps:"
-  info "  cd $project_name"
-  info "  git init"
-}
-
-# ---------------------------------------------------------------------------
-# cmd_merge()
-# Also used for the 'update' alias.
-# ---------------------------------------------------------------------------
-cmd_merge() {
-  # Accept both .git directory (normal repo) and .git file (worktree/submodule)
-  if [[ ! -e ".git" ]]; then
-    error "not a git repository (no .git found in current directory)."
-    exit 1
-  fi
-
-  local project_name
-  project_name="$(basename "$PWD")"
-
-  # clone_template sets global TEMPLATE_DIR; do NOT use command substitution
-  clone_template
-
-  # --- Self-update check (v0.7.0+) ---
-  # Detect whether the CLI itself needs updating before applying template
-  # changes to the user's project. Runs APPLY (overwrite self + exec re-run)
-  # or MIGRATE (print notice + stage new HOME install) based on current path.
-  local _rein_action _rein_rc=0
-  _rein_action=$(self_update_check "$TEMPLATE_DIR") || _rein_rc=$?
-
-  if [[ $_rein_rc -eq 1 ]]; then
-    case "$_rein_action" in
-      APPLY)
-        if prompt_self_update "$TEMPLATE_DIR"; then
-          self_update_apply "$TEMPLATE_DIR"
-          export REIN_SELF_UPDATED=1
-          info "Restarting with new version..."
-          exec "$(current_cli_path)" "${ORIGINAL_ARGV[@]}"
-        else
-          warn "Self-update skipped by user. CLI remains at v$VERSION."
-        fi
-        ;;
-      MIGRATE)
-        install_to_new_home "$TEMPLATE_DIR"
-        migrate_old_install_notice
-        ;;
-    esac
-  fi
-
-  # ALL_OVERWRITE may have been set by --all/--yes flag in main(); preserve
-  # that. Only reset to false if it has not been set explicitly.
-  : "${ALL_OVERWRITE:=false}"
-
-  # Plan C Task 1.3 — top up rein operational-hygiene entries in the user
-  # project's .gitignore. Idempotent; safe to call on every update.
-  ensure_gitignore_entries
-
-  # v1.1.4 hotfix: self-heal missing CLI-adjacent helpers before any code
-  # path tries to invoke them. Covers the chicken-and-egg case where a
-  # pre-v1.1.3 CLI self-updated to v1.1.3 — the v1.1.2 self_update_apply
-  # only replaced rein.sh, leaving helpers absent. Because self_update_check
-  # now sees `tv == VERSION` on subsequent runs, self_update_apply (which
-  # in v1.1.3+ DOES copy helpers) is never re-entered. Without this
-  # self-heal the user is stranded until a future version bump triggers
-  # self-update again. More generally: any same-version drift between
-  # rein.sh and its sibling helpers is now auto-recoverable from the
-  # freshly cloned template.
-  _ensure_cli_helpers_present
-
-  # ---- Prune snapshot (must be taken BEFORE any manifest mutation) --------
-  # Round 2 codex-review finding (Group 7 2026-04-24): if we snapshot the
-  # manifest AFTER stage_manifest_commit, the snapshot reflects the new
-  # manifest (current template files only), so prune sees zero candidates
-  # and template-removed files never get cleaned up. Take the snapshot
-  # here — pre-v2-commit — so prune_impl compares OLD tracked files vs
-  # NEW template and correctly identifies removals.
-  local prune_snapshot=""
-  if [[ "$PRUNE_MODE" == "true" ]]; then
-    local live_mf_pre
-    live_mf_pre=$(manifest_path "$PWD")
-    if [[ -f "$live_mf_pre" ]]; then
-      prune_snapshot=$(mktemp)
-      cp "$live_mf_pre" "$prune_snapshot"
-    fi
-  fi
-
-  # ---- v2 update dispatcher (Group 7A hotfix, 2026-04-24) -----------------
-  # Wires cmd_merge to the v2 primitives that were shipped in v1.1.0 but
-  # never dispatched from the CLI entry point (dead-code regression).
-  #
-  #   - is_first_update_v2 true  → apply_first_update_text per text file
-  #                                 (preserve user + seed base), copy_file
-  #                                 for non-text.
-  #   - is_first_update_v2 false → stage_manifest_begin + do_update_v2
-  #                                 (three_way_merge per text file), legacy
-  #                                 2-way prompt for non-text, stage commit.
-  #
-  # Exit codes (propagated to the outer dispatcher):
-  #   0 — all clean or user approved overwrites
-  #   1 — ≥1 text-file 3-way conflict (user versions preserved, .rej written)
-  #   2 — fatal error inside do_update_v2 (staging manifest left for inspection)
-  # -----------------------------------------------------------------------
-  local added=0 updated=0 overwritten=0 identical=0 conflicts=0
-  local nontext_added=0 nontext_overwritten=0 nontext_identical=0
-  local final_rc=0
-
-  # Collect template rel paths up front so we can reason about the whole set.
-  local rels=()
-  while IFS= read -r -d '' rel_path; do
-    rels+=("$rel_path")
-  done < <(list_copy_files "$TEMPLATE_DIR")
-
-  if is_first_update_v2; then
-    info "First-time v2 update — seeding base snapshot + preserving user modifications"
-    stage_manifest_begin
-    local rel_path
-    for rel_path in "${rels[@]}"; do
-      if is_text_file "$rel_path"; then
-        # apply_first_update_text stdout: "installed: <rel>" |
-        # "preserved: <rel> (modified since install)" | silent (== same)
-        # Capture so we can classify for the summary.
-        local fu_out fu_rc=0
-        fu_out=$(apply_first_update_text "$TEMPLATE_DIR" "$rel_path") || fu_rc=$?
-        if [[ $fu_rc -ne 0 ]]; then
-          error "apply_first_update_text failed for $rel_path (rc=$fu_rc)"
-          final_rc=2
-          continue
-        fi
-        case "$fu_out" in
-          installed:*) added=$((added + 1)); [[ -n "$fu_out" ]] && echo -e "  ${GREEN}Added${NC}: $rel_path" >&2 ;;
-          preserved:*) updated=$((updated + 1)); echo -e "  ${YELLOW}Preserved${NC}: $rel_path (user-modified)" >&2 ;;
-          *)           identical=$((identical + 1)) ;;
-        esac
-        # Apply Finding 3 / Issue 2 parity for new installs: if incoming is
-        # executable and user file exists but lacks exec bit, set it.
-        if [[ -f "$rel_path" && -x "$TEMPLATE_DIR/$rel_path" && ! -x "$rel_path" ]]; then
-          chmod +x "$rel_path" 2>/dev/null || true
-        fi
-        stage_manifest_add "$rel_path" "$(sha256_of "$TEMPLATE_DIR/$rel_path")"
-      else
-        # Non-text in first-update: mirror legacy path.
-        # stage_skipped=true when user chose to preserve their own version —
-        # symmetric with do_update_v2 conflict policy (never advance staged
-        # sha past the incoming version the user declined).
-        local stage_skipped=false
-        if [[ -f "$rel_path" ]]; then
-          if diff -q "$rel_path" "$TEMPLATE_DIR/$rel_path" >/dev/null 2>&1; then
-            # Issue 2 fix: identical content but mode may differ — force
-            # copy_file so chmod+x logic (copy_file body) runs.
-            copy_file "$TEMPLATE_DIR" "$PWD" "$rel_path"
-            nontext_identical=$((nontext_identical + 1))
-          else
-            local action; action="$(prompt_conflict "$rel_path" "$TEMPLATE_DIR" "$PWD")"
-            case "$action" in
-              overwrite) copy_file "$TEMPLATE_DIR" "$PWD" "$rel_path"; nontext_overwritten=$((nontext_overwritten + 1)); echo -e "  ${YELLOW}Overwritten${NC}: $rel_path" >&2 ;;
-              skip)      nontext_identical=$((nontext_identical + 1)); stage_skipped=true ;;
-              quit)      info "Aborted by user."; exit 0 ;;
-            esac
-          fi
-        else
-          copy_file "$TEMPLATE_DIR" "$PWD" "$rel_path"
-          nontext_added=$((nontext_added + 1))
-          echo -e "  ${GREEN}Added${NC}: $rel_path" >&2
-        fi
-        if [[ "$stage_skipped" != "true" ]]; then
-          stage_manifest_add "$rel_path" "$(sha256_of "$TEMPLATE_DIR/$rel_path")"
-        fi
-      fi
-    done
-    if [[ $final_rc -ne 2 ]]; then
-      stage_manifest_commit
-    fi
-  else
-    # v2 steady-state: 3-way merge text files, legacy 2-way for non-text.
-    stage_manifest_begin
-    local v2_rc=0
-    do_update_v2 "$TEMPLATE_DIR" "${rels[@]}" || v2_rc=$?
-
-    updated=$_REIN_UPDATE_UPDATES
-    conflicts=$_REIN_UPDATE_CONFLICTS
-
-    # Non-text fallback — _REIN_UPDATE_NONTEXT is space-separated.
-    if [[ -n "${_REIN_UPDATE_NONTEXT:-}" ]]; then
-      local nontext_rel
-      for nontext_rel in $_REIN_UPDATE_NONTEXT; do
-        # stage_skipped=true when user chose to preserve their own version —
-        # symmetric with do_update_v2 conflict policy (never advance staged
-        # sha past the incoming version the user declined).
-        local stage_skipped=false
-        if [[ -f "$nontext_rel" ]]; then
-          if diff -q "$nontext_rel" "$TEMPLATE_DIR/$nontext_rel" >/dev/null 2>&1; then
-            # Issue 2 fix: content identical → still call copy_file so
-            # mode propagation runs (fixes exec bit drift regression).
-            copy_file "$TEMPLATE_DIR" "$PWD" "$nontext_rel"
-            nontext_identical=$((nontext_identical + 1))
-          else
-            local action; action="$(prompt_conflict "$nontext_rel" "$TEMPLATE_DIR" "$PWD")"
-            case "$action" in
-              overwrite) copy_file "$TEMPLATE_DIR" "$PWD" "$nontext_rel"; nontext_overwritten=$((nontext_overwritten + 1)); echo -e "  ${YELLOW}Overwritten${NC}: $nontext_rel" >&2 ;;
-              skip)      nontext_identical=$((nontext_identical + 1)); stage_skipped=true ;;
-              quit)      info "Aborted by user."; exit 0 ;;
-            esac
-          fi
-        else
-          copy_file "$TEMPLATE_DIR" "$PWD" "$nontext_rel"
-          nontext_added=$((nontext_added + 1))
-          echo -e "  ${GREEN}Added${NC}: $nontext_rel" >&2
-        fi
-        if [[ "$stage_skipped" != "true" ]]; then
-          stage_manifest_add "$nontext_rel" "$(sha256_of "$TEMPLATE_DIR/$nontext_rel")"
-        fi
-      done
-    fi
-
-    if [[ $v2_rc -eq 2 ]]; then
-      error "fatal error during v2 update — staging manifest preserved at $(staging_manifest_path)"
-      exit 2
-    fi
-
-    stage_manifest_commit
-    final_rc=$v2_rc  # 0 or 1 (partial conflict)
-  fi
-
-  scaffold_trail "$PWD" "$TEMPLATE_DIR" "true"
-  substitute_vars "$PWD" "$project_name"
-
-  echo ""
-  info "Update summary:"
-  [[ $added -gt 0 ]]              && echo "  added: $added"
-  [[ $updated -gt 0 ]]            && echo "  updated (3-way merge): $updated"
-  [[ $conflicts -gt 0 ]]          && echo -e "  ${YELLOW}conflicts${NC}: $conflicts (user versions kept; .rej files in $(rein_conflicts_dir))"
-  [[ $overwritten -gt 0 ]]        && echo "  overwritten: $overwritten"
-  [[ $identical -gt 0 ]]          && echo "  identical: $identical"
-  [[ $nontext_added -gt 0 ]]      && echo "  non-text added: $nontext_added"
-  [[ $nontext_overwritten -gt 0 ]] && echo "  non-text overwritten: $nontext_overwritten"
-  [[ $nontext_identical -gt 0 ]]  && echo "  non-text identical/mode-refreshed: $nontext_identical"
-
-  # ---- Prune (uses the pre-commit snapshot taken earlier) ----
-  # The snapshot was captured at the top of cmd_merge before stage_manifest_*
-  # mutated the live manifest. That snapshot holds the OLD tracked-file set,
-  # which is what prune_impl needs to compare against the NEW template to
-  # identify removal candidates.
-  if [[ "$PRUNE_MODE" == "true" ]]; then
-    prune_impl "$PWD" "$TEMPLATE_DIR" "$PRUNE_CONFIRM" "$prune_snapshot"
-    [[ -n "$prune_snapshot" && -f "$prune_snapshot" ]] && rm -f "$prune_snapshot"
-  fi
-
-  # v2 manifest has already been committed atomically via stage_manifest_commit.
-  # manifest_generate writes schema_version="1" unconditionally (v1.1.0 legacy
-  # helper) — calling it here would clobber the v2 manifest we just committed,
-  # forcing is_first_update_v2 to return true on every subsequent update and
-  # effectively keeping the 3-way merge path dead. Finding from codex Round 1
-  # (Group 7 2026-04-24). If prune ran and removed files, those entries are
-  # still present in the committed manifest; that's a separate, pre-existing
-  # gap (prune does not update the manifest) and not introduced by this fix.
-  # TODO: make manifest_generate v2-aware; until then, skip it here.
-
-  exit "$final_rc"
 }
 
 # ---------------------------------------------------------------------------
@@ -2668,90 +1632,6 @@ Safety:
   - User-modified files are ALWAYS preserved in place (no --force flag).
   - --all --confirm rejects non-interactive stdin (pipe / redirect / heredoc).
 EOF
-}
-
-# ---------------------------------------------------------------------------
-# cmd_remove <args...>
-# Dispatcher for 'rein remove'. Parses --path/--all/--confirm/--dry-run,
-# enforces the scope-flag requirement (RU-remove-requires-scope-flag), and
-# delegates to:
-#   - _rein_remove_dry_run
-#   - _rein_remove_path_apply <glob>
-#   - _rein_remove_all_apply
-# The TTY-only gate for --all --confirm is enforced inside
-# _rein_remove_all_apply (RU-remove-all-requires-typed-confirmation, Plan C
-# Task 5.3).
-# ---------------------------------------------------------------------------
-cmd_remove() {
-  local have_path=0 have_all=0 have_confirm=0 have_dry=0 have_help=0
-  local path_glob=""
-
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --path)
-        have_path=1
-        [ $# -lt 2 ] && { error "--path requires a <glob> argument"; exit 2; }
-        path_glob="$2"
-        shift 2
-        ;;
-      --all)      have_all=1;     shift ;;
-      --confirm)  have_confirm=1; shift ;;
-      --dry-run)  have_dry=1;     shift ;;
-      --help|-h)  have_help=1;    shift ;;
-      *)
-        error "unknown flag: $1"
-        _rein_remove_usage >&2
-        exit 2
-        ;;
-    esac
-  done
-
-  if [ "$have_help" = "1" ]; then
-    _rein_remove_usage
-    exit 0
-  fi
-
-  if [ "$have_path" = "0" ] && [ "$have_all" = "0" ] && [ "$have_dry" = "0" ]; then
-    # No scope flag at all
-    if [ "$have_confirm" = "1" ]; then
-      cat >&2 <<'EOF'
-Error: 'rein remove --confirm' requires either --path <glob> or --all.
-  To remove specific files: rein remove --path '.claude/skills/foo/*' --confirm
-  To remove ALL rein files:  rein remove --all --confirm   (requires typed confirmation)
-EOF
-      exit 2
-    fi
-    # No flags at all → usage + exit 2
-    _rein_remove_usage >&2
-    exit 2
-  fi
-
-  # Prefer --dry-run even when other flags are also present — it's purely
-  # informational and must never cause side effects.
-  if [ "$have_dry" = "1" ]; then
-    _rein_remove_dry_run
-    exit 0
-  fi
-
-  if [ "$have_confirm" = "0" ]; then
-    error "rein remove requires --confirm to actually remove files (use --dry-run to preview)"
-    exit 2
-  fi
-
-  if [ "$have_all" = "1" ] && [ "$have_path" = "1" ]; then
-    error "rein remove: cannot combine --all with --path"
-    exit 2
-  fi
-
-  if [ "$have_path" = "1" ]; then
-    _rein_remove_path_apply "$path_glob"
-    exit $?
-  fi
-
-  if [ "$have_all" = "1" ]; then
-    _rein_remove_all_apply
-    exit $?
-  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -3459,81 +2339,13 @@ main() {
   fi
 
   case "$1" in
-    new)
-      if [[ $# -lt 2 ]]; then
-        error "project name required"
-        echo "Usage: rein new <project-name> [--all]" >&2
-        exit 1
-      fi
-      shift
-      local project_name="$1"
-      shift
-      parse_flags "$@"
-      cmd_new "$project_name"
-      ;;
     init)
       shift
       cmd_init "$@"
       ;;
     merge|update)
-      shift
-      # Phase 5 Task 5.7 — branch on mode BEFORE the legacy 3-way merge path
-      # touches anything. plugin mode never runs cmd_merge: rein doesn't own
-      # the plugin's files (CLAUDE.md included), so update is a redirect.
-      if [[ -e ".git" ]]; then
-        local _phase5_mode
-        _phase5_mode="$(read_project_mode "$PWD")"
-        if [[ "$_phase5_mode" == "plugin" ]]; then
-          # Snapshot CLAUDE.md sha256 + presence flag to prove zero-touch.
-          # Presence parity catches absent→created regressions; byte equality
-          # catches in-place mutation. Both are enforced.
-          local _phase5_sha_root_before="" _phase5_sha_nested_before=""
-          local _phase5_exists_root_before=0 _phase5_exists_nested_before=0
-          if [[ -f "$PWD/CLAUDE.md" ]]; then
-            _phase5_sha_root_before=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$PWD/CLAUDE.md")
-            _phase5_exists_root_before=1
-          fi
-          if [[ -f "$PWD/.claude/CLAUDE.md" ]]; then
-            _phase5_sha_nested_before=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$PWD/.claude/CLAUDE.md")
-            _phase5_exists_nested_before=1
-          fi
-          update_plugin_mode "$PWD"
-          local _phase5_exists_root_after=0 _phase5_exists_nested_after=0
-          [[ -f "$PWD/CLAUDE.md" ]] && _phase5_exists_root_after=1
-          [[ -f "$PWD/.claude/CLAUDE.md" ]] && _phase5_exists_nested_after=1
-          [[ "$_phase5_exists_root_before" == "$_phase5_exists_root_after" ]] || {
-            error "rein update plugin-mode unexpectedly created/removed CLAUDE.md"
-            exit 1
-          }
-          [[ "$_phase5_exists_nested_before" == "$_phase5_exists_nested_after" ]] || {
-            error "rein update plugin-mode unexpectedly created/removed .claude/CLAUDE.md"
-            exit 1
-          }
-          if [[ -n "$_phase5_sha_root_before" ]]; then
-            local _phase5_sha_root_after
-            _phase5_sha_root_after=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$PWD/CLAUDE.md")
-            [[ "$_phase5_sha_root_before" == "$_phase5_sha_root_after" ]] || {
-              error "rein update plugin-mode unexpectedly modified CLAUDE.md"
-              exit 1
-            }
-          fi
-          if [[ -n "$_phase5_sha_nested_before" ]]; then
-            local _phase5_sha_nested_after
-            _phase5_sha_nested_after=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$PWD/.claude/CLAUDE.md")
-            [[ "$_phase5_sha_nested_before" == "$_phase5_sha_nested_after" ]] || {
-              error "rein update plugin-mode unexpectedly modified .claude/CLAUDE.md"
-              exit 1
-            }
-          fi
-          exit 0
-        fi
-      fi
-      parse_flags "$@"
-      cmd_merge
-      ;;
-    remove)
-      shift
-      cmd_remove "$@"
+      echo 'plugin 모드는 `claude plugin update rein-core` 를 사용하세요. 자세한 내용: https://github.com/JayJihyunKim/rein'
+      exit 0
       ;;
     migrate)
       # Phase 4 / Phase 9 Task 9.4: dispatch to the migrate orchestrator.

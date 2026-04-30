@@ -127,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--project-dir", required=True)
     parser.add_argument("--scope", default="plugin")
-    parser.add_argument("--version", default="2.0.0")
+    parser.add_argument("--version", default="1.0.0")
     args = parser.parse_args(argv)
 
     root = bootstrap(Path(args.project_dir), args.scope, args.version)
