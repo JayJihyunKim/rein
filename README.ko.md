@@ -4,12 +4,12 @@
 
 <div align="center">
 
-  <h1>⚙️ Rein</h1>
+  <img src="main_img.png" alt="Rein — Guide Autonomy. Ship Quality." width="320">
 
   <p>
-    <strong>AI 에게 고삐를 맡기되, 안심하고 달릴 수 있도록.</strong>
+    <strong>GUIDE AUTONOMY. SHIP QUALITY.</strong>
     <br>
-    팀의 리뷰 규율을 저장소에 직접 심는 Claude Code 플러그인.
+    AI 에이전트가 전속력으로 달리되, 계획·증거·리뷰를 거친 코드만 main 에 도달하게 하는 Claude Code 플러그인.
   </p>
 
   <p>
@@ -17,7 +17,7 @@
     ·
     <a href="https://github.com/JayJihyunKim/rein/issues/new?labels=enhancement">기능 요청</a>
     ·
-    <a href="REIN_SETUP_GUIDE.md">상세 가이드</a>
+    <a href="docs/agents-md-examples.md">AGENTS.md 예시</a>
   </p>
 
   <p>
@@ -92,6 +92,19 @@ AI 가 git commit 시도
 
 ---
 
+## 왜 AI-Native?
+
+| | AI Assisted (기존) | AI Native (Rein) |
+|---|---|---|
+| 지시 방식 | "이 함수 이렇게 만들어줘" | "이 워크플로우를 실행해줘" |
+| 기준 위치 | 사람 머릿속 | `AGENTS.md`, `rules/`, `trail/` |
+| 결과가 나쁠 때 | 출력물 다시 요청 | 잘못 통과시킨 규칙을 수정 |
+| 확장성 | 매번 사람이 개입 | 규칙이 쌓일수록 품질 자동 상승 |
+
+AI-assisted 워크플로에서는 모든 수정이 재요청입니다. AI-native 워크플로에서는 모든 수정이 다음에 같은 실수를 막는 규칙이 됩니다. Rein 이 두 번째를 가능하게 합니다.
+
+---
+
 ## 무엇을 보장하나
 
 1. **코드 편집 전에 작업이 먼저 정의된다.** 모든 소스 편집 전에 완료 기준 (Definition of Done) 파일이 필요합니다.
@@ -147,9 +160,9 @@ your-repo/
     └── settings.json         ← 한 줄: `rein` 플러그인 핀
 ```
 
-이게 전부입니다. 프레임워크의 hook·rule·agent·skill·`AGENTS.md`·`.claude/CLAUDE.md` 는 **플러그인이 소유**하며 Claude Code 의 플러그인 캐시에 들어 있습니다 — 사용자 저장소에는 복사되지 않습니다. 플러그인 업데이트는 사용자 수정 파일을 절대 건드리지 않습니다.
+이게 전부입니다. 프레임워크의 **hook·rule·agent·skill** 은 플러그인 안에 ship 되어 Claude Code 의 플러그인 캐시에 들어 있습니다 — 사용자 저장소에는 복사되지 않으므로, 플러그인 업데이트가 사용자 파일을 덮어쓰지 않습니다. 프로젝트 고유의 지시 사항을 함께 두고 싶다면 사용자 저장소에 직접 `AGENTS.md` (또는 `.claude/CLAUDE.md`) 를 작성하세요. Rein 은 이를 읽기만 하고 수정하지 않습니다.
 
-> `trail/` 과 `.claude/cache/` 는 자동으로 `.gitignore` 에 추가됩니다.
+> 권장: `trail/` 과 `.claude/cache/` 를 사용자 `.gitignore` 에 추가하세요 (세션 증거를 git 에 커밋하지 않으려는 경우). Rein 은 `.gitignore` 를 자동 편집하지 않습니다.
 
 ---
 
@@ -231,7 +244,7 @@ claude plugin remove everything-claude-code
 4. 브랜치 Push: `git push origin feat/amazing-feature`
 5. Pull Request 열기
 
-PR 전에 [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) 에서 프레임워크 구조를 먼저 파악해 주세요.
+PR 전에 [`AGENTS.md`](AGENTS.md) 에서 프레임워크 구조와 기여 규칙을 먼저 파악해 주세요.
 
 | 커밋 타입 | 사용 시점 |
 |---|---|

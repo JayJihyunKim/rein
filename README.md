@@ -4,12 +4,12 @@
 
 <div align="center">
 
-  <h1>⚙️ Rein</h1>
+  <img src="main_img.png" alt="Rein — Guide Autonomy. Ship Quality." width="320">
 
   <p>
-    <strong>Give your AI the reins — with the guardrails to actually let it run.</strong>
+    <strong>GUIDE AUTONOMY. SHIP QUALITY.</strong>
     <br>
-    The Claude Code plugin that puts your team's review discipline directly in your repo.
+    A Claude Code plugin that lets your AI agent move at full speed — while requiring it to plan, leave evidence, and pass review before code lands.
   </p>
 
   <p>
@@ -17,7 +17,7 @@
     ·
     <a href="https://github.com/JayJihyunKim/rein/issues/new?labels=enhancement">Request Feature</a>
     ·
-    <a href="REIN_SETUP_GUIDE.md">Setup Guide</a>
+    <a href="docs/agents-md-examples.md">AGENTS.md Examples</a>
   </p>
 
   <p>
@@ -92,6 +92,19 @@ so context carries over.
 
 ---
 
+## Why AI-Native
+
+| | AI-Assisted (typical) | AI-Native (Rein) |
+|---|---|---|
+| How you instruct | "Write this function" | "Run this workflow" |
+| Where standards live | In someone's head | In `AGENTS.md`, `rules/`, `trail/` |
+| When output is wrong | Re-prompt the AI | Update the rule that let it through |
+| Scaling effect | A human reviews every change | Rules accumulate; quality compounds |
+
+In an AI-assisted workflow, every fix is a re-prompt. In an AI-native workflow, every fix is a rule that prevents the same mistake next time. Rein makes the second possible.
+
+---
+
 ## What you get
 
 1. **Tasks must be defined before code is edited.** A Definition-of-Done file is required before any source edit.
@@ -147,9 +160,9 @@ your-repo/
     └── settings.json         ← one line: plugin pin for `rein`
 ```
 
-That's all. The framework's hooks, rules, agents, skills, `AGENTS.md`, and `.claude/CLAUDE.md` are **owned by the plugin** and live in Claude Code's plugin cache — not in your repo. Plugin updates never touch user-modified files.
+That's all. The framework's **hooks, rules, agents, and skills** ship inside the plugin and live in Claude Code's plugin cache, not in your repo — so plugin updates never overwrite anything. If you want project-specific instructions to ride alongside Rein, add your own `AGENTS.md` (or `.claude/CLAUDE.md`) in your repo; Rein reads them but never modifies them.
 
-> `trail/` and `.claude/cache/` are added to `.gitignore` automatically.
+> Recommended: add `trail/` and `.claude/cache/` to your `.gitignore` if you don't want session evidence committed (Rein doesn't auto-edit `.gitignore`).
 
 ---
 
@@ -231,7 +244,7 @@ Issues and pull requests are welcome.
 4. Push the branch: `git push origin feat/amazing-feature`
 5. Open a Pull Request
 
-Before submitting, read [REIN_SETUP_GUIDE.md](REIN_SETUP_GUIDE.md) to understand the framework structure.
+Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework structure and the rules that govern contributions.
 
 | Commit type | When to use |
 |---|---|
