@@ -180,15 +180,15 @@ repo/
 
 ### Slash command 호출
 
-플러그인 모드에서 Rein 의 스킬은 `/rein-core:` 네임스페이스 아래로 노출됩니다. 예시: `/rein-core:codex-review`, `/rein-core:codex-ask`.
+플러그인 모드에서 Rein 의 스킬은 `/rein:` 네임스페이스 아래로 노출됩니다. 예시: `/rein:codex-review`, `/rein:codex-ask`.
 
 #### Custom alias 권장
 설정 파일 `.claude/settings.json` 에 다음 추가 시 짧은 호출 가능:
 ```json
 {
   "aliases": {
-    "/cr": "/rein-core:codex-review",
-    "/ca": "/rein-core:codex-ask"
+    "/cr": "/rein:codex-review",
+    "/ca": "/rein:codex-ask"
   }
 }
 ```

@@ -37,7 +37,7 @@ INSTALL_PLUGIN_PY="$SCRIPT_DIR/rein-install-plugin-to-settings.py"
 RUNTIME_INIT_PY="$SCRIPT_DIR/rein-runtime-init.py"
 PROJECT_JSON_PY="$SCRIPT_DIR/rein-write-project-json.py"
 
-REIN_CORE_VERSION_DEFAULT="^2.0.0"
+REIN_PLUGIN_VERSION_DEFAULT="^2.0.0"
 
 # ---------------------------------------------------------------------------
 # Pre-flight: idempotency + incomplete-state detection
@@ -55,9 +55,9 @@ if [ -f ".rein/project.json" ] && [ ! -f ".claude/.rein-manifest.json" ]; then
     2>/dev/null || echo "")"
   if [ "$MODE" = "plugin" ]; then
     # Spec §3.3 requires "plugin enabled" before declaring already-migrated —
-    # i.e. the rein-core entry exists in some scope's settings.json plugins
+    # i.e. the rein entry exists in some scope's settings.json plugins
     # key. Inspect project + local + user scopes (managed is rare); ANY of
-    # them carrying rein-core counts as enabled.
+    # them carrying rein counts as enabled.
     PLUGIN_ENABLED="$(python3 - <<'PY'
 import json
 import os
@@ -79,7 +79,7 @@ for p in candidates:
     if not isinstance(data, dict):
         continue
     plugins = data.get("plugins", {})
-    if isinstance(plugins, dict) and "rein-core" in plugins:
+    if isinstance(plugins, dict) and "rein" in plugins:
         print("yes")
         break
 else:
@@ -128,7 +128,7 @@ fi
 SCOPE="${REIN_MIGRATE_SCOPE:-project}"
 python3 "$INSTALL_PLUGIN_PY" \
   --scope "$SCOPE" \
-  --plugin "rein-core=$REIN_CORE_VERSION_DEFAULT"
+  --plugin "rein=$REIN_PLUGIN_VERSION_DEFAULT"
 
 # ---------------------------------------------------------------------------
 # step 4 — router data git mv to .rein/policy/router/
@@ -138,7 +138,7 @@ bash "$ROUTER_SH"
 # ---------------------------------------------------------------------------
 # step 5 — runtime/ initialize under ${CLAUDE_PLUGIN_DATA}
 # ---------------------------------------------------------------------------
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/rein-core}" \
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/rein}" \
   python3 "$RUNTIME_INIT_PY"
 
 # ---------------------------------------------------------------------------

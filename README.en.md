@@ -180,15 +180,15 @@ Advanced commands (`rein job`, `rein remove`, environment variables) are documen
 
 ### Slash command invocation
 
-In plugin mode, Rein's skills are exposed under the `/rein-core:` namespace. Examples: `/rein-core:codex-review`, `/rein-core:codex-ask`.
+In plugin mode, Rein's skills are exposed under the `/rein:` namespace. Examples: `/rein:codex-review`, `/rein:codex-ask`.
 
 #### Recommended custom alias
 Add the following to `.claude/settings.json` for shorter invocations:
 ```json
 {
   "aliases": {
-    "/cr": "/rein-core:codex-review",
-    "/ca": "/rein-core:codex-ask"
+    "/cr": "/rein:codex-review",
+    "/ca": "/rein:codex-ask"
   }
 }
 ```

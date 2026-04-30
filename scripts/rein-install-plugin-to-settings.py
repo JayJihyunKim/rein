@@ -31,7 +31,7 @@ Caller contract (CLI):
 
     rein-install-plugin-to-settings.py \\
         --scope project \\
-        --plugin rein-core=^2.0.0 \\
+        --plugin rein=^2.0.0 \\
         [--plugin foo=1.0.0 ...]
 
 Caller contract (module API):
@@ -40,7 +40,7 @@ Caller contract (module API):
 
     install_plugin_to_settings(
         scope="project",
-        plugin_name="rein-core",
+        plugin_name="rein",
         version="^2.0.0",
     )
 """

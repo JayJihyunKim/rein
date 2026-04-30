@@ -297,15 +297,15 @@ Claude Code가 세션 시작 시 자동으로 읽는 순서:
 
 #### 1-6. Slash command 호출 규약 (플러그인 모드, v2.0+)
 
-플러그인 모드에서 Rein 의 스킬은 `/rein-core:` 네임스페이스 아래로 노출됩니다. 예를 들어 코드 리뷰 스킬은 `/rein-core:codex-review`, second-opinion 스킬은 `/rein-core:codex-ask` 로 호출합니다.
+플러그인 모드에서 Rein 의 스킬은 `/rein:` 네임스페이스 아래로 노출됩니다. 예를 들어 코드 리뷰 스킬은 `/rein:codex-review`, second-opinion 스킬은 `/rein:codex-ask` 로 호출합니다.
 
 ##### Custom alias 권장
 설정 파일 `.claude/settings.json` 에 다음 추가 시 짧은 호출 가능:
 ```json
 {
   "aliases": {
-    "/cr": "/rein-core:codex-review",
-    "/ca": "/rein-core:codex-ask"
+    "/cr": "/rein:codex-review",
+    "/ca": "/rein:codex-ask"
   }
 }
 ```

@@ -28,6 +28,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # git rev-parse / SCRIPT_DIR fallback / $PWD 순으로 결정.
 PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 
+# Plugin installs can be enabled before a repo has been bootstrapped for Rein.
+# In that state, session-start-bootstrap.sh injects the user-facing prompt.
+# This hook should not emit a partial trail context or create repo state.
+# Skip unless BOTH markers exist — partial state (one missing) is still
+# treated as uninitialized so the bootstrap prompt path stays authoritative.
+if [ ! -f "$PROJECT_DIR/.rein/project.json" ] || [ ! -f "$PROJECT_DIR/trail/index.md" ]; then
+  exit 0
+fi
+
 emit_file_block() {
   # $1 = 파일 경로 (프로젝트 루트 기준 상대 경로)
   # Lean mode: 예산 추적 없이 그대로 emit. 호출 대상은 index.md 1개.

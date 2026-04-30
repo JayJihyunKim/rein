@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: /rein-core:codex-review 장애 시 fallback 리뷰어. 변경된 코드에 대해 AGENTS.md rules + 체크리스트 기반으로 리뷰하고 stamp 생성.
+description: /rein:codex-review 장애 시 fallback 리뷰어. 변경된 코드에 대해 AGENTS.md rules + 체크리스트 기반으로 리뷰하고 stamp 생성.
 triggers:
   - /codex-review 호출 타임아웃
   - /codex-review 호출 에러(exit non-zero)

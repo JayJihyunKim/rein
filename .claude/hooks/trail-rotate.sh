@@ -78,6 +78,116 @@ sweep_legacy_dod() {
 
 sweep_legacy_dod
 
+# --- orphan 완료 DoD 보정 스윕 ---
+# 정상 경로에서는 inbox driver 가 DoD 를 daily 로 병합한 직후 원본을 삭제한다.
+# 과거 데이터나 slug 변경으로 inbox 원본이 먼저 사라진 경우에는 완료 기록만
+# daily/weekly 에 남고 DoD 가 계속 active 후보로 떠서, 완료 증거가 명확한
+# 과거 DoD 만 별도 아카이브한다.
+completed_dod_has_archive_evidence() {
+  local dod_fname="$1"
+  local slug="$2"
+  local archive_file
+
+  for archive_file in "$DAILY_DIR"/*.md "$WEEKLY_DIR"/*.md; do
+    [ -f "$archive_file" ] || continue
+    awk -v slug="$slug" -v dod_fname="$dod_fname" '
+      index($0, dod_fname) > 0 { found=1; exit }
+
+      $0 == "## " slug { found=1; exit }
+
+      /^<!--[[:space:]]source:[[:space:]]/ {
+        line = $0
+        sub(/^<!--[[:space:]]source:[[:space:]]/, "", line)
+        sub(/[[:space:]]*-->$/, "", line)
+        if (line ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-.*[.]md$/) {
+          source_slug = line
+          sub(/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-/, "", source_slug)
+          sub(/[.]md$/, "", source_slug)
+          if (source_slug == slug) { found=1; exit }
+        }
+      }
+
+      END { exit(found ? 0 : 1) }
+    ' "$archive_file" 2>/dev/null && return 0
+  done
+
+  return 1
+}
+
+dod_has_matching_inbox() {
+  local slug="$1"
+  local inbox_file inbox_slug
+
+  [ -d "$INBOX_DIR" ] || return 1
+  for inbox_file in "$INBOX_DIR"/[0-9]*.md; do
+    [ -f "$inbox_file" ] || continue
+    inbox_slug=$(basename "$inbox_file" .md | sed 's/^[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-//')
+    [ "$inbox_slug" = "$slug" ] && return 0
+  done
+
+  return 1
+}
+
+sweep_orphan_completed_dod() {
+  [ -d "$DOD_DIR" ] || return 0
+
+  local COMPLETED_ARCHIVE="$DOD_DIR/COMPLETED_ARCHIVE.md"
+  local COMPLETED_COUNT=0
+
+  for f in "$DOD_DIR"/dod-[0-9]*.md; do
+    [ -f "$f" ] || continue
+
+    local fname file_date slug
+    fname=$(basename "$f")
+    file_date=$(echo "$fname" | grep -oE '^[^0-9]*[0-9]{4}-[0-9]{2}-[0-9]{2}' | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1)
+    [ -n "$file_date" ] || continue
+
+    # 오늘/미래 DoD 는 아직 작업 중일 수 있으므로 보정 스윕 대상에서 제외.
+    [ "$file_date" \< "$TODAY" ] || continue
+
+    slug=$(echo "$fname" | sed -E 's/^dod-[0-9]{4}-[0-9]{2}-[0-9]{2}-//' | sed 's/\.md$//')
+    [ -n "$slug" ] || continue
+
+    # 정상 회전 대상은 inbox driver 가 DoD 를 daily 에 병합하도록 둔다.
+    dod_has_matching_inbox "$slug" && continue
+
+    completed_dod_has_archive_evidence "$fname" "$slug" || continue
+
+    if [ ! -f "$COMPLETED_ARCHIVE" ]; then
+      {
+        echo "# Completed DoD Archive"
+        echo ""
+        echo "> inbox driver 를 잃었지만 daily/weekly 에 완료 증거가 있는 DoD 를 자동 수집한 아카이브."
+        echo ""
+      } > "$COMPLETED_ARCHIVE" || continue
+    fi
+
+    local FILE_MTIME TMP_SECTION
+    FILE_MTIME=$(portable_mtime_date "$f")
+    TMP_SECTION=$(mktemp)
+    {
+      echo "---"
+      echo "## $fname (mtime: $FILE_MTIME, archived: $TODAY)"
+      cat "$f"
+      echo ""
+    } > "$TMP_SECTION" || { rm -f "$TMP_SECTION"; continue; }
+
+    if cat "$TMP_SECTION" >> "$COMPLETED_ARCHIVE"; then
+      rm -f "$TMP_SECTION"
+      rm -f "$f"
+      COMPLETED_COUNT=$((COMPLETED_COUNT + 1))
+    else
+      rm -f "$TMP_SECTION"
+    fi
+  done
+
+  if [ "$COMPLETED_COUNT" -gt 0 ]; then
+    echo "NOTICE: ${COMPLETED_COUNT}개의 완료 DoD 파일을 ${COMPLETED_ARCHIVE}로 아카이빙했습니다." >&2
+  fi
+}
+
+sweep_orphan_completed_dod
+
 # 마커가 오늘이면 skip (하루 1회만 실행)
 if [ -f "$COMPRESS_MARKER" ] && [ "$(cat "$COMPRESS_MARKER" 2>/dev/null)" = "$TODAY" ]; then
   exit 0

@@ -1943,7 +1943,7 @@ YAML
 }
 
 # install_plugin_mode(target_root)
-# Plugin-mode rein init: register rein-core in the chosen scope's settings.json,
+# Plugin-mode rein init: register rein in the chosen scope's settings.json,
 # write .rein/project.json + .rein/policy/* templates, and ensure trail/ exists.
 # Does NOT write .claude/.rein-manifest.json (plugin manager owns those files).
 # Tasks 5.1, 5.3, 5.4, 5.5, 5.6.
@@ -1978,12 +1978,12 @@ install_plugin_mode() {
   # paths (.claude/settings.json, .claude/settings.local.json,
   # .claude/managed-settings.json) anchor on the user repo. user-scope writes
   # to ~/.claude/settings.json regardless of cwd.
-  # rein-core@^2.0.0 — pinned to the major plugin version, NOT the rein.sh
+  # rein@^2.0.0 — pinned to the major plugin version, NOT the rein.sh
   # CLI version (which still tracks pre-2.0 internal releases until Phase 9
   # bumps VERSION=2.0.0). Plan §5.1 step 1.
   ( cd "$target_root" && python3 "$install_py" \
       --scope "$SCOPE" \
-      --plugin "rein-core=^2.0.0" >/dev/null )
+      --plugin "rein=^2.0.0" >/dev/null )
 
   # Write .rein/project.json + policy templates + ensure trail/ scaffolded.
   write_rein_project_json "$target_root" "plugin"
@@ -2223,7 +2223,7 @@ cmd_init() {
   info "rein init complete (mode=$MODE scope=$SCOPE version=$VERSION)."
   if [[ "$MODE" == "plugin" ]]; then
     info "  Plugin entry written to scope=$SCOPE settings.json."
-    info "  Use 'claude /plugin install rein-core' or restart Claude Code to activate."
+    info "  Use 'claude /plugin install rein@rein-dev-local' or restart Claude Code to activate."
   else
     info "  Scaffold installed under $target_root/.claude/."
   fi
