@@ -125,6 +125,33 @@ jobs:
             git commit -m "chore: strip trail/ skeleton + explicit blocks logs (S30) for public"
           fi
 
+          # Q9 mitigation (v1.0.3+): identify any tags that pointed at the
+          # original pre-strip push HEAD (GITHUB_SHA). The strip step above
+          # advanced HEAD via N maintainer-only strip commits — any release
+          # tag pushed atomically with this main push still points at the
+          # original (unstripped) commit. Force re-tag onto the stripped
+          # HEAD so the public release tarball is generated from the clean
+          # tree. Pre-v1.0.3 tags (v1.0.0/v1.0.1/v1.0.2) are NOT retroactively
+          # re-tagged here — they remain as-is on public per the v1.0.3 spec
+          # decision (out-of-scope retag).
+          ORIG_SHA="${{ github.sha }}"
+          ATTACHED_TAGS=$(git tag --points-at "$ORIG_SHA")
+          if [ -n "$ATTACHED_TAGS" ]; then
+            for tag in $ATTACHED_TAGS; do
+              # Preserve the original annotated tag message + force retag.
+              msg=$(git tag -l --format='%(contents)' "$tag")
+              git tag -f -a "$tag" -m "$msg"
+            done
+          fi
+
           git remote add public https://x-access-token:${{ secrets.PUBLIC_REPO_TOKEN }}@github.com/JayJihyunKim/rein.git
           git push public HEAD:main --force
-          git push public --tags --force
+          # Push only the re-tagged tags (Q9). The previous `--tags --force`
+          # form would have pushed all local tags including pre-strip tag
+          # trees — that was the leak source. Pre-v1.0.3 tags already on
+          # public remain untouched (no force-overwrite).
+          if [ -n "$ATTACHED_TAGS" ]; then
+            for tag in $ATTACHED_TAGS; do
+              git push public "$tag" --force
+            done
+          fi
