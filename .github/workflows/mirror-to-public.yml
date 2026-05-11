@@ -52,6 +52,61 @@ jobs:
             git commit -m "chore: strip maintainer-only govcheck workflow for public"
           fi
 
+          # Strip maintainer-only plugin-drift-check workflow. Verifies that
+          # plugins/rein-core/ ↔ .claude/ stay sha256-identical — only meaningful
+          # on rein-dev where the dual tree exists. Public rein repo has the
+          # plugin tarball only.
+          if [ -f .github/workflows/plugin-drift-check.yml ]; then
+            git rm -q .github/workflows/plugin-drift-check.yml
+            git commit -m "chore: strip maintainer-only plugin-drift-check workflow for public"
+          fi
+
+          # Strip maintainer-only daily-trail-audit workflow. Operates on the
+          # rein-dev trail/ skeleton; public repo has no trail/ to audit.
+          if [ -f .github/workflows/daily-trail-audit.yml ]; then
+            git rm -q .github/workflows/daily-trail-audit.yml
+            git commit -m "chore: strip maintainer-only daily-trail-audit workflow for public"
+          fi
+
+          # Strip maintainer-only repo-audit workflow. Internal governance
+          # audit job, not user-facing.
+          if [ -f .github/workflows/repo-audit.yml ]; then
+            git rm -q .github/workflows/repo-audit.yml
+            git commit -m "chore: strip maintainer-only repo-audit workflow for public"
+          fi
+
+          # Strip maintainer-only weekly-agent-evolution workflow. Rein-dev
+          # agent-candidates promotion pipeline, not user-facing.
+          if [ -f .github/workflows/weekly-agent-evolution.yml ]; then
+            git rm -q .github/workflows/weekly-agent-evolution.yml
+            git commit -m "chore: strip maintainer-only weekly-agent-evolution workflow for public"
+          fi
+
+          # Strip trail/ skeleton if it ever lands on main by accident.
+          # Per the current contract (branch-strategy.md "특수 처리" 절,
+          # 2026-05-06): trail/ is created in the user's git root by
+          # plugins/rein-core/scripts/rein-bootstrap-project.py, invoked from
+          # session-start-bootstrap.sh on the first plugin-enabled SessionStart
+          # after user approval. The bootstrap script explicitly refuses to
+          # run inside .claude/plugins/**. Defense-in-depth backstop: if a
+          # future accidental dev->main checkout pulls trail/ back in, this
+          # step ensures the public mirror stays clean. NOTE: if the contract
+          # ever changes to legitimately ship trail/ on main, remove this
+          # strip step in the same change.
+          if [ -d trail ]; then
+            git rm -rqf trail
+            git commit -m "chore: strip trail/ skeleton — bootstrap creates it in user repo"
+          fi
+
+          # Explicit strip of blocks log files (S30 — future drift safety).
+          # The trail/ strip above already removes the entire subtree, but
+          # naming the 3 block log files explicitly ensures future drift
+          # (e.g., if trail policy changes and some trail/** path is legitimately
+          # shipped on main) cannot accidentally leak block logs to public.
+          rm -f trail/incidents/blocks.jsonl
+          rm -f trail/incidents/blocks.log
+          rm -f trail/incidents/blocks.log.legacy
+
           git remote add public https://x-access-token:${{ secrets.PUBLIC_REPO_TOKEN }}@github.com/JayJihyunKim/rein.git
           git push public HEAD:main --force
           git push public --tags --force

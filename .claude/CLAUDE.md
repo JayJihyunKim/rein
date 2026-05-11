@@ -12,13 +12,13 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 1. 이 파일 (`.claude/CLAUDE.md`) — 자동 로드
 2. `/AGENTS.md` — 전역 실행 규칙
 3. 작업 디렉토리의 nearest `AGENTS.md` — 언어/프레임워크별 규칙
-4. **SessionStart 훅 (`session-start-load-sot.sh`)** 이 다음을 자동 주입:
-   - `trail/index.md` 전량
-   - `trail/inbox/*.md` 전량 (오늘 진행 중 작업)
-   - `trail/daily/*.md` 전량 (최근 7일 이내)
-   - `trail/weekly/*.md` 최근 4주 (ISO 주 기준 역산)
-   - `trail/dod/.spec-reviews/*.pending` 이 있으면 "⚠️ 미해결 spec review" 요약
-   - 용량 예산: 기본 65536 바이트. 초과 시 제목만 표시 (REIN_BUDGET_BYTES 로 조정)
+4. **SessionStart 훅 (`session-start-load-trail.sh`)** 이 다음을 자동 주입 (lean mode, 2026-04-29~):
+   - `trail/index.md` 전량 (5~25줄)
+   - 비권위 캐시 freshness 경고 1줄 — release/git/tag/publish 류 volatile claim 은 답변 전 git 명령으로 재검증
+   - `trail/dod/.spec-reviews/*.pending` 있으면 "⚠️ 미해결 spec review" 요약
+   - `trail/incidents/` 미처리 incident 카운트 (있으면 첫 source 편집 차단)
+   - skill/MCP 인벤토리 가이드 (`.claude/cache/skill-mcp-guide.md`)
+   - **자동 주입에서 제외**: `trail/inbox/*.md`, `trail/daily/*.md`, `trail/weekly/*.md`, `MEMORY.md`. 필요 시 명시 read 로 가져온다 (raw 회고/절차 텍스트가 stale anchoring 을 유발한 회고: `trail/dod/dod-2026-04-29-session-context-reduction.md`)
 
 작업 유형에 따라 추가 로드:
 - 워크플로우: `.claude/workflows/[relevant].md`
@@ -28,6 +28,7 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 
 ## 규칙 허브
 
+@.claude/rules/answer-only-mode.md
 @.claude/rules/code-style.md
 @.claude/rules/testing.md
 @.claude/rules/security.md
@@ -73,6 +74,8 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 
 ## 강제 작업 시퀀스 (hook이 위반을 차단합니다)
 
+> **Answer-only mode 가 적용되는 turn 은 이 시퀀스를 skip 한다** — 단순 정보 조회·의견 요청·tradeoff 설명·second opinion 호출은 DoD/route/review/inbox/index ceremony 없이 답변에 집중. 단 release/git/tag/publish 류 volatile claim 은 답변 전 명령으로 재검증한다. 자세한 trigger·escape·검증 의무: `.claude/rules/answer-only-mode.md`. 코드 편집·파일 신규 생성 의도가 발생하는 즉시 정상 시퀀스로 자동 전환 (`pre-edit-dod-gate.sh` 가 강제).
+
 아래 순서를 반드시 따른다. Hook이 도구 호출을 차단(exit 2)하므로 건너뛸 수 없다.
 
 1. **READ** `trail/index.md` — 항상 첫 번째
@@ -99,7 +102,7 @@ Claude Code는 세션 시작 시 아래 순서로 컨텍스트를 구성한다:
 9. **SELF-REVIEW** — AGENTS.md §6 항목을 명시적으로 답변
 10. **WRITE** `trail/inbox/YYYY-MM-DD-[작업명].md` — 작업 완료 기록
     → `stop-session-gate.sh`가 세션 종료 시 inbox 기록 없으면 차단함 (exit 2)
-    → 라우팅 피드백을 `.claude/router/feedback-log.yaml`에도 기록
+    → 라우팅 피드백을 `.rein/policy/router/feedback-log.yaml`에도 기록
 11. **UPDATE** `trail/index.md` — 세션 종료 전
     → `stop-session-gate.sh`가 세션 종료 시 index.md 미갱신이면 차단함 (exit 2)
 

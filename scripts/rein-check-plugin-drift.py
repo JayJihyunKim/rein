@@ -3,11 +3,12 @@
 
 Phase 9 Task 9.2 (plugin-first restructure). The rein-core plugin is the
 SSOT for hooks/skills/agents. The repo also keeps a `.claude/` tree that
-serves the maintainer-side scaffold export (rein init --mode=scaffold).
-The two trees must stay sha256-identical for every shared first-class file:
-if a maintainer edits .claude/hooks/<x>.sh without mirroring it to
-plugins/rein-core/hooks/<x>.sh (or vice versa), users on plugin mode and
-users on scaffold mode will see different code, producing silent SSOT drift.
+serves as the maintainer dev dogfood overlay — so the same hooks/skills/agents
+that ship in the plugin tarball are also active inside the rein-dev checkout
+session. The two trees must stay sha256-identical for every shared first-class
+file: if a maintainer edits .claude/hooks/<x>.sh without mirroring it to
+plugins/rein-core/hooks/<x>.sh (or vice versa), the dev session and the
+published plugin will see different code, producing silent SSOT drift.
 
 This checker walks both trees and reports any file whose content hash
 differs between the two locations, or that exists in only one of them
@@ -58,10 +59,10 @@ DOMAIN_SKILL_DIRS = frozenset({
     "shadcn-ui",
 })
 
-# Filename suffixes ignored ONLY on the .claude/ (scaffold) side. We must
+# Filename suffixes ignored ONLY on the .claude/ (dev overlay) side. We must
 # not silently ignore stray .example files inside the plugin tree — those
 # would actually be drift (plugin-only without an allowlist entry).
-SCAFFOLD_IGNORE_SUFFIXES = (".example",)
+OVERLAY_IGNORE_SUFFIXES = (".example",)
 
 # Filenames ignored anywhere in the walk.
 IGNORE_NAMES = frozenset({
@@ -108,8 +109,8 @@ def _sha256(path: Path) -> str:
 def _is_ignored(rel_path: Path, *, side: str) -> bool:
     """True iff (side, rel_path) falls under an exclusion rule.
 
-    side: "plugin" or "scaffold". Some rules apply to only one side
-    (e.g., .example suffix is scaffold-only — a plugin/.example file is
+    side: "plugin" or "overlay". Some rules apply to only one side
+    (e.g., .example suffix is overlay-only — a plugin/.example file is
     real drift and must be reported).
     """
     parts = rel_path.parts
@@ -125,8 +126,8 @@ def _is_ignored(rel_path: Path, *, side: str) -> bool:
     if len(parts) >= 1 and parts[0] in DOMAIN_SKILL_DIRS:
         return True
     # Side-specific suffix rules.
-    if side == "scaffold":
-        if rel_path.name.endswith(SCAFFOLD_IGNORE_SUFFIXES):
+    if side == "overlay":
+        if rel_path.name.endswith(OVERLAY_IGNORE_SUFFIXES):
             return True
     return False
 
@@ -152,26 +153,26 @@ def _is_plugin_only_allowed(category: str, rel: Path) -> bool:
 
 
 def _diff_trees(plugin_files: Dict[Path, str],
-                scaffold_files: Dict[Path, str],
+                overlay_files: Dict[Path, str],
                 category: str) -> List[str]:
     """Return list of human-readable drift lines, empty list if in sync."""
     drift: List[str] = []
     plugin_keys = set(plugin_files)
-    scaffold_keys = set(scaffold_files)
+    overlay_keys = set(overlay_files)
 
-    for rel in sorted(plugin_keys & scaffold_keys):
-        if plugin_files[rel] != scaffold_files[rel]:
+    for rel in sorted(plugin_keys & overlay_keys):
+        if plugin_files[rel] != overlay_files[rel]:
             drift.append(
                 f"  HASH-MISMATCH {category}/{rel}\n"
-                f"    plugin   sha256={plugin_files[rel]}\n"
-                f"    scaffold sha256={scaffold_files[rel]}"
+                f"    plugin  sha256={plugin_files[rel]}\n"
+                f"    overlay sha256={overlay_files[rel]}"
             )
-    for rel in sorted(plugin_keys - scaffold_keys):
+    for rel in sorted(plugin_keys - overlay_keys):
         if _is_plugin_only_allowed(category, rel):
             continue
-        drift.append(f"  PLUGIN-ONLY    {category}/{rel}")
-    for rel in sorted(scaffold_keys - plugin_keys):
-        drift.append(f"  SCAFFOLD-ONLY  {category}/{rel}")
+        drift.append(f"  PLUGIN-ONLY  {category}/{rel}")
+    for rel in sorted(overlay_keys - plugin_keys):
+        drift.append(f"  OVERLAY-ONLY {category}/{rel}")
     return drift
 
 
@@ -206,7 +207,7 @@ def main(argv: List[str]) -> int:
     all_drift: List[str] = []
     for cat, p_root, s_root in categories:
         p_files = _walk_files(p_root, side="plugin")
-        s_files = _walk_files(s_root, side="scaffold")
+        s_files = _walk_files(s_root, side="overlay")
         drift = _diff_trees(p_files, s_files, cat)
         if drift:
             all_drift.append(f"\n{cat} ({len(drift)} drift entries):")

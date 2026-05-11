@@ -24,6 +24,9 @@ triggers:
 ```
 
 ### 3. trail 일관성 점검
+
+> 운영 archive (`plugins/rein-core/policy/cleanup-archive-ignore.txt` 의 4 path) 는 분석 대상에서 제외한다.
+
 ```
 [ ] trail/index.md 최신 상태 (5~15줄)
 [ ] trail/inbox/ 3일 이상 미압축 로그 확인

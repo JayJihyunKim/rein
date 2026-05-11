@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Router 산출물 쓰기 경로.
 
-.claude/router/{overrides,feedback-log,registry}.yaml 에 entry 를 안전하게 append.
-주석/공백을 보존하기 위해 ruamel.yaml 우선, 없으면 수동 텍스트 삽입으로 폴백.
+.rein/policy/router/{overrides,feedback-log,registry}.yaml 에 entry 를 안전하게
+append. 주석/공백을 보존하기 위해 ruamel.yaml 우선, 없으면 수동 텍스트 삽입으로 폴백.
 
 Commands:
   override  — 사용자가 추천 조합을 수정했을 때 overrides.yaml 에 기록
@@ -31,15 +31,16 @@ _PROJECT_ROOT = Path(".")
 
 
 def resolve_router_dir() -> Path:
-    """Resolve router directory honoring env override + plugin/scaffold mode.
+    """Resolve router directory honoring env override.
 
-    Resolution order (Plan §660-702 — Phase 3 Task 3.1):
+    Resolution order (v1.0.1 — S21 + S25 hard cut):
       1. ``REIN_ROUTER_DIR`` env var — explicit override; mkdir -p; return it.
-      2. ``.rein/policy/router/`` (plugin-first canonical location) if exists.
-      3. ``.claude/router/`` (legacy scaffold location) if exists.
-      4. Fallback by ``.rein/project.json`` mode: ``plugin`` -> ``.rein/policy/router/``,
-         anything else (incl. missing/malformed json) -> ``.claude/router/``.
-         The chosen path is created with mkdir -p before return.
+      2. ``.rein/policy/router/`` — canonical plugin-first location. Always
+         used. Legacy ``.claude/router/`` fallback removed in v1.0.1 (no
+         silent legacy acceptance).
+
+    project.json mode defaults to ``plugin`` when absent or malformed (S21).
+    The directory is created with mkdir -p before return.
 
     Returned ``Path`` is repo-relative (the caller's cwd anchors writes).
     """
@@ -48,20 +49,7 @@ def resolve_router_dir() -> Path:
         p = Path(env_path)
         p.mkdir(parents=True, exist_ok=True)
         return p
-    new_path = Path(".rein/policy/router")
-    old_path = Path(".claude/router")
-    if new_path.exists():
-        return new_path
-    if old_path.exists():
-        return old_path
-    project_json = Path(".rein/project.json")
-    mode = "scaffold"
-    if project_json.exists():
-        try:
-            mode = json.loads(project_json.read_text(encoding="utf-8")).get("mode", "scaffold")
-        except Exception:
-            mode = "scaffold"
-    target = new_path if mode == "plugin" else old_path
+    target = Path(".rein/policy/router")
     target.mkdir(parents=True, exist_ok=True)
     return target
 

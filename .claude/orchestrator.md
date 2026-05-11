@@ -80,7 +80,7 @@ DoD 작성 완료 후, 구현 시작 전에 아래를 수행한다.
    - **프로젝트 에이전트**: `.claude/agents/*.md` 파일을 스캔하여 역할 설명 읽기
    - **스킬**: 세션 컨텍스트의 `The following skills are available` 목록에서 이름 + description 수집
    - **MCP**: 세션 컨텍스트의 `deferred tools` 목록에서 `mcp__서버명__` 접두사로 서버 식별
-   - **제외**: `.claude/router/registry.yaml`의 `excluded_patterns.description_keywords` 에 매칭되는 스킬(설명문 키워드) 또는 `excluded_patterns.id_globs` 에 매칭되는 id(glob) 를 라우팅 추천에서 제외
+   - **제외**: `.rein/policy/router/registry.yaml`의 `excluded_patterns.description_keywords` 에 매칭되는 스킬(설명문 키워드) 또는 `excluded_patterns.id_globs` 에 매칭되는 id(glob) 를 라우팅 추천에서 제외
 
 2. **신호 추출**: DoD 파일에서 아래 4가지 신호를 추출
    - 키워드: 작업명, 완료 기준, 요약에서 핵심 단어
@@ -91,7 +91,7 @@ DoD 작성 완료 후, 구현 시작 전에 아래를 수행한다.
 3. **매칭**: 발견된 각 항목의 description을 DoD 신호와 대조
    - 각 항목의 description 텍스트에서 용도, 트리거 조건, 도메인을 분석
    - DoD의 키워드/파일패턴/작업유형과의 관련성을 판단
-   - `.claude/router/registry.yaml`에 학습된 보정(boost) 데이터가 있으면 반영
+   - `.rein/policy/router/registry.yaml`에 학습된 보정(boost) 데이터가 있으면 반영
 
 4. **조합 생성**:
    - 에이전트: 가장 적합한 1개 (필수)
@@ -135,7 +135,7 @@ DoD 작성 완료 후, 구현 시작 전에 아래를 수행한다.
 
    **중요**: `approved_by_user` 값은 사용자가 "진행해" 등으로 명시 승인한 뒤에만 `true` 로 설정한다. `pre-edit-dod-gate.sh` 가 `approved_by_user: true` 없으면 Edit/Write 를 차단한다.
 
-6. **수정 사항 기록**: 사용자가 추천 조합을 수정하면 아래 명령으로 `.claude/router/overrides.yaml` 에 기록
+6. **수정 사항 기록**: 사용자가 추천 조합을 수정하면 아래 명령으로 `.rein/policy/router/overrides.yaml` 에 기록
    ```bash
    python3 scripts/rein-route-record.py override \
      --dod trail/dod/dod-YYYY-MM-DD-<slug>.md \
@@ -163,7 +163,7 @@ DoD 작성 완료 후, 구현 시작 전에 아래를 수행한다.
 
 ### 작업 완료 후 피드백 기록
 
-작업 완료 시(=inbox 기록 직후) 아래 명령으로 `.claude/router/feedback-log.yaml` 에 append 한다:
+작업 완료 시(=inbox 기록 직후) 아래 명령으로 `.rein/policy/router/feedback-log.yaml` 에 append 한다:
 
 ```bash
 python3 scripts/rein-route-record.py feedback \
@@ -179,7 +179,7 @@ python3 scripts/rein-route-record.py feedback \
 
 ### 자동 보정 규칙
 
-피드백 이력을 분석하여 `.claude/router/registry.yaml`의 `learned_preferences`에 보정 데이터를 축적한다.
+피드백 이력을 분석하여 `.rein/policy/router/registry.yaml`의 `learned_preferences`에 보정 데이터를 축적한다.
 
 | 조건 | 행동 |
 |------|------|

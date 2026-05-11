@@ -1,6 +1,6 @@
 ---
 name: brainstorming
-description: rein-native brainstorming. 기존 코드베이스/아키텍처 제약 하에서 아이디어를 spec 초안으로 구체화한다. brownfield (기존 시스템 변경) 에서는 feasibility·compatibility 를 먼저 검증한 뒤 선택지를 수렴하고, greenfield 에서는 얇은 질문 세트로 의도를 빠르게 수렴한다. 산출물은 docs/brainstorms/ 에 기록되고 spec 이 brainstorm ref: 로 가리킨다. superpowers:brainstorming 과 달리 호환성·구현 가능성을 일급 시민으로 다룬다.
+description: "rein-native brainstorming. 기존 코드베이스/아키텍처 제약 하에서 아이디어를 spec 초안으로 구체화한다. brownfield (기존 시스템 변경) 에서는 feasibility·compatibility 를 먼저 검증한 뒤 선택지를 수렴하고, greenfield 에서는 얇은 질문 세트로 의도를 빠르게 수렴한다. 산출물은 docs/brainstorms/ 에 기록되고 spec 이 brainstorm ref: 로 가리킨다. superpowers:brainstorming 과 달리 호환성·구현 가능성을 일급 시민으로 다룬다."
 triggers:
   - "신규 기능/변경 아이디어가 들어왔을 때 (구현 착수 전)"
   - "기존 시스템에 기능을 추가할 때 (brownfield)"

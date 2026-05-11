@@ -126,7 +126,7 @@ AI-assisted 워크플로에서는 모든 수정이 재요청입니다. AI-native
 4. 첫 실행 시 Claude 가 Rein 초기화 여부를 물어봅니다 — yes 답변.
 ```
 
-이게 전부입니다. 첫 세션에서 Claude 가 `trail/` 과 `.rein/` 을 저장소에 자동 생성합니다. `curl` 설치 스크립트도, 직접 입력해야 할 셸 명령도 없습니다.
+이게 전부입니다. 첫 세션에서 플러그인이 `trail/` 과 `.rein/` 을 저장소에 초기화합니다. `curl` 설치 스크립트도, 직접 입력해야 할 셸 명령도 없습니다.
 
 ### 요구사항
 
@@ -163,6 +163,8 @@ your-repo/
 ```
 
 이게 전부입니다. 프레임워크의 **hook·rule·agent·skill** 은 플러그인 안에 ship 되어 Claude Code 의 플러그인 캐시에 들어 있습니다 — 사용자 저장소에는 복사되지 않으므로, 플러그인 업데이트가 사용자 파일을 덮어쓰지 않습니다. 프로젝트 고유의 지시 사항을 함께 두고 싶다면 사용자 저장소에 직접 `AGENTS.md` (또는 `.claude/CLAUDE.md`) 를 작성하세요. Rein 은 이를 읽기만 하고 수정하지 않습니다.
+
+저장소 단위 hook 정책은 `.rein/policy/hooks.yaml` 에서 조정합니다 — `<hook-name>: false` 또는 `<hook-name>: { enabled: false }` 가 모두 허용됩니다. `profile:` 키 (`lean` / `standard` / `strict` 중 하나) 로 무거운 gate 의 기본값을 한꺼번에 바꿀 수 있습니다 — `lean` 은 `post-edit-plan-coverage`, `post-write-spec-review-gate`, `post-write-dod-routing-check` 를 끄고(탐색·문서 작업용), `standard` (기본) 는 모두 활성, `strict` 는 향후 추가 strictness 의 reserved slot 입니다. 개별 hook 항목은 항상 profile 보다 우선합니다.
 
 > 권장: `trail/` 과 `.claude/cache/` 를 사용자 `.gitignore` 에 추가하세요 (세션 증거를 git 에 커밋하지 않으려는 경우). Rein 은 `.gitignore` 를 자동 편집하지 않습니다.
 

@@ -14,16 +14,19 @@ wsl --install
 - 기본 배포판 Ubuntu 가 자동 설치되고 사용자 계정을 만들라는 프롬프트가 뜹니다
 - 재부팅 후 `wsl` 을 다시 실행하면 Ubuntu 셸로 진입합니다
 
-그 다음 WSL Ubuntu 셸 안에서 일반 Linux 와 동일하게 설치합니다:
+그 다음 WSL Ubuntu 셸 안에서 일반 Linux 와 동일하게 도구를 준비한 뒤, Claude Code 안에서 plugin marketplace 흐름으로 Rein 을 설치합니다:
 
 ```bash
 # 필수 도구 (대부분 Ubuntu 기본 포함)
-sudo apt update && sudo apt install -y git curl python3
+sudo apt update && sudo apt install -y git python3
+```
 
-# Rein 설치
-curl -fsSL https://raw.githubusercontent.com/JayJihyunKim/rein/main/install.sh | bash
-source ~/.rein/env
-rein --version
+Claude Code 안에서 (별도 셸 설치 스크립트 없음):
+
+```
+/plugin marketplace add JayJihyunKim/rein
+/plugin install rein@rein
+# 세션 재시작 후 첫 실행에서 Claude 가 "Rein 초기화 여부" 를 물으면 yes.
 ```
 
 프로젝트 체크아웃 경로는 `/mnt/c/...` (Windows 파일시스템) 보다 `~/` (WSL 파일시스템) 가 디스크 I/O 가 훨씬 빠릅니다.

@@ -126,7 +126,7 @@ In an AI-assisted workflow, every fix is a re-prompt. In an AI-native workflow, 
 4. On first run, Claude will ask whether to initialise Rein in your project — say yes.
 ```
 
-That's it. Claude scaffolds `trail/` and `.rein/` in your repo on the first session. There is no `curl` installer and no shell command to run.
+That's it. On the first session the plugin initialises `trail/` and `.rein/` in your repo. There is no `curl` installer and no shell command to run.
 
 ### Requirements
 
@@ -163,6 +163,8 @@ your-repo/
 ```
 
 That's all. The framework's **hooks, rules, agents, and skills** ship inside the plugin and live in Claude Code's plugin cache, not in your repo — so plugin updates never overwrite anything. If you want project-specific instructions to ride alongside Rein, add your own `AGENTS.md` (or `.claude/CLAUDE.md`) in your repo; Rein reads them but never modifies them.
+
+For repo-local hook policy overrides, `.rein/policy/hooks.yaml` accepts either `<hook-name>: false` or `<hook-name>: { enabled: false }`. A `profile:` key (one of `lean`, `standard`, `strict`) sets defaults for the heavy gates — `lean` disables `post-edit-plan-coverage`, `post-write-spec-review-gate`, and `post-write-dod-routing-check` for exploratory work; `standard` (default) keeps all gates on; `strict` is reserved for stricter future defaults. Per-hook entries always override the profile.
 
 > Recommended: add `trail/` and `.claude/cache/` to your `.gitignore` if you don't want session evidence committed (Rein doesn't auto-edit `.gitignore`).
 

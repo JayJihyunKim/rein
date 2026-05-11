@@ -15,6 +15,8 @@ triggers:
 ## 입력
 - `trail/incidents/{target}.md` 또는 `trail/incidents/` 전체
 
+> 운영 archive (`plugins/rein-core/policy/cleanup-archive-ignore.txt` 의 4 path) 는 분석 대상에서 제외한다.
+
 ## 입력 포맷
 
 ### 신규 자동 생성 포맷 (`auto-*.md`)
