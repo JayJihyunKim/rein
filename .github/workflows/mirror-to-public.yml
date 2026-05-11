@@ -93,19 +93,37 @@ jobs:
           # step ensures the public mirror stays clean. NOTE: if the contract
           # ever changes to legitimately ship trail/ on main, remove this
           # strip step in the same change.
+          # S30 — explicit name-level strip of blocks log files runs BEFORE the
+          # trail/ subtree strip so the workflow source carries explicit
+          # `git rm trail/incidents/blocks.<X>` lines that are grep-discoverable
+          # (plan A.9.1/C.3.1 grep contract verifies 3 separate lines).
+          # If a future contract change ships some trail/** content on main
+          # (removing the trail/ subtree strip below), these 3 files still must
+          # never leak to public. `|| true` makes the lines a safe no-op when
+          # the files are absent.
+          git rm -qf trail/incidents/blocks.jsonl 2>/dev/null || true
+          git rm -qf trail/incidents/blocks.log 2>/dev/null || true
+          git rm -qf trail/incidents/blocks.log.legacy 2>/dev/null || true
+
+          # Strip trail/ skeleton if it ever lands on main by accident.
+          # Per the current contract (branch-strategy.md "특수 처리" 절,
+          # 2026-05-06): trail/ is created in the user's git root by
+          # plugins/rein-core/scripts/rein-bootstrap-project.py, invoked from
+          # session-start-bootstrap.sh on the first plugin-enabled SessionStart
+          # after user approval. The bootstrap script explicitly refuses to
+          # run inside .claude/plugins/**. Defense-in-depth backstop: if a
+          # future accidental dev->main checkout pulls trail/ back in, this
+          # step ensures the public mirror stays clean. NOTE: if the contract
+          # ever changes to legitimately ship trail/ on main, remove this
+          # strip step in the same change.
           if [ -d trail ]; then
             git rm -rqf trail
-            git commit -m "chore: strip trail/ skeleton — bootstrap creates it in user repo"
           fi
 
-          # Explicit strip of blocks log files (S30 — future drift safety).
-          # The trail/ strip above already removes the entire subtree, but
-          # naming the 3 block log files explicitly ensures future drift
-          # (e.g., if trail policy changes and some trail/** path is legitimately
-          # shipped on main) cannot accidentally leak block logs to public.
-          rm -f trail/incidents/blocks.jsonl
-          rm -f trail/incidents/blocks.log
-          rm -f trail/incidents/blocks.log.legacy
+          # Single commit covers blocks-log + trail/ stripping when either staged something.
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: strip trail/ skeleton + explicit blocks logs (S30) for public"
+          fi
 
           git remote add public https://x-access-token:${{ secrets.PUBLIC_REPO_TOKEN }}@github.com/JayJihyunKim/rein.git
           git push public HEAD:main --force
