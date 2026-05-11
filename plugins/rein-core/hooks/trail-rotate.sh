@@ -1,5 +1,5 @@
 #!/bin/bash
-# Hook: PreToolUse(Read|Edit|Write|MultiEdit)
+# Hook: PreToolUse(Edit|Write|MultiEdit)
 # trail 회전 엔진: inbox → daily → weekly + 레거시 DoD 아카이빙
 # (하루 1회, 마커 기반 idempotent)
 #
@@ -22,8 +22,15 @@ COMPRESS_MARKER="/tmp/.claude-inbox-compressed-${CACHE_KEY}"
 
 TODAY=$(date +%Y-%m-%d)
 
+# 마커가 오늘이면 skip (하루 1회만 실행). Read 경로에서는 이 hook 을
+# 호출하지 않지만, Edit/Write 가 많은 세션에서도 비싼 sweep 전에 빠르게
+# 빠져나가야 한다.
+if [ -f "$COMPRESS_MARKER" ] && [ "$(cat "$COMPRESS_MARKER" 2>/dev/null)" = "$TODAY" ]; then
+  exit 0
+fi
+
 # ============================================================
-# 레거시 DoD 스윕 (마커 검사 이전에 실행 — 업데이트 당일 즉시 청소)
+# 레거시 DoD 스윕 (하루 1회 maintenance)
 # ============================================================
 sweep_legacy_dod() {
   [ -d "$DOD_DIR" ] || return 0
@@ -187,11 +194,6 @@ sweep_orphan_completed_dod() {
 }
 
 sweep_orphan_completed_dod
-
-# 마커가 오늘이면 skip (하루 1회만 실행)
-if [ -f "$COMPRESS_MARKER" ] && [ "$(cat "$COMPRESS_MARKER" 2>/dev/null)" = "$TODAY" ]; then
-  exit 0
-fi
 
 # --- 통합 회전: inbox(driver) + 매칭 dod → daily ---
 if [ -d "$INBOX_DIR" ]; then

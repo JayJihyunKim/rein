@@ -9,37 +9,50 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/python-runner.sh"
 # shellcheck source=./lib/project-dir.sh
 . "$SCRIPT_DIR/lib/project-dir.sh"
+# shellcheck source=./lib/hook-input-cache.sh
+. "$SCRIPT_DIR/lib/hook-input-cache.sh"
 
 PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 REVIEW_PENDING="$PROJECT_DIR/trail/dod/.review-pending"
 
-INPUT=$(cat)
+hook_input_load   # 캐시 활성 시 INPUT/FILE_PATHS 가 채워짐. 없으면 INPUT 만.
 
-# Python resolver — post-hook silent on failure.
-resolve_python 2>/dev/null
-rc=$?
-if [ "$rc" -ne 0 ]; then
-  exit 0
+if [ "${REIN_HOOK_INPUT_CACHE:-0}" != "1" ]; then
+  # Python resolver — post-hook silent on failure.
+  resolve_python 2>/dev/null
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    exit 0
+  fi
+
+  # 모든 편집 파일 경로 추출 (MultiEdit는 여러 파일 가능)
+  # 수집 순서 (기존 semantics 와 동일):
+  #   1) tool_input.file_path          (Edit/Write)
+  #   2) tool_input.edits[*].file_path (MultiEdit 입력)
+  #   3) tool_result.edits[*].file_path(MultiEdit 결과)
+  #   4) tool_result.file_path         (fallback — 1~3 에서 아무것도 못 찾은 경우만)
+  # extract-hook-json.py 는 dedup/빈 문자열 필터링을 하지 않으므로 shell 에서 후처리.
+  FILE_PATHS=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
+    --field tool_input.file_path \
+    --array-of tool_input.edits --subfield file_path \
+    --array-of tool_result.edits --subfield file_path \
+    --default '' 2>/dev/null | awk 'NF && !seen[$0]++')
+
+  # fallback: tool_result.file_path 는 1~3 에서 경로를 찾지 못했을 때만 사용.
+  # 이는 Claude Code hook schema 기존 semantics 를 보존하기 위함 (Codex final review A4).
+  if [ -z "$FILE_PATHS" ]; then
+    FILE_PATHS=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
+      --field tool_result.file_path --default '' 2>/dev/null | awk 'NF && !seen[$0]++')
+  fi
 fi
 
-# 모든 편집 파일 경로 추출 (MultiEdit는 여러 파일 가능)
-# 수집 순서 (기존 semantics 와 동일):
-#   1) tool_input.file_path          (Edit/Write)
-#   2) tool_input.edits[*].file_path (MultiEdit 입력)
-#   3) tool_result.edits[*].file_path(MultiEdit 결과)
-#   4) tool_result.file_path         (fallback — 1~3 에서 아무것도 못 찾은 경우만)
-# extract-hook-json.py 는 dedup/빈 문자열 필터링을 하지 않으므로 shell 에서 후처리.
-FILE_PATHS=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
-  --field tool_input.file_path \
-  --array-of tool_input.edits --subfield file_path \
-  --array-of tool_result.edits --subfield file_path \
-  --default '' 2>/dev/null | awk 'NF && !seen[$0]++')
-
-# fallback: tool_result.file_path 는 1~3 에서 경로를 찾지 못했을 때만 사용.
-# 이는 Claude Code hook schema 기존 semantics 를 보존하기 위함 (Codex final review A4).
-if [ -z "$FILE_PATHS" ]; then
-  FILE_PATHS=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
-    --field tool_result.file_path --default '' 2>/dev/null | awk 'NF && !seen[$0]++')
+# 캐시 경로에서도 path normalize 용 PYTHON_RUNNER 가 필요하므로 resolve 보장.
+if [ -z "${PYTHON_RUNNER[0]:-}" ]; then
+  resolve_python 2>/dev/null
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    exit 0
+  fi
 fi
 
 if [ -z "$FILE_PATHS" ]; then

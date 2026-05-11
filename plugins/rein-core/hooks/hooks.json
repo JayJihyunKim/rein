@@ -20,7 +20,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Read|Edit|Write|MultiEdit",
+        "matcher": "Edit|Write|MultiEdit",
         "hooks": [
           {
             "type": "command",
@@ -53,27 +53,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-plan-coverage.sh"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-write-dod-routing-check.sh"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-review-gate.sh"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-hygiene.sh"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-index-sync-inbox.sh"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-write-spec-review-gate.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-dispatcher.sh"
           }
         ]
       }

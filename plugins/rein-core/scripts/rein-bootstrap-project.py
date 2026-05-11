@@ -29,8 +29,18 @@ TRAIL_SUBDIRS = (
 )
 
 POLICY_HOOKS_TEMPLATE = """# .rein/policy/hooks.yaml
-# Set <hook-name>: false to disable a plugin-shipped hook for this repo.
-# Empty file = use plugin defaults.
+#
+# Operational profile (Phase 4):
+#   profile: lean       # exploratory work — disables plan-coverage, spec-review-gate, dod-routing-check
+#   profile: standard   # (default) all gates enabled
+#   profile: strict     # release / security-sensitive — reserved for stricter future defaults
+#
+# Per-hook toggles (override the profile):
+#   <hook-name>: false                # disable
+#   <hook-name>: { enabled: false }   # equivalent structured form
+#
+# Resolution: per-hook entry > profile default > built-in default (enabled).
+# Empty file = use plugin defaults (everything enabled).
 """
 
 POLICY_RULES_TEMPLATE = """# .rein/policy/rules.yaml

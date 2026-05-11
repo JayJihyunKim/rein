@@ -6,6 +6,8 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./lib/project-dir.sh
 . "$SCRIPT_DIR/lib/project-dir.sh"
+# shellcheck source=./lib/hook-input-cache.sh
+. "$SCRIPT_DIR/lib/hook-input-cache.sh"
 PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 DOD_DIR="$PROJECT_DIR/trail/dod"
 SPEC_REVIEWS_DIR="$DOD_DIR/.spec-reviews"
@@ -21,44 +23,55 @@ if ! . "$SCRIPT_DIR/lib/path-policy.sh" 2>/dev/null; then
   exit 2
 fi
 
-# Post-hook: Python 미해결 시 조용히 skip (세션 차단 금지).
-resolve_python 2>/dev/null
-rc=$?
-if [ "$rc" -ne 0 ]; then
-  exit 0
-fi
+hook_input_load   # 캐시 활성 시 INPUT/FILE_PATHS 채워짐.
 
-INPUT=$(cat)
+if [ "${REIN_HOOK_INPUT_CACHE:-0}" != "1" ]; then
+  # Post-hook: Python 미해결 시 조용히 skip (세션 차단 금지).
+  resolve_python 2>/dev/null
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    exit 0
+  fi
 
-# MultiEdit + Edit/Write 모두 지원: 모든 편집 파일 경로 추출.
-# 수집 순서(원본 보존): tool_input.file_path → tool_input.edits[*].file_path
-#                   → tool_result.edits[*].file_path → tool_result.file_path(fallback only).
-# 빈 값/중복은 awk 단계에서 제거 (원본의 `if fp and fp not in paths` 의미 유지).
-# 서브쉘에서 pipefail 을 켜서 helper 실패를 정확히 캡처한다.
-FILE_PATHS=$(
-  set -o pipefail
-  printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
-    --field tool_input.file_path \
-    --array-of tool_input.edits --subfield file_path \
-    --array-of tool_result.edits --subfield file_path \
-    --default '' 2>/dev/null \
-    | awk 'NF && !seen[$0]++'
-)
-PY_EXIT=$?
+  # MultiEdit + Edit/Write 모두 지원: 모든 편집 파일 경로 추출.
+  # 수집 순서(원본 보존): tool_input.file_path → tool_input.edits[*].file_path
+  #                   → tool_result.edits[*].file_path → tool_result.file_path(fallback only).
+  # 빈 값/중복은 awk 단계에서 제거 (원본의 `if fp and fp not in paths` 의미 유지).
+  # 서브쉘에서 pipefail 을 켜서 helper 실패를 정확히 캡처한다.
+  FILE_PATHS=$(
+    set -o pipefail
+    printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
+      --field tool_input.file_path \
+      --array-of tool_input.edits --subfield file_path \
+      --array-of tool_result.edits --subfield file_path \
+      --default '' 2>/dev/null \
+      | awk 'NF && !seen[$0]++'
+  )
+  PY_EXIT=$?
 
-# helper 가 실패했으면 세션은 차단하지 않되 사용자가 stderr 로 인지 가능하게 한다.
-if [ "$PY_EXIT" -ne 0 ]; then
-  echo "WARNING: post-write-spec-review-gate JSON 파싱 실패 — marker 미생성" >&2
-  exit 0
-fi
+  # helper 가 실패했으면 세션은 차단하지 않되 사용자가 stderr 로 인지 가능하게 한다.
+  if [ "$PY_EXIT" -ne 0 ]; then
+    echo "WARNING: post-write-spec-review-gate JSON 파싱 실패 — marker 미생성" >&2
+    exit 0
+  fi
 
-# fallback: tool_result.file_path 는 1~3 에서 경로를 찾지 못했을 때만 사용 (Codex final review A4).
-if [ -z "$FILE_PATHS" ]; then
-  FILE_PATHS=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
-    --field tool_result.file_path --default '' 2>/dev/null | awk 'NF && !seen[$0]++')
+  # fallback: tool_result.file_path 는 1~3 에서 경로를 찾지 못했을 때만 사용 (Codex final review A4).
+  if [ -z "$FILE_PATHS" ]; then
+    FILE_PATHS=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
+      --field tool_result.file_path --default '' 2>/dev/null | awk 'NF && !seen[$0]++')
+  fi
 fi
 
 [ -z "$FILE_PATHS" ] && exit 0
+
+# 캐시 경로에서도 path normalize 용 PYTHON_RUNNER 가 필요.
+if [ -z "${PYTHON_RUNNER[0]:-}" ]; then
+  resolve_python 2>/dev/null
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    exit 0
+  fi
+fi
 
 # 해시 계산
 compute_hash() {

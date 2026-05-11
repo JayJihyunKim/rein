@@ -1,8 +1,9 @@
 #!/bin/bash
 # Hook: SessionStart
-# Detect a git repo where the Rein plugin is enabled but repo-local state has
-# not been initialized yet. SessionStart cannot ask interactively itself, so it
-# injects concise context instructing Claude to ask before bootstrapping.
+# Detect a project directory where the Rein plugin is enabled but repo-local
+# state has not been initialized yet. SessionStart cannot ask interactively
+# itself, so it injects concise context instructing Claude to ask before
+# bootstrapping.
 
 set -u
 
@@ -40,12 +41,13 @@ else
   START_DIR="$PWD"
 fi
 
-GIT_ROOT="$(git -C "$START_DIR" rev-parse --show-toplevel 2>/dev/null)" || exit 0
-[ -n "$GIT_ROOT" ] && [ -d "$GIT_ROOT" ] || exit 0
+PROJECT_DIR="$(git -C "$START_DIR" rev-parse --show-toplevel 2>/dev/null)" || PROJECT_DIR="$START_DIR"
+PROJECT_DIR="$(cd "$PROJECT_DIR" 2>/dev/null && pwd)" || exit 0
+[ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ] || exit 0
 
 # Never create or prompt for repo state inside Claude's plugin cache /
 # marketplace clones. Those directories are code/cache, not user projects.
-if _is_plugin_storage "$GIT_ROOT"; then
+if _is_plugin_storage "$PROJECT_DIR"; then
   exit 0
 fi
 
@@ -53,7 +55,7 @@ fi
 # Partial state (only one of the two) still needs the bootstrap prompt so
 # load-trail does not inject half-baked context. Symmetry with the early-exit
 # in session-start-load-trail.sh.
-if [ -f "$GIT_ROOT/.rein/project.json" ] && [ -f "$GIT_ROOT/trail/index.md" ]; then
+if [ -f "$PROJECT_DIR/.rein/project.json" ] && [ -f "$PROJECT_DIR/trail/index.md" ]; then
   exit 0
 fi
 
@@ -62,23 +64,23 @@ if [ ! -f "$BOOTSTRAP_SCRIPT" ]; then
 fi
 
 Q_BOOTSTRAP="$(_quote "$BOOTSTRAP_SCRIPT")"
-Q_ROOT="$(_quote "$GIT_ROOT")"
+Q_ROOT="$(_quote "$PROJECT_DIR")"
 
 cat <<EOF
 ## Rein bootstrap required
 
-Rein plugin is enabled in this git repository, but repo-local Rein memory is not initialized yet.
+Rein plugin is enabled in this project directory, but repo-local Rein memory is not initialized yet.
 
 - Rein uses \`trail/\` as the project's core memory and evidence log.
 - Do not create files automatically.
-- Before doing source work, ask the user whether to initialize Rein state in this repository.
+- Before doing source work, ask the user whether to initialize Rein state in this project directory.
 - If the user approves, run:
 
 \`\`\`bash
 python3 $Q_BOOTSTRAP --project-dir $Q_ROOT
 \`\`\`
 
-This must create state only under the repository root, never under Claude plugin cache or marketplace directories.
+This must create state only under the project directory, never under Claude plugin cache or marketplace directories.
 
 EOF
 

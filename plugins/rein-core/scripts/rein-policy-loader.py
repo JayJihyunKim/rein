@@ -31,30 +31,98 @@ except ImportError:
     sys.exit(0)
 
 
-def is_enabled(hook_name: str) -> bool:
-    """Return True if hook is enabled (default), False only when explicitly disabled."""
+# Phase 4 운영 프로파일 — profile 키가 set 됐을 때 각 hook 의 기본값을 매핑.
+# 개별 키 override 가 우선하고, profile 은 default 값을 흔든다. profile 매핑에
+# 등재되지 않은 hook 은 모두 enabled.
+#
+# - lean:     단순 탐색/문서 작업. 무거운 design/coverage gate 비활성화.
+# - standard: 일반 개발 (기본값). 모든 gate enabled.
+# - strict:   릴리즈/보안 민감 변경. 현재 standard 와 동일하지만 향후 추가
+#             strictness 옵션의 reserved slot.
+PROFILE_HOOK_DEFAULTS = {
+    "lean": {
+        "post-edit-plan-coverage": False,
+        "post-write-spec-review-gate": False,
+        "post-write-dod-routing-check": False,
+    },
+    "standard": {},
+    "strict": {},
+}
+
+
+def _load_policy_data():
+    """Return parsed yaml dict or None. Warn-only on parse failure."""
     policy_path = Path(".rein/policy/hooks.yaml")
     if not policy_path.exists():
-        return True  # default enabled (Plan Task 2.9 missing-key default)
+        return None
     try:
         data = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
     except Exception:
-        # Malformed yaml -> fail-open per Plan Task 2.10.
-        # Emit a one-line warning so a human notices, but never block.
         print(
             f"warning: failed to parse {policy_path} - using default (enabled)",
             file=sys.stderr,
         )
-        return True
+        return None
     if not isinstance(data, dict):
-        # Top-level must be a mapping; otherwise treat as missing (default).
-        return True
+        return None
+    return data
+
+
+def _profile_default(data: dict, hook_name: str):
+    """Look up the hook's profile-driven default. Return True/False or None when
+    the profile does not set an explicit value for this hook."""
+    profile = data.get("profile")
+    if not isinstance(profile, str):
+        return None
+    profile = profile.strip().lower()
+    mapping = PROFILE_HOOK_DEFAULTS.get(profile)
+    if mapping is None:
+        # Unknown profile name -> warn but fall through to default enabled.
+        print(
+            f"warning: unknown profile '{profile}' in .rein/policy/hooks.yaml - "
+            "ignoring (use lean | standard | strict)",
+            file=sys.stderr,
+        )
+        return None
+    if hook_name in mapping:
+        return mapping[hook_name]
+    return None
+
+
+def is_enabled(hook_name: str) -> bool:
+    """Return True if hook is enabled (default), False only when explicitly disabled.
+
+    Accept both documented shorthand:
+        pre-bash-guard: false
+    and the original structured form:
+        pre-bash-guard:
+          enabled: false
+
+    Resolution order:
+        1. Explicit per-hook entry (bool shorthand or {enabled: ...} mapping)
+        2. profile-driven default from PROFILE_HOOK_DEFAULTS
+        3. Built-in default = True
+    """
+    data = _load_policy_data()
+    if data is None:
+        return True  # default enabled (Plan Task 2.9 missing-key default)
+
+    # 1. explicit per-hook override
     raw = data.get(hook_name)
-    if not isinstance(raw, dict):
-        # Missing key OR non-dict shape -> default enabled.
-        return True
-    enabled = raw.get("enabled", True)
-    return bool(enabled)
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, dict):
+        enabled = raw.get("enabled", True)
+        return bool(enabled)
+    # raw is None or unsupported shape -> fall through to profile default.
+
+    # 2. profile-driven default
+    profile_default = _profile_default(data, hook_name)
+    if profile_default is not None:
+        return profile_default
+
+    # 3. built-in default
+    return True
 
 
 def get_rule_override(rule_name: str):

@@ -182,11 +182,10 @@ fi
 
 echo "## trail 세션 시작 컨텍스트"
 echo
-echo "> 자동 로드: index.md + 미해결 게이트 요약 (lean mode — bulk trail off)"
-echo "> ⚠️ 이 컨텍스트는 비권위 캐시. release/git/branch/tag/publish 상태는"
-echo ">    답변 전에 반드시 \`git status\` / \`git log\` / \`git tag\` /"
-echo ">    \`git ls-remote\` 로 재검증한다. trail/inbox/daily/weekly 는 자동"
-echo ">    주입되지 않으며 필요 시 명시 read 로 가져온다."
+echo "> lean mode — index.md + 미해결 게이트 요약만 주입 (비권위 캐시; bulk trail off)."
+echo "> release/branch/tag/publish 류 volatile claim 은 답변 전 \`git status\` / \`git log\` / \`git tag\` / \`git ls-remote\` 로 재검증."
+echo "> 단순 질문은 answer-only 모드 — DoD/routing/review ceremony 생략 (.claude/rules/answer-only-mode.md)."
+echo "> 추가 trail 파일은 명시 Read 로 가져온다 (inbox/daily/weekly 자동 주입 없음)."
 echo
 
 # 0. B2 pending spec review 요약 (있을 때만)
@@ -291,11 +290,44 @@ emit_file_block "trail/index.md"
 # Skill/MCP 인벤토리 스캔 + 가이드 출력 (D)
 # BEGIN D skill-mcp
 SKILL_GUIDE="$PROJECT_DIR/.claude/cache/skill-mcp-guide.md"
+SKILL_INVENTORY="$PROJECT_DIR/.claude/cache/skill-mcp-inventory.json"
 SKILL_REGEN_STAMP="$PROJECT_DIR/.claude/cache/.skill-mcp-regen-pending"
-SKILL_GUIDE_MAX_BYTES=6144  # 6KB cap, B1 65536 의 약 10%
+SKILL_GUIDE_MAX_BYTES=4096  # 4KB cap (Phase 3: 6KB → 4KB 축소, 단순 질문 ceremony drift 감소)
 
-if command -v python3 >/dev/null 2>&1 && [ -f "$PROJECT_DIR/scripts/rein-scan-skill-mcp.py" ]; then
-  # 스캐너 결과를 임시 파일에 저장 후 검증
+emit_skill_guide() {
+  if [ -f "$SKILL_GUIDE" ]; then
+    GUIDE_SIZE=$(portable_stat_size "$SKILL_GUIDE")
+    echo "### Skill/MCP 활용 가이드"
+    if [ "$GUIDE_SIZE" -gt "$SKILL_GUIDE_MAX_BYTES" ]; then
+      head -c "$SKILL_GUIDE_MAX_BYTES" "$SKILL_GUIDE"
+      echo
+      echo "> ⚠️ truncated: 가이드가 ${GUIDE_SIZE}B 로 ${SKILL_GUIDE_MAX_BYTES}B 초과. 전체는 .claude/cache/skill-mcp-guide.md."
+    else
+      cat "$SKILL_GUIDE"
+    fi
+    echo
+  fi
+}
+
+skill_scan_needed() {
+  [ -f "$SKILL_REGEN_STAMP" ] && return 0
+  [ ! -f "$SKILL_GUIDE" ] && return 0
+  [ ! -f "$SKILL_INVENTORY" ] && return 0
+  [ -f "$PROJECT_DIR/.claude/settings.json" ] && [ "$PROJECT_DIR/.claude/settings.json" -nt "$SKILL_GUIDE" ] && return 0
+  [ -f "$PROJECT_DIR/.claude/mcp.json" ] && [ "$PROJECT_DIR/.claude/mcp.json" -nt "$SKILL_GUIDE" ] && return 0
+  [ -n "${HOME:-}" ] && [ -f "$HOME/.claude.json" ] && [ "$HOME/.claude.json" -nt "$SKILL_GUIDE" ] && return 0
+  if [ -d "$PROJECT_DIR/.claude/skills" ]; then
+    if find "$PROJECT_DIR/.claude/skills" -name 'SKILL.md' -newer "$SKILL_GUIDE" -print -quit 2>/dev/null | grep -q .; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+NEEDS_REGEN="no"
+if command -v python3 >/dev/null 2>&1 && [ -f "$PROJECT_DIR/scripts/rein-scan-skill-mcp.py" ] && skill_scan_needed; then
+  # 스캐너 결과를 임시 파일에 저장 후 검증. 평상시 세션 시작에서는 캐시된 guide
+  # 만 emit 하여 skill/MCP inventory scan 비용을 피한다.
   SCAN_TMP=$(mktemp)
   if python3 "$PROJECT_DIR/scripts/rein-scan-skill-mcp.py" \
        --project-dir "$PROJECT_DIR" --scan > "$SCAN_TMP" 2>/dev/null \
@@ -306,19 +338,6 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$PROJECT_DIR/scripts/rein-scan-sk
   fi
   rm -f "$SCAN_TMP"
 
-  if [ -f "$SKILL_GUIDE" ]; then
-    GUIDE_SIZE=$(portable_stat_size "$SKILL_GUIDE")
-    echo "### Skill/MCP 활용 가이드"
-    if [ "$GUIDE_SIZE" -gt "$SKILL_GUIDE_MAX_BYTES" ]; then
-      head -c "$SKILL_GUIDE_MAX_BYTES" "$SKILL_GUIDE"
-      echo
-      echo "> ⚠️ 가이드가 ${GUIDE_SIZE}B (${SKILL_GUIDE_MAX_BYTES}B 초과) — truncated"
-    else
-      cat "$SKILL_GUIDE"
-    fi
-    echo
-  fi
-
   case "$NEEDS_REGEN" in
     yes)
       mkdir -p "$(dirname "$SKILL_REGEN_STAMP")"
@@ -328,10 +347,6 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$PROJECT_DIR/scripts/rein-scan-sk
         if ( cd "$PROJECT_DIR" && python3 scripts/rein-generate-skill-mcp-guide.py >/dev/null 2>&1 ); then
           echo "### 🔄 skill/MCP 가이드 자동 재생성 완료"
           echo
-          if [ -f "$SKILL_GUIDE" ]; then
-            cat "$SKILL_GUIDE"
-            echo
-          fi
         else
           echo "### ⚠️ skill/MCP 가이드 자동 재생성 실패 (stamp 유지)"
           echo "수동 실행: python3 scripts/rein-generate-skill-mcp-guide.py"
@@ -353,6 +368,8 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$PROJECT_DIR/scripts/rein-scan-sk
       ;;
   esac
 fi
+
+emit_skill_guide
 # END D skill-mcp
 
 exit 0

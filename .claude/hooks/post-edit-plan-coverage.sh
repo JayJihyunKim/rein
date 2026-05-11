@@ -6,7 +6,8 @@
 set -u
 
 # --- Policy toggle (plugin mode only) ---
-# .rein/policy/hooks.yaml can disable a hook via { <hook-name>: { enabled: false } }.
+# .rein/policy/hooks.yaml can disable a hook via `<hook-name>: false`
+# or `{ <hook-name>: { enabled: false } }`.
 # Plugin mode: ${CLAUDE_PLUGIN_ROOT} is set, loader is invoked.
 # Scaffold mode: env unset, check is skipped (preserves pre-policy behavior).
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" ]; then
@@ -18,6 +19,8 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./lib/project-dir.sh
 . "$SCRIPT_DIR/lib/project-dir.sh"
+# shellcheck source=./lib/hook-input-cache.sh
+. "$SCRIPT_DIR/lib/hook-input-cache.sh"
 PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 DOD_DIR="$PROJECT_DIR/trail/dod"
 MARKER="$DOD_DIR/.coverage-mismatch"
@@ -37,34 +40,45 @@ fi
 
 [ -f "$VALIDATOR" ] || exit 0  # validator 없으면 no-op
 
-# Post-hook: Python 미해결 시 조용히 skip (세션 차단 금지).
-resolve_python 2>/dev/null
-rc=$?
-if [ "$rc" -ne 0 ]; then
-  exit 0
-fi
+hook_input_load   # 캐시 활성 시 INPUT/FILE_PATHS 채워짐.
 
-INPUT=$(cat)
+if [ "${REIN_HOOK_INPUT_CACHE:-0}" != "1" ]; then
+  # Post-hook: Python 미해결 시 조용히 skip (세션 차단 금지).
+  resolve_python 2>/dev/null
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    exit 0
+  fi
 
-# Claude Code hook payload 의 여러 필드에서 편집 대상 경로를 수집한다.
-# 수집 순서(원본 보존): tool_input.file_path → tool_input.edits[*].file_path
-#                   → tool_result.edits[*].file_path → tool_result.file_path(fallback only).
-# 빈 값/중복은 awk 단계에서 제거 (원본의 `if fp and fp not in paths` 의미 유지).
-FILE_PATHS=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
-  --field tool_input.file_path \
-  --array-of tool_input.edits --subfield file_path \
-  --array-of tool_result.edits --subfield file_path \
-  --default '' 2>/dev/null \
-  | awk 'NF && !seen[$0]++'
-)
-
-# fallback: tool_result.file_path 는 1~3 에서 경로를 찾지 못했을 때만 사용 (Codex final review A4).
-if [ -z "$FILE_PATHS" ]; then
+  # Claude Code hook payload 의 여러 필드에서 편집 대상 경로를 수집한다.
+  # 수집 순서(원본 보존): tool_input.file_path → tool_input.edits[*].file_path
+  #                   → tool_result.edits[*].file_path → tool_result.file_path(fallback only).
+  # 빈 값/중복은 awk 단계에서 제거 (원본의 `if fp and fp not in paths` 의미 유지).
   FILE_PATHS=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
-    --field tool_result.file_path --default '' 2>/dev/null | awk 'NF && !seen[$0]++')
+    --field tool_input.file_path \
+    --array-of tool_input.edits --subfield file_path \
+    --array-of tool_result.edits --subfield file_path \
+    --default '' 2>/dev/null \
+    | awk 'NF && !seen[$0]++'
+  )
+
+  # fallback: tool_result.file_path 는 1~3 에서 경로를 찾지 못했을 때만 사용 (Codex final review A4).
+  if [ -z "$FILE_PATHS" ]; then
+    FILE_PATHS=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
+      --field tool_result.file_path --default '' 2>/dev/null | awk 'NF && !seen[$0]++')
+  fi
 fi
 
 [ -z "$FILE_PATHS" ] && exit 0
+
+# validator 호출에 python runner 가 필요. 캐시 경로에서 resolve 보장.
+if [ -z "${PYTHON_RUNNER[0]:-}" ]; then
+  resolve_python 2>/dev/null
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    exit 0
+  fi
+fi
 
 mkdir -p "$DOD_DIR"
 

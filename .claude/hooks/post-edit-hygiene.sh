@@ -7,19 +7,25 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./lib/python-runner.sh
 . "$SCRIPT_DIR/lib/python-runner.sh"
+# shellcheck source=./lib/hook-input-cache.sh
+. "$SCRIPT_DIR/lib/hook-input-cache.sh"
 
-INPUT=$(cat)
+hook_input_load   # 캐시 활성 시 stdin 안 읽음. 없으면 INPUT 만 채워짐.
 
-# Python resolver (soft fail, silent — hygiene 은 단순 console.log/시크릿 grep 만
-# 수행하는 사후 피드백이므로 resolver 실패 시 조용히 skip). marker 를 생성하지
-# 않는다 — 다음 편집을 BLOCK 할 이유가 없다.
-resolve_python 2>/dev/null
-rc=$?
-if [ "$rc" -ne 0 ]; then
-  exit 0
+if [ "${REIN_HOOK_INPUT_CACHE:-0}" = "1" ]; then
+  : # FILE_PATH 가 캐시에서 채워짐 — Python resolver 호출 자체를 건너뜀.
+else
+  # Python resolver (soft fail, silent — hygiene 은 단순 console.log/시크릿 grep 만
+  # 수행하는 사후 피드백이므로 resolver 실패 시 조용히 skip). marker 를 생성하지
+  # 않는다 — 다음 편집을 BLOCK 할 이유가 없다.
+  resolve_python 2>/dev/null
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    exit 0
+  fi
+
+  FILE_PATH=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" --field tool_input.file_path --default '' 2>/dev/null)
 fi
-
-FILE_PATH=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" --field tool_input.file_path --default '' 2>/dev/null)
 
 if [ -z "$FILE_PATH" ] || [ ! -f "$FILE_PATH" ]; then
   exit 0

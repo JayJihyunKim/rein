@@ -47,7 +47,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Read|Edit|Write|MultiEdit",
+        "matcher": "Edit|Write|MultiEdit",
         "hooks": [
           {
             "type": "command",
@@ -80,27 +80,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/post-edit-hygiene.sh"
-          },
-          {
-            "type": "command",
-            "command": ".claude/hooks/post-edit-review-gate.sh"
-          },
-          {
-            "type": "command",
-            "command": ".claude/hooks/post-edit-index-sync-inbox.sh"
-          },
-          {
-            "type": "command",
-            "command": ".claude/hooks/post-write-spec-review-gate.sh"
-          },
-          {
-            "type": "command",
-            "command": ".claude/hooks/post-edit-plan-coverage.sh"
-          },
-          {
-            "type": "command",
-            "command": ".claude/hooks/post-write-dod-routing-check.sh"
+            "command": ".claude/hooks/post-edit-dispatcher.sh"
           }
         ]
       }
@@ -126,5 +106,8 @@
       }
     ]
   },
-  "additionalDirectories": []
+  "additionalDirectories": [],
+  "plugins": {
+    "rein": "^1.0.0"
+  }
 }

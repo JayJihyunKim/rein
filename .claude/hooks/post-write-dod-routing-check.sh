@@ -11,6 +11,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/python-runner.sh"
 # shellcheck source=./lib/project-dir.sh
 . "$SCRIPT_DIR/lib/project-dir.sh"
+# shellcheck source=./lib/hook-input-cache.sh
+. "$SCRIPT_DIR/lib/hook-input-cache.sh"
 
 # PROJECT_DIR resolution: see .claude/hooks/lib/project-dir.sh — 7-tier order
 # (REIN_PROJECT_DIR_OVERRIDE / REIN_PROJECT_DIR / CLAUDE_PLUGIN_ROOT-aware
@@ -18,24 +20,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 DOD_DIR="$PROJECT_DIR/trail/dod"
 
-INPUT=$(cat)
+hook_input_load   # 캐시 활성 시 INPUT/FILE_PATH 채워짐.
 
-# Python resolver (soft fail-closed for post-hook):
-# resolver 실패 시에도 routing-gate 의 신뢰성을 지키기 위해 보수적 marker 를
-# 생성한다. 다음 pre-edit-dod-gate 가 이 marker 를 감지해 routing-missing
-# BLOCK 을 걸면서 Python 진단을 함께 노출한다. post-hook 자체는 exit 0
-# (silent) — 사용자의 현재 write 를 되돌리지 않는다.
-resolve_python 2>/dev/null
-rc=$?
-if [ "$rc" -ne 0 ]; then
-  mkdir -p "$DOD_DIR" 2>/dev/null
-  : > "$DOD_DIR/.routing-missing-unknown-python-runtime" 2>/dev/null
-  exit 0
+if [ "${REIN_HOOK_INPUT_CACHE:-0}" != "1" ]; then
+  # Python resolver (soft fail-closed for post-hook):
+  # resolver 실패 시에도 routing-gate 의 신뢰성을 지키기 위해 보수적 marker 를
+  # 생성한다. 다음 pre-edit-dod-gate 가 이 marker 를 감지해 routing-missing
+  # BLOCK 을 걸면서 Python 진단을 함께 노출한다. post-hook 자체는 exit 0
+  # (silent) — 사용자의 현재 write 를 되돌리지 않는다.
+  resolve_python 2>/dev/null
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    mkdir -p "$DOD_DIR" 2>/dev/null
+    : > "$DOD_DIR/.routing-missing-unknown-python-runtime" 2>/dev/null
+    exit 0
+  fi
+  # resolver 성공 경로에 도달하면 이전 write 시 남긴 python-runtime fallback marker 를 자동 해소.
+  rm -f "$DOD_DIR/.routing-missing-unknown-python-runtime" 2>/dev/null || true
+
+  FILE_PATH=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" --field tool_input.file_path --default '' 2>/dev/null)
+else
+  # 캐시 경로: dispatcher 가 resolver 성공 시에만 캐시를 export 하므로 도착한
+  # 시점에 python-runtime fallback marker 를 안전하게 해소할 수 있다.
+  rm -f "$DOD_DIR/.routing-missing-unknown-python-runtime" 2>/dev/null || true
 fi
-# resolver 성공 경로에 도달하면 이전 write 시 남긴 python-runtime fallback marker 를 자동 해소.
-rm -f "$DOD_DIR/.routing-missing-unknown-python-runtime" 2>/dev/null || true
-
-FILE_PATH=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" --field tool_input.file_path --default '' 2>/dev/null)
 [ -z "$FILE_PATH" ] && exit 0
 
 case "$FILE_PATH" in

@@ -13,27 +13,30 @@
 # Exit code: 항상 0. 이 훅은 절대 도구 호출을 차단하지 않는다.
 #            내부 오류가 발생해도 조용히 통과시킨다.
 
-# 안전하게 stdin 을 읽는다. 실패해도 계속 진행.
-INPUT=$(cat 2>/dev/null || true)
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || exit 0
 # shellcheck source=./lib/python-runner.sh
 . "$SCRIPT_DIR/lib/python-runner.sh"
 # shellcheck source=./lib/project-dir.sh
 . "$SCRIPT_DIR/lib/project-dir.sh"
+# shellcheck source=./lib/hook-input-cache.sh
+. "$SCRIPT_DIR/lib/hook-input-cache.sh"
 
 PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 [ -n "$PROJECT_DIR" ] || exit 0
 
-# Python resolver — post-hook silent on failure.
-resolve_python 2>/dev/null
-rc=$?
-if [ "$rc" -ne 0 ]; then
-  exit 0
-fi
+hook_input_load   # 캐시 활성 시 INPUT/FILE_PATH 채워짐. 없으면 INPUT 만.
 
-FILE_PATH=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
-  --field tool_input.file_path --strip-newlines --default '' 2>/dev/null || true)
+if [ "${REIN_HOOK_INPUT_CACHE:-0}" != "1" ]; then
+  # Python resolver — post-hook silent on failure.
+  resolve_python 2>/dev/null
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    exit 0
+  fi
+
+  FILE_PATH=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" \
+    --field tool_input.file_path --strip-newlines --default '' 2>/dev/null || true)
+fi
 
 # file_path 추출 실패 또는 trail/index.md 가 아니면 즉시 종료.
 if [ -z "$FILE_PATH" ]; then

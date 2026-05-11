@@ -5,7 +5,8 @@
 # 주의: exit 1은 non-blocking error (통과됨). 차단은 반드시 exit 2
 
 # --- Policy toggle (plugin mode only) ---
-# .rein/policy/hooks.yaml can disable a hook via { <hook-name>: { enabled: false } }.
+# .rein/policy/hooks.yaml can disable a hook via `<hook-name>: false`
+# or `{ <hook-name>: { enabled: false } }`.
 # Plugin mode: ${CLAUDE_PLUGIN_ROOT} is set, loader is invoked.
 # Scaffold mode: env unset, check is skipped (preserves pre-policy behavior).
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" ]; then

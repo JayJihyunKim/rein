@@ -2,6 +2,20 @@
 
 > **Versioning policy**: 버전 bump 는 `.claude/rules/versioning.md` 의 Rule A/B/C 를 따른다.
 
+## v1.0.2 — 2026-05-11 (Claude performance hooks)
+
+세션 시작/편집 hook 의 응답성을 개선하는 patch.
+
+- **SessionStart 헤더 압축 + skill/MCP scan cache** — `trail/index.md` + skill 인벤토리 주입 시 cache 활용으로 lean SessionStart 응답속도 단축.
+- **post-edit dispatcher 통합** — 7개 post-edit hook 을 단일 `post-edit-dispatcher.sh` 로 묶어 sub-hook fan-out 비용 절감 (Read tool 트리거에서는 post-edit hook 자체 skip).
+- **policy profile (`lean` / `standard` / `strict`)** — `.rein/policy/hooks.yaml` 의 `profile:` 키로 hook 활성 범위 토글. lean = 단순 탐색/문서 작업용 (plan-coverage/spec-review-gate/dod-routing-check off).
+- **trail-rotate early skip** — 하루 1회 실행 marker 가 fresh 하면 즉시 종료.
+- **`rein-policy-loader.py` 신설** — profile + per-hook 토글 resolution 의 SSOT.
+
+Internal: `scripts/rein-manifest-v2.py` + `scripts/rein-path-match.py` 제거 (v1.0.1 의 scaffold drop 으로 caller 0). `scripts/rein-bootstrap-project.py` 신설 (plugin-mode bootstrap 진입점).
+
+[v1.0.1 release notes](#v101--2026-05-11-scaffold-drop-completion).
+
 ## v1.0.1 — 2026-05-11 (Scaffold drop completion)
 
 v1.0.0 launch 의 declarative scaffold drop 을 코드 차원에서 완결합니다.

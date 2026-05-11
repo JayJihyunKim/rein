@@ -194,6 +194,7 @@ python3 scripts/rein-generate-skill-mcp-guide.py
 - sonnet 폴백 시 stamp에 `fallback_reason` 기록 필수
 - 리뷰 없이 결과를 반환하거나 테스트/커밋 시도 시 hook이 차단함 (exit 2)
 - 리뷰 후 추가 코드 수정 시 `.review-pending` 재생성 → 재리뷰 필수
+- **`rm trail/dod/.review-pending && git commit` 류 marker 수동 삭제 + 즉시 commit 우회 금지** — review stamp 는 코드 변경분에 대한 검증 증거이므로, 추가 변경분에 대한 재리뷰 없이 marker 만 제거해 게이트를 우회하면 검증되지 않은 코드가 main 으로 흘러간다. marker 가 재생성됐다면 반드시 `/codex-review` 재실행 후 stamp 갱신.
 
 ### 리뷰 에스컬레이션 규칙
 - **High 이슈** → 수정 후 codex 재리뷰 (필수)
