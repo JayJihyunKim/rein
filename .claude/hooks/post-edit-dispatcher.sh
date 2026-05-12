@@ -1,7 +1,7 @@
 #!/bin/bash
 # Hook: PostToolUse(Edit|Write|MultiEdit) — dispatcher
 #
-# 기존 6개 post-hook 을 단일 entry 로 묶어 다음 비용을 1회만 지불한다:
+# 기존 7개 post-hook 을 단일 entry 로 묶어 다음 비용을 1회만 지불한다:
 #   1) stdin JSON 흡수
 #   2) Python resolver 부트스트랩
 #   3) extract-hook-json.py 호출 (file_path 추출)
@@ -12,9 +12,17 @@
 #   REIN_HOOK_INPUT_FILE=<temp>            — 원본 JSON (env 가 아니라 파일 — 거대 payload 안전)
 #   REIN_HOOK_FILE_PATH, REIN_HOOK_FILE_PATHS — 추출된 경로
 #
-# 실패 정책:
-#   - 각 sub-hook 의 silent / fail-closed (exit 2) 정책을 그대로 보존.
-#   - sub-hook 이 exit 2 를 내면 dispatcher 도 exit 2 로 propagate.
+# 출력 정책 (Task 2.6 aggregator refactor):
+#   - sub-hook 들이 emit 한 JSON envelope 의 additionalContext 만 추출 → 단일
+#     PostToolUse envelope 로 합쳐 dispatcher stdout 에 1회 출력. separator
+#     는 `\n\n---\n\n` (마지막 entry 뒤에는 separator 없음).
+#   - sub-hook stderr 는 dispatcher stderr 로 그대로 통과 (capture/silence 금지).
+#   - sub-hook 이 invalid JSON 을 stdout 으로 출력하면 stderr 에 진단을 남기고
+#     해당 sub-hook 의 기여분은 drop (다른 sub-hook envelope 은 정상 처리).
+#
+# Exit 정책 (단순 numeric max 사용 금지):
+#   - 어떤 sub-hook 이라도 exit 2 면 dispatcher exit 2 (hard block 의미 보존).
+#   - 그 외 nonzero (127 등) 는 stderr 진단만 남기고 dispatcher exit 0.
 #   - resolver 실패 또는 extractor 실패 시 캐시를 export 하지 않아 sub-hook 들이
 #     각자 fallback 경로를 타고 본래의 fail-closed/marker 동작을 유지.
 
@@ -25,6 +33,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/python-runner.sh"
 # shellcheck source=./lib/hook-input-cache.sh
 . "$SCRIPT_DIR/lib/hook-input-cache.sh"
+# shellcheck source=./lib/aggregator.sh
+. "$SCRIPT_DIR/lib/aggregator.sh"
 
 INPUT=$(cat 2>/dev/null || true)
 
@@ -113,14 +123,20 @@ fi
 
 # Sub-hook 실행 — 순서는 기존 settings.json 등록 순서를 그대로 따름.
 # 각 sub-hook 이름은 정책 loader 가 인식하는 키와 동일하다.
-DISPATCH_RC=0
+#
+# Aggregator 정책 (Task 2.6):
+#   - 각 sub-hook 의 stdout 을 capture → aggregator 가 envelope concat
+#   - stderr 는 capture 하지 않음 → dispatcher stderr 로 그대로 통과
+#   - exit 2 가 하나라도 있으면 dispatcher exit 2 (OR-based 누적, max 아님)
+aggregator_init
 for sub in \
   post-edit-hygiene.sh \
   post-edit-review-gate.sh \
   post-edit-index-sync-inbox.sh \
   post-write-spec-review-gate.sh \
   post-edit-plan-coverage.sh \
-  post-write-dod-routing-check.sh
+  post-write-dod-routing-check.sh \
+  post-write-design-plan-coverage-rule.sh
 do
   SUB_PATH="$SCRIPT_DIR/$sub"
   [ -x "$SUB_PATH" ] || continue
@@ -131,13 +147,12 @@ do
   # sub-hook 이 stdin 을 다시 읽으려 할 때 대비해 INPUT 을 흘려준다. 캐시가
   # 활성 상태면 sub-hook 은 stdin 을 읽지 않으므로 SIGPIPE 발생 가능 — printf
   # stderr 만 silence 한다 (sub-hook 결과는 정상 capture).
-  printf '%s' "$INPUT" 2>/dev/null | "$SUB_PATH"
+  #
+  # stderr 는 redirect 하지 않음 (>&2 path 그대로 통과). stdout 만 capture.
+  sub_stdout=$(printf '%s' "$INPUT" 2>/dev/null | "$SUB_PATH")
   rc=$?
-  # exit 2 (fail-closed) 는 dispatcher 도 propagate. 그 외 비-0 은 무시
-  # (sub-hook 들의 silent best-effort 정책 보존).
-  if [ "$rc" -eq 2 ]; then
-    DISPATCH_RC=2
-  fi
+  aggregator_add "$sub_stdout" "$rc"
 done
 
-exit "$DISPATCH_RC"
+aggregator_emit
+exit "$(aggregator_exit_code)"

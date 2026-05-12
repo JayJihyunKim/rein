@@ -91,6 +91,16 @@ if [ ! -f "$UPDATE_PY" ]; then
   exit 2
 fi
 
+# --- Pre-publish validation (Task 3.3) -------------------------------------
+#
+# Validate plugin rules + rule-inject hooks BEFORE any side effects (tarball
+# build, manifest update, Anthropic POST). Fail-fast so a malformed rule
+# body or missing hook never reaches the marketplace.
+python3 "$SCRIPT_DIR/rein-validate-plugin-rules.py" || {
+  echo "publish aborted: plugin rule validation failed" >&2
+  exit 1
+}
+
 # --- Fail-fast on Anthropic env vars (BEFORE any side effects) -------------
 #
 # Round 5 fix Finding 6: NO default URL is hardcoded. CI must inject the

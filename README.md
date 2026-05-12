@@ -263,7 +263,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.0.0** (2026-04-30) — plugin-only OSS launch
+Latest release: **v1.1.0** (2026-05-12) — plugin prompt-level operating model (action mandate + overflow handoff + 3 new hook lifecycle events)
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

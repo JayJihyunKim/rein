@@ -162,9 +162,10 @@ FILE_PATH="$FILE_PATH_NORM"
 
 # --- 경로 기반 면제 (runtime state + operational data + git infra only) ---
 # M1 (2026-04-22 retro-review-sweep): 기존 blanket `*/.claude/*` exemption 제거.
-# 배경: .claude/rules/*, .claude/skills/**, .claude/agents/*, .claude/workflows/*,
-#   .claude/CLAUDE.md, .claude/orchestrator.md, AGENTS.md 는 branch-strategy.md
-#   기준 main 포함 (사용자 repo 로 복사되는 source). DoD 없이 편집되면 안 됨.
+# 배경: 사용자 repo 의 .claude/rules/*, .claude/skills/**, .claude/agents/*,
+#   .claude/workflows/*, AGENTS.md 는 plugin 이 제공하는 운영 surface — DoD 없이
+#   편집되면 안 됨. (rein-dev 메인테이너 환경 hint: .claude/CLAUDE.md /
+#   .claude/orchestrator.md 도 동일 카테고리이나 일반 사용자 repo 에는 없음.)
 # 면제 대상은 runtime state / 운영 데이터 / git 인프라 파일만.
 case "$FILE_PATH" in
   # .gitignore 는 **어느 디렉토리에 있든** 항상 source (main-포함, tracking 정책
@@ -201,6 +202,8 @@ case "$FILE_PATH" in
   */.claude/rules/*|*/.claude/skills/*|*/.claude/agents/*|*/.claude/workflows/*)
     IS_SOURCE=true
     ;;
+  # rein-dev 메인테이너 환경에서만 존재하는 paths. 일반 사용자 repo 에는
+  # 이들 파일이 없으므로 자연 무동작 (case 가 매치되지 않음). hint 보존 목적.
   */.claude/CLAUDE.md|*/.claude/orchestrator.md|*/.claude/settings.json)
     IS_SOURCE=true
     ;;
@@ -376,7 +379,8 @@ if [ "${#MISSING_MARKERS[@]}" -gt 0 ]; then
     for m in "${MISSING_MARKERS[@]}"; do
       echo "  - $(basename -- "$m" | sed 's/^\.routing-missing-//')" >&2
     done
-    echo "  orchestrator.md '스마트 라우팅 절차' 를 따라 섹션을 추가하세요." >&2
+    echo "  DoD 에 '## 라우팅 추천' 섹션을 추가하세요. 형식: agent / skills / mcps / rationale / approved_by_user." >&2
+    echo "  PostToolUse hook 이 DoD write 직후 routing 절차 본문을 자동 inject 합니다." >&2
     echo "  긴급 바이패스: echo 'reason=<사유>' > $ROUTING_BYPASS" >&2
     log_block "routing section missing" "$FILE_PATH"
     exit 2
@@ -444,7 +448,7 @@ if [ -n "$ROUTING_VIOLATIONS" ]; then
     rm -f "$ROUTING_BYPASS"
   else
     printf "BLOCKED: active DoD 의 '## 라우팅 추천' 섹션 위반:%b\n" "$ROUTING_VIOLATIONS" >&2
-    echo "  orchestrator.md '스마트 라우팅 절차' 를 따라 추천 조합 + approved_by_user: true 를 기록하세요." >&2
+    echo "  '## 라우팅 추천' 섹션에 approved_by_user: true 를 기록하세요 (사용자 승인 후)." >&2
     echo "  긴급 바이패스: echo 'reason=<사유>' > $ROUTING_BYPASS" >&2
     log_block "routing section 위반" "$FILE_PATH"
     exit 2

@@ -12,6 +12,10 @@ paths:
 
 > ⚠️ 보안 민감 파일 작업 시 자동으로 로드됩니다.
 
+## 행동 강령
+
+`.claude/security/profile.yaml` 의 보안 레벨 기준으로 security-reviewer 에이전트가 코드 편집 후 자동 호출된다. 차단 패턴: hard-coded credentials, command injection, SQL injection, XSS, 안전하지 않은 deserialize. user input boundary 에서 항상 validation·escape. secret 은 환경변수 또는 secret manager 만 — 코드 hardcode 금지. Codex 리뷰 (.codex-reviewed stamp) 통과 후 security 리뷰 실행, 두 stamp 모두 있어야 test/commit 통과 (pre-bash-guard 차단).
+
 ## 절대 금지
 - `.env` 파일 Git 커밋 금지
 - API 키, 비밀번호, 토큰 소스 코드 하드코딩 금지

@@ -74,7 +74,8 @@ else
   mkdir -p "$DOD_DIR"
   echo "created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$MARKER"
   echo "WARNING: $FNAME 에 '## 라우팅 추천' 섹션이 없습니다. 다음 소스 편집이 차단됩니다." >&2
-  echo "  orchestrator.md 의 '스마트 라우팅 절차' 를 따라 섹션을 추가하세요." >&2
+  echo "  DoD 에 '## 라우팅 추천' 섹션을 추가하세요." >&2
+  echo "  Phase 2 의 PostToolUse design-plan-coverage hook 이 spec/plan/DoD write 시 routing 본문을 자동 inject 합니다." >&2
 fi
 
 # Auto-write `.active-dod` when routing approval is final.

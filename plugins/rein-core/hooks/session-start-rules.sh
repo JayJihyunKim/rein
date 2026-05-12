@@ -2,7 +2,7 @@
 # Plugin SessionStart hook — emit prompt-only rules to additionalContext.
 #
 # Reads 3 rule body files from
-#   ${CLAUDE_PLUGIN_ROOT}/skills/rules-prompt/{code-style,security,testing}.md
+#   ${CLAUDE_PLUGIN_ROOT}/rules/{code-style,security,testing}.md
 # concatenates them (separated by `\n\n`), JSON-encodes the result, and prints
 # a single SessionStart envelope to stdout:
 #
@@ -25,13 +25,13 @@
 set -euo pipefail
 
 # Graceful degrade: if CLAUDE_PLUGIN_ROOT is unset (not in plugin runtime)
-# OR if the rules-prompt dir doesn't exist (partial install / layout
-# regression), exit 0 silently — Claude Code treats empty stdout as a
-# no-op SessionStart so the rest of session bootstrap still proceeds.
+# OR if the rules dir doesn't exist (partial install / layout regression),
+# exit 0 silently — Claude Code treats empty stdout as a no-op SessionStart
+# so the rest of session bootstrap still proceeds.
 if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   exit 0
 fi
-RULES_DIR="${CLAUDE_PLUGIN_ROOT}/skills/rules-prompt"
+RULES_DIR="${CLAUDE_PLUGIN_ROOT}/rules"
 LOADER="${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py"
 if [ ! -d "$RULES_DIR" ]; then
   exit 0
