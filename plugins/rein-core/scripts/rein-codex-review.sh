@@ -36,12 +36,27 @@
 
 set -euo pipefail
 
-# ---- Locate project dir (git repo root if possible). ------------------
+# ---- Locate project dir + select-active-dod library. -----------------
+#
+# Layout probe: plugin tree has hooks/lib as sibling of scripts/. Legacy
+# scaffold tree has .claude/hooks/lib at the project root. We pick the
+# plugin-bundled lib whenever it exists so the wrapper is self-contained
+# (user repo no longer needs scaffold files after v1.0.1 declarative drop).
+#
+# PROJECT_DIR is the user repo (trail/dod, .rein/, .claude/cache target).
+# - REIN_PROJECT_DIR_OVERRIDE: test sandbox override.
+# - Plugin mode: CLAUDE_PROJECT_DIR (set by Claude Code) → CWD fallback.
+# - Scaffold mode (legacy): script's parent IS the project root.
 
 _script_dir=$(cd "$(dirname "$0")" && pwd)
-# REIN_PROJECT_DIR_OVERRIDE: test sandbox override (격리 환경에서 wrapper
-# function 단독 호출 시 사용). 기본은 script 위치 기반 (실제 운영 동작 보존).
-PROJECT_DIR="${REIN_PROJECT_DIR_OVERRIDE:-$(cd "$_script_dir/.." && pwd)}"
+
+if [ -f "$_script_dir/../hooks/lib/select-active-dod.sh" ]; then
+  _select_active_dod_lib=$(cd "$_script_dir/.." && pwd)/hooks/lib/select-active-dod.sh
+  PROJECT_DIR="${REIN_PROJECT_DIR_OVERRIDE:-${CLAUDE_PROJECT_DIR:-$PWD}}"
+else
+  PROJECT_DIR="${REIN_PROJECT_DIR_OVERRIDE:-$(cd "$_script_dir/.." && pwd)}"
+  _select_active_dod_lib="$PROJECT_DIR/.claude/hooks/lib/select-active-dod.sh"
+fi
 
 # If invoked from outside PROJECT_DIR, still operate on PROJECT_DIR so
 # select_active_dod reads the correct trail/dod.
@@ -50,8 +65,8 @@ cd "$PROJECT_DIR"
 # ---- Inject the shared DoD selector (Phase 4.1 library). --------------
 
 # Fail-closed if library missing (same pattern as pre-edit-dod-gate.sh).
-if ! . "$PROJECT_DIR/.claude/hooks/lib/select-active-dod.sh" 2>/dev/null; then
-  echo "ERROR: [codex-review] missing .claude/hooks/lib/select-active-dod.sh" >&2
+if ! . "$_select_active_dod_lib" 2>/dev/null; then
+  echo "ERROR: [codex-review] missing select-active-dod library at $_select_active_dod_lib" >&2
   exit 2
 fi
 

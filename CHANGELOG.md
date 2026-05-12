@@ -2,6 +2,17 @@
 
 > **Versioning policy**: 버전 bump 는 `.claude/rules/versioning.md` 의 Rule A/B/C 를 따른다.
 
+## v1.1.2 — 2026-05-12 (Plugin self-containment hotfixes)
+
+v1.1.0 plugin-first 전환 이후 사용자 repo 에서 scaffold 잔재를 정리한 환경에서 발견된 plugin 자체 결함 2건 hotfix. `rein update` 후 사용자 세션에서 다음이 바뀝니다.
+
+- **`/codex-review` 가 scaffold 없는 사용자 프로젝트에서도 동작** — wrapper (`rein-codex-review.sh`) 가 더 이상 사용자 repo 의 `.claude/hooks/lib/select-active-dod.sh` 를 source 하지 않습니다. 자기 plugin tree 의 sibling 번들 lib 를 사용 (plugin self-containment). scaffold 를 지운 plugin-first 사용자도 `/codex-review` 정상 호출.
+- **monorepo subdirectory 에서 Bash 차단 false-positive 해소** — PreToolUse:Bash hook 의 `bootstrap-check.sh` 가 Claude Code envelope 의 `cwd` (Bash 도구의 셸 CWD) 를 그대로 project_dir 로 채택하던 동작 변경. monorepo 에서 `cd apps/web` 한 뒤 모든 Bash 호출이 차단되던 증상 해결. 이제 `git -C <stdin.cwd> rev-parse --show-toplevel` 로 git root 까지 walk up 해서 부트스트랩 contract 와 정렬.
+- **nested .git 경계 존중** — sub-project 가 자체 `.git/` 가진 경우 walk-up 은 그 nested boundary 에서 멈춥니다 (outer monorepo root 로 escape 안 함).
+- **git env redirection 차단** — bootstrap-check 의 새 git 호출은 `GIT_DIR` / `GIT_WORK_TREE` / `GIT_COMMON_DIR` / `GIT_INDEX_FILE` 를 unset 한 상태로 실행. caller 환경의 git env 가 walk-up 결과를 다른 worktree 로 redirect 못 함. `GIT_CEILING_DIRECTORIES` 는 policy-sensitive 라 의도적으로 preserve.
+
+영향 없음: `/codex-review` 호출 인터페이스 변경 없음. 기존 scaffold 모드 사용자는 wrapper 가 자동으로 legacy `.claude/hooks/lib/` fallback 사용 (probe-based dual-layout resolver).
+
 ## v1.1.1 — 2026-05-12 (Plugin bootstrap gate hotfix)
 
 v1.1.0 의 silent bootstrap failure (`trail/` 미생성 + 사용자 surface 누락) 를 hard gate 로 수정. `rein update` 후 사용자 세션에서 다음이 바뀝니다.

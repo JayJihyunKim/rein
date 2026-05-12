@@ -17,9 +17,17 @@
 #   echo "$JSON" | bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bootstrap-check.sh"
 #
 # Project dir resolution priority:
-#   stdin.cwd → git rev-parse --show-toplevel → $PWD
+#   $1 (explicit override) > stdin.cwd-then-git-walkup > git from $PWD > $PWD
+#   - stdin.cwd is treated as a *hint*. We run `git -C <stdin.cwd> rev-parse
+#     --show-toplevel` to walk up to the git root. This keeps the runtime
+#     gate aligned with rein-bootstrap-project.py's "git root only" contract
+#     in monorepos where the shell CWD persists on a subdir (e.g. apps/web).
+#   - When stdin.cwd has no enclosing git repo, it is used verbatim (non-git
+#     project). When stdin.cwd is missing/invalid, fall back to git-from-$PWD
+#     then $PWD.
 #   (CLAUDE_PROJECT_DIR is NOT used — Claude Code spec does not guarantee it.)
-#   $1 (explicit override) trumps all of the above when supplied.
+#
+# Source labels (logged on stderr): override | git-from-stdin | stdin | git | pwd
 #
 # Exit codes:
 #   0  — trail/ exists; stdout empty
@@ -111,13 +119,43 @@ bootstrap_check() {
   local source=""
 
   # ---- Project dir resolution -------------------------------------------
+  #
+  # stdin.cwd 는 Claude Code 가 PreToolUse:Bash hook envelope 으로 넘기는
+  # 셸 CWD. monorepo 에서 사용자가 `cd apps/web` 한 뒤 모든 Bash 호출은
+  # envelope.cwd = apps/web 으로 들어온다. stdin.cwd 를 그대로 project-dir
+  # 로 채택하면 부트스트랩 contract (rein-bootstrap-project.py: git root
+  # only) 와 어긋난 위치에 trail/ 을 찾아 false-negative exit 10 이 난다.
+  #
+  # 따라서 stdin.cwd 가 있으면 그것을 hint 로 받아 `git -C $stdin_cwd
+  # rev-parse --show-toplevel` 로 walk up. git root 있으면 그것을 채택
+  # (source=git-from-stdin), 없으면 stdin.cwd 자체 (source=stdin, non-git
+  # project). 나머지 fallback (git from $PWD → $PWD) 은 stdin.cwd 부재 시
+  # 동작 (이전과 동일).
   if [ -n "$override" ]; then
     resolved="$override"
     source="override"
   else
     local stdin_cwd=""
     stdin_cwd="$(_bc_read_stdin_cwd)"
-    if [ -n "$stdin_cwd" ]; then
+    if [ -n "$stdin_cwd" ] && [ -d "$stdin_cwd" ]; then
+      local git_root=""
+      # Sanitize inherited git env vars so the walk-up is anchored strictly
+      # to stdin.cwd. GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE
+      # could redirect discovery to an unrelated worktree. GIT_CEILING_DIRECTORIES
+      # is deliberately preserved — it is policy-sensitive (caller may have set
+      # it intentionally to bound discovery).
+      git_root="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+        git -C "$stdin_cwd" rev-parse --show-toplevel 2>/dev/null)" || git_root=""
+      if [ -n "$git_root" ]; then
+        resolved="$git_root"
+        source="git-from-stdin"
+      else
+        resolved="$stdin_cwd"
+        source="stdin"
+      fi
+    elif [ -n "$stdin_cwd" ]; then
+      # stdin.cwd 가 존재하지 않는 디렉토리면 git walk-up 불가.
+      # Step 1 의 [ -d "$resolved_real" ] 가 resolution 실패로 처리.
       resolved="$stdin_cwd"
       source="stdin"
     else
