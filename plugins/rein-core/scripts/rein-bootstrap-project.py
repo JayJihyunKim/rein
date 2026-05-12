@@ -64,6 +64,35 @@ def is_plugin_storage(path: Path) -> bool:
     return normalized.endswith("/.claude/plugins") or "/.claude/plugins/" in normalized
 
 
+def _refuse_sensitive_or_unsafe(project_dir: Path) -> None:
+    """Mirror bootstrap-check.sh helper's safety net.
+
+    Reject sensitive paths (filesystem root, $HOME) and plugin cache paths so a
+    mis-resolved or copy-pasted --project-dir cannot pollute system locations.
+    Plugin storage prefix (~/.claude/plugins/...) remains covered by the existing
+    ``is_plugin_storage`` check; this helper extends coverage to (1) "/" and
+    (2) ``$HOME`` and (3) ``~/.claude/plugins/cache/...`` explicitly.
+    """
+    resolved = project_dir.resolve()
+
+    # (1) sensitive path: filesystem root
+    if str(resolved) == "/":
+        fail(f"refusing to bootstrap filesystem root: {resolved}")
+
+    # (2) sensitive path: $HOME
+    home = Path.home().resolve()
+    if resolved == home:
+        fail(f"refusing to bootstrap home directory: {resolved}")
+
+    # (3) plugin cache path: ~/.claude/plugins/cache/* prefix
+    plugin_cache = (home / ".claude" / "plugins" / "cache").resolve()
+    try:
+        resolved.relative_to(plugin_cache)
+        fail(f"refusing to bootstrap inside plugin cache: {resolved}")
+    except ValueError:
+        pass  # not under plugin cache — OK
+
+
 def git_root_for(path: Path) -> Path | None:
     try:
         result = subprocess.run(
@@ -88,23 +117,33 @@ def write_text_if_missing(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def bootstrap(project_dir: Path, scope: str, version: str) -> Path:
+def bootstrap(project_dir: Path, scope: str, version: str) -> tuple[Path, bool]:
     project_dir = project_dir.resolve()
+    _refuse_sensitive_or_unsafe(project_dir)
     if is_plugin_storage(project_dir):
         fail(f"refusing to bootstrap inside Claude plugin storage: {project_dir}")
 
     git_root = git_root_for(project_dir)
+    non_git = False
     if git_root is None:
-        fail(f"not a git repository: {project_dir}")
-    if git_root != project_dir:
-        fail(f"project-dir must be the git root: got {project_dir}, root is {git_root}")
+        # Task 2.3 (v1.1.1): non-git fallback — use project_dir itself as the
+        # bootstrap root. We never invoke `git init` or any mutating git
+        # command. trail/ + .rein/ are created in-place so the user can adopt
+        # Rein without first turning the directory into a git repo.
+        non_git = True
+        root = project_dir
+    else:
+        if git_root != project_dir:
+            fail(
+                f"project-dir must be the git root: got {project_dir}, root is {git_root}"
+            )
+        if is_plugin_storage(git_root):
+            fail(f"refusing to bootstrap plugin cache repository: {git_root}")
+        root = git_root
 
-    if is_plugin_storage(git_root):
-        fail(f"refusing to bootstrap plugin cache repository: {git_root}")
-
-    rein_dir = git_root / ".rein"
+    rein_dir = root / ".rein"
     policy_dir = rein_dir / "policy"
-    trail_dir = git_root / "trail"
+    trail_dir = root / "trail"
 
     policy_dir.mkdir(parents=True, exist_ok=True)
     project_json = rein_dir / "project.json"
@@ -128,7 +167,7 @@ def bootstrap(project_dir: Path, scope: str, version: str) -> Path:
         (target / ".gitkeep").touch(exist_ok=True)
     write_text_if_missing(trail_dir / "index.md", INDEX_TEMPLATE)
 
-    return git_root
+    return root, non_git
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -140,8 +179,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", default="1.0.0")
     args = parser.parse_args(argv)
 
-    root = bootstrap(Path(args.project_dir), args.scope, args.version)
-    print(f"Rein repo state bootstrapped at {root}")
+    root, non_git = bootstrap(Path(args.project_dir), args.scope, args.version)
+    if non_git:
+        print(f"Non-git project — initialized trail/ at {root}.")
+    else:
+        print(f"Rein repo state bootstrapped at {root}")
     return 0
 
 

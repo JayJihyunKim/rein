@@ -50,6 +50,34 @@ PROFILE_HOOK_DEFAULTS = {
 }
 
 
+# Umbrella keys (Wave 2 Task 1.5): a single umbrella key in hooks.yaml can toggle
+# multiple individual hook keys at once. Individual key explicit entries always
+# take precedence over the umbrella value. Hooks not listed here are unaffected
+# by any umbrella value.
+#
+# - bootstrap-gate: toggles both the pre-edit and pre-tool-use-bash variants of
+#   the bootstrap gate (Wave 2 bootstrap gate split).
+UMBRELLA_KEYS = {
+    "pre-edit-trail-bootstrap-gate": "bootstrap-gate",
+    "pre-tool-use-bash-bootstrap-gate": "bootstrap-gate",
+}
+
+
+def _normalize_enabled(raw):
+    """Normalize a yaml entry to an enabled bool.
+
+    Accepts:
+        bool          -> returned as-is
+        {enabled: ...} -> coerced to bool (default True if key missing)
+    Anything else -> None (caller should fall through to lower-precedence default).
+    """
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, dict):
+        return bool(raw.get("enabled", True))
+    return None
+
+
 def _load_policy_data():
     """Return parsed yaml dict or None. Warn-only on parse failure."""
     policy_path = Path(".rein/policy/hooks.yaml")
@@ -100,8 +128,10 @@ def is_enabled(hook_name: str) -> bool:
 
     Resolution order:
         1. Explicit per-hook entry (bool shorthand or {enabled: ...} mapping)
-        2. profile-driven default from PROFILE_HOOK_DEFAULTS
-        3. Built-in default = True
+        2. Umbrella key (e.g. `bootstrap-gate`) when the hook is registered in
+           UMBRELLA_KEYS and the individual entry is absent
+        3. profile-driven default from PROFILE_HOOK_DEFAULTS
+        4. Built-in default = True
     """
     data = _load_policy_data()
     if data is None:
@@ -109,19 +139,25 @@ def is_enabled(hook_name: str) -> bool:
 
     # 1. explicit per-hook override
     raw = data.get(hook_name)
-    if isinstance(raw, bool):
-        return raw
-    if isinstance(raw, dict):
-        enabled = raw.get("enabled", True)
-        return bool(enabled)
-    # raw is None or unsupported shape -> fall through to profile default.
+    normalized = _normalize_enabled(raw)
+    if normalized is not None:
+        return normalized
+    # raw is None or unsupported shape -> fall through.
 
-    # 2. profile-driven default
+    # 2. umbrella key fallback (Wave 2 Task 1.5)
+    umbrella_key = UMBRELLA_KEYS.get(hook_name)
+    if umbrella_key is not None:
+        umbrella_raw = data.get(umbrella_key)
+        umbrella_normalized = _normalize_enabled(umbrella_raw)
+        if umbrella_normalized is not None:
+            return umbrella_normalized
+
+    # 3. profile-driven default
     profile_default = _profile_default(data, hook_name)
     if profile_default is not None:
         return profile_default
 
-    # 3. built-in default
+    # 4. built-in default
     return True
 
 

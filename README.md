@@ -117,16 +117,19 @@ In an AI-assisted workflow, every fix is a re-prompt. In an AI-native workflow, 
 
 ## Install
 
-> Two commands inside Claude Code, then approve a one-time bootstrap. No shell installer.
+> Two commands inside Claude Code, then run the bootstrap command Rein shows you on first edit. No shell installer.
 
 ```
 1. /plugin marketplace add JayJihyunKim/rein
 2. /plugin install rein@rein
 3. Restart your Claude Code session
-4. On first run, Claude will ask whether to initialise Rein in your project — say yes.
 ```
 
-That's it. On the first session the plugin initialises `trail/` and `.rein/` in your repo. There is no `curl` installer and no shell command to run.
+After install, the first time the agent tries a source edit (Edit / Write / MultiEdit) or a Bash command, Rein's bootstrap gate detects that `trail/` is missing, **blocks the operation**, and prints a one-line `python3 …/rein-bootstrap-project.py` command. Run that command to create `trail/` and `.rein/`; subsequent edits pass through normally. The same flow runs after `/reload-plugins` — it converges on the same path as a fresh session.
+
+Non-git projects are supported — `git init` is **not required**. When no `git_root` is found, bootstrap uses the project directory itself as the root.
+
+To disable the gate, set `bootstrap-gate: false` in `.rein/policy/hooks.yaml`. Detailed options are in the troubleshooting docs.
 
 ### Requirements
 
@@ -198,15 +201,13 @@ Use a recent version of Claude Code. The marketplace command is a single word: `
 </details>
 
 <details>
-<summary>Claude doesn't offer to bootstrap on first session</summary>
+<summary>I don't see the bootstrap command</summary>
 
-The bootstrap prompt appears the first time you open Claude Code in a directory that doesn't already have `.rein/project.json`. Make sure you're inside a git repository:
+Rein no longer auto-prompts on session start. The bootstrap command surfaces only when the agent attempts its **first source edit** (Edit / Write / MultiEdit) or **first Bash command** in a directory without `trail/`. Ask the agent to make any edit — the gate will print a one-line `python3 …/rein-bootstrap-project.py` command. Run it once and subsequent edits pass through.
 
-```bash
-git init       # initialise a new repo, or
-cd your-repo   # move into an existing one
-# then start a new Claude Code session
-```
+`/reload-plugins` produces the same behaviour — there is no separate "first session" path. Non-git projects are supported; `git init` is **not** required.
+
+To disable the gate entirely, set `bootstrap-gate: false` in `.rein/policy/hooks.yaml`. Individual hook keys (`pre-edit-trail-bootstrap-gate`, `pre-tool-use-bash-bootstrap-gate`) can be toggled the same way.
 
 </details>
 
@@ -263,7 +264,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.1.0** (2026-05-12) — plugin prompt-level operating model (action mandate + overflow handoff + 3 new hook lifecycle events)
+Latest release: **v1.1.1** (2026-05-12) — plugin bootstrap gate hotfix (PreToolUse hard gate + non-git fallback + opt-out)
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

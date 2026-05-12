@@ -8,6 +8,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TOTAL_FAIL=0
 
 for test_file in \
+  "$SCRIPT_DIR/test-bootstrap-check-helper.sh" \
+  "$SCRIPT_DIR/test-pre-edit-trail-bootstrap-gate.sh" \
+  "$SCRIPT_DIR/test-pre-tool-use-bash-bootstrap-gate.sh" \
+  "$SCRIPT_DIR/test-bootstrap-gate-hooks-json-order.sh" \
+  "$SCRIPT_DIR/test-user-prompt-submit-bootstrap-advisory.sh" \
+  "$SCRIPT_DIR/test-session-start-bootstrap-helper-refactor.sh" \
+  "$SCRIPT_DIR/test-bootstrap-trigger-parity.sh" \
   "$SCRIPT_DIR/test-dod-rotation.sh" \
   "$SCRIPT_DIR/test-dod-gate.sh" \
   "$SCRIPT_DIR/test-stop-gate.sh" \
