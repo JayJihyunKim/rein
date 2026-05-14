@@ -24,7 +24,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 DOD_DIR="$PROJECT_DIR/trail/dod"
 MARKER="$DOD_DIR/.coverage-mismatch"
-VALIDATOR="$PROJECT_DIR/scripts/rein-validate-coverage-matrix.py"
+
+# RES-1: resolve VALIDATOR via the plugin-aware helper. The validator ships
+# inside the plugin bundle on a fresh `/plugin install`, where no `scripts/`
+# dir exists in the user repo. Falling back to a hardcoded `${PROJECT_DIR}
+# /scripts/...` would mean every plan write silently no-ops past the
+# `[ -f "$VALIDATOR" ]` guard below — which is the failure mode RES-1
+# replaces. Source-fail is fatal (matches the path-policy lib pattern at L36),
+# but a not-found script just leaves VALIDATOR empty and the guard skips.
+if ! . "$SCRIPT_DIR/lib/plugin-script-path.sh" 2>/dev/null; then
+  echo "BLOCKED: [post-edit-plan-coverage] plugin-script-path library missing at $SCRIPT_DIR/lib/plugin-script-path.sh" >&2
+  exit 2
+fi
+VALIDATOR=$(resolve_helper_script rein-validate-coverage-matrix.py 2>/dev/null || true)
 
 # shellcheck source=./lib/python-runner.sh
 . "$SCRIPT_DIR/lib/python-runner.sh"

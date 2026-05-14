@@ -154,16 +154,14 @@ ok "F: exact .claude/plugins path refused"
 
 # G: partial init.
 #
-# v1.1.1 spec change (Scope ID
-#   bootstrap-check-helper-treats-trail-dir-presence-as-sole-initialized-predicate-not-checking-dot-rein-project-json-or-trail-index-md):
-# the shared helper treats `trail/` presence as the SOLE bootstrap predicate.
-# `.rein/project.json` and `trail/index.md` are deliberately NOT consulted.
+# v1.2.0 BG-1 contract: both trail/ AND .rein/project.json must be present for
+# the helper to treat the repo as bootstrapped. Either alone is partial state
+# and prompts the user. BG-1 eliminates the v1.1.1 false-positive where stray
+# trail/ residue (from unrelated processes) was mistakenly read as "initialized".
 #
-#   G(a): .rein/ present, trail/ absent → still prompt (predicate fails)
-#   G(b): trail/ present, .rein/ absent → SILENT (predicate succeeds; the
-#         repo is considered initialized even without .rein/). This is the
-#         intentional v1.1.1 contract: completing the missing .rein/ is the
-#         user's responsibility once trail/ exists.
+#   G(a): .rein/ present, trail/ absent → prompt (BG-1 신 contract — marker alone insufficient)
+#   G(b): trail/ present, .rein/ absent → prompt (BG-1 신 contract — trail alone insufficient,
+#         the case BG-1 was specifically designed to fix)
 PARTIAL_REPO_A="$TMP/repo-partial-a"
 mkdir -p "$PARTIAL_REPO_A/.rein"
 ( cd "$PARTIAL_REPO_A" && git init -q )
@@ -178,9 +176,9 @@ mkdir -p "$PARTIAL_REPO_B/trail"
 ( cd "$PARTIAL_REPO_B" && git init -q )
 printf '# trail/index.md\n' >"$PARTIAL_REPO_B/trail/index.md"
 run_hook "$PARTIAL_REPO_B" "$TMP/repo-partial-b.out"
-[ ! -s "$TMP/repo-partial-b.out" ] \
-  || fail "G(b): trail/ present → helper must treat as initialized (silent)"
+grep -q "trail/ directory missing" "$TMP/repo-partial-b.out" \
+  || fail "G(b): partial init (trail only) must still prompt (BG-1 신 contract — false positive 제거)"
 [ ! -e "$PARTIAL_REPO_B/.rein" ] || fail "G(b): hook must not create .rein in partial state"
-ok "G: partial init handled per v1.1.1 trail-only predicate"
+ok "G: partial init handled per v1.2.0 BG-1 contract (trail/ AND .rein/project.json required)"
 
 echo "test-session-start-bootstrap: OK (7/7 assertions)"

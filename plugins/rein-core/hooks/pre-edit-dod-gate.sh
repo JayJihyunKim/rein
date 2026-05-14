@@ -36,6 +36,12 @@ if ! . "$SCRIPT_DIR/lib/governance-stage.sh" 2>/dev/null; then
   echo "BLOCKED: [DoD gate] governance-stage library missing at $SCRIPT_DIR/lib/governance-stage.sh" >&2
   exit 2
 fi
+# RES-1: plugin-aware helper script resolver. CLAUDE_PLUGIN_ROOT/scripts
+# preferred, repo scripts/ as fallback.
+if ! . "$SCRIPT_DIR/lib/plugin-script-path.sh" 2>/dev/null; then
+  echo "BLOCKED: [DoD gate] plugin-script-path library missing at $SCRIPT_DIR/lib/plugin-script-path.sh" >&2
+  exit 2
+fi
 
 BLOCKS_LOG="$PROJECT_DIR/trail/incidents/blocks.log"
 BLOCKS_LOG_JSONL="$PROJECT_DIR/trail/incidents/blocks.jsonl"
@@ -55,7 +61,10 @@ DOD_ADVISORY_MARKER="$DOD_DIR/.dod-coverage-advisory"    # non-blocking
 
 # Validator invocation (Plan A Phase 3 + 4): wrapped in `timeout 30` by
 # this hook per GI-validator-v2-timeout-fail-closed.
-VALIDATOR_PATH="$PROJECT_DIR/scripts/rein-validate-coverage-matrix.py"
+# RES-1: deferred resolution — validator path resolved lazily in the
+# block that actually invokes it (only on Tier-1/2 candidates). Resolution
+# failure becomes BLOCKED at that site so users without the helper get a
+# clear message instead of a silent skip.
 VALIDATOR_TIMEOUT_S=30
 
 log_block() {
@@ -251,7 +260,16 @@ if [ -f "$INCIDENT_STAMP" ]; then
   # exit code 를 분리 캡처하여 스크립트 실패 시 fail-closed 로 처리한다.
   # `|| echo 0` 방식은 실패 시에도 0 으로 보여 stamp 를 잘못 지우고 통과시켰음
   # (codex v0.7.2 review High).
-  LIVE_COUNT=$("${PYTHON_RUNNER[@]}" "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+  # RES-1: helper script 경로는 plugin-aware resolver 로 해석한다. resolver
+  # 실패 시 stamp 검증 자체가 불가능하므로 fail-closed (VALIDATOR_PATH 패턴과
+  # 동일). plugin install 환경에서 ${CLAUDE_PLUGIN_ROOT}/scripts/ 우선, 메인테이너
+  # repo fallback 으로 ${PROJECT_DIR}/scripts/ 가 사용된다.
+  AGGREGATE_PY=$(resolve_helper_script rein-aggregate-incidents.py) || {
+    echo "BLOCKED: [DoD gate] aggregate helper rein-aggregate-incidents.py not resolvable" >&2
+    log_block "aggregate helper missing" "$FILE_PATH"
+    exit 2
+  }
+  LIVE_COUNT=$("${PYTHON_RUNNER[@]}" "$AGGREGATE_PY" \
     --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null)
   LIVE_RC=$?
   if [ "$LIVE_RC" -ne 0 ]; then
@@ -271,7 +289,8 @@ if [ -f "$INCIDENT_STAMP" ]; then
     echo "  1) /incidents-to-rule 스킬 호출" >&2
     echo "  2) AskUserQuestion 으로 승격/거부 결정" >&2
     echo "  3) 승인된 rule 을 AGENTS.md 에 추가" >&2
-    echo "  4) python3 scripts/rein-mark-incident-processed.py <path> <processed|declined>" >&2
+    echo "  4) python3 <scripts-dir>/rein-mark-incident-processed.py <path> <processed|declined>" >&2
+    echo "     (scripts-dir = \${CLAUDE_PLUGIN_ROOT}/scripts/ on plugin install, \${PROJECT_DIR}/scripts/ on maintainer repo)" >&2
     echo "  5) (자동) 다음 source 편집 시 stamp 자가 해소" >&2
     echo "" >&2
     echo "긴급: echo 'reason=<사유>' > $INCIDENT_BYPASS" >&2
@@ -348,7 +367,8 @@ if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]; then
 
   if [ "$UNRESOLVED_SPECS" = true ]; then
     echo "BLOCKED: 미리뷰 사양 문서가 있습니다." >&2
-    echo "리뷰 완료 후: bash scripts/rein-mark-spec-reviewed.sh \"$spec_path\" codex" >&2
+    echo "리뷰 완료 후: bash <scripts-dir>/rein-mark-spec-reviewed.sh \"$spec_path\" codex" >&2
+    echo "  (scripts-dir = \${CLAUDE_PLUGIN_ROOT}/scripts/ on plugin install, \${PROJECT_DIR}/scripts/ on maintainer repo)" >&2
     log_block "미리뷰 사양 문서" "$FILE_PATH"
     exit 2
   fi
@@ -380,7 +400,7 @@ if [ "${#MISSING_MARKERS[@]}" -gt 0 ]; then
       echo "  - $(basename -- "$m" | sed 's/^\.routing-missing-//')" >&2
     done
     echo "  DoD 에 '## 라우팅 추천' 섹션을 추가하세요. 형식: agent / skills / mcps / rationale / approved_by_user." >&2
-    echo "  PostToolUse hook 이 DoD write 직후 routing 절차 본문을 자동 inject 합니다." >&2
+    echo "  DoD 작성 후 PostToolUse 단계의 'post-write-routing-procedure-rule.sh' 가 routing 절차 본문을 inject 합니다." >&2
     echo "  긴급 바이패스: echo 'reason=<사유>' > $ROUTING_BYPASS" >&2
     log_block "routing section missing" "$FILE_PATH"
     exit 2
@@ -456,10 +476,16 @@ if [ -n "$ROUTING_VIOLATIONS" ]; then
 fi
 
 # skill/MCP 가이드 재생성 pending: 자동 생성 시도 → 실패 시 WARNING 만 (block 아님)
+# RES-1: helper script 경로는 plugin-aware resolver 로 해석한다. 본 블록은 advisory
+# (block 아님) 이므로 resolver 실패도 WARNING 으로 graceful skip — fail-closed 가
+# 아닌 fail-graceful 패턴 (AGGREGATE_PY / VALIDATOR_PATH 의 fail-closed 와 의도적
+# 으로 분리). plugin install 환경에서 ${CLAUDE_PLUGIN_ROOT}/scripts/ 우선, 메인테이너
+# repo fallback 으로 ${PROJECT_DIR}/scripts/ 가 사용된다.
 SKILL_REGEN_STAMP="$PROJECT_DIR/.claude/cache/.skill-mcp-regen-pending"
 if [ -f "$SKILL_REGEN_STAMP" ]; then
-  if [ -x "$PROJECT_DIR/scripts/rein-generate-skill-mcp-guide.py" ] || [ -f "$PROJECT_DIR/scripts/rein-generate-skill-mcp-guide.py" ]; then
-    ( cd "$PROJECT_DIR" && python3 scripts/rein-generate-skill-mcp-guide.py >/dev/null 2>&1 ) || \
+  GEN_SKILL_MCP=$(resolve_helper_script rein-generate-skill-mcp-guide.py 2>/dev/null || true)
+  if [ -n "$GEN_SKILL_MCP" ] && [ -f "$GEN_SKILL_MCP" ]; then
+    ( cd "$PROJECT_DIR" && "${PYTHON_RUNNER[@]}" "$GEN_SKILL_MCP" >/dev/null 2>&1 ) || \
       echo "WARNING: skill-mcp-guide 자동 생성 실패 (stamp 유지)" >&2
   else
     echo "WARNING: skill/MCP 가이드 재생성 pending. .claude/cache/skill-mcp-guide.md 를 확인하세요." >&2
@@ -485,6 +511,21 @@ if [ "$DOD_FOUND" = true ]; then
     # Edit/Write with a warning.
     touch "$SRC_EDIT_MARKER" 2>/dev/null
     exit 0
+  fi
+
+  # RES-1: lazy-resolve VALIDATOR_PATH via plugin-aware helper. The
+  # resolver picks ${CLAUDE_PLUGIN_ROOT}/scripts/<name> first, then
+  # ${PROJECT_DIR}/scripts/<name> as fallback. Without this, fresh
+  # plugin installs (no repo scripts/) would always fail Tier 1 on a
+  # missing validator, which would block legitimate edits.
+  if [ -z "${VALIDATOR_PATH:-}" ]; then
+    VALIDATOR_PATH=$(resolve_helper_script rein-validate-coverage-matrix.py) || {
+      mkdir -p "$DOD_DIR" 2>/dev/null
+      touch "$DOD_MISMATCH_MARKER" 2>/dev/null
+      echo "BLOCKED: [DoD gate] validator helper rein-validate-coverage-matrix.py not resolvable" >&2
+      log_block "validator helper missing" "$SAD_PATH"
+      exit 2
+    }
   fi
 
   # Validator call with 30s timeout.

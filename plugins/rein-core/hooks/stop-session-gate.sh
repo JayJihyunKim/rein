@@ -24,6 +24,17 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib/project-dir.sh"
 PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 
+# RES-1: plugin-aware helper script resolver. AGGREGATE_PY is consulted
+# from 4 sites below (trap stamp, advisory_check, main aggregate, count-
+# pending query). All call sites must guard on non-empty because the
+# resolver returns empty when the helper is absent on either side
+# (e.g. legacy scaffold install without the plugin bundle).
+if ! . "$SCRIPT_DIR/lib/plugin-script-path.sh" 2>/dev/null; then
+  echo "BLOCKED: [stop-session-gate] plugin-script-path library missing at $SCRIPT_DIR/lib/plugin-script-path.sh" >&2
+  exit 2
+fi
+AGGREGATE_PY=$(resolve_helper_script rein-aggregate-incidents.py 2>/dev/null || true)
+
 # session_end "퇴근 도장" — 어떤 exit 경로로 끝나든 trap EXIT 으로 marking.
 # 이 redefinition 으로 session_end=true 의 의미가 "Stop hook 이 어떤 경로로든
 # 실행은 됨" 이 된다. false 로 남는 것은 진짜 hook 미호출 (Ctrl+C / 터미널
@@ -32,8 +43,8 @@ PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 # `set-session-end` subcommand 를 통해 flock 안에서 직렬화된다 (multi-writer
 # race 회피).
 _stamp_session_end_true() {
-  if command -v python3 >/dev/null 2>&1; then
-    python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+  if command -v python3 >/dev/null 2>&1 && [ -n "$AGGREGATE_PY" ]; then
+    python3 "$AGGREGATE_PY" \
       --project-dir "$PROJECT_DIR" set-session-end true >/dev/null 2>&1 || true
   fi
 }
@@ -58,7 +69,10 @@ incident_advisory_check() {
   fi
 
   local summary_json
-  summary_json=$(python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+  if [ -z "$AGGREGATE_PY" ]; then
+    return 0
+  fi
+  summary_json=$(python3 "$AGGREGATE_PY" \
     advisory-summary --since-line "$since_line" 2>/dev/null || echo "[]")
 
   if [ -z "$summary_json" ] || [ "$summary_json" = "[]" ]; then
@@ -219,8 +233,8 @@ fi
 # aggregate 의 stdout/stderr 는 모두 stderr 로 redirect 한다.
 # Stop hook 의 stdout 은 block JSON payload 전용이어야 하므로 aggregate 의
 # NOTICE/WARNING 이 혼입되면 JSON 파싱이 깨질 위험 (codex v0.7.2 Medium).
-if command -v python3 >/dev/null 2>&1; then
-  python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+if command -v python3 >/dev/null 2>&1 && [ -n "$AGGREGATE_PY" ]; then
+  python3 "$AGGREGATE_PY" \
     --project-dir "$PROJECT_DIR" 1>&2 || true
 fi
 
@@ -229,13 +243,13 @@ INCIDENT_STAMP_DEFERRED="$PROJECT_DIR/trail/dod/.incident-decision-deferred"
 INCIDENT_STAMP_BYPASS="$PROJECT_DIR/trail/dod/.skip-stop-gate"
 BLOCK_COUNTER_FILE="$PROJECT_DIR/trail/dod/.incident-stop-blocks"
 HASHES_FILE="$PROJECT_DIR/trail/dod/.incident-stop-hashes"
-EMIT_PY="$PROJECT_DIR/scripts/rein-stop-emit-block.py"
+EMIT_PY=$(resolve_helper_script rein-stop-emit-block.py 2>/dev/null || true)
 INCIDENTS_DIR="$PROJECT_DIR/trail/incidents"
 
-if command -v python3 >/dev/null 2>&1; then
+if command -v python3 >/dev/null 2>&1 && [ -n "$AGGREGATE_PY" ]; then
   # Second invocation: read-only count query.
   # (aggregate side effect already ran above; count_pending reflects updated state.)
-  PENDING_COUNT=$(python3 "$PROJECT_DIR/scripts/rein-aggregate-incidents.py" \
+  PENDING_COUNT=$(python3 "$AGGREGATE_PY" \
     --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null || echo 0)
 else
   PENDING_COUNT=0

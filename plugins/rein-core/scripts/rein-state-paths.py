@@ -17,7 +17,7 @@ Usage:
     python3 rein-state-paths.py <state-name>
 
 Where <state-name> is one of:
-    governance | jobs | inventory | active-dod-choice-log
+    governance | jobs | inventory | active-dod-choice-log | skill-mcp-guide
 
 Plugin mode roots state files under::
 
@@ -29,6 +29,12 @@ Scaffold mode (default / no ``.rein/project.json``) roots them under::
 
 The single ``trail/`` directory does NOT participate in this mapping —
 ``trail/`` stays at repo root in both modes (Phase 3 Task 3.10 invariant).
+
+v1.2.0 cycle (2026-05-14) — RTG-2 (plan §Task 3.3) adds the
+``skill-mcp-guide`` state. It replaces the ``.claude/cache/skill-mcp-guide.md``
+hardcoded reference inside ``session-start-load-trail.sh`` so fresh plugin
+installs route the guide through the plugin-data root the same way
+governance/jobs/inventory/active-dod-choice-log do.
 """
 
 from __future__ import annotations
@@ -48,6 +54,10 @@ STATE_FILES: dict[str, tuple[str, str]] = {
     "active-dod-choice-log": (
         "active-dod-choice.log",
         "runtime/active-dod-choice.log",
+    ),
+    "skill-mcp-guide": (
+        "inventory/skill-mcp-guide.md",
+        "runtime/inventory/skill-mcp-guide.md",
     ),
 }
 
@@ -95,7 +105,7 @@ def main(argv: list[str]) -> int:
     if len(argv) != 2:
         sys.stderr.write(
             "usage: rein-state-paths.py <governance|jobs|inventory|"
-            "active-dod-choice-log>\n"
+            "active-dod-choice-log|skill-mcp-guide>\n"
         )
         return 2
     print(resolve(argv[1]))

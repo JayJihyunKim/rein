@@ -53,6 +53,13 @@ INDEX_TEMPLATE = """# trail/index.md
 > Rein 프로젝트 상태 — 매 세션 종료 시 갱신.
 """
 
+SECURITY_PROFILE_TEMPLATE = """# 이 파일은 rein bootstrap 이 생성한 default. 프로젝트 정책에 맞게 수정.
+# 가벼운 검사는 `security_level: base`, 더 엄격한 검사는 `security_level: strict`
+# (strict 는 미정의 — 사용자 정의 필요). rules 본문은 plugin source 에서 자동 read;
+# 본문 자체를 override 하려면 `.claude/security/rules/<level>.md` 를 직접 생성.
+security_level: standard
+"""
+
 
 def fail(message: str) -> None:
     print(f"error: {message}", file=sys.stderr)
@@ -117,6 +124,23 @@ def write_text_if_missing(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def ensure_security_profile(project_root: Path) -> None:
+    """Create default `.claude/security/profile.yaml` if absent (SEC-1).
+
+    Writes only the profile (idempotent — never overwrites existing files).
+    Rules bodies (`base.md`, `standard.md`) stay in the plugin source (SEC-3);
+    the security-reviewer agent resolves them via SEC-2's priority list. This
+    boundary is the core of SEC-1: bootstrap creates the profile pointer, not
+    the rule bodies.
+    """
+    profile_path = project_root / ".claude" / "security" / "profile.yaml"
+    if profile_path.exists():
+        return
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(SECURITY_PROFILE_TEMPLATE, encoding="utf-8")
+    print(f"[bootstrap] security profile created: {profile_path}")
+
+
 def bootstrap(project_dir: Path, scope: str, version: str) -> tuple[Path, bool]:
     project_dir = project_dir.resolve()
     _refuse_sensitive_or_unsafe(project_dir)
@@ -166,6 +190,8 @@ def bootstrap(project_dir: Path, scope: str, version: str) -> tuple[Path, bool]:
         target.mkdir(parents=True, exist_ok=True)
         (target / ".gitkeep").touch(exist_ok=True)
     write_text_if_missing(trail_dir / "index.md", INDEX_TEMPLATE)
+
+    ensure_security_profile(root)
 
     return root, non_git
 

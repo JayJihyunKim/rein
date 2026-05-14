@@ -101,6 +101,23 @@ python3 "$SCRIPT_DIR/rein-validate-plugin-rules.py" || {
   exit 1
 }
 
+# --- Pre-publish version parity check (VER-1, v1.2.0 cycle) ---------------
+#
+# Asserts that plugins/rein-core/.claude-plugin/plugin.json `version` matches
+# scripts/rein.sh `VERSION=`. Drift between these two surfaces produces a
+# marketplace tarball whose `plugin.json` claims one version while the
+# installed CLI shim claims another, which silently breaks `rein --version`
+# parity after `/plugin install`. Fail-fast BEFORE any tarball / manifest /
+# Anthropic side effect.
+PLUGIN_JSON_VERSION="$(python3 -c "import json,sys; print(json.load(open('plugins/rein-core/.claude-plugin/plugin.json'))['version'])")"
+REIN_SH_VERSION="$(grep '^VERSION=' scripts/rein.sh | head -1 | cut -d'"' -f2)"
+if [ "$PLUGIN_JSON_VERSION" != "$REIN_SH_VERSION" ]; then
+  echo "BLOCKED: plugin.json version ($PLUGIN_JSON_VERSION) != scripts/rein.sh VERSION ($REIN_SH_VERSION)" >&2
+  echo "  fix: update both to the same value before publish" >&2
+  exit 2
+fi
+echo "version-parity OK: $PLUGIN_JSON_VERSION"
+
 # --- Fail-fast on Anthropic env vars (BEFORE any side effects) -------------
 #
 # Round 5 fix Finding 6: NO default URL is hardcoded. CI must inject the

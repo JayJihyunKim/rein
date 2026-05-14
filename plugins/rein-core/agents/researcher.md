@@ -39,7 +39,7 @@ description: 기술 조사 및 문서 수집 전담. 라이브러리 비교, 아
 
 ## 완료 기준
 ```
-[ ] research-task workflow DoD 전체 충족
+[ ] DoD 전체 충족 (조사 목적/범위/결과물 형식 명시)
 [ ] 최소 3개 옵션 비교 (해당하는 경우)
 [ ] 권장 결론 명시
 [ ] trail/decisions/DEC-NNN.md 기록

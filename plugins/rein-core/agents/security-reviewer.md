@@ -21,17 +21,27 @@ description: 변경된 코드에 대해 현재 보안 레벨 기준으로 취약
 ## 동작 흐름
 
 ### 1. 프로파일 로드
+
+profile.yaml 은 아래 priority list 를 순서대로 시도해 **첫 발견된 경로**를 사용한다:
+
+1. `${PROJECT_DIR}/.claude/security/profile.yaml` — 사용자 repo override (normal case). `rein-bootstrap-project.py` 가 신규 프로젝트 init 시 default 본문으로 생성한다.
+2. `${CLAUDE_PLUGIN_ROOT}/security/profile.yaml` — plugin override (rare). plugin source 가 직접 ship 한 profile (특수 배포 시나리오).
+3. bootstrap default — 위 둘 다 부재 시, bootstrap 의 내장 default 값 (`security_level: standard`, `user_level: auto`) 으로 fallback.
+
+선택된 path 에서 다음을 추출:
 ```
-.claude/security/profile.yaml 읽기
-  → security_level: base | standard | strict
-  → user_level: auto | beginner | intermediate | advanced
+security_level: base | standard | strict
+user_level:     auto | beginner | intermediate | advanced
 ```
 
 ### 2. 규칙 로드
-```
-.claude/security/rules/{security_level}.md 읽기
-  → 해당 레벨의 검사 항목을 리뷰 기준으로 사용
-```
+
+추출된 `security_level` 값으로 `rules/{level}.md` 를 다음 priority list 순서로 시도해 **첫 발견된 경로**의 본문을 검사 기준으로 사용:
+
+1. `${PROJECT_DIR}/.claude/security/rules/{security_level}.md` — 사용자가 직접 작성한 override. plugin default 를 덮어쓰고자 할 때 수동 생성.
+2. `${CLAUDE_PLUGIN_ROOT}/security/rules/{security_level}.md` — plugin source default. `base.md` / `standard.md` 는 plugin 이 항상 ship 한다 (bootstrap 으로 user repo 에 복사되지 않음).
+
+profile 과 rules priority 는 **독립적으로 평가**한다 — profile 은 repo override 였지만 rules 는 plugin source 인 조합도 정상이다.
 
 ### 3. 대상 파일 수집
 ```

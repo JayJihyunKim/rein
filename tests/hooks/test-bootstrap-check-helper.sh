@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Verify the bootstrap-check helper:
 #
-#   A      — happy path, trail/ exists           → exit 0, stdout empty
-#   B      — happy path, trail/ missing          → exit 10, bilingual guidance
+#   A      — happy path, trail/ + .rein/project.json both present → exit 0, stdout empty
+#   B      — happy path, both missing            → exit 10, bilingual guidance
 #   C-i    — resolution failure                  → exit 11, stderr "resolution"
 #   C-ii   — plugin cache path                   → exit 11, stderr "cache-path"
 #   C-iii  — plugin install dir match            → exit 11, stderr "plugin-dir"
@@ -13,6 +13,11 @@
 #   E      — resolution priority: git toplevel   → exit 0
 #   F      — resolution priority: PWD            → exit 0
 #   G      — git contract: no mutating commands  → mutating call count == 0
+#   H      — monorepo subdir walk-up to git root → exit 0
+#   I      — nested git boundary (no marker)     → exit 10
+#   J      — env hygiene (GIT_DIR/GIT_WORK_TREE) → exit 0
+#   K      — BG-1 false positive: trail/ only    → exit 10 (marker required)
+#   L      — BG-1 symmetric: .rein/project.json only → exit 10 (trail/ required)
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -44,6 +49,15 @@ record_skip() {
   echo "SKIP: $1"
 }
 
+# BG-1 (2026-05-14): "bootstrapped" requires BOTH trail/ AND .rein/project.json.
+# Tests that exercise the happy path must materialise both — using a helper keeps
+# the predicate change localised so future contract bumps update one site.
+mk_bootstrap_marker() {
+  local d="$1"
+  mkdir -p "$d/trail" "$d/.rein"
+  printf '{}' > "$d/.rein/project.json"
+}
+
 # Helper to clear inherited env that the resolution logic must NOT see.
 # Tests set their own env explicitly per-case.
 run_clean() {
@@ -52,12 +66,12 @@ run_clean() {
 }
 
 # ---------------------------------------------------------------------------
-# Fixture A — happy: trail/ exists → exit 0, stdout empty
+# Fixture A — happy: trail/ + .rein/project.json both present → exit 0, stdout empty
 # ---------------------------------------------------------------------------
 fixture_a() {
   local dir
   dir="$(mktemp -d "$SCRATCH_ROOT/A-XXXXXX")"
-  mkdir "$dir/trail"
+  mk_bootstrap_marker "$dir"
   local out err rc
   out=$( (cd "$dir" && env -u CLAUDE_PLUGIN_ROOT bash "$HELPER" "$dir") 2>/tmp/bc-err-A )
   rc=$?
@@ -74,7 +88,7 @@ fixture_a() {
 }
 
 # ---------------------------------------------------------------------------
-# Fixture B — happy: trail/ missing → exit 10 + bilingual guidance
+# Fixture B — happy: trail/ and marker both missing → exit 10 + bilingual guidance
 # ---------------------------------------------------------------------------
 fixture_b() {
   local dir
@@ -103,9 +117,13 @@ fixture_b() {
     record_fail "B: stdout missing 'bootstrap' substring"
     return
   fi
-  # Korean substring check (no locale dependency — UTF-8 bytes).
-  if ! printf '%s' "$out" | grep -q "트랩\|trail" 2>/dev/null; then
-    : # tolerated — we already checked English markers above
+  if ! printf '%s' "$out" | grep -q "trail/"; then
+    record_fail "B: stdout missing 'trail/' substring (BG-1 guidance phrasing)"
+    return
+  fi
+  if ! printf '%s' "$out" | grep -q "\.rein/project\.json"; then
+    record_fail "B: stdout missing '.rein/project.json' substring (BG-1 marker phrasing)"
+    return
   fi
   if ! printf '%s' "$out" | grep -q "Run:"; then
     record_fail "B: stdout missing 'Run:' line"
@@ -272,7 +290,7 @@ fixture_c_v_b() {
 fixture_d() {
   local good
   good="$(mktemp -d "$SCRATCH_ROOT/D-good-XXXXXX")"
-  mkdir "$good/trail"
+  mk_bootstrap_marker "$good"
   # Run from a different cwd (no trail there) to prove stdin.cwd wins.
   local other
   other="$(mktemp -d "$SCRATCH_ROOT/D-other-XXXXXX")"
@@ -297,7 +315,8 @@ fixture_e() {
   fi
   local dir
   dir="$(mktemp -d "$SCRATCH_ROOT/E-XXXXXX")"
-  (cd "$dir" && git init -q && mkdir trail)
+  (cd "$dir" && git init -q)
+  mk_bootstrap_marker "$dir"
   local out err rc
   out=$( (cd "$dir" && printf '{}' | env -u CLAUDE_PLUGIN_ROOT bash "$HELPER") 2>/tmp/bc-err-E )
   rc=$?
@@ -315,7 +334,7 @@ fixture_e() {
 fixture_f() {
   local dir
   dir="$(mktemp -d "$SCRATCH_ROOT/F-XXXXXX")"
-  mkdir "$dir/trail"
+  mk_bootstrap_marker "$dir"
   # Sneak a no-git environment: invoke from a freshly-created dir that has
   # no .git. Provide empty stdin JSON so stdin.cwd path doesn't fire.
   local out err rc
@@ -355,7 +374,7 @@ WRAP
   # Run helper across a few representative paths so all branches exercise.
   local dir
   dir="$(mktemp -d "$SCRATCH_ROOT/G-dir-XXXXXX")"
-  mkdir "$dir/trail"
+  mk_bootstrap_marker "$dir"
   # Use modified PATH so the trace wrapper is seen first.
   ( cd "$dir" && PATH="$trace_dir:$PATH" env -u CLAUDE_PLUGIN_ROOT bash "$HELPER" ) >/dev/null 2>&1 || true
   # Also exercise the no-trail path.
@@ -373,6 +392,187 @@ WRAP
 }
 
 # ---------------------------------------------------------------------------
+# Fixture H — monorepo subdir walkup: trail/ at git root, stdin.cwd = subdir.
+# Regression for 2026-05-12 hotfix (bootstrap-check.sh stdin.cwd → git-root
+# walkup). Before the fix, stdin.cwd was selected verbatim → trail/ lookup
+# at subdir → exit 10. After the fix, `git -C $stdin_cwd rev-parse` walks up
+# to the git root → trail/ found → exit 0. Exit code alone is the assertion
+# (helper is silent on exit 0, so source= label can only be observed on exit
+# 10 path; fixture J below covers the exit-10 source label).
+# ---------------------------------------------------------------------------
+fixture_h() {
+  if ! command -v git >/dev/null 2>&1; then
+    record_skip "H (monorepo subdir walkup) — git not installed"
+    return
+  fi
+  local root
+  root="$(mktemp -d "$SCRATCH_ROOT/H-root-XXXXXX")"
+  (cd "$root" && git init -q && mkdir -p apps/web)
+  mk_bootstrap_marker "$root"
+  local sub="$root/apps/web"
+  # Confirm preconditions: subdir has no trail/, root has trail/ + marker.
+  [ ! -d "$sub/trail" ] || { record_fail "H: precondition - subdir trail/ should not exist"; return; }
+  [ -d "$root/trail" ] || { record_fail "H: precondition - root trail/ should exist"; return; }
+  [ -f "$root/.rein/project.json" ] || { record_fail "H: precondition - root marker should exist"; return; }
+  local out err rc
+  local other
+  other="$(mktemp -d "$SCRATCH_ROOT/H-other-XXXXXX")"
+  out=$( (cd "$other" && printf '{"cwd":"%s"}' "$sub" | env -u CLAUDE_PLUGIN_ROOT bash "$HELPER") 2>"$SCRATCH_ROOT/bc-err-H" )
+  rc=$?
+  err=$(cat "$SCRATCH_ROOT/bc-err-H")
+  if [ "$rc" -ne 0 ]; then
+    record_fail "H: expected exit 0 (git walk-up subdir → root → trail/ found), got $rc (stderr: $err)"
+    return
+  fi
+  record_pass "H (monorepo subdir → git-root walkup)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture I — nested git boundary: subdir has its own .git/. Walk-up must
+# STOP at the nested boundary (not escape to outer root). With trail/ ONLY
+# at the outer root and missing at the subdir, expected: exit 10 (walk-up
+# returns subdir, no trail/ there). If walk-up incorrectly escaped to the
+# outer root, exit would be 0 (false positive). Guidance text on stderr
+# must reference the subdir as the resolved project_dir.
+# ---------------------------------------------------------------------------
+fixture_i() {
+  if ! command -v git >/dev/null 2>&1; then
+    record_skip "I (nested git boundary) — git not installed"
+    return
+  fi
+  local root
+  root="$(mktemp -d "$SCRATCH_ROOT/I-root-XXXXXX")"
+  (cd "$root" && git init -q)
+  mk_bootstrap_marker "$root"
+  local sub="$root/sub-project"
+  mkdir -p "$sub"
+  (cd "$sub" && git init -q)
+  # Subdir has NO trail/ on purpose. If walk-up respects nested boundary,
+  # it returns $sub → trail/ at $sub missing → exit 10.
+  local out err rc
+  local other
+  other="$(mktemp -d "$SCRATCH_ROOT/I-other-XXXXXX")"
+  out=$( (cd "$other" && printf '{"cwd":"%s"}' "$sub" | env -u CLAUDE_PLUGIN_ROOT bash "$HELPER") 2>"$SCRATCH_ROOT/bc-err-I" )
+  rc=$?
+  err=$(cat "$SCRATCH_ROOT/bc-err-I")
+  if [ "$rc" -ne 10 ]; then
+    record_fail "I: expected exit 10 (nested git boundary stops walk-up at subdir, no trail/), got $rc (stderr: $err)"
+    return
+  fi
+  # Resolved project_dir on exit-10 diagnostic should be $sub (nested root),
+  # not the outer $root. This proves walk-up stopped at the nested boundary.
+  local sub_real
+  sub_real="$(cd "$sub" && pwd -P)"
+  if ! echo "$err" | grep -qF "project_dir=$sub_real"; then
+    record_fail "I: expected project_dir=$sub_real on exit-10 diagnostic, got: $err"
+    return
+  fi
+  # Walk-up branch should be reported via source=git-from-stdin.
+  if ! echo "$err" | grep -q "source=git-from-stdin"; then
+    record_fail "I: expected source=git-from-stdin in stderr, got: $err"
+    return
+  fi
+  record_pass "I (nested git boundary respected)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture J — env hygiene: polluted GIT_DIR / GIT_WORK_TREE must NOT redirect
+# walk-up. Caller env is "dirty" (env vars point to an unrelated git repo),
+# but the helper's git invocation is sanitized with `env -u GIT_DIR
+# -u GIT_WORK_TREE ...`. Without sanitization, walk-up would resolve to the
+# polluted target, finding (or missing) trail/ at the wrong place.
+# ---------------------------------------------------------------------------
+fixture_j() {
+  if ! command -v git >/dev/null 2>&1; then
+    record_skip "J (env hygiene GIT_DIR/GIT_WORK_TREE) — git not installed"
+    return
+  fi
+  # Target monorepo: trail/+marker at root, no trail/ at subdir (same as H).
+  local root
+  root="$(mktemp -d "$SCRATCH_ROOT/J-root-XXXXXX")"
+  (cd "$root" && git init -q && mkdir -p apps/web)
+  mk_bootstrap_marker "$root"
+  local sub="$root/apps/web"
+  # Decoy: a separate git repo that does NOT have trail/. If env sanitation
+  # fails, git -C would honor GIT_DIR pointing here, find no trail/ → exit 10
+  # (false negative on the H-equivalent path).
+  local decoy
+  decoy="$(mktemp -d "$SCRATCH_ROOT/J-decoy-XXXXXX")"
+  (cd "$decoy" && git init -q)
+  local out err rc
+  local other
+  other="$(mktemp -d "$SCRATCH_ROOT/J-other-XXXXXX")"
+  # Export polluted GIT_DIR / GIT_WORK_TREE pointing at the decoy. With
+  # sanitation, the helper's `git -C "$sub" rev-parse` ignores them and walks
+  # up to $root → trail/ found → exit 0.
+  out=$( (cd "$other" \
+    && GIT_DIR="$decoy/.git" GIT_WORK_TREE="$decoy" \
+       printf '{"cwd":"%s"}' "$sub" \
+    | env -u CLAUDE_PLUGIN_ROOT \
+        GIT_DIR="$decoy/.git" GIT_WORK_TREE="$decoy" \
+        bash "$HELPER") 2>"$SCRATCH_ROOT/bc-err-J" )
+  rc=$?
+  err=$(cat "$SCRATCH_ROOT/bc-err-J")
+  if [ "$rc" -ne 0 ]; then
+    record_fail "J: expected exit 0 (env sanitation isolates walk-up from polluted GIT_DIR), got $rc (stderr: $err)"
+    return
+  fi
+  record_pass "J (env hygiene: GIT_DIR/GIT_WORK_TREE ignored during walk-up)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture K — BG-1 false positive: trail/ alone is not "bootstrapped".
+# Regression for 2026-05-14 BG-1 spec — overlay residue or unrelated processes
+# can drop a trail/ into a project. Pre-BG-1 the helper exited 0 here, silently
+# turning gate hooks into no-ops on a half-bootstrapped repo. Post-BG-1 the
+# marker (.rein/project.json) is required → exit 10 with guidance that names
+# the marker so the user knows what is actually missing.
+# ---------------------------------------------------------------------------
+fixture_k() {
+  local dir
+  dir="$(mktemp -d "$SCRATCH_ROOT/K-XXXXXX")"
+  mkdir "$dir/trail"
+  local out err rc
+  out=$( (cd "$dir" && env -u CLAUDE_PLUGIN_ROOT bash "$HELPER" "$dir") 2>"$SCRATCH_ROOT/bc-err-K" )
+  rc=$?
+  err=$(cat "$SCRATCH_ROOT/bc-err-K")
+  if [ "$rc" -ne 10 ]; then
+    record_fail "K: expected exit 10 (BG-1: trail/ alone insufficient), got $rc (stderr: $err)"
+    return
+  fi
+  if ! printf '%s' "$out" | grep -q "\.rein/project\.json"; then
+    record_fail "K: guidance must name '.rein/project.json' marker when trail/ alone present (got: $out)"
+    return
+  fi
+  record_pass "K (BG-1 false positive: trail/ alone insufficient)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture L — BG-1 symmetric: .rein/project.json alone is not "bootstrapped".
+# A residual marker without an accompanying trail/ (e.g. user deleted trail/
+# manually) must also fail closed → exit 10 with guidance that names trail/.
+# ---------------------------------------------------------------------------
+fixture_l() {
+  local dir
+  dir="$(mktemp -d "$SCRATCH_ROOT/L-XXXXXX")"
+  mkdir -p "$dir/.rein"
+  printf '{}' > "$dir/.rein/project.json"
+  local out err rc
+  out=$( (cd "$dir" && env -u CLAUDE_PLUGIN_ROOT bash "$HELPER" "$dir") 2>"$SCRATCH_ROOT/bc-err-L" )
+  rc=$?
+  err=$(cat "$SCRATCH_ROOT/bc-err-L")
+  if [ "$rc" -ne 10 ]; then
+    record_fail "L: expected exit 10 (BG-1 symmetric: marker alone insufficient), got $rc (stderr: $err)"
+    return
+  fi
+  if ! printf '%s' "$out" | grep -q "trail/"; then
+    record_fail "L: guidance must name 'trail/' when marker alone present (got: $out)"
+    return
+  fi
+  record_pass "L (BG-1 symmetric: marker alone insufficient)"
+}
+
+# ---------------------------------------------------------------------------
 # Run all fixtures
 # ---------------------------------------------------------------------------
 fixture_a
@@ -387,6 +587,11 @@ fixture_d
 fixture_e
 fixture_f
 fixture_g
+fixture_h
+fixture_i
+fixture_j
+fixture_k
+fixture_l
 
 echo
 echo "test-bootstrap-check-helper: pass=$PASS_COUNT fail=$FAIL_COUNT skip=$SKIP_COUNT"

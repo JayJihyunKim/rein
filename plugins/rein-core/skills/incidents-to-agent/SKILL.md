@@ -35,11 +35,13 @@ rule 로 해결 불가한 반복 실패 패턴을 분석해 전문 에이전트 
 
 candidate stub 생성:
 ```bash
-python3 scripts/rein-mark-agent-candidate.py create \
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/rein-mark-agent-candidate.py" create \
   --hash <pattern_hash> \
   --source-incident <auto-*.md 파일명> \
   --role-one-liner "<추정 역할 한 문장>"
 ```
+
+> Helper path 는 plugin install 환경에서 `${CLAUDE_PLUGIN_ROOT}/scripts/`, 메인테이너 dogfood (env unset) 에서는 `scripts/rein-mark-agent-candidate.py` 로 fallback (RES-1 resolver 가 동일 파일 가리킴).
 
 ### Step 2: Batch 사용자 결정
 
@@ -55,7 +57,7 @@ python3 scripts/rein-mark-agent-candidate.py create \
 - 선택 안 됨 → `decide` 서브커맨드로 `declined`
 
 ```bash
-python3 scripts/rein-mark-agent-candidate.py decide \
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/rein-mark-agent-candidate.py" decide \
   --hash <hash> --decision <approved|declined> \
   --reason "<사람이 제시한 이유>"
 ```

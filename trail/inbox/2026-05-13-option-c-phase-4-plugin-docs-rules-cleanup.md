@@ -1,0 +1,22 @@
+# Option C Phase 4 — plugin docs/rules mirror cleanup
+
+- 날짜: 2026-05-13
+- 유형: refactor (Phase 4, target-release: none — Rule A, Task 6.2 다음 release 묶음)
+- DoD: trail/dod/dod-2026-05-13-option-c-phase-4-plugin-docs-rules-cleanup.md
+- plan: docs/plans/2026-05-13-option-c-plugin-ssot-thin-overlay.md (Phase 4)
+- 변경:
+  - **Task 4.1**: `plugins/rein-core/docs/rules/` 4 mirror (legacy-shipped-pending, background-jobs, design-plan-coverage, subagent-review) + dir 폐기. `overflow-handoff.md` 만 잔존.
+  - **Task 4.2**: `tests/hooks/test-legacy-pending-heal-registered.sh` — mirror sha256 parity check 제거 + hooks.json schema 갱신 (nested `data["hooks"][event]` traversal)
+  - **Task 4.3**: drift checker (`rein-check-plugin-drift.py`) — Phase 2 흡수 시 이미 제거됨 (변경 없음). 검증만.
+  - **Task 4.4**: stale reference 정리 (Phase 3 카테고리 B/D follow-up)
+    - 11 파일에서 `.claude/rules/<shared>.md` → `plugins/rein-core/rules/<shared>.md` redirect (총 17 replacement)
+    - `tests/hooks/test-{background-jobs,subagent-review,design-plan-coverage}-registered.sh` 3개 — hooks.json schema + PLUGIN_RULE_DOC + EXPECTED_BASENAME 갱신 (Phase 3+4 cleanup 이 노출시킨 pre-existing semantic bug 도 fix)
+    - `plugins/rein-core/hooks/session-start-load-trail.sh:187` — runtime banner path `${CLAUDE_PLUGIN_ROOT}/rules/answer-only-mode.md` 로 portable redirect
+- 검증:
+  - drift checker (`python3 scripts/rein-check-plugin-drift.py`): OK
+  - drift-boundary test: pass=8 fail=0
+  - 4 hook registered test: 모두 OK (background-jobs, design-plan-coverage, subagent-review, legacy-pending-heal)
+  - codex Round 3 PASS (cycle=option-c-phase-4-plugin-docs-rules-cleanup, diff_base=559a760, 2026-05-13T07:11:37Z)
+  - security review PASS (base profile, 5-check 매핑 + sanity 모두 통과)
+- 본 cycle main 머지 = none (Rule A, plan §Phase 6 — Task 6.2 다음 user-facing release 묶음). dev branch only.
+- 라우팅 피드백: feature-builder + codex-review (medium effort). codex 3 round (NEEDS-FIX → NEEDS-FIX → PASS) 만에 통과. background-jobs Bash 도구 auto-background 위험 패턴 1회 재발 (kill + foreground 재호출로 복구). codex review 가 Phase 3+4 cleanup 이 노출시킨 pre-existing test semantic bug 까지 발견 — broader cleanup 효과.

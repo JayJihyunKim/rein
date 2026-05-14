@@ -124,7 +124,7 @@ while IFS= read -r FILE_PATH; do
   } > "$MARKER"
 
   echo "NOTICE: spec review pending — $ABS" >&2
-  echo "  리뷰 후: bash scripts/rein-mark-spec-reviewed.sh \"$ABS\" codex" >&2
+  echo "  리뷰 후: rein-mark-spec-reviewed.sh \"$ABS\" codex (plugin bundle 또는 repo scripts/)" >&2
 done <<< "$FILE_PATHS"
 
 exit 0

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Plugin SessionStart hook — emit prompt-only rules to additionalContext.
 #
-# Reads 3 rule body files from
-#   ${CLAUDE_PLUGIN_ROOT}/rules/{code-style,security,testing}.md
+# Reads 4 rule body files from
+#   ${CLAUDE_PLUGIN_ROOT}/rules/{code-style,security,testing,operating-sequence}.md
 # concatenates them (separated by `\n\n`), JSON-encodes the result, and prints
 # a single SessionStart envelope to stdout:
 #
@@ -38,7 +38,7 @@ if [ ! -d "$RULES_DIR" ]; then
 fi
 
 CONTENT=""
-for RULE in code-style security testing; do
+for RULE in code-style security testing operating-sequence; do
   # Per-rule override probe (Task 2.8). The loader prints the override body
   # if `.rein/policy/rules.yaml` defines one for this rule, else nothing.
   # We deliberately do NOT silence loader stderr — when the user's

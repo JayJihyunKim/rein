@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# test-plugin-hooks-bundle.sh — Option C parity (post Phase 3, 2026-05-13).
+#
+# 배경: Option C Phase 3 (2026-05-13) 에서 dev overlay 의 `.claude/hooks/` 가
+# 폐기되었다. 메인테이너 환경은 `/plugin install rein@rein` 으로 동작하며
+# `plugins/rein-core/hooks/` 가 단독 SSOT 다.
+#
+# 본 test 는 Option C 정합을 enforce 한다:
+#   (a) Overlay 부재: `.claude/hooks/` 디렉토리가 존재하지 않아야 한다.
+#       (잔존 시 dev overlay vs plugin SSOT drift 가 재발할 위험)
+#   (b) Plugin SSOT presence: `plugins/rein-core/hooks/` 가 존재하고
+#       비어있지 않다 (최소 1개 hook .sh 파일 포함).
+#
+# Scope ID: rein-core-plugin-bundles-hooks-skills-agents-in-single-package-on-publish
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_DIR"
+
+OVERLAY_DIR=".claude/hooks"
+PLUGIN_DIR="plugins/rein-core/hooks"
+
+fail() {
+  echo "FAIL: $1" >&2
+  exit 1
+}
+
+# (a) Overlay 부재 assert — Option C Phase 3 폐기 정합.
+if [ -e "$OVERLAY_DIR" ]; then
+  fail "dev overlay must be absent post Option C Phase 3: $OVERLAY_DIR exists (remove to restore parity with plugin SSOT)"
+fi
+
+# (b) Plugin SSOT presence assert.
+if [ ! -d "$PLUGIN_DIR" ]; then
+  fail "plugin SSOT missing: $PLUGIN_DIR (rein-core plugin must ship a hooks directory)"
+fi
+
+# Plugin dir 가 비어있지 않은지 확인 — 최소 1개 hook .sh 파일 존재.
+hook_count="$(find "$PLUGIN_DIR" -mindepth 1 -maxdepth 1 -type f -name '*.sh' | wc -l | tr -d ' ')"
+if [ "$hook_count" -eq 0 ]; then
+  fail "plugin SSOT empty: $PLUGIN_DIR has 0 hook .sh files (rein-core must ship at least 1 hook)"
+fi
+
+echo "test-plugin-hooks-bundle: OK (overlay absent + plugin SSOT presence with $hook_count hook(s))"

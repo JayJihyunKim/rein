@@ -136,7 +136,8 @@ for sub in \
   post-write-spec-review-gate.sh \
   post-edit-plan-coverage.sh \
   post-write-dod-routing-check.sh \
-  post-write-design-plan-coverage-rule.sh
+  post-write-design-plan-coverage-rule.sh \
+  post-write-routing-procedure-rule.sh
 do
   SUB_PATH="$SCRIPT_DIR/$sub"
   [ -x "$SUB_PATH" ] || continue

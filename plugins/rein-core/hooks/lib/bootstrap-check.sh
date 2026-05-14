@@ -2,13 +2,20 @@
 # Plugin helper — bootstrap predicate.
 #
 # Purpose: detect whether the resolved project_dir has been bootstrapped
-# (i.e. has a `trail/` directory). When not, emit a bilingual guidance
-# message instructing the user how to run rein-bootstrap-project.py.
+# (i.e. has BOTH a `trail/` directory AND a `.rein/project.json` marker).
+# When not, emit a bilingual guidance message instructing the user how to
+# run rein-bootstrap-project.py.
 #
-# The predicate is intentionally **lenient**: presence of `trail/` is the
-# sole signal. `.rein/project.json` and `trail/index.md` are deliberately
-# NOT consulted, because partially-initialised projects (e.g. trail/ created
-# manually but index.md not yet) should still pass.
+# BG-1 (2026-05-14): require both trail/ and .rein/project.json — eliminates
+# false positive when overlay residue trail/ exists without bootstrap
+# completion (e.g. maintainer dogfood install where dev-overlay residue
+# leaves a stray trail/ without the plugin-mode .rein/project.json marker).
+# Pre-BG-1 behaviour was trail/-only, which mistakenly signalled
+# "bootstrapped" for any project that happened to have a trail/ from
+# unrelated processes. trail/index.md is still NOT consulted, because the
+# bootstrap script (rein-bootstrap-project.py) generates project.json and
+# trail/ atomically — presence of project.json is a reliable proxy for
+# "bootstrap script ran to completion in plugin mode".
 #
 # Usage (direct invocation):
 #   bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bootstrap-check.sh" [<project_dir_override>]
@@ -30,8 +37,8 @@
 # Source labels (logged on stderr): override | git-from-stdin | stdin | git | pwd
 #
 # Exit codes:
-#   0  — trail/ exists; stdout empty
-#   10 — trail/ missing + project_dir safe; stdout = guidance text
+#   0  — trail/ AND .rein/project.json both exist; stdout empty
+#   10 — trail/ or .rein/project.json missing + project_dir safe; stdout = guidance text
 #   11 — unsafe project_dir; stderr = one-line category keyword
 #
 # Unsafe categories (precedence order, first match wins):
@@ -274,8 +281,13 @@ bootstrap_check() {
     echo "bootstrap-check: warning: probe cleanup failed at $probe_file" >&2
   fi
 
-  # ---- Predicate: trail/ presence ---------------------------------------
-  if [ -d "$resolved_real/trail" ]; then
+  # ---- Predicate: trail/ AND .rein/project.json both present ------------
+  # BG-1 (2026-05-14): require both trail/ and .rein/project.json — eliminates
+  # false positive when overlay residue trail/ exists without bootstrap
+  # completion (e.g. maintainer dogfood install where dev-overlay residue
+  # leaves a stray trail/ without the plugin-mode .rein/project.json marker).
+  # Pre-BG-1: trail/-only check produced false positives.
+  if [ -d "$resolved_real/trail" ] && [ -f "$resolved_real/.rein/project.json" ]; then
     # Happy path — no stdout, optional debug to stderr.
     # Keep silent on success: many hooks invoke this and chatty stderr
     # pollutes the platform log.
@@ -286,8 +298,8 @@ bootstrap_check() {
   # Byte-exact bilingual template, trailing newline preserved.
   local guidance
   guidance=$(cat <<EOF
-ERROR: rein plugin의 trail/ 디렉토리가 없습니다 — bootstrap 미완료.
-ERROR: rein plugin trail/ directory missing — bootstrap not initialized.
+ERROR: rein plugin의 trail/ 디렉토리가 없거나 .rein/project.json marker가 없습니다 — bootstrap 미완료.
+ERROR: rein plugin trail/ directory missing or .rein/project.json marker absent — bootstrap not initialized.
 
 실행: python3 "\${CLAUDE_PLUGIN_ROOT}/scripts/rein-bootstrap-project.py" --project-dir "${resolved_real}"
 Run: python3 "\${CLAUDE_PLUGIN_ROOT}/scripts/rein-bootstrap-project.py" --project-dir "${resolved_real}"

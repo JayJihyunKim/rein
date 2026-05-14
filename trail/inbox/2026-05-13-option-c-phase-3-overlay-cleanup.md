@@ -1,0 +1,21 @@
+# Option C Phase 3 — overlay 정리 + dogfood install
+
+- 날짜: 2026-05-13
+- 유형: refactor (Phase 3, target-release: none — main 머지 보류, dev only)
+- DoD: trail/dod/dod-2026-05-13-option-c-phase-3-overlay-cleanup.md
+- plan: docs/plans/2026-05-13-option-c-plugin-ssot-thin-overlay.md (Phase 3)
+- 변경 파일:
+  - `.claude/settings.json` (hooks={} + plugins 키 제거)
+  - `.claude/CLAUDE.md` (shared 7 @import 제거 + 본문 stale 참조 정리)
+  - `.claude/rules/` (shared 7 파일 삭제 → 4 dev-only 잔존)
+  - `.claude/hooks/` `.claude/skills/` `.claude/agents/` (통째 폐기, plugin SSOT 가 대체)
+  - `plugins/rein-core/rules/design-plan-coverage.md` (mandate section 추가 + overlay enrichment sync)
+  - `tests/rules/test-{testing,design-plan-coverage}-*.sh` (7개, RULE_FILE redirect: `.claude/rules` → `plugins/rein-core/rules`)
+  - `tests/scripts/test-bg-guide-exists.sh` (plugin source redirect + hook surfacing assertion)
+  - `tests/scripts/test-rein-check-plugin-drift-boundary.sh` (T2 isolated fixture + T7 post-cleanup invariant + T8 exact 4 dev-only)
+- 요약: `/plugin install rein@rein` (scope=local) 후 `.claude/` overlay 의 plugin 중복 surface 를 모두 폐기. 메인테이너 환경이 plugin SSOT 단독 source 로 동작 (`.claude/settings.json` hooks={} + `.claude/{hooks,skills,agents}/` 부재 + `.claude/rules/` 4 dev-only 잔존). Trigger count == 1 deterministic (overlay 살아있었다면 2회 inject 됐을 hook 들이 모두 1회만 관찰).
+- 검증: codex Round 3 PASS (cycle=option-c-phase-3-overlay-cleanup, diff_base=c1cb693, 2026-05-13T06:15:04Z). security review PASS (base profile, 5-check 매핑 + sanity 모두 통과). drift checker `python3 scripts/rein-check-plugin-drift.py` PASS. drift-boundary test pass=8 fail=0.
+- Phase 3 sub-step 안전 순서 (4 회 세션 재시작 — Task 3.2/3.4/3.7/3.9): plan §D6 Step 2 strict order 준수. 각 변환의 영향 격리 검증.
+- Task 3.7.A 추가: codex-ask (Round 1 Mode B) 가 짚은 hidden coupling (deleted rule 을 참조하는 stale test 7+1개) 을 plugin source 로 redirect 하여 8/8 PASS.
+- 본 cycle main 머지 = none (plan §Phase 6 Rule A — Task 6.2 다음 release 에 묶음). dev branch incremental commit 만.
+- 라우팅 피드백: feature-builder + codex-review + context7 — schema 검증 (Task 3.0) 에서 context7 가 정확한 schema 인용 제공. codex-review 3 round (NEEDS-FIX → NEEDS-FIX → PASS) 만에 통과. 평균 effort.

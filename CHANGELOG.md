@@ -2,6 +2,25 @@
 
 > **Versioning policy**: 버전 bump 는 `.claude/rules/versioning.md` 의 Rule A/B/C 를 따른다.
 
+## v1.2.0 — 2026-05-14 (Scaffold→plugin migration gap fix)
+
+v1.1.3 Option C 이후 plugin SSOT 와 사용자 ship 표면 사이에서 발견된 9 drift + 메인테이너 분석 추가 6건을 한 cycle 로 묶어 해소. `rein update` 후 사용자 세션에서 바뀌는 것:
+
+- **`/codex-review` 등 hook 의 helper 호출이 plugin-install 환경에서 안정** — 새 `resolve_helper_script` 가 `${CLAUDE_PLUGIN_ROOT}/scripts/` 우선, `${PROJECT_DIR}/scripts/` fallback. 사용자 repo 에 scaffold 가 없어도 plugin source 의 helper 가 즉시 발견됩니다 (이전엔 일부 hook 이 hardcoded `scripts/...` 를 가리켜 plugin-only 사용자에서 "BLOCKED: helper not found" 가능).
+- **Bootstrap 이 사용자 repo 에 default `.claude/security/profile.yaml` 만 생성** — 기존엔 plugin 에 security rules 가 ship 되지 않아 security-reviewer 가 사용 불가했습니다. 이제 plugin 이 `security/rules/{base,standard}.md` 를 ship 하고, bootstrap 은 profile.yaml 만 생성 (rules 본문은 plugin source 에 머묾, 사용자가 직접 override 가능).
+- **Bootstrap 완료 판정 false positive 제거** — `trail/` 디렉토리만 있고 `.rein/project.json` marker 가 없으면 이제 "bootstrap 미완료" 로 안내합니다 (이전엔 stray `trail/` 만 있어도 silent 통과 → 실수로 미완료 상태에서 작업 진행 가능).
+- **DoD 작성 후 routing 절차 자동 안내** — `## 라우팅 추천` 섹션이 없는 DoD 작성 시 PostToolUse hook 이 routing-procedure rule body 를 additionalContext 로 자동 inject. `pre-edit-dod-gate.sh` 가 stderr 로 약속하던 "PostToolUse hook 이 자동 inject" 가 실제로 동작.
+- **Skill/MCP 인벤토리 가이드 plugin 화** — SessionStart 시 plugin 의 scanner + generator 가 동작 + 가이드 경로가 rein-state-paths 로 routing. plugin install 환경에서 가이드 파일이 정상 생성/갱신.
+- **Incident automation helper 4개 plugin ship** — `incidents-to-rule` / `incidents-to-agent` skill 의 `rein-aggregate-incidents.py` / `rein-stop-emit-block.py` / `rein-mark-incident-processed.py` / `rein-mark-agent-candidate.py` 호출이 plugin path 우선. 사용자 repo 에 scaffold 없이도 incident 분석 동작.
+- **`feature-builder` / `researcher` agent description 명료화** — 폐기된 workflow 파일 reference 제거 + 작업 유형별 핵심 원칙 (fix-bug reproduce-first, add-feature 기존 패턴 우선, build-from-scratch skeleton+vertical-slice) inline.
+- **SessionStart 시 operating-sequence rule 자동 inject** — DoD→routing→implement→codex-review→security-review→fix→test→inbox→index 11-step 압축 표가 매 세션 추가 (advisory).
+- **Publish 직전 plugin.json ↔ rein.sh VERSION mismatch 자동 검출** — `rein-publish.sh` 가 두 버전 불일치 시 abort.
+
+Internal (메인테이너 dev 환경, 사용자 무관):
+- `.claude/rules/branch-strategy.md` 의 ✅ 포함 / ❌ 제외 표 정정 (Option C 후 plugin SSOT 표현).
+- 잔존 fix 9건 (F1 scanner plugin-aware refactor + F2/F4 pre-edit-dod-gate hardcoded paths + F3 test bundle doc drift + F5 codex-review wrapper layout probe + F6 plugin mirror sync + F7 bootstrap-check English message + F8 fixture G(b) BG-1 contract + F9 stale test skip).
+- 회귀 차단: `tests/scripts/run-all.sh` ALL SUITES PASSED (13 helpers sha256 parity, 17/17 bootstrap-check fixtures, 6/6 resolver unit, 7/7 session-start-bootstrap, version-parity 1.2.0).
+
 ## v1.1.3 — 2026-05-14 (Option C — plugin SSOT 단독 + dogfood model)
 
 v1.1.0~v1.1.2 동안 plugin-first 전환을 마쳤지만, plugin source (`plugins/rein-core/`) 와 메인테이너 dev overlay (`.claude/`) 가 sha256-mirror 관계로 양쪽에 같은 hooks/skills/agents 가 중복 보유되어 drift 위험 + tarball 사이즈 부담이 누적됐습니다. v1.1.3 은 **plugin SSOT 단일화 + 메인테이너 dogfood install** 전환을 마치고 그 결과를 ship 합니다. `rein update` 후 사용자 세션에서 바뀌는 것:

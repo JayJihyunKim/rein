@@ -82,40 +82,27 @@ jobs:
             git commit -m "chore: strip maintainer-only weekly-agent-evolution workflow for public"
           fi
 
-          # Strip trail/ skeleton if it ever lands on main by accident.
-          # Per the current contract (branch-strategy.md "특수 처리" 절,
-          # 2026-05-06): trail/ is created in the user's git root by
-          # plugins/rein-core/scripts/rein-bootstrap-project.py, invoked from
-          # session-start-bootstrap.sh on the first plugin-enabled SessionStart
-          # after user approval. The bootstrap script explicitly refuses to
-          # run inside .claude/plugins/**. Defense-in-depth backstop: if a
-          # future accidental dev->main checkout pulls trail/ back in, this
-          # step ensures the public mirror stays clean. NOTE: if the contract
-          # ever changes to legitimately ship trail/ on main, remove this
-          # strip step in the same change.
+          # Strip trail/ from public mirror.
+          # Per v1.2.0 cycle F10 (branch-strategy.md "특수 처리" 절,
+          # 2026-05-14 갱신): trail/ is now legitimately shipped on main as
+          # maintainer dogfood operational data (dod/inbox/index/stamps) — this
+          # resolved the bootstrap-check hook false-positive that blocked
+          # maintainer release path when main lacked trail/. However, public
+          # rein repo (general user-facing) MUST NOT expose maintainer
+          # operational records (codex-reviewed stamps, incident logs, etc.),
+          # so this strip step is retained as the public-facing boundary.
           # S30 — explicit name-level strip of blocks log files runs BEFORE the
           # trail/ subtree strip so the workflow source carries explicit
           # `git rm trail/incidents/blocks.<X>` lines that are grep-discoverable
           # (plan A.9.1/C.3.1 grep contract verifies 3 separate lines).
-          # If a future contract change ships some trail/** content on main
-          # (removing the trail/ subtree strip below), these 3 files still must
-          # never leak to public. `|| true` makes the lines a safe no-op when
-          # the files are absent.
+          # `|| true` makes the lines a safe no-op when the files are absent.
           git rm -qf trail/incidents/blocks.jsonl 2>/dev/null || true
           git rm -qf trail/incidents/blocks.log 2>/dev/null || true
           git rm -qf trail/incidents/blocks.log.legacy 2>/dev/null || true
 
-          # Strip trail/ skeleton if it ever lands on main by accident.
-          # Per the current contract (branch-strategy.md "특수 처리" 절,
-          # 2026-05-06): trail/ is created in the user's git root by
-          # plugins/rein-core/scripts/rein-bootstrap-project.py, invoked from
-          # session-start-bootstrap.sh on the first plugin-enabled SessionStart
-          # after user approval. The bootstrap script explicitly refuses to
-          # run inside .claude/plugins/**. Defense-in-depth backstop: if a
-          # future accidental dev->main checkout pulls trail/ back in, this
-          # step ensures the public mirror stays clean. NOTE: if the contract
-          # ever changes to legitimately ship trail/ on main, remove this
-          # strip step in the same change.
+          # Strip trail/ subtree (F10 boundary: maintainer-only operational
+          # data does not appear in the public mirror, even though it ships
+          # to main for the hook bootstrap-check contract).
           if [ -d trail ]; then
             git rm -rqf trail
           fi

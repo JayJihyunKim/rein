@@ -47,6 +47,8 @@ for test_file in \
   "$SCRIPT_DIR/test-rein-route-record-paths.sh" \
   "$SCRIPT_DIR/test-rein-route-record-default.sh" \
   "$SCRIPT_DIR/test-plugin-agents-bundle.sh" \
+  "$SCRIPT_DIR/test-plugin-skills-bundle.sh" \
+  "$SCRIPT_DIR/test-version-parity.sh" \
   "$SCRIPT_DIR/test-rules-prompt-bundle-drift.sh" \
   "$SCRIPT_DIR/test-plugin-drift-detection.sh" \
   "$SCRIPT_DIR/../integration/test-slash-command-namespace.sh"

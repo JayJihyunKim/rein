@@ -14,7 +14,7 @@ paths:
 
 ## 행동 강령
 
-`.claude/security/profile.yaml` 의 보안 레벨 기준으로 security-reviewer 에이전트가 코드 편집 후 자동 호출된다. 차단 패턴: hard-coded credentials, command injection, SQL injection, XSS, 안전하지 않은 deserialize. user input boundary 에서 항상 validation·escape. secret 은 환경변수 또는 secret manager 만 — 코드 hardcode 금지. Codex 리뷰 (.codex-reviewed stamp) 통과 후 security 리뷰 실행, 두 stamp 모두 있어야 test/commit 통과 (pre-bash-guard 차단).
+사용자 repo 의 보안 프로파일 기준으로 security-reviewer 에이전트가 코드 편집 후 자동 호출된다. profile.yaml 과 rules/{level}.md 는 **priority list 순서로 해석**된다 (아래 §경로 우선순위 참조). 차단 패턴: hard-coded credentials, command injection, SQL injection, XSS, 안전하지 않은 deserialize. user input boundary 에서 항상 validation·escape. secret 은 환경변수 또는 secret manager 만 — 코드 hardcode 금지. Codex 리뷰 (.codex-reviewed stamp) 통과 후 security 리뷰 실행, 두 stamp 모두 있어야 test/commit 통과 (pre-bash-guard 차단).
 
 ## 절대 금지
 - `.env` 파일 Git 커밋 금지
@@ -43,7 +43,23 @@ JWT_SECRET=
 
 ## Security Layer 연동
 
-보안 레벨별 상세 규칙은 `.claude/security/rules/` 디렉토리에서 관리한다:
-- **현재 레벨**: `.claude/security/profile.yaml`의 `security_level` 참조
-- **규칙 파일**: `.claude/security/rules/{level}.md`
-- 보안 리뷰는 `security-reviewer` 에이전트가 위 규칙을 기준으로 수행한다
+보안 프로파일과 레벨별 상세 규칙은 두 가지 위치 — 사용자 repo override 와 plugin source default — 에 분리되어 있다. `security-reviewer` 에이전트가 아래 priority list 를 순서대로 시도해 **첫 발견된 경로**를 사용한다.
+
+### 경로 우선순위
+
+#### profile.yaml (보안 레벨·사용자 레벨 선언)
+
+1. `${PROJECT_DIR}/.claude/security/profile.yaml` — 사용자 repo override (normal case). `rein-bootstrap-project.py` 가 신규 프로젝트 init 시 default 본문으로 생성한다.
+2. `${CLAUDE_PLUGIN_ROOT}/security/profile.yaml` — plugin override (rare). plugin source 가 직접 ship 한 profile (특수 배포 시나리오).
+3. bootstrap default — 위 둘 다 부재 시, `rein-bootstrap-project.py` 의 내장 default 값 (`security_level: standard`, `user_level: auto`) 으로 fallback.
+
+#### rules/{level}.md (레벨별 상세 검사 항목)
+
+1. `${PROJECT_DIR}/.claude/security/rules/{level}.md` — 사용자가 직접 작성한 override. plugin default 를 덮어쓰고자 할 때 수동 생성.
+2. `${CLAUDE_PLUGIN_ROOT}/security/rules/{level}.md` — plugin source default. `base.md` / `standard.md` 는 plugin 이 항상 ship 한다 (bootstrap 으로 user repo 에 복사되지 않음).
+
+### 적용 절차
+
+- `security-reviewer` 가 `profile.yaml` priority 1→3 순서로 시도 → 첫 발견 path 에서 `security_level` 추출
+- 추출된 `{level}` 로 `rules/{level}.md` priority 1→2 순서로 시도 → 첫 발견 path 의 본문을 검사 기준으로 사용
+- 두 priority list 는 독립적으로 평가 — profile 은 repo override 였지만 rules 는 plugin source 인 조합도 정상

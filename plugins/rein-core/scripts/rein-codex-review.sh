@@ -55,7 +55,11 @@ if [ -f "$_script_dir/../hooks/lib/select-active-dod.sh" ]; then
   PROJECT_DIR="${REIN_PROJECT_DIR_OVERRIDE:-${CLAUDE_PROJECT_DIR:-$PWD}}"
 else
   PROJECT_DIR="${REIN_PROJECT_DIR_OVERRIDE:-$(cd "$_script_dir/.." && pwd)}"
-  _select_active_dod_lib="$PROJECT_DIR/.claude/hooks/lib/select-active-dod.sh"
+  if [ -f "$PROJECT_DIR/plugins/rein-core/hooks/lib/select-active-dod.sh" ]; then
+    _select_active_dod_lib="$PROJECT_DIR/plugins/rein-core/hooks/lib/select-active-dod.sh"
+  else
+    _select_active_dod_lib="$PROJECT_DIR/.claude/hooks/lib/select-active-dod.sh"
+  fi
 fi
 
 # If invoked from outside PROJECT_DIR, still operate on PROJECT_DIR so

@@ -25,8 +25,8 @@ if [ "$RC" -ne 0 ]; then
   echo "stderr:" >&2; cat /tmp/rein-vpr-a.err >&2
   exit 1
 fi
-grep -q "^OK:" /tmp/rein-vpr-a.out || {
-  echo "FAIL (a): missing OK baseline marker on stdout" >&2
+grep -qE "(^OK:|rein-check-plugin-drift: OK)" /tmp/rein-vpr-a.out || {
+  echo "FAIL (a): missing OK baseline marker on stdout (expected legacy 'OK:' or new 'rein-check-plugin-drift: OK')" >&2
   cat /tmp/rein-vpr-a.out >&2
   exit 1
 }
@@ -51,59 +51,46 @@ done
 # operate on temporary clones via a small wrapper Python script.
 
 # For (b)(c)(d) we test the underlying check functions directly via Python.
+# Option C Phase 2 (2026-05-13): validator 6 check 가 rein-check-plugin-drift.py
+# 로 흡수됨. check 함수는 (repo_root, errors) 인자 받는 형태로 변경 — monkeypatch
+# 없이 직접 호출.
 python3 - <<'PY' || exit 1
 import sys, importlib.util, tempfile, shutil, pathlib
 
-spec = importlib.util.spec_from_file_location("validator", "scripts/rein-validate-plugin-rules.py")
+spec = importlib.util.spec_from_file_location("drift_checker", "scripts/rein-check-plugin-drift.py")
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
 # (b) missing mandate
 with tempfile.TemporaryDirectory() as td:
     tdp = pathlib.Path(td)
-    # Spoof REPO_ROOT/PLUGIN_ROOT/RULES_DIR/HOOKS_DIR by monkeypatching
-    orig_repo, orig_plugin, orig_rules, orig_hooks = m.REPO_ROOT, m.PLUGIN_ROOT, m.RULES_DIR, m.HOOKS_DIR
-    m.REPO_ROOT = tdp
-    m.PLUGIN_ROOT = tdp / "plugins" / "rein-core"
-    m.RULES_DIR = m.PLUGIN_ROOT / "rules"
-    m.HOOKS_DIR = m.PLUGIN_ROOT / "hooks"
-    m.RULES_DIR.mkdir(parents=True)
-    (m.RULES_DIR / "foo.md").write_text("# Foo\n\n## Not Mandate\nblah\n", encoding="utf-8")
+    rules_dir = tdp / "plugins" / "rein-core" / "rules"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "foo.md").write_text("# Foo\n\n## Not Mandate\nblah\n", encoding="utf-8")
     errs = []
-    m.check_action_mandate(errs)
+    m.check_action_mandate(tdp, errs)
     assert any("missing '## 행동 강령'" in e for e in errs), f"(b) expected missing-mandate error, got: {errs}"
-    m.REPO_ROOT, m.PLUGIN_ROOT, m.RULES_DIR, m.HOOKS_DIR = orig_repo, orig_plugin, orig_rules, orig_hooks
 
 # (c) mandate too large
 with tempfile.TemporaryDirectory() as td:
     tdp = pathlib.Path(td)
-    orig_repo, orig_plugin, orig_rules, orig_hooks = m.REPO_ROOT, m.PLUGIN_ROOT, m.RULES_DIR, m.HOOKS_DIR
-    m.REPO_ROOT = tdp
-    m.PLUGIN_ROOT = tdp / "plugins" / "rein-core"
-    m.RULES_DIR = m.PLUGIN_ROOT / "rules"
-    m.HOOKS_DIR = m.PLUGIN_ROOT / "hooks"
-    m.RULES_DIR.mkdir(parents=True)
+    rules_dir = tdp / "plugins" / "rein-core" / "rules"
+    rules_dir.mkdir(parents=True)
     big = "A" * 3000
-    (m.RULES_DIR / "bar.md").write_text(f"# Bar\n\n## 행동 강령\n{big}\n", encoding="utf-8")
+    (rules_dir / "bar.md").write_text(f"# Bar\n\n## 행동 강령\n{big}\n", encoding="utf-8")
     errs = []
-    m.check_action_mandate(errs)
+    m.check_action_mandate(tdp, errs)
     assert any("action mandate size" in e for e in errs), f"(c) expected size error, got: {errs}"
-    m.REPO_ROOT, m.PLUGIN_ROOT, m.RULES_DIR, m.HOOKS_DIR = orig_repo, orig_plugin, orig_rules, orig_hooks
 
 # (d) dev-only rule present
 with tempfile.TemporaryDirectory() as td:
     tdp = pathlib.Path(td)
-    orig_repo, orig_plugin, orig_rules, orig_hooks = m.REPO_ROOT, m.PLUGIN_ROOT, m.RULES_DIR, m.HOOKS_DIR
-    m.REPO_ROOT = tdp
-    m.PLUGIN_ROOT = tdp / "plugins" / "rein-core"
-    m.RULES_DIR = m.PLUGIN_ROOT / "rules"
-    m.HOOKS_DIR = m.PLUGIN_ROOT / "hooks"
-    m.RULES_DIR.mkdir(parents=True)
-    (m.RULES_DIR / "branch-strategy.md").write_text("# X\n\n## 행동 강령\nshort\n", encoding="utf-8")
+    rules_dir = tdp / "plugins" / "rein-core" / "rules"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "branch-strategy.md").write_text("# X\n\n## 행동 강령\nshort\n", encoding="utf-8")
     errs = []
-    m.check_action_mandate(errs)
+    m.check_action_mandate(tdp, errs)
     assert any("dev-only rule shipped in plugin" in e for e in errs), f"(d) expected dev-only error, got: {errs}"
-    m.REPO_ROOT, m.PLUGIN_ROOT, m.RULES_DIR, m.HOOKS_DIR = orig_repo, orig_plugin, orig_rules, orig_hooks
 
 print("test-rein-validate-plugin-rules: all synthetic scenarios PASS")
 PY
