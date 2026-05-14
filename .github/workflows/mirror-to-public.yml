@@ -100,6 +100,17 @@ jobs:
           git rm -qf trail/incidents/blocks.log 2>/dev/null || true
           git rm -qf trail/incidents/blocks.log.legacy 2>/dev/null || true
 
+          # Strip .rein/ subtree (F12 boundary, 2026-05-14): .rein/project.json
+          # is shipped on main as the BG-1 bootstrap-check marker, but the
+          # entire .rein/ directory (including project.json + cache + policy)
+          # is maintainer-only operational state. Public mirror has no use
+          # for it. plugin tarball does not include .rein/ either (it lives
+          # outside plugins/rein-core/), so this strip is the public-facing
+          # boundary mirroring F10's trail/ pattern.
+          if [ -d .rein ]; then
+            git rm -rqf .rein
+          fi
+
           # Strip trail/ subtree (F10 boundary: maintainer-only operational
           # data does not appear in the public mirror, even though it ships
           # to main for the hook bootstrap-check contract).

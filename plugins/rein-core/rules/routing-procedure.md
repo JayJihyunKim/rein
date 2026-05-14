@@ -1,6 +1,8 @@
 # 라우팅 추천 — DoD `## 라우팅 추천` 섹션 작성 절차
 
-DoD 작성 직후 `## 라우팅 추천` 섹션을 YAML 로 채우고 사용자 승인 후 `approved_by_user: true` 로 교체하라. 미승인 시 `pre-edit-dod-gate.sh` 가 Edit/Write 를 차단한다.
+## 행동 강령
+
+매 DoD 작성 직후 `## 라우팅 추천` YAML 섹션을 채우고 (agent 1 / skills ≤3 / mcps ≤2 + rationale) 사용자에게 검토 요청. 승인 시 `approved_by_user: true` 로 교체. 누락 또는 `false` 시 `pre-edit-dod-gate.sh` 가 첫 Edit/Write 차단 (exit 2).
 
 ## YAML 예시
 

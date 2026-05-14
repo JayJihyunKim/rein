@@ -1,13 +1,13 @@
 reviewer: sonnet-fallback
 timestamp: 2026-05-14T07:55:00
 cycle: 2026-05-14-plugin-mode-gap-fix
-scope: 15 Scope IDs (BS-1/2 SEC-1/2/3 RES-1/2 TST-1 VER-1 BG-1 OPSEQ-1 WF-1 RTG-1 INC-1 RTG-2) + Wave 5 잔존 fix F1-F9 (scanner refactor + pre-edit-dod-gate hardcoded paths + bootstrap-check message + fixture G(b) BG-1 contract + wrapper layout probe + plugin mirror sync + test skip) + F10 (trail/ main include + public mirror strip — docs-only)
-files_reviewed: ~50 + F10 3 doc files (branch-strategy.md doc + mirror-to-public.yml comment + inbox)
+scope: 15 Scope IDs (BS-1/2 SEC-1/2/3 RES-1/2 TST-1 VER-1 BG-1 OPSEQ-1 WF-1 RTG-1 INC-1 RTG-2) + Wave 5 잔존 fix F1-F9 (scanner refactor + pre-edit-dod-gate hardcoded paths + bootstrap-check message + fixture G(b) BG-1 contract + wrapper layout probe + plugin mirror sync + test skip) + F10 (trail/ main include + public mirror strip — docs-only) + F11 (routing-procedure.md `## 행동 강령` 추가 — publish-plugin validation fix, docs-only)
+files_reviewed: ~50 + F10 3 doc files + F11 1 doc file (routing-procedure.md)
 review_round: 1
 fallback_reason: codex_wrapper_auto_background_hang
 resolution: passed
 remaining_issues: 3 LOW advisory (LOW-1 profile downgrade audit / LOW-2 trace log newline sanitization / LOW-3 REIN_PROJECT_DIR_OVERRIDE trust model) — all advisory, base level 비차단
 prior_reviewer: codex_attempted_then_killed
 prior_max_severity: high_fixed_via_F6_F7_F8_F9
-review_evidence: general-purpose agent (sonnet) full code review FINAL_VERDICT NEEDS-FIX(HIGH 1+MEDIUM 1+LOW 2) → F6 plugin mirror sync + F7 bootstrap-check English message + F8 fixture G(b) BG-1 contract + F9 test-rules-prompt skip → ALL SUITES PASSED. user-approved sonnet-fallback stamp creation 2026-05-14. F10 (trail/ main include + public mirror strip): docs-only (branch-strategy.md doc + mirror-to-public.yml comment + inbox 추가, 코드 로직 변경 0) — skill SKILL.md stamp 수동 touch 예외 조건 (review skip 명시 승인 + docs-only) 충족, user-approved review skip 2026-05-14.
+review_evidence: general-purpose agent (sonnet) full code review FINAL_VERDICT NEEDS-FIX(HIGH 1+MEDIUM 1+LOW 2) → F6 plugin mirror sync + F7 bootstrap-check English message + F8 fixture G(b) BG-1 contract + F9 test-rules-prompt skip → ALL SUITES PASSED. user-approved sonnet-fallback stamp creation 2026-05-14. F10 (trail/ main include + public mirror strip): docs-only (branch-strategy.md doc + mirror-to-public.yml comment + inbox 추가, 코드 로직 변경 0) — skill SKILL.md stamp 수동 touch 예외 조건 (review skip 명시 승인 + docs-only) 충족, user-approved review skip 2026-05-14. F11 (routing-procedure.md `## 행동 강령` 1 섹션 추가, plugin-rules validation 통과): docs-only, user-approved review skip 2026-05-14 (v1.2.0 publish-plugin failure root cause hotfix). F12 (.rein/project.json main 포함 + public mirror strip): doc/marker only (branch-strategy.md 특수 처리 추가 + mirror-to-public.yml strip 추가 + .rein/project.json 1 marker file ship). 코드 로직 변경 0 — user-approved review skip 2026-05-14 (BG-1 신 contract main marker 충족).
 user_approved: true
