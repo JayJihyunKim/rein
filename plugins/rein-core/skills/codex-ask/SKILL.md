@@ -48,7 +48,7 @@ Second opinion 전용 — Claude 주 세션의 컨텍스트와 **독립적** 인
 
 ### 실행 모드 — Bash 도구로 호출 시 foreground 전용
 
-Bash 도구로 `codex exec` 를 호출할 때는 **foreground + TTY 등가 조건**이 반드시 성립해야 한다. 아래는 `.claude/rules/background-jobs.md` 예외 절의 codex 계열 규칙이다. 실패 시 codex 가 sandbox/auth 초기화에서 hang (증상: 네트워크 연결 0개, CPU 0, `~/.codex/sessions/` 에 세션 파일 미생성).
+Bash 도구로 `codex exec` 를 호출할 때는 **foreground + TTY 등가 조건**이 반드시 성립해야 한다. 아래는 `plugins/rein-core/rules/background-jobs.md` 예외 절의 codex 계열 규칙이다. 실패 시 codex 가 sandbox/auth 초기화에서 hang (증상: 네트워크 연결 0개, CPU 0, `~/.codex/sessions/` 에 세션 파일 미생성).
 
 - `run_in_background: false` 명시 — Bash 도구의 장기 실행 auto-background 전환을 막는다
 - timeout 상한: `low ≤120s`, `medium ≤180s`, `high ≤300s`. 600s harness limit 을 넘어가면 prompt 를 쪼갠다
@@ -144,7 +144,7 @@ Fallback 정책 비대칭 이유는 `.claude/skills/codex-review/SKILL.md` §1 M
   - `codex` 프로세스가 수 분 이상 진행 없음 + CPU 0 + 네트워크 연결 0개 → auth/sandbox 초기화 단계에서 멈춤
   - 체크: `lsof -p <pid> -i` 결과 비어있으면 API 요청조차 못 보낸 상태. `ps -o stat,%cpu,etime -p <pid>` 로 Sleep 상태 확인
   - 대응: kill 후 **foreground + stdin close + 직접 파일 출력** 형태로 재호출 (`> /tmp/out 2>&1 < /dev/null`, `run_in_background: false`)
-  - 배경: Bash 도구 auto-background 전환 시 stdin 이 unix socket 으로 붙어 codex 초기화 실패. 근거: `.claude/rules/background-jobs.md` 예외 절 + `trail/dod/dod-2026-04-22-codex-foreground-policy.md`
+  - 배경: Bash 도구 auto-background 전환 시 stdin 이 unix socket 으로 붙어 codex 초기화 실패. 근거: `plugins/rein-core/rules/background-jobs.md` 예외 절 + `trail/dod/dod-2026-04-22-codex-foreground-policy.md`
 
 ---
 

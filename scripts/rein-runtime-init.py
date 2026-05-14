@@ -12,7 +12,7 @@ expects in plugin mode:
 
 Idempotent — pre-existing files / directories are left as-is. Only the
 ``governance.json`` file is created when absent (default ``stage`` value is
-``1`` per ``.claude/rules/design-plan-coverage.md`` §3.3).
+``1`` per ``plugins/rein-core/rules/design-plan-coverage.md`` §3.3).
 
 The script must be invoked with ``CLAUDE_PLUGIN_DATA`` set; missing env var
 exits non-zero (Round 6 fail-closed contract).

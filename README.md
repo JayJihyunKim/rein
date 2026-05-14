@@ -264,7 +264,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.1.2** (2026-05-12) — plugin self-containment hotfixes (codex-review wrapper bundled lib + bootstrap-check monorepo subdir walk-up)
+Latest release: **v1.1.3** (2026-05-14) — Option C: plugin SSOT 단독 + maintainer dogfood model. Rule body inject accuracy + tarball size reduction. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

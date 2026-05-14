@@ -184,7 +184,7 @@ echo "## trail 세션 시작 컨텍스트"
 echo
 echo "> lean mode — index.md + 미해결 게이트 요약만 주입 (비권위 캐시; bulk trail off)."
 echo "> release/branch/tag/publish 류 volatile claim 은 답변 전 \`git status\` / \`git log\` / \`git tag\` / \`git ls-remote\` 로 재검증."
-echo "> 단순 질문은 answer-only 모드 — DoD/routing/review ceremony 생략 (.claude/rules/answer-only-mode.md)."
+echo "> 단순 질문은 answer-only 모드 — DoD/routing/review ceremony 생략 (\${CLAUDE_PLUGIN_ROOT}/rules/answer-only-mode.md, plugin source)."
 echo "> 추가 trail 파일은 명시 Read 로 가져온다 (inbox/daily/weekly 자동 주입 없음)."
 echo
 

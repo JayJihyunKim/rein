@@ -2,6 +2,23 @@
 
 > **Versioning policy**: 버전 bump 는 `.claude/rules/versioning.md` 의 Rule A/B/C 를 따른다.
 
+## v1.1.3 — 2026-05-14 (Option C — plugin SSOT 단독 + dogfood model)
+
+v1.1.0~v1.1.2 동안 plugin-first 전환을 마쳤지만, plugin source (`plugins/rein-core/`) 와 메인테이너 dev overlay (`.claude/`) 가 sha256-mirror 관계로 양쪽에 같은 hooks/skills/agents 가 중복 보유되어 drift 위험 + tarball 사이즈 부담이 누적됐습니다. v1.1.3 은 **plugin SSOT 단일화 + 메인테이너 dogfood install** 전환을 마치고 그 결과를 ship 합니다. `rein update` 후 사용자 세션에서 바뀌는 것:
+
+- **`design-plan-coverage` rule body 정확화** — SessionStart 시 plugin 이 inject 하는 rule 본문에 `## 행동 강령` summary + behavior-level Scope ID v2 의 acceptable/non-acceptable 예시 + Stage 1/2/3 enforcement 표가 모두 포함됩니다. 사용자 plan 작성 시 더 명확한 contract 가이드.
+- **SessionStart banner path 정확화** — banner 의 `answer-only-mode.md` reference 가 `${CLAUDE_PLUGIN_ROOT}/rules/...` 로 재작성. installed plugin cache 에서도 정확한 경로 표기 (이전엔 dev-only path 표시).
+- **Plugin tarball 사이즈 감소** — `plugins/rein-core/docs/rules/` 의 4 mirror 파일 (legacy-shipped-pending, background-jobs, design-plan-coverage, subagent-review) 폐기. install size + cache footprint 약간 감소. 사용자 hook 동작 변화 없음 (rule body inject 는 `plugins/rein-core/rules/` 가 source).
+
+영향 없음: `rein` CLI 명령 표면 / hook 차단 정책 / 사용자 ship 표면 자체 변화 없음. 본 release 는 patch — 메인테이너 환경의 큰 변경 (`.claude/{hooks,skills,agents}/` overlay 폐기 → plugin SSOT 단독) 이 사용자에게는 거의 invisible.
+
+Internal (메인테이너 dev 환경, 사용자 무관):
+- `.claude/hooks/`, `.claude/skills/`, `.claude/agents/` overlay 전체 폐기. plugin source 가 단독 SSOT. 메인테이너는 `/plugin install rein@rein` 으로 dogfood 운영.
+- `scripts/rein-check-plugin-drift.py` 가 boundary (`.claude/rules/` shared rule mirror 금지) + parity (plugin ↔ dev tree sha256 동일) + validation (mandate section + inject envelope + hooks.json schema) 3 layer 통합 도구로 재작성. `scripts/rein-validate-plugin-rules.py` 는 wrapper-only shim (backward compat).
+- `tests/scripts/test-rein-check-plugin-drift-boundary.sh` 신규 (8 test, post-cleanup invariant + isolated 7-mirror fixture). `tests/hooks/test-{background-jobs,design-plan-coverage,subagent-review,legacy-pending-heal}-registered.sh` 갱신 (hooks.json nested schema + plugin source path redirect).
+- `.claude/rules/branch-strategy.md` 의 ✅ 포함 / ❌ 제외 표를 plugin SSOT 중심으로 재작성. 9 GitHub workflow 모두 분류 (public 도달 2 + maintainer-only mirror-strip 7). `.github/workflows/plugin-drift-check.yml` 의 transitional `--skip-boundary` 제거.
+- 본 cycle 의 검증 결과 (sandbox dogfood inject byte > 0, trigger count == 1 deterministic, cache rebuild 검증 5/5 PASS) 모두 `trail/decisions/2026-05-13-option-c-sandbox-verification.md` + `trail/decisions/2026-05-14-plugin-cache-verification-evidence.md` 에 영구 보관.
+
 ## v1.1.2 — 2026-05-12 (Plugin self-containment hotfixes)
 
 v1.1.0 plugin-first 전환 이후 사용자 repo 에서 scaffold 잔재를 정리한 환경에서 발견된 plugin 자체 결함 2건 hotfix. `rein update` 후 사용자 세션에서 다음이 바뀝니다.

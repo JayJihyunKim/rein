@@ -23,14 +23,14 @@ triggers:
 
 리뷰 시작 전 아래 규칙 파일을 먼저 로드하여 각 그룹의 기준을 확인한다.
 
-### 1. 보안 (`.claude/rules/security.md` 기준)
+### 1. 보안 (`plugins/rein-core/rules/security.md` 기준)
 
 - [ ] 하드코딩된 credential (API 키, 비밀번호, 토큰) 없음
 - [ ] 모든 외부 입력(사용자 입력, 환경 인수, 파일 경로)에 검증 로직 존재
 - [ ] SQL / 쉘 / HTML 주입 공격 방어 처리 확인
 - [ ] `.env` 파일 또는 `secrets/` 디렉토리 직접 접근·커밋 없음
 
-### 2. 코드 스타일 (`.claude/rules/code-style.md` 기준)
+### 2. 코드 스타일 (`plugins/rein-core/rules/code-style.md` 기준)
 
 - [ ] 네이밍: 함수 동사형 camelCase, 상수 UPPER_SNAKE_CASE, Boolean `is/has/can/should` 접두사
 - [ ] 함수 길이 50줄 이내 (초과 시 분리 권고)
@@ -38,7 +38,7 @@ triggers:
 - [ ] 중첩 depth 3단계 이하 (early return 또는 함수 분리)
 - [ ] `any` 타입(TypeScript) / `console.log`·`print` 운영 코드 방치 없음
 
-### 3. 테스트 (`.claude/rules/testing.md` 기준)
+### 3. 테스트 (`plugins/rein-core/rules/testing.md` 기준)
 
 - [ ] 변경 범위에 해당하는 테스트가 추가 또는 수정됨
 - [ ] 경계 조건(null/undefined, 빈 값, 최대/최소값) 커버

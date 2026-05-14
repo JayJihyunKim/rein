@@ -1,0 +1,56 @@
+name: plugin-drift-check
+
+# Phase 9 Task 9.2 — SSOT drift detector for the rein-core plugin tree.
+# Updated 2026-05-13 (Option C Phase 3+4): the rein-core plugin
+# (plugins/rein-core/) is now the *single* SSOT for hooks/skills/agents/rules
+# that ship to user projects. The `.claude/` tree no longer mirrors the plugin;
+# Option C Phase 3 retired hooks/skills/agents overlay and the shared 7 rule
+# mirrors, leaving only 4 dev-only rules (branch-strategy/readme-style/
+# versioning/legacy-shipped-pending). Plugin docs/rules mirror also retired
+# (Phase 4).
+#
+# The drift checker now enforces 3 layers in one tool:
+#   - boundary: no `.claude/rules/<shared>.md` may exist (Phase 3 invariant)
+#   - parity: `plugins/rein-core/{hooks,skills,agents,rules}/` matches dev tree
+#     where applicable
+#   - validation: plugin rules pass mandate-section + inject-envelope + hooks.json
+#     schema checks
+#
+# This workflow runs scripts/rein-check-plugin-drift.py only when manually
+# dispatched. A non-zero exit fails the manual check.
+#
+# Scope: rein-dev maintainer surface. mirror-to-public.yml strips this file
+# before publish.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift-check:
+    if: github.repository == 'JayJihyunKim/rein-dev'
+    name: SSOT drift check (rein-core plugin ↔ .claude/)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Phase 2 (2026-05-13): drift checker 가 boundary + parity + validation
+      # 세 layer 통합. Phase 3 완료 (overlay 정리, 2026-05-13) 후 `.claude/rules/`
+      # 에 dev-only 4 파일만 잔존 → boundary check unconditional 정상 작동.
+      - name: Run drift checker (boundary + parity + validation)
+        run: python3 scripts/rein-check-plugin-drift.py
+
+      - name: Run drift detector unit test
+        run: bash tests/scripts/test-plugin-drift-detection.sh
+
+      - name: Run boundary + validator-absorption unit test (Phase 2)
+        run: bash tests/scripts/test-rein-check-plugin-drift-boundary.sh

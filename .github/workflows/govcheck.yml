@@ -1,0 +1,32 @@
+name: govcheck
+
+# rein-dev 메인테이너 전용 governance plumbing self-test.
+# `rein init` 로 설치되는 사용자 프로젝트에는 이 파일이 포함되지 않는다
+# (mirror-to-public.yml 의 strip 리스트에 명시).
+# 수동 실행 전용. 내부 governance 참조 검사는 자동 CI 에서 실행하지 않는다.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  govcheck:
+    # 외부 포크/복제 저장소에서는 돌지 않도록 방어.
+    if: github.repository == 'JayJihyunKim/rein-dev'
+    name: rein-govcheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Show toolchain versions
+        run: |
+          bash --version
+          python3 --version
+
+      - name: Run rein-govcheck
+        run: python3 scripts/rein-govcheck.py

@@ -1,0 +1,83 @@
+name: publish-plugin
+
+# Triggered on tag push (v2.0.0, v2.0.1, ...) — runs `rein-publish.sh` to
+# build deterministic plugin tarballs, update the self-hosted
+# `marketplace/marketplace.json`, AND POST each tarball to the Anthropic
+# public marketplace.
+#
+# Scope IDs:
+#   - rein-publish-uploads-plugin-tarballs-to-marketplace-on-tag-push
+#   - marketplace-publishes-to-anthropic-and-self-hosted-json-simultaneously-on-release
+#
+# Required CI configuration (Round 5 fix Finding 6 — NO default URL hardcoded
+# anywhere; both must be present or the publish step fails fast):
+#   - repository variable ANTHROPIC_MARKETPLACE_API: HTTPS base URL of the
+#     Anthropic public marketplace.
+#   - repository secret  ANTHROPIC_TOKEN: bearer token used in the
+#     `Authorization: Bearer ...` header during POST.
+#
+# Persistence model:
+#   - Tarballs and the updated manifest are uploaded as a workflow
+#     artifact named `marketplace-${tag}` so the build is auditable.
+#   - This workflow does NOT auto-commit/push the manifest back to the
+#     repository: tag-push events arrive with HEAD attached to the tag,
+#     not to a branch ref, so `git push HEAD:<branch>` would either be
+#     wrong or push the tag commit onto main without review. Repository
+#     publishing (committing the updated marketplace.json onto main) is
+#     a deliberate human/PR step downstream of this workflow.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compute version from tag
+        id: version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          case "$version" in
+            ''|*[!A-Za-z0-9._+-]*)
+              echo "error: invalid tag/version: $tag" >&2
+              exit 2
+              ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Publish (self-hosted + Anthropic marketplace)
+        env:
+          ANTHROPIC_MARKETPLACE_API: ${{ vars.ANTHROPIC_MARKETPLACE_API }}
+          ANTHROPIC_TOKEN: ${{ secrets.ANTHROPIC_TOKEN }}
+        run: |
+          set -euo pipefail
+          bash scripts/rein-publish.sh "${{ steps.version.outputs.version }}"
+
+      - name: Upload marketplace artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-${{ github.ref_name }}
+          path: |
+            marketplace/marketplace.json
+            marketplace/plugins/**
+          if-no-files-found: warn
+          retention-days: 90

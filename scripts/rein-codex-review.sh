@@ -301,7 +301,7 @@ _resolve_relative_path() {
 
 # 4d. Plan ref from active DoD `## 범위 연결` section.
 #
-# Single-plan contract (per .claude/rules/design-plan-coverage.md). Phase 2
+# Single-plan contract (per plugins/rein-core/rules/design-plan-coverage.md). Phase 2
 # (integration DoD) will lift this; until then we return the first plan_ref
 # only and use `_count_dod_plan_refs` + gap header to flag duplicates.
 #

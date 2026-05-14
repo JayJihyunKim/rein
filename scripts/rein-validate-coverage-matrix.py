@@ -97,7 +97,7 @@ def err(msg: str) -> None:
 # ---------- Scope-ID version parser (Plan B Task 4.1) ------------------
 #
 # design 의 frontmatter 상단에서 ``scope-id-version`` 메타를 읽는다.
-# rule: .claude/rules/design-plan-coverage.md §1.3
+# rule: plugins/rein-core/rules/design-plan-coverage.md §1.3
 #   - frontmatter 없음 → "v1" (legacy 호환)
 #   - scope-id-version: v1 → "v1"
 #   - scope-id-version: v2 → "v2"
