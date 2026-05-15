@@ -2092,3 +2092,198 @@ approved_by_user: true
   - Phase 4 Step 4.6 의 public publish secrets 부재 검증 결과에 따라 case A/B 분기.
   - Task 3.2 의 release-cleanup helper 가 v1.0.0 만 `--cleanup-tag` 제외, 19 pre-v1 은 포함.
 
+---
+## dod-2026-05-12-bootstrap-gate.md (mtime: 2026-05-14, archived: 2026-05-15)
+# DoD — Plugin bootstrap gate (v1.1.1 hotfix)
+
+- 날짜: 2026-05-12
+- 유형: feat (brownfield, patch release v1.1.1)
+- 타깃 release: v1.1.1
+- spec ref (예정): docs/specs/2026-05-12-bootstrap-gate.md
+- plan ref (예정): docs/plans/2026-05-12-bootstrap-gate.md
+- 선행 분석:
+  - codex-ask 1차 (trail bootstrap 진단): /tmp/codex-ask-trail-out.log
+  - codex-ask 2차 (방향 검증): /tmp/codex-ask-bootstrap-direction.out
+- 선행 release: v1.1.0 (main `9360650`, tag `v1.1.0`)
+
+## 목표 한 줄
+
+rein plugin 사용자가 자기 프로젝트 (git or non-git 무관) 에서 새 세션 시작 또는 `/reload-plugins` 실행 후, `trail/` 폴더가 없으면 첫 source 편집·Bash 도구 시도 직전에 차단되고 한 줄짜리 bootstrap 명령 안내를 받도록 한다. 두 trigger 경로 모두 동일한 helper·메시지·명령으로 수렴.
+
+## 범위 한계 (이번 DoD — 확장)
+
+- 본 DoD 는 **spec + plan + 구현 + review + release** 전 단계 cover.
+- spec 단계 완료 (Round 3 PASS, stamp `51eb8141e61f7dfe.reviewed`).
+- plan 단계 완료 (Round 4 user-approved, stamp `f3a299ca44af7698.reviewed`).
+- 구현 단계 — 11 task / 4 wave 병렬 dispatch (file partitioning conflict-free):
+  - Wave 1: Task 1.1 helper (단독)
+  - Wave 2 (병렬 4): Task 1.2 / 1.3 / 1.5 / 2.3
+  - Wave 3 (병렬 3): Task 1.4 / 2.1 / 2.2
+  - Wave 4 (병렬 5): Task 3.1 / 3.2 / 3.3 / 3.4 / 3.5
+- review 단계: codex-review (Mode A) + security-reviewer
+- release: dev commit + main 선별 체크아웃 + `v1.1.1` tag + mirror-to-public
+
+## 라우팅 추천
+
+```yaml
+agent: plan-writer       # plan 단계 — design 읽어 coverage matrix + covers 메타데이터 plan 작성 + validator + codex-review + plan stamp 자동
+skills:
+  - codex-review         # spec 단계에서 spec-review subflow 호출 (이미 완료, Round 3 PASS)
+mcps: []
+rationale: >
+  spec 단계는 plain markdown 작성 + codex spec-review (이미 완료). plan 단계는
+  plan-writer agent 가 자동 흐름 — spec 의 Scope Items 를 plan work unit 에 1:1
+  매핑 + coverage matrix validator + codex spec-review subflow + plan stamp 자동
+  생성. self-fix loop 없음 — NEEDS-FIX 시 사용자 핸드오프.
+approved_by_user: true
+```
+
+## Task 분할 (spec + plan)
+
+**Spec 단계 (완료)**:
+1. ✅ spec markdown 작성 — `docs/specs/2026-05-12-bootstrap-gate.md` (19 Scope Items)
+2. ✅ codex-review spec-review subflow 3 rounds (R1 NEEDS-FIX → fix → R2 NEEDS-FIX → fix → R3 PASS)
+3. ✅ spec stamp 생성 — `trail/dod/.spec-reviews/51eb8141e61f7dfe.reviewed`
+
+**Plan 단계**:
+4. plan-writer agent dispatch — spec ref 전달, plan target `docs/plans/2026-05-12-bootstrap-gate.md`
+5. agent 가 자동 수행:
+   - design 의 Scope Items 읽기 → plan 의 `## Design 범위 커버리지 매트릭스` + 각 work unit `covers:` 메타데이터 생성
+   - Phase 분할 (spec §"Phase 분할" 참고 — Phase 1 helper+차단, Phase 2 advisory+non-git, Phase 3 test+README)
+   - `python3 scripts/rein-validate-coverage-matrix.py plan ...` PASS 확인
+   - codex spec-review subflow 호출 (`[NON_INTERACTIVE] spec review for plan: docs/plans/...`)
+   - PASS 시 `bash scripts/rein-mark-spec-reviewed.sh <plan-path> codex` 로 plan stamp 자동 생성
+   - NEEDS-FIX/REJECT 시 사용자 핸드오프 (self-fix loop 없음)
+6. plan stamp 생성 확인 후 inbox 기록 + index 갱신
+
+## 핵심 scope 후보 (spec 에서 확정)
+
+codex-ask 2차 결과 반영:
+- A. trail/ 부재 시 PreToolUse(Edit|Write|MultiEdit) 차단 + 안내 stderr
+- B. trail/ 부재 시 PreToolUse(Bash) 도 동일 차단 (source-writing Bash 우회 cover)
+- C. trail/ 부재 시 UserPromptSubmit 가 모델에게 advisory inject (read-only session cover)
+- D. 세 hook 가 동일 helper `bootstrap-check.sh` 사용 (DRY 메시지·명령)
+- E. project dir resolution = stdin.cwd → git root → PWD (env var 의존 금지) — 기존 `project-dir.sh` 재사용
+- F. helper API contract: stdout = 안내 텍스트, exit 0 = trail 존재 (no-op), exit 10 = bootstrap 필요, exit 11 = unsafe/refused
+- G. hooks.json Edit|Write|MultiEdit matcher group 에서 bootstrap gate 가 첫 번째 (trail-rotate 보다 앞)
+- H. `.rein/policy/hooks.yaml` 에서 bootstrap-gate disable 가능 (opt-out)
+- I. helper 메시지에 "사용자에게 즉시 surface" instruction 포함 (모델 surface 확률 강화)
+- J. project root 결정 — monorepo subdir launch 기본값 = git root (override env / option 은 v1.1.2+ defer)
+
+## 위험 / 회귀 영역
+
+1. **trail-rotate 순서 변경**: bootstrap gate 가 Edit matcher group 첫 번째로 가면, 기존 hook 순서에 의존하는 시나리오가 깨질 수 있음. test-pre-edit-dod-gate.sh / test-post-edit-dispatcher.sh 회귀 필수.
+2. **Bash 도구 차단의 부작용**: PreToolUse(Bash) 의 추가 차단 hook 가 기존 `pre-bash-guard.sh` 의 stamp 체크와 충돌 가능. 우선순위 + 누적 차단 시나리오 검증.
+3. **opt-out 의 의미**: `.rein/policy/hooks.yaml` 에서 bootstrap-gate disable 시 사용자 책임으로 trail/ 미생성 상태에서 작업 가능 — 의도적 동작이지만 다른 hook (예: stop-session-gate) 가 trail/ 부재로 오작동 가능.
+4. **`/reload-plugins` lifecycle**: spec 상 SessionStart 재실행 안 됨 가정 — 검증 못 함 (codex-ask 의 UNVERIFIED). 실제 spec 미확정 동작에 의존하지 말고 PreToolUse hard gate 만 보장 contract.
+5. **stderr surface 보장**: Claude Code UI 의 stderr 전체 surface 는 spec 부재. contract = "차단 + 모델이 메시지 받음" 까지만. 사용자 surface 는 best-effort.
+
+## 검증 계획 (spec 단계)
+
+- **Scope Items v2 contract**: 각 ID 가 entity + direction/threshold + scenario 3요소 포함 (design-plan-coverage.md §1.2)
+- **coverage matrix validator**: spec subcommand 부재 (`scripts/rein-validate-coverage-matrix.py` 는 plan/dod 만 지원). 본 cycle 에서는 spec 의 내적 일관성을 codex spec-review subflow 가 검증 — 별도 spec validator 없음. plan 단계에서 plan matrix 가 본 spec 의 Scope Items 와 정합성 검증.
+- **codex-review spec-review subflow**: `[NON_INTERACTIVE] spec review for design: docs/specs/2026-05-12-bootstrap-gate.md`
+- **PASS 시 stamp**: `trail/dod/.spec-reviews/<hash>.reviewed`
+
+## 완료 기준 (본 DoD)
+
+- [ ] `docs/specs/2026-05-12-bootstrap-gate.md` 작성
+- [ ] coverage matrix validator exit 0
+- [ ] codex spec-review PASS verdict + spec stamp 생성
+- [ ] `trail/inbox/2026-05-12-bootstrap-gate-spec.md` 작성
+- [ ] `trail/index.md` 갱신 — 다음 진입점 = "bootstrap gate plan 작성 + 구현 (v1.1.1)"
+
+---
+## dod-2026-05-12-plugin-prompt-level-operating-model.md (mtime: 2026-05-14, archived: 2026-05-15)
+# DoD — Plugin prompt-level operating model (v1.1.0)
+
+- 날짜: 2026-05-12
+- 유형: feat (brownfield, minor release)
+- 타깃 release: v1.1.0
+- spec ref: docs/specs/2026-05-12-plugin-prompt-level-operating-model.md
+- plan ref: docs/plans/2026-05-12-plugin-prompt-level-operating-model.md
+- brainstorm ref: docs/brainstorms/2026-05-12-plugin-prompt-level-operating-model.md
+- spec stamp: trail/dod/.spec-reviews/595f862cd4d9eb96.reviewed (user-approved)
+- plan stamp: trail/dod/.spec-reviews/d4ffff1038bbd3ed.reviewed (user-approved)
+- approved_by_user: true
+
+## 목표 한 줄
+
+rein plugin v1.0.4 에 7 user-facing rule 의 prompt-level 책임을 6 mode delivery taxonomy + action mandate + overflow handoff 패턴으로 적시 전달하고, broken ref 5건을 inline 화하며, publish-time 형식 검사 + Claude Code minimum version 강제를 도입한다.
+
+## 범위 연결
+
+plan ref: docs/plans/2026-05-12-plugin-prompt-level-operating-model.md
+work unit: Phase 1 ~ Phase 3 전체 (16 tasks)
+covers: [plugin-bundled-rules-relocated-from-skills-rules-prompt-to-plugins-rein-core-rules-dir, each-plugin-shipped-rule-has-action-mandate-section-under-2kb-at-start-of-body, design-plan-coverage-body-size-under-10kb-after-stage-3-3-deletion-and-example-diet, dev-only-rules-excluded-from-plugin-tarball-via-branch-strategy-exclusion-list, session-start-rules-hook-injects-action-mandate-plus-body-for-code-style-security-testing-on-session-begin, user-prompt-submit-hook-injects-answer-only-mode-action-mandate-plus-body-every-user-turn, pre-tool-use-bash-hook-emits-background-jobs-action-mandate-plus-body-as-advisory-additional-context-after-bash-tool-selection-for-next-reasoning-step, pre-tool-use-agent-hook-emits-subagent-review-action-mandate-plus-body-as-advisory-additional-context-after-agent-tool-selection-for-next-reasoning-step, post-tool-use-injects-design-plan-coverage-action-mandate-plus-body-when-edit-write-targets-docs-specs-or-docs-plans-or-trail-dod-dod, post-edit-dispatcher-aggregates-all-active-sub-hook-stdout-into-single-json-envelope-preserving-each-stderr-and-propagating-exit-2-from-any-sub-hook, plugin-rule-body-exceeding-10000-chars-passes-through-as-claude-code-overflow-file-not-truncated-by-rein-hooks, pre-edit-dod-gate-stderr-lines-166-and-204-and-379-and-447-replace-orchestrator-md-references-with-inline-routing-procedure-text, post-write-dod-routing-check-stderr-line-77-replaces-orchestrator-md-reference-with-inline-routing-procedure-text, rein-publish-script-rejects-plugin-tarball-when-any-rule-missing-action-mandate-or-action-mandate-exceeds-2048-chars-or-hook-output-invalid-json]
+
+## Task 분할 (plan 의존성 순서)
+
+### Phase 1 — Rule catalog + action mandate (Task 1.1 → 1.2 → 1.3 → 1.4 → 1.5)
+- Task 1.1: `skills/rules-prompt/` → `rules/` 마이그레이션 + `session-start-rules.sh` RULES_DIR 갱신
+- Task 1.2: code-style / security / testing 에 `## 행동 강령` 절 추가 (≤ 2KB)
+- Task 1.3: answer-only-mode / subagent-review / background-jobs 신규 plugin 복사 + 행동 강령 절 추가
+- Task 1.4: design-plan-coverage 다이어트 (§3.3 삭제 + §1.4 예시 6→2 + §1.3 압축) → < 10KB + 행동 강령 절
+- Task 1.5: dev-only 4 rule (branch-strategy/readme-style/versioning/legacy-shipped-pending) plugin 미포함 확인
+
+### Phase 2 — Hook lifecycle (Task 2.0 → 2.1/2.2/2.3/2.4 → 2.5 → 2.6 → 2.7)
+- Task 2.0: `hooks/lib/rule-inject.sh` helper (override probe + body 반환) — 모든 신규 inject hook 의 dependency
+- Task 2.1: `user-prompt-submit-rules.sh` 신설 (turn-brief / answer-only-mode)
+- Task 2.2: `pre-tool-use-agent-rules.sh` 신설 (tool-brief / subagent-review, Agent matcher)
+- Task 2.3: `pre-tool-use-bash-rules.sh` 신설 (tool-brief / background-jobs, 기존 pre-bash-guard 와 분리)
+- Task 2.4: `post-write-design-plan-coverage-rule.sh` 신설 (event-brief / docs/specs|plans|trail/dod 매치) + dispatcher sub-hook 등록
+- Task 2.5: `hooks.json` final manifest (UserPromptSubmit slot + Agent matcher + Bash matcher 추가)
+- Task 2.6: `post-edit-dispatcher.sh` aggregator refactor + `hooks/lib/aggregator.sh` (단일 JSON envelope + exit 2 propagation)
+- Task 2.7: overflow handoff 정책 (no truncation + size diagnostic to stderr) + `docs/overflow-handoff.md`
+
+### Phase 3 — Broken refs + CI (Task 3.1/3.2 병렬 가능, 3.3 별도)
+- Task 3.1: `pre-edit-dod-gate.sh` line 166/204/379/447 orchestrator.md ref → inline 절차 텍스트
+- Task 3.2: `post-write-dod-routing-check.sh` line 77 orchestrator.md ref → inline 절차 텍스트
+- Task 3.3: `scripts/rein-validate-plugin-rules.py` + `scripts/rein-publish.sh` pre-publish 호출 (행동 강령 절 / 2KB / JSON envelope / dev-only 부재 검사)
+
+## 라우팅 추천
+
+```yaml
+agent: feature-builder
+skills:
+  - superpowers:executing-plans     # 17 task plan 실행 discipline (review checkpoint 포함)
+  - superpowers:test-driven-development  # 각 task 의 test 먼저 작성 패턴 — plan 의 모든 task 가 "failing test → impl → green" 구조
+  - codex-review                    # 구현 완료 후 통합 코드 리뷰 stamp 생성
+mcps: []                            # 외부 service 의존 없음 — 모두 local file/hook/script
+rationale: >
+  brownfield plugin 확장. plan 이 task 단위 TDD 구조 (test 먼저, impl, green) 로 명시되어 있고
+  17 task 의 의존성이 명확해서 executing-plans + TDD 조합이 적합. codex-review 는 11단계 시퀀스
+  필수 게이트. security-reviewer 는 codex-review 완료 후 자동 호출되므로 별도 명시 안 함.
+  Explore agent 는 Plan/Spec 이 이미 파일 경로/라인 명시해서 불필요.
+approved_by_user: true
+```
+
+## 위험 / 회귀 영역
+
+1. **rules-prompt → rules/ 마이그레이션 (Task 1.1)** — `session-start-rules.sh` 의 RULES_DIR 갱신과 파일 이동이 atomic 해야 함. plan §"Migration Order" 의 4단계 (생성 → 갱신 → 테스트 → 옛 위치 삭제) 강제.
+2. **dispatcher aggregator (Task 2.6)** — 기존 6 sub-hook 의 stderr/exit 2 의미 보존 필수. `post-edit-plan-coverage.sh` 의 exit 2 propagation 회귀 테스트 필수 (plan Task 2.6 Step 5).
+3. **PreToolUse(Bash) 2 hook 공존 (Task 2.3)** — 기존 `pre-bash-guard.sh` 의 차단 동작 (codex stamp 부재 시 exit 2) 이 신규 inject hook 으로 인해 깨지지 않음. plan Task 2.3 Step 6 확인.
+4. **PostToolUse hook input schema (Task 2.4)** — `tool_input.file_path` primary + `tool_response.filePath` / `tool_result.file_path` fallback 셋 다 fixture 로 검증. MultiEdit 동작은 Claude Code docs 미명시 — fixture 결과로 확정.
+5. **overflow handoff 가정 (Task 2.7)** — Claude Code 의 10,000 chars cap + overflow-file 메커니즘은 외부 의존. unit test 는 "rein 이 truncate 안 함" 만 검증, end-to-end 는 integration test 로 분리.
+
+## 검증 계획
+
+- **Unit tests** — Phase 1: action mandate 절 존재/크기, design-plan-coverage size, dev-only 부재. Phase 2: rule-inject helper, 4 신규 hook envelope JSON, aggregator concat/exit 2, overflow no-truncation. Phase 3: orchestrator.md ref 부재, publish-time validation.
+- **Integration tests** — MultiEdit hook input schema (Task 2.4), shell-stamp 가 PostToolUse 미 trigger (Task 2.4 deferred 근거), overflow end-to-end (Task 2.7).
+- **Regression** — `post-edit-plan-coverage.sh` exit 2 propagation (Task 2.6), `pre-bash-guard.sh` 차단 시나리오 (Task 2.3).
+- **Pre-publish dry-run** — Task 3.3 의 `rein-validate-plugin-rules.py` 가 모든 게이트 통과 확인.
+- **`/codex-review`** — Phase 1+2+3 전체 diff 대상 통합 리뷰 (stamp 생성).
+- **`security-reviewer`** — hook envelope / publish-time script / inline 절차 텍스트의 injection vector 점검.
+
+## 완료 기준
+
+- [ ] 16 task 모두 완료 + 각 task 의 test PASS
+- [ ] `python3 scripts/rein-validate-plugin-rules.py` exit 0
+- [ ] `scripts/rein-validate-coverage-matrix.py plan docs/plans/2026-05-12-plugin-prompt-level-operating-model.md` 통과
+- [ ] `/codex-review` PASS → `trail/dod/.codex-reviewed` stamp
+- [ ] `security-reviewer` PASS → `trail/dod/.security-reviewed` stamp
+- [ ] `trail/inbox/2026-05-12-plugin-prompt-level-operating-model-impl.md` 작성
+- [ ] `trail/index.md` 갱신 (다음 진입점 = v1.1.0 main 머지)
+- [ ] CHANGELOG.md 항목 추가 (user-facing 효과 — 행동 강령 적시 inject, broken ref 해소)
+- [ ] main 머지 + `v1.1.0` tag 는 별도 release task (본 DoD 외부)
+

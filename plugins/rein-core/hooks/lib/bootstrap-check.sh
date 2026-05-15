@@ -296,13 +296,19 @@ bootstrap_check() {
 
   # ---- Guidance message (exit 10) ---------------------------------------
   # Byte-exact bilingual template, trailing newline preserved.
+  # BG-E (2026-05-15): expand bootstrap_script to a literal absolute path so
+  # users can copy-paste the Run: line directly. Previously the heredoc
+  # emitted `\${CLAUDE_PLUGIN_ROOT}/scripts/...` literally, which expanded to
+  # an empty prefix in user shells and produced an unrecoverable deadlock.
+  local plugin_root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+  local bootstrap_script="${plugin_root}/scripts/rein-bootstrap-project.py"
   local guidance
   guidance=$(cat <<EOF
 ERROR: rein plugin의 trail/ 디렉토리가 없거나 .rein/project.json marker가 없습니다 — bootstrap 미완료.
 ERROR: rein plugin trail/ directory missing or .rein/project.json marker absent — bootstrap not initialized.
 
-실행: python3 "\${CLAUDE_PLUGIN_ROOT}/scripts/rein-bootstrap-project.py" --project-dir "${resolved_real}"
-Run: python3 "\${CLAUDE_PLUGIN_ROOT}/scripts/rein-bootstrap-project.py" --project-dir "${resolved_real}"
+실행: python3 "${bootstrap_script}" --project-dir "${resolved_real}"
+Run: python3 "${bootstrap_script}" --project-dir "${resolved_real}"
 
 (Claude: surface this message to the user immediately before doing anything else.)
 EOF

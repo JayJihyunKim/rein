@@ -2,6 +2,26 @@
 
 > **Versioning policy**: 버전 bump 는 `.claude/rules/versioning.md` 의 Rule A/B/C 를 따른다.
 
+## v1.3.0 — 2026-05-15 (Bootstrap gate deadlock fix + auto-bootstrap)
+
+v1.2.0 release 후 다른 프로젝트 fresh install 환경에서 SessionStart 의 "bootstrap 미완료" 안내 명령이 Bash gate 자체에 차단되어 회복 불가능한 deadlock 이 보고됐습니다. `${CLAUDE_PLUGIN_ROOT}` 가 사용자 shell 에서 expand 안 되어 안내 명령이 실패하고, Stop hook 이 무한 반복되어 세션 진행 불가였습니다. `rein update` 후 사용자 세션에서 바뀌는 것:
+
+- **세션 시작 시 자동 bootstrap** — git repo + safe path 인 경우 SessionStart hook 이 자동으로 `.rein/project.json` + `trail/index.md` + `.gitignore` 를 생성합니다. 사용자는 별도 명령 실행 없이 첫 세션부터 작업 시작 가능. 완료 시 한 줄 알림 inject ("rein: bootstrap completed automatically — created trail/ and .rein/project.json in <path> (version 1.3.0)").
+- **Degraded mode 도입** — git binary 미설치, non-git directory, `REIN_NO_AUTO_BOOTSTRAP=1` opt-out, bootstrap 안전 거부 시 rein governance gate 가 자동으로 통과 모드로 전환됩니다. Claude Code 자체는 평소대로 동작 + 상황별 1줄 안내 (git 미설치 시 macOS/Debian/Fedora/Arch/Windows 별 설치 명령 안내 포함). marker: `.claude/cache/.rein-session-degraded`. 사용자가 직접 bootstrap 한 뒤 다음 세션에서는 marker 자동 정리.
+- **Bash gate self-block 해소** — bootstrap 미완료 상태에서도 `python3 .../rein-bootstrap-project.py --project-dir ...` 명령이 통과합니다 (allow-list 추가). 어제 deadlock 의 회복 경로 확보.
+- **Trail edit gate path-scoped 화** — 기존엔 bootstrap 미완료 시 모든 Edit/Write 가 차단됐지만, 이제 `trail/` 외 파일 편집은 통과합니다 (`scripts/foo.py` 같은 일반 파일은 봉쇄되지 않음).
+- **Stop hook 무한 루프 해소** — bootstrap 미완료 또는 degraded 모드에서 Stop hook 의 incident gate 가 즉시 통과합니다. fresh install 후 Stop hook 봉쇄 가능성 제거.
+- **Bootstrap 안내 메시지 portable** — guidance 가 `${CLAUDE_PLUGIN_ROOT}` literal 대신 expanded 절대 경로로 표시됩니다. 사용자가 메시지를 복사해 shell 에 그대로 붙여넣어도 동작.
+- **`.rein/project.json` 의 version 이 plugin.json 과 자동 동기화** — bootstrap helper 가 plugin manifest 의 version 을 동적으로 읽습니다. 이전엔 default `"1.0.0"` 으로 작성되어 stale 가능성 (v1.2.0 install 도 1.0.0 marker 작성).
+- **`incidents-to-rule` / `incidents-to-agent` skill 의 명령 예시 portable resolver 사용** — `${CLAUDE_PLUGIN_ROOT}` 노출 대신 `claude plugin path rein-core` 또는 `$HOME/.claude/plugins/marketplaces/rein/...` fallback. 사용자가 skill instruction 을 그대로 실행해도 정상 동작.
+
+Internal (메인테이너 dev 환경, 사용자 무관):
+- 신규 helper `plugins/rein-core/hooks/lib/degraded-check.sh` — degraded marker lifecycle 관리 (`rein_is_degraded` / `rein_write_degraded` / `rein_clear_degraded` 3 함수).
+- BG-C 의 degraded marker lookup 이 stdin.cwd git-root walkup 수행 — monorepo subdir 에서도 marker 정확히 인식.
+- `tests/hooks/lib/test-harness.sh` 가 Option C Phase 3 후 plugin path (`plugins/rein-core/hooks/`) fallback 지원.
+- 신규 gate fixtures + BG-1 contract (trail/ + `.rein/project.json` 둘 다 require) 와 test 일관성 확보. 총 48/48 fixtures PASS.
+- 통합 codex review round 2 PASS (round 1 NEEDS-FIX → fix → round 2 PASS) + security review PASS.
+
 ## v1.2.0 — 2026-05-14 (Scaffold→plugin migration gap fix)
 
 v1.1.3 Option C 이후 plugin SSOT 와 사용자 ship 표면 사이에서 발견된 9 drift + 메인테이너 분석 추가 6건을 한 cycle 로 묶어 해소. `rein update` 후 사용자 세션에서 바뀌는 것:

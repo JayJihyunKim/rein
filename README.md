@@ -264,7 +264,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.1.3** (2026-05-14) — Option C: plugin SSOT 단독 + maintainer dogfood model. Rule body inject accuracy + tarball size reduction. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.3.0** (2026-05-15) — Bootstrap gate deadlock fix + auto-bootstrap on first session (git repo + safe path) + degraded mode for non-git / git-missing environments. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

@@ -58,6 +58,91 @@ if [ ! -f "$HELPER" ]; then
   exit 0
 fi
 
+# ---------------------------------------------------------------------------
+# BG-C: capture stdin once, then route on (a) degraded marker and
+# (b) target file path scope before invoking the bootstrap helper.
+# ---------------------------------------------------------------------------
+# The helper itself reads stdin to discover the project dir hint
+# (`stdin.cwd`), so we must buffer the payload here and replay it via
+# process substitution to the helper invocation below. Without this, the
+# helper would see an empty stdin once we have already consumed it for
+# file_path extraction.
+INPUT=""
+if [ ! -t 0 ]; then
+  INPUT=$(cat || true)
+fi
+
+# Resolve project_dir hint for the degraded-marker probe.
+#
+# HIGH-2 fix: SessionStart writes the marker at <git_root>/.claude/cache/,
+# but in monorepo workflows the user's cwd is often a subdir like
+# `apps/web/`. Using raw cwd here would miss the marker and force the gate
+# into block mode for the rest of the session. Mirror bootstrap-check.sh's
+# resolution: stdin.cwd (envelope) → git-root walkup (when inside a git
+# repo) → stdin.cwd verbatim (non-git) → PWD git walkup → PWD. The probe
+# itself remains a single -f file check, so cost is unchanged.
+EXTRACT_JSON="${CLAUDE_PLUGIN_ROOT}/hooks/lib/extract-hook-json.py"
+_pe_resolve_marker_root() {
+  # Print one line: the directory in which `.claude/cache/.rein-session-degraded`
+  # should be looked up. Mirrors bootstrap-check.sh's source-order so the
+  # marker reader stays aligned with the marker writer in
+  # session-start-bootstrap.sh.
+  local stdin_cwd=""
+  if [ -n "$INPUT" ] && [ -f "$EXTRACT_JSON" ] && command -v python3 >/dev/null 2>&1; then
+    stdin_cwd=$(printf '%s' "$INPUT" | python3 "$EXTRACT_JSON" --field cwd --default '' 2>/dev/null || true)
+  fi
+  local candidate=""
+  if [ -n "$stdin_cwd" ] && [ -d "$stdin_cwd" ]; then
+    # stdin.cwd present → try git-root walkup. Sanitize inherited git env
+    # so discovery is anchored strictly to stdin.cwd, matching
+    # bootstrap-check.sh's stdin.cwd resolution branch.
+    candidate=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+      git -C "$stdin_cwd" rev-parse --show-toplevel 2>/dev/null) || candidate=""
+    if [ -n "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+    # non-git stdin.cwd → use verbatim (matches helper's source=stdin branch)
+    printf '%s\n' "$stdin_cwd"
+    return 0
+  fi
+  # No stdin.cwd → fall back to git-root walkup from PWD, then PWD raw.
+  candidate=$(git rev-parse --show-toplevel 2>/dev/null) || candidate=""
+  if [ -n "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  printf '%s\n' "${PWD:-.}"
+}
+PROJECT_DIR_HINT="$(_pe_resolve_marker_root)"
+
+# (1) Degraded pass-through — SessionStart marked rein inactive for this
+# session (git missing, non-git cwd, user opt-out, bootstrap refused).
+# Pass through silently so Claude Code remains usable.
+DEGRADED_HELPER="${CLAUDE_PLUGIN_ROOT}/hooks/lib/degraded-check.sh"
+if [ -f "$DEGRADED_HELPER" ]; then
+  # shellcheck disable=SC1090
+  source "$DEGRADED_HELPER"
+  if rein_is_degraded "$PROJECT_DIR_HINT"; then
+    exit 0
+  fi
+fi
+
+# (2) Path scope — this gate exists to protect trail/ from edits before
+# bootstrap. Any other target (scripts/, src/, docs/, root configs) is
+# out of scope and must not be blocked by missing bootstrap. Yesterday's
+# deadlock root cause: this hook was blocking ALL Edit/Write/MultiEdit
+# regardless of target, locking out recovery edits to scripts/ etc.
+FILE_PATH=""
+if [ -n "$INPUT" ] && [ -f "$EXTRACT_JSON" ] && command -v python3 >/dev/null 2>&1; then
+  FILE_PATH=$(printf '%s' "$INPUT" | python3 "$EXTRACT_JSON" --field tool_input.file_path --default '' 2>/dev/null || true)
+fi
+
+case "$FILE_PATH" in
+  */trail/*|trail/*) ;;  # in scope — fall through to bootstrap_check
+  *) exit 0 ;;           # any other path (including empty) → pass through
+esac
+
 # Source the helper so bootstrap_check() is defined in this shell.
 # shellcheck disable=SC1090
 source "$HELPER"
@@ -75,8 +160,11 @@ source "$HELPER"
 # reflects the subshell's exit status. Putting `cmd=$(...)` inside `if`
 # causes `$?` after the `fi` to be 0 (the if-statement's own status), not
 # the failed command's exit code — a subtle bash gotcha.
+#
+# Replay the buffered stdin via a here-string so the helper's
+# _bc_read_stdin_cwd() sees the original envelope JSON.
 GUIDANCE=$(
-  if bootstrap_check; then
+  if bootstrap_check <<<"$INPUT"; then
     printf x
   else
     rc=$?

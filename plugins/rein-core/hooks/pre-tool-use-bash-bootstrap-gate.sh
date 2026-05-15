@@ -68,6 +68,59 @@ fi
 source "$HELPER"
 
 # ---------------------------------------------------------------------------
+# BG-B: degraded pass-through + bootstrap allow-list
+# ---------------------------------------------------------------------------
+# Two escape hatches inserted before the bootstrap_check invocation so that
+# Claude Code remains usable (a) when the SessionStart hook opted into
+# degraded mode (git missing / non-git / user opt-out / bootstrap refused),
+# and (b) when the user is *running the bootstrap command itself*. Without
+# (b) a fresh-install user would deadlock: the gate blocks every Bash call
+# including the very command that would resolve the missing bootstrap.
+
+# (a) Degraded mode pass-through.
+# project-dir.sh resolves the user's project root (git root from cwd in
+# plugin mode). Sourced from the same plugin tree as this gate. If the
+# helper is missing (install regression), fall through to PWD — degraded
+# marker is keyed on the project dir, so a wrong dir simply means no
+# bypass, which is the safer side.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/lib/project-dir.sh" ]; then
+  # shellcheck source=./lib/project-dir.sh
+  . "$SCRIPT_DIR/lib/project-dir.sh"
+  PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
+else
+  PROJECT_DIR="${PWD:-.}"
+fi
+if [ -f "$SCRIPT_DIR/lib/degraded-check.sh" ]; then
+  # shellcheck source=./lib/degraded-check.sh
+  . "$SCRIPT_DIR/lib/degraded-check.sh"
+  rein_is_degraded "$PROJECT_DIR" && exit 0
+fi
+
+# (b) Bootstrap command allow-list.
+# Consume stdin once (`bootstrap_check` re-reads it internally via
+# _bc_read_stdin_cwd), then feed it back via printf below. Extract
+# tool_input.command best-effort: missing python3 / parse failure → empty
+# COMMAND → no allow-list match → fall through to bootstrap_check, which
+# does its own python3-resilient handling. Using python-runner.sh keeps
+# the runner discovery consistent with pre-bash-guard.sh.
+INPUT=$(cat)
+COMMAND=""
+if [ -f "$SCRIPT_DIR/lib/python-runner.sh" ]; then
+  # shellcheck source=./lib/python-runner.sh
+  . "$SCRIPT_DIR/lib/python-runner.sh"
+  if resolve_python 2>/dev/null; then
+    COMMAND=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" \
+      "$SCRIPT_DIR/lib/extract-hook-json.py" \
+      --field tool_input.command --default '' 2>/dev/null || true)
+  fi
+fi
+
+case "$COMMAND" in
+  *rein-bootstrap-project.py*--project-dir*) exit 0 ;;
+esac
+
+# ---------------------------------------------------------------------------
 # Invoke helper, preserving stdout (including trailing newline)
 # ---------------------------------------------------------------------------
 # Trailing-newline preservation idiom: command substitution `$(...)` strips
@@ -80,8 +133,12 @@ source "$HELPER"
 # bash resets `$?` to 0 after an `if/fi` block when the condition fails and
 # no `else` branch runs. Instead, we capture the rc directly with `||` so
 # `$?` is preserved through the assignment.
+#
+# BG-B: feed the captured INPUT back into bootstrap_check's stdin so its
+# internal _bc_read_stdin_cwd sees the same envelope.cwd it would have read
+# directly, preserving stdin.cwd-based monorepo resolution.
 GUIDANCE=$(
-  if bootstrap_check; then
+  if printf '%s' "$INPUT" | bootstrap_check; then
     printf x
   else
     rc=$?

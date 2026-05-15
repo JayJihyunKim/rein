@@ -122,6 +122,27 @@ if [ ! -f "$SRC_EDIT_MARKER" ]; then
   exit 0
 fi
 
+# ---- BG-D: degraded mode escape (BG-J helper) ----
+# SessionStart 가 degraded 로 끝났으면 incident gate 도 skip.
+# rein_is_degraded 는 .claude/cache/.rein-degraded marker (또는 BG-J 가 정한 위치)
+# 를 검사. helper 가 없으면 silent fail — stamp 부재 시 정상 경로로 통과.
+# shellcheck source=./lib/degraded-check.sh
+if [ -f "${CLAUDE_PLUGIN_ROOT:-$SCRIPT_DIR/..}/hooks/lib/degraded-check.sh" ]; then
+  . "${CLAUDE_PLUGIN_ROOT:-$SCRIPT_DIR/..}/hooks/lib/degraded-check.sh"
+  if rein_is_degraded "$PROJECT_DIR"; then
+    echo "stop-session-gate: degraded mode — incident gate skipped" >&2
+    exit 0
+  fi
+fi
+
+# ---- BG-D: bootstrap-incomplete escape (fresh install deadlock 방지) ----
+# .rein/project.json 또는 trail/ 부재 시 bootstrap 미완료 환경 — incident gate skip.
+# stop hook 무한 반복 회피 (BG-1 신 contract 와 동일한 두 marker 검사).
+if [ ! -f "$PROJECT_DIR/.rein/project.json" ] || [ ! -d "$PROJECT_DIR/trail" ]; then
+  echo "stop-session-gate: bootstrap incomplete — incident gate skipped" >&2
+  exit 0
+fi
+
 MISSING=""
 
 # --- inbox 작업 기록 확인 ---

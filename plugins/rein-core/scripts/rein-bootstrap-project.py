@@ -61,6 +61,23 @@ security_level: standard
 """
 
 
+def _read_plugin_version() -> str:
+    """Read version from the plugin's .claude-plugin/plugin.json manifest.
+
+    BG-F (v1.3.0): the bootstrap CLI's --version default historically hardcoded
+    "1.0.0", which drifted from the plugin.json SoT (e.g. v1.2.0). Reading the
+    manifest dynamically keeps `.rein/project.json` in sync with the installed
+    plugin version. Falls back to "1.0.0" if the manifest is unreadable so the
+    bootstrap remains usable even when run from an unusual location.
+    """
+    try:
+        plugin_root = Path(__file__).resolve().parent.parent
+        manifest = plugin_root / ".claude-plugin" / "plugin.json"
+        return json.loads(manifest.read_text(encoding="utf-8"))["version"]
+    except Exception:
+        return "1.0.0"  # last-resort fallback
+
+
 def fail(message: str) -> None:
     print(f"error: {message}", file=sys.stderr)
     raise SystemExit(2)
@@ -202,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--project-dir", required=True)
     parser.add_argument("--scope", default="plugin")
-    parser.add_argument("--version", default="1.0.0")
+    parser.add_argument("--version", default=_read_plugin_version())
     args = parser.parse_args(argv)
 
     root, non_git = bootstrap(Path(args.project_dir), args.scope, args.version)

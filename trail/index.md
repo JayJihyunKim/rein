@@ -5,9 +5,9 @@
 ## 현재 상태
 
 - **프로젝트**: Rein (AI Native Development Framework)
-- **다음 세션 진입점**: **v1.2.0 cycle 종결 (구현 + 통합 review PASS), main 머지 + tag + push 대기** — DoD `trail/dod/dod-2026-05-14-plugin-mode-gap-fix.md`. 15 Scope IDs + Wave 5 잔존 fix F1-F9 모두 완료. stamps 생성 (sonnet-fallback codex + base security PASS). ALL SUITES PASSED. 사용자 확인 후 main 선별 체크아웃 + tag v1.2.0 + push 진행 — 자동 trigger: mirror-to-public + publish-plugin. 상세: `trail/inbox/2026-05-14-v1-2-0-cycle-complete.md`.
-- **이전 완료**: 2026-05-14 **v1.2.0 cycle 구현 + 통합 review 완료** — Wave 1 (7 parallel + 5 fix, 이전 session) → Wave 2 (SEC-1+SEC-2 parallel) → Wave 3 (OPSEQ-1+WF-1+RTG-1 parallel) → Wave 4 (INC-1→RTG-2 sequential) → Wave 5 (F1-F9 잔존 fix 9건) → sonnet-fallback code review (codex wrapper hang, F6/F7/F8/F9 추가 fix 후 ALL SUITES PASSED) → base security review PASS. / 2026-05-14 **v1.1.3 release** (main `d8727c8`, tag `v1.1.3`). / 2026-05-13 Option C Phase 1~5 완료. / 2026-05-12 v1.1.2 (`c15bdb1`) / v1.1.1 (`6f588ca`) / v1.1.0 (`9360650`). / 2026-04-30 v1.0.0 OSS launch.
-- **버전**: VERSION = 1.2.0 (`scripts/rein.sh`, plugin.json 동기화). main HEAD = `d8727c8` (v1.1.3, origin 푸시 완료). dev HEAD = `b9d6ad7` + working tree 누적 (v1.2.0 cycle 변경, 미 commit). v1.0.0~v1.1.3 tags 존재. v1.2.0 tag 대기. release/git/branch/tag/publish claim 은 답변 전 명령 재검증 필수.
+- **다음 세션 진입점**: **v1.3.0 release dev commit 완료 — main 선별 체크아웃 + push 대기**. 다음 cycle 후보: v1.2.0 의 mirror-to-public Q9 root cause / release postcondition verifier / BG-B allow-list anchor (security LOW-1) / partial-bootstrap stale marker 정리 (codex round 1 missed defect #3). 상세: `trail/inbox/2026-05-15-bootstrap-gate-deadlock-fix.md`.
+- **이전 완료**: 2026-05-15 **v1.3.0 dev commit** — BG-A~J (10 scope IDs) bootstrap gate deadlock fix + auto-bootstrap + degraded mode. 통합 codex review round 1 NEEDS-FIX → round 2 PASS + security review PASS. 48/48 fixture PASS. / 2026-05-14 **v1.2.0 release 완료** — 15 Scope IDs + Wave 5 F1-F9 + main fixup F10/F11/F12 + public v1.2.0 force re-tag (clean commit `11169372`). / 2026-05-14 **v1.1.3 release** (main `d8727c8`, tag `v1.1.3`). / 2026-05-13 Option C Phase 1~5. / 2026-04-30 v1.0.0 OSS launch.
+- **버전**: VERSION = 1.3.0 (dev `scripts/rein.sh`, `plugin.json` 동기화). main/origin 은 1.2.0 (`d20506e`) — 본 cycle dev commit 후 main 선별 체크아웃 대기. public/main = `11169372` (1.2.0 시점). v1.0.0~v1.2.0 tags 존재 (v1.3.0 tag 미생성). release/git/branch/tag/publish claim 은 답변 전 명령 재검증 필수.
 
 ## 주의사항
 
@@ -16,3 +16,5 @@
 - DoD: `dod-YYYY-MM-DD-<slug>.md` + `## 라우팅 추천` + `approved_by_user: true` + 단일 `plan ref:` (v1.1.1~)
 - plan 편집 시 coverage validator 자동 실행
 - lean SessionStart (2026-04-29~): inbox/daily/weekly 자동 주입 안 됨
+- main 머지 시 mirror-to-public 의 Q9 force re-tag 가 실패 가능 — 검증 후 manual force push (codex-ask 권고)
+- **2026-05-15 paused cycle**: main `.claude/` overlay cleanup (DoD: `dod-2026-05-14-main-claude-overlay-cleanup.md`, dev `b9d6ad7` push 완료). v1.2.0 release 와 충돌 가능성 — v1.2.0 이 trail/ + `.rein/project.json` 을 main 에 include 하기로 변경했으므로 본 cycle 의 `.claude/` exclusion 가정도 재검토 필요. 상세: `trail/inbox/2026-05-15-main-claude-overlay-cleanup-paused.md`
