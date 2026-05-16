@@ -4,6 +4,28 @@ on:
   push:
     branches:
       - main
+    # Q9 fix: a release tag is pushed separately from the main commit, so the
+    # branch-triggered run cannot see it. Triggering on tag pushes too lets the
+    # tag-propagation step (below) run after the maintainer pushes vX.Y.Z.
+    tags:
+      - 'v*'
+
+# Concurrency. Branch (main) runs share one group so the strip + force-push of
+# public main does not interleave and the mapping-ref prune+record below is
+# not raced. cancel-in-progress:false keeps an in-progress mirror from being
+# killed. NOTE: GitHub still drops a *superseded pending* run, so under rapid
+# back-to-back main pushes an intermediate run can be skipped — acceptable
+# because the newest run mirrors the latest main, and a release commit is
+# always the latest main push at release time (one merge per day, see
+# branch-strategy.md), so a release's own run is never the superseded one.
+# If that invariant is ever violated the tag run fails loud (its mapping-ref
+# poll times out) rather than silently mis-tagging. Tag runs get a unique
+# per-tag group: they must NOT queue behind a branch run — a shared group
+# would let a tag run scheduled first hold the only slot while the branch run
+# it depends on waits behind it.
+concurrency:
+  group: mirror-${{ github.ref_type }}-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   mirror:
@@ -13,14 +35,18 @@ jobs:
     if: github.repository == 'JayJihyunKim/rein-dev'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout main with tags
+      - name: Checkout with full history
         uses: actions/checkout@v4
         with:
+          # fetch-depth: 0 fetches all branches and tags, so origin/main is
+          # available as a remote-tracking ref on tag-triggered runs.
           fetch-depth: 0
-          fetch-tags: true
           persist-credentials: false
 
       - name: Strip maintainer-only files and force push to public
+        if: github.ref_type == 'branch'
+        env:
+          PUBLIC_REPO_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
         run: |
           git config user.email "github-actions@users.noreply.github.com"
           git config user.name "github-actions[bot]"
@@ -123,33 +149,132 @@ jobs:
             git commit -m "chore: strip trail/ skeleton + explicit blocks logs (S30) for public"
           fi
 
-          # Q9 mitigation (v1.0.3+): identify any tags that pointed at the
-          # original pre-strip push HEAD (GITHUB_SHA). The strip step above
-          # advanced HEAD via N maintainer-only strip commits — any release
-          # tag pushed atomically with this main push still points at the
-          # original (unstripped) commit. Force re-tag onto the stripped
-          # HEAD so the public release tarball is generated from the clean
-          # tree. Pre-v1.0.3 tags (v1.0.0/v1.0.1/v1.0.2) are NOT retroactively
-          # re-tagged here — they remain as-is on public per the v1.0.3 spec
-          # decision (out-of-scope retag).
-          ORIG_SHA="${{ github.sha }}"
-          ATTACHED_TAGS=$(git tag --points-at "$ORIG_SHA")
-          if [ -n "$ATTACHED_TAGS" ]; then
-            for tag in $ATTACHED_TAGS; do
-              # Preserve the original annotated tag message + force retag.
-              msg=$(git tag -l --format='%(contents)' "$tag")
-              git tag -f -a "$tag" -m "$msg"
-            done
+          # Push the stripped HEAD to public main. The token lives only in the
+          # remote config (added once here), never on a command line — and
+          # `set -x` is intentionally not enabled so the URL is never echoed.
+          git remote add public "https://x-access-token:${PUBLIC_REPO_TOKEN}@github.com/JayJihyunKim/rein.git"
+          git push public HEAD:main --force
+
+          # Postcondition (Q9 fix): confirm the stripped HEAD actually landed
+          # on public main. A silent push-skip is the failure mode that hid
+          # the v1.3.0 tag defect — surface it as a job failure instead.
+          git fetch public refs/heads/main:refs/remotes/public/main --force
+          PUBLIC_MAIN=$(git rev-parse refs/remotes/public/main)
+          PUSHED_HEAD=$(git rev-parse HEAD)
+          if [ "$PUBLIC_MAIN" != "$PUSHED_HEAD" ]; then
+            echo "::error::public main ($PUBLIC_MAIN) does not match pushed HEAD ($PUSHED_HEAD)"
+            exit 1
+          fi
+          echo "public main -> $PUBLIC_MAIN"
+
+          # Record this mirror's stripped commit, keyed by the origin commit
+          # (GITHUB_SHA), so a tag-triggered run can resolve the EXACT stripped
+          # commit for its release. Stripping is lossy — public main content
+          # alone cannot identify which release produced it (two releases
+          # differing only in maintainer-only files strip to the same tree) —
+          # so the branch run that did the stripping is the authority and
+          # records the mapping here. Mapping refs live under refs/mirror-state/
+          # (outside refs/heads and refs/tags, so clone/fetch default refspecs
+          # ignore them). Prior mappings are pruned so the namespace stays
+          # bounded to the most recent mirror.
+          # Record this mapping FIRST so a concurrent same-release tag run
+          # never sees it momentarily absent, then prune older mappings —
+          # skipping the one just written. A delete failure is surfaced as a
+          # warning (not silently swallowed) so a token permission downgrade
+          # does not hide unbounded ref growth.
+          CURRENT_MAPPING="refs/mirror-state/main/${GITHUB_SHA}"
+          git push public --force "HEAD:${CURRENT_MAPPING}"
+          echo "recorded mirror-state: ${GITHUB_SHA} -> ${PUSHED_HEAD}"
+          STALE_MAPPINGS=$(git ls-remote public 'refs/mirror-state/main/*' | awk '{print $2}' || true)
+          for stale in $STALE_MAPPINGS; do
+            [ "$stale" = "$CURRENT_MAPPING" ] && continue
+            git push public --delete "$stale" \
+              || echo "::warning::could not delete stale mirror-state mapping $stale"
+          done
+
+      - name: Propagate release tag to public
+        if: github.ref_type == 'tag'
+        env:
+          PUBLIC_REPO_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+        run: |
+          # Q9 fix: this step is the SOLE tag-propagation path. The old
+          # origin-side retag loop (removed) was a no-op for the split-push
+          # release flow — it searched for the tag during the branch-triggered
+          # run, before the maintainer had pushed it. This step covers both
+          # the split push (push main, then push tag) and an atomic
+          # `git push --atomic origin main vX.Y.Z`. One release tag per push
+          # is assumed — GitHub omits tag push events when >3 tags are pushed
+          # together, which is not a concern for the one-tag release flow.
+          #
+          # The release tag must point at the STRIPPED public commit, never
+          # the unstripped origin commit (which carries trail/, .rein/ and
+          # maintainer files). public main IS that stripped commit after the
+          # branch-triggered run completes.
+          TAG="${GITHUB_REF#refs/tags/}"
+          TAG_COMMIT=$(git rev-parse "${GITHUB_REF}^{commit}")
+          ORIGIN_MAIN=$(git rev-parse origin/main)
+
+          # Normal release: the tag sits on the current main tip. If it does
+          # not, this is a retroactive or out-of-order tag — fail loud rather
+          # than silently tagging the wrong public commit.
+          if [ "$TAG_COMMIT" != "$ORIGIN_MAIN" ]; then
+            echo "::error::tag ${TAG} commit (${TAG_COMMIT}) is not the current origin/main (${ORIGIN_MAIN})."
+            echo "::error::This path only propagates a tag on the current main tip. Retroactive tag repair must be done manually."
+            exit 1
           fi
 
-          git remote add public https://x-access-token:${{ secrets.PUBLIC_REPO_TOKEN }}@github.com/JayJihyunKim/rein.git
-          git push public HEAD:main --force
-          # Push only the re-tagged tags (Q9). The previous `--tags --force`
-          # form would have pushed all local tags including pre-strip tag
-          # trees — that was the leak source. Pre-v1.0.3 tags already on
-          # public remain untouched (no force-overwrite).
-          if [ -n "$ATTACHED_TAGS" ]; then
-            for tag in $ATTACHED_TAGS; do
-              git push public "$tag" --force
-            done
+          # Token lives only in the remote config; never echoed (`set -x` off).
+          git remote add public "https://x-access-token:${PUBLIC_REPO_TOKEN}@github.com/JayJihyunKim/rein.git"
+
+          # Resolve the EXACT stripped commit for this release by looking up
+          # the mapping the branch-triggered run recorded
+          # (refs/mirror-state/main/<release-commit> -> <stripped commit>).
+          # We key the lookup by TAG_COMMIT rather than inspecting public main
+          # content: stripping is lossy, so public main content cannot by
+          # itself identify which release produced it. ls-remote only
+          # transfers the SHA, so polling it is cheap.
+          MAPPING_REF="refs/mirror-state/main/${TAG_COMMIT}"
+          STRIPPED=""
+          for attempt in $(seq 1 30); do
+            STRIPPED=$(git ls-remote public "$MAPPING_REF" 2>/dev/null | awk '{print $1}' || true)
+            [ -n "$STRIPPED" ] && break
+            echo "attempt ${attempt}/30: ${MAPPING_REF} not recorded yet — waiting 10s"
+            sleep 10
+          done
+          if [ -z "$STRIPPED" ]; then
+            echo "::error::no stripped commit recorded for ${TAG} (${MAPPING_REF} absent) — the branch-triggered mirror run for this release may have failed or not started."
+            exit 1
           fi
+
+          # Fetch the mapped commit's objects so the ancestry sanity check can
+          # run locally.
+          git fetch public "${MAPPING_REF}:refs/mirror-state/resolved" --force
+          STRIPPED=$(git rev-parse refs/mirror-state/resolved)
+          # Sanity: the stripped commit must descend from the release commit
+          # (the strip stacks commits on top of it). This rejects a corrupt or
+          # mismatched mapping before it can mislabel the tag.
+          if ! git merge-base --is-ancestor "$TAG_COMMIT" "$STRIPPED"; then
+            echo "::error::recorded stripped commit ${STRIPPED} does not descend from release commit ${TAG_COMMIT} — refusing to tag ${TAG}."
+            exit 1
+          fi
+
+          # Push the recorded stripped commit as the release tag. Lightweight
+          # tag — consistent with the v1.2.0 / v1.3.0 manual fixes.
+          git push public --force "${STRIPPED}:refs/tags/${TAG}"
+
+          # Postcondition (Q9 fix): fail the job if the tag did not land on
+          # public — this is exactly the silent skip that hid the v1.3.0 bug.
+          REMOTE_TAG=$(git ls-remote public "refs/tags/${TAG}" | awk '{print $1}')
+          if [ "$REMOTE_TAG" != "$STRIPPED" ]; then
+            echo "::error::tag ${TAG} did not propagate to public (remote=${REMOTE_TAG:-<absent>}, expected=${STRIPPED})"
+            exit 1
+          fi
+          echo "tag ${TAG} -> ${STRIPPED} on public"
+
+          # The mapping ref has served its purpose — delete it so the origin
+          # release commit SHA is not exposed on the public repo longer than
+          # the brief branch-run-to-tag-run window. A leftover mapping is also
+          # pruned by the next branch run, so a delete failure here is only a
+          # warning.
+          git push public --delete "${MAPPING_REF}" \
+            || echo "::warning::could not delete consumed mapping ref ${MAPPING_REF}"

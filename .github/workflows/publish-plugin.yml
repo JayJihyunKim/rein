@@ -16,6 +16,11 @@ name: publish-plugin
 #   - repository secret  ANTHROPIC_TOKEN: bearer token used in the
 #     `Authorization: Bearer ...` header during POST.
 #
+# Temporary mode (2026-05-15~): REIN_PUBLISH_SELF_HOSTED_ONLY="1" in the
+# publish step env disables the Anthropic POST while the token is unprovisioned.
+# Self-hosted manifest update + tarball artifact upload still run. Remove that
+# single env line once ANTHROPIC_TOKEN is configured to restore full publish.
+#
 # Persistence model:
 #   - Tarballs and the updated manifest are uploaded as a workflow
 #     artifact named `marketplace-${tag}` so the build is auditable.
@@ -63,8 +68,13 @@ jobs:
           esac
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Publish (self-hosted + Anthropic marketplace)
+      - name: Publish (self-hosted only — Anthropic marketplace skipped)
         env:
+          # Anthropic marketplace POST 는 ANTHROPIC_MARKETPLACE_API + ANTHROPIC_TOKEN
+          # repo secret 이 설정될 때까지 skip. rein-publish.sh 의 fallback 메커니즘
+          # (line 127-129) 이 self-hosted marketplace.json 갱신 + tarball artifact
+          # upload 만 수행. Token 발급 시 본 env 한 줄 제거하면 정상 동작 재개.
+          REIN_PUBLISH_SELF_HOSTED_ONLY: "1"
           ANTHROPIC_MARKETPLACE_API: ${{ vars.ANTHROPIC_MARKETPLACE_API }}
           ANTHROPIC_TOKEN: ${{ secrets.ANTHROPIC_TOKEN }}
         run: |
