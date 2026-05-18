@@ -139,7 +139,9 @@ To disable the gate, set `bootstrap-gate: false` in `.rein/policy/hooks.yaml`. D
 | Claude Code | Latest | Required |
 | git | Any | — |
 | bash | 3.2+ | Only for hook execution |
-| **Codex CLI** | Latest | **Recommended.** Rein's review gate uses Codex for higher-trust reviews. If Codex is not installed, Rein automatically falls back to Claude (`code-reviewer` skill) with the fallback reason logged in the review record. |
+| **Codex CLI + paid ChatGPT plan** | Latest | **Strongly recommended.** Rein's review gate routes code review to Codex for an independent, higher-trust second opinion. Running Codex needs a paid ChatGPT plan (**Plus tier or higher**) or an OpenAI API key. Without Codex, Rein falls back to Claude (`code-reviewer` skill) and logs the fallback reason — usable, but you lose the second-model review Rein is built around. |
+
+> **Recommended setup — use Rein as intended.** Rein is designed around a two-model split: **Claude implements, Codex reviews.** To get the real experience, install the [Codex CLI](https://github.com/openai/codex) and sign in with a paid ChatGPT plan — **Plus tier or higher**. The independent Codex review is a core part of Rein's guardrail. The Claude fallback keeps Rein working without Codex, but that is a degraded mode, not the intended setup.
 
 ---
 

@@ -139,7 +139,9 @@ gate 를 끄려면 `.rein/policy/hooks.yaml` 에 `bootstrap-gate: false` 를 추
 | Claude Code | 최신 버전 | 필수 |
 | git | 임의 버전 | — |
 | bash | 3.2+ | hook 실행에만 사용 |
-| **Codex CLI** | 최신 버전 | **권장.** Rein 의 리뷰 게이트는 신뢰도 높은 리뷰를 위해 Codex 를 사용합니다. Codex 가 설치되어 있지 않으면 Rein 은 자동으로 Claude (`code-reviewer` 스킬) 로 fallback 하며, fallback 사유가 리뷰 기록에 남습니다. |
+| **Codex CLI + 유료 ChatGPT 요금제** | 최신 버전 | **강력 권장.** Rein 의 리뷰 게이트는 독립적이고 신뢰도 높은 second opinion 을 위해 코드 리뷰를 Codex 로 라우팅합니다. Codex 실행에는 유료 ChatGPT 요금제 (**Plus 이상**) 또는 OpenAI API 키가 필요합니다. Codex 가 없으면 Rein 은 Claude (`code-reviewer` 스킬) 로 fallback 하고 사유를 리뷰 기록에 남깁니다 — 동작은 하지만 Rein 이 설계상 전제하는 두 번째 모델 리뷰를 잃습니다. |
+
+> **권장 설정 — Rein 을 의도대로 쓰려면.** Rein 은 **Claude 가 구현하고 Codex 가 리뷰하는** 두 모델 분리 구조를 전제로 설계됐습니다. 제대로 된 경험을 위해 [Codex CLI](https://github.com/openai/codex) 를 설치하고 유료 ChatGPT 요금제 — **Plus 이상** — 로 로그인하세요. 독립적인 Codex 리뷰는 Rein 가드레일의 핵심입니다. Codex 가 없을 때의 Claude fallback 은 Rein 을 동작은 시키지만, 의도된 구성이 아닌 degraded 모드입니다.
 
 ---
 
