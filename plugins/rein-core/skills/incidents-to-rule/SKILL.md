@@ -126,9 +126,28 @@ python3 "$REIN_PLUGIN_ROOT/scripts/rein-mark-incident-processed.py" \
 각 pending `auto-*.md` 에 대해:
 
 1. AskUserQuestion 으로 "승격/거부/보류" 결정을 받는다
-2. 결정이 "승격" 인 경우: AGENTS.md 에 규칙을 추가한 뒤 아래 helper 로 `processed` 마킹
+2. 결정이 "승격" 인 경우: 프로젝트 루트(git root) `AGENTS.md` 에 규칙을 추가한 뒤 아래 helper 로 `processed` 마킹. **`AGENTS.md` 가 부재하면 규칙 추가 전에 먼저 starter 템플릿으로 생성한다** — 아래 "AGENTS.md 부재 시" 분기 참조
 3. 결정이 "거부" 인 경우: 이유만 기록하고 `declined` 마킹
 4. 결정이 "보류" 인 경우: `status` 는 그대로 두고 다음 세션으로 이월 (gate 는 계속 차단됨)
+
+#### AGENTS.md 부재 시 — starter 생성 분기
+
+plugin 사용자 프로젝트는 bootstrap 이 `AGENTS.md` 를 만들지 않는다 (`rein-bootstrap-project.py` 는 `.rein/`·`trail/`·`.claude/security/profile.yaml`·`.rein/project.json` 만 생성). 따라서 승격 결정 시 프로젝트 루트에 `AGENTS.md` 가 없을 수 있고, 이때 규칙을 쓸 곳이 없어 승격이 사실상 no-op 이 된다.
+
+승격 대상 규칙이 있는데 `AGENTS.md` 가 부재하면, **규칙을 추가하기 전에** 아래 최소 starter 템플릿으로 파일을 먼저 생성한다. 파일이 이미 존재하면 **절대 덮어쓰지 않고** 규칙만 append 한다.
+
+```markdown
+# AGENTS.md — 프로젝트 실행 규칙
+
+> AI 에이전트가 이 저장소에서 작업할 때 따르는 규칙을 모은다.
+> rein 의 `incidents-to-rule` 이 반복 incident 를 규칙으로 승격할 때 갱신된다.
+
+## 규칙
+
+<!-- incidents-to-rule 이 승격한 규칙이 이 섹션에 누적된다 -->
+```
+
+생성 후 Step 3 의 규칙 초안을 `## 규칙` 섹션에 추가한다.
 
 **helper 호출** (Bash):
 ```bash

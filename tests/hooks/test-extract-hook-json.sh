@@ -29,7 +29,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-HELPER="$PROJECT_DIR/.claude/hooks/lib/extract-hook-json.py"
+HELPER="$PROJECT_DIR/plugins/rein-core/hooks/lib/extract-hook-json.py"
 
 if [ ! -f "$HELPER" ]; then
   echo "FATAL: $HELPER not found" >&2

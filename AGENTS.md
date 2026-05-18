@@ -52,6 +52,14 @@
 
 이 경로에 `.md` 파일을 Write/Edit 하면 `post-write-spec-review-gate` 훅이 pending review 마커를 자동 생성한다.
 
+#### 진단 / research 문서는 `docs/reports/` 에 — `docs/specs/` 금지
+
+`docs/specs/` · `docs/plans/` 는 **`## Scope Items` 를 가진 design/plan 전용**이다. 이 경로에 `.md` 를 쓰면 spec-review gate 가 pending 마커를 만들고, `/codex-review` spec-review 를 거치기 전까지 source 편집을 차단한다.
+
+진단 노트, root-cause 분석, research 산출물처럼 **구현 대상이 아닌 비-설계 문서**는 `docs/reports/` 에 작성한다 (메인테이너 활동 로그). `docs/specs/` 에 두면 불필요한 gate block 이 발생한다 (incident: `auto-pre-edit-dod-gate-351623296a9bc1d8`, 2026-05-15 — agent 가 진단 문서를 `docs/specs/` 에 생성해 후속 source 편집이 2회 차단됨).
+
+agent 에 research/diagnosis task 를 dispatch 할 때는 산출물 경로를 명시적으로 `docs/reports/` 로 지정한다.
+
 #### 리뷰 강제
 
 **설계 문서 작성 직후, 구현으로 넘어가기 전에 반드시 `/codex-review` 스킬로 리뷰를 실행하고 per-spec stamp 를 등록한다:**
@@ -112,34 +120,14 @@ pending 마커는 원래 경로를 기억한다. 이동/리네임 후 gate 가 "
 
 ### Skill/MCP 활용 강제
 
-세션 시작 시 `Skill/MCP 활용 가이드` 가 `.claude/cache/skill-mcp-guide.md` 에서 자동 생성된다. 작업 시작 전에:
+라우팅은 Claude Code 가 매 세션 컨텍스트에 주입하는 skill/agent/MCP 목록을 권위 source 로 사용한다 (디스크 스캔이 아님). 작업 시작 전에:
 
-1. **반드시** 가이드를 먼저 참조해 적합한 skill/MCP 조합을 선택한다
+1. **반드시** 세션에 주입된 skill/agent/MCP 목록을 참조해 적합한 조합을 선택한다 (선택 절차는 `plugins/rein-core/rules/routing-procedure.md`)
 2. DoD 작성 시 **`## 라우팅 추천`** 섹션에 `agent`/`skills`/`mcps`/`rationale`/`approved_by_user` 를 기록한다 (신규 스키마, `pre-edit-dod-gate.sh` 가 검증)
 3. 이전 `## 활용 skill/MCP` 자유 서술은 **legacy** — 기존 DoD 는 유지, 신규 DoD 는 `## 라우팅 추천` 을 사용
 4. 사용자 승인 후 DoD 내 `approved_by_user: true` 로 교체
 5. 사용자가 추천을 수정하면 `python3 scripts/rein-route-record.py override ...` 로 `overrides.yaml` 에 기록
 6. 작업 완료 시 `python3 scripts/rein-route-record.py feedback ...` 로 `feedback-log.yaml` 에 기록
-
-### 가이드 자동 생성 (자동화됨)
-
-`.claude/cache/.skill-mcp-regen-pending` stamp 가 있으면 `pre-edit-dod-gate.sh` 가 `scripts/rein-generate-skill-mcp-guide.py` 를 자동 호출해 `.claude/cache/skill-mcp-guide.md` 를 재생성한다.
-
-수동 실행:
-```bash
-python3 scripts/rein-generate-skill-mcp-guide.py
-```
-
-스크립트 동작:
-1. 인벤토리 (`.claude/cache/skill-mcp-inventory.json`) 읽기
-2. 기존 가이드에 `<!-- USER NOTES -->` ~ `<!-- /USER NOTES -->` 블록 있으면 보존
-3. 5 카테고리 고정 (검색·코드·디버깅·흐름·기타) + 기본 권장 조합 표 생성
-4. 6KB 초과 시 description 압축
-5. 성공 시 stamp 삭제, 실패 시 stamp 유지 + stderr 경고 (gate 차단 없음)
-
-### Cache 디렉토리
-
-`.claude/cache/` 는 git 추적 안 함 (`.gitignore` 에 등록). 사용자별 환경에 따라 다른 가이드가 생성됨.
 
 ---
 
@@ -271,6 +259,11 @@ Incident 파일 포맷:
 - 한 파일 = 한 사건, 한 결정, 한 회고
 - `trail/inbox/`를 실행 컨텍스트에 직접 넣지 않는다
 - 같은 문제가 2회 이상 반복되면 trail에만 두지 말고 즉시 이 파일에 규칙 추가
+
+**작성 언어 규칙 (S8)**
+- Claude 가 trail/ · docs/ 문서를 작성할 때는 사용자 대화 언어를 따른다.
+- 적용 범위: agent-authored 기록 — `trail/inbox/`, `trail/daily/`, `trail/dod/`, `docs/specs/`, `docs/plans/`, `docs/brainstorms/` 등 Claude 가 직접 작성하는 문서 전체.
+- 범위 밖: bootstrap/hook/script 가 생성하는 템플릿 텍스트의 i18n 은 본 규칙 범위 밖 (후속 cycle).
 
 ---
 

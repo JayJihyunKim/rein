@@ -108,6 +108,20 @@ jobs:
             git commit -m "chore: strip maintainer-only weekly-agent-evolution workflow for public"
           fi
 
+          # Strip maintainer-only root AGENTS.md from public mirror (FU-2).
+          # AGENTS.md ships on rein-dev main as the maintainer's global
+          # execution rules, but for plugin users the rein rule bodies are
+          # injected via the plugin's session-start-rules.sh (rules/*.md) —
+          # the repo-root AGENTS.md is never loaded for a user's own project.
+          # Leaving it in the public mirror only places an inert file into the
+          # marketplace clone (~/.claude/plugins/marketplaces/rein/AGENTS.md),
+          # which is confusing. Mirrors the trail/ + .rein/ "shipped to main,
+          # stripped from public" boundary (branch-strategy.md 특수 처리).
+          if [ -f AGENTS.md ]; then
+            git rm -q AGENTS.md
+            git commit -m "chore: strip maintainer-only root AGENTS.md for public"
+          fi
+
           # Strip trail/ from public mirror.
           # Per v1.2.0 cycle F10 (branch-strategy.md "특수 처리" 절,
           # 2026-05-14 갱신): trail/ is now legitimately shipped on main as

@@ -2,6 +2,23 @@
 
 > **Versioning policy**: 버전 bump 는 `.claude/rules/versioning.md` 의 Rule A/B/C 를 따른다.
 
+## v1.3.1 — 2026-05-18 (hook 비서 톤 2단계 + 분류기 정밀화 + 스마트 라우팅 정리)
+
+`rein update` 후 사용자 세션에서 바뀌는 것:
+
+- **hook 차단 사유가 사용자 언어로 전달됩니다** — `pre-bash-guard` 의 정책 차단(파이프 쉘 실행, 커밋 메시지 포맷 위반, `.env` 파일 접근, 파괴적 git 명령, 리뷰 미완료 등 11지점)이 차단 사유를 Claude 에게 구조화해 전달합니다. Claude 가 그 사유를 사용자 대화 언어로 풀어 설명하므로, 영어 stderr 한 줄 대신 "무엇이 왜 막혔고 어떻게 풀지" 안내를 받습니다.
+- **차단·경고 메시지가 비서 톤으로 재작성됨** — 사용자 대면 hook 메시지(JSON 차단 안내 / Stop hook 차단 / SessionStart 배너 / 잔류 stderr)가 대문자 명령형("BLOCKED:") 대신 자연스러운 "무엇 → 왜 → 어떻게" 문장으로 바뀌었습니다.
+- **pre-bash-guard 의 명령 차단 판정이 정밀해졌습니다** — 이전엔 명령 문자열 어디에든 위험 키워드(파괴적 git, `.env` 접근 등)가 보이면 차단했으나, 이제 실제 실행되는 명령 절(clause) 단위로 판정합니다. `echo` 인자에 들어간 안내 문자열처럼 무해한 명령이 잘못 차단되던 false positive 가 줄었고, 리뷰 후 정상 코드 재수정이 과하게 막히던 동작도 해소됐습니다. 차단해야 할 명령의 차단 범위는 그대로입니다.
+- **스마트 라우팅이 세션 주입 목록 기반으로 동작합니다** — 작업에 맞는 agent/skill/MCP 추천이 Claude Code 가 세션마다 제공하는 사용 가능 목록을 직접 활용합니다. 이전 인벤토리 스캐너는 Claude Code 의 plugin 저장 구조와 어긋나 빈 결과만 내던 회귀가 있어 폐기했고, SessionStart 의 skill/MCP 가이드 주입도 함께 제거됩니다.
+- **차단 동작 자체는 불변** — 막히던 명령은 그대로 막히고 차단 범위·조건도 동일합니다. 바뀐 것은 차단 사유의 전달 표면(stderr → Claude 응답)과 오인 차단 정확도입니다.
+
+Internal (메인테이너 dev 환경, 사용자 무관):
+- 중앙 JSON deny emitter 3슬롯 재설계 (`<신뢰된_사유> <reason_code> <격리할_입력>`), reason_code 필수화, fail-closed 불변식 보존.
+- `pre-bash-guard` 정책 차단 11지점 `exit 0 + JSON deny` 전환, 인프라 무결성 5지점 + 신규 emitter-부재 가드는 `exit 2` 유지.
+- need-to-confirm FU-1~4 묶음 (`ed8d690`): `incidents-to-rule` skill 의 AGENTS.md 부재 분기, `mirror-to-public` workflow 의 AGENTS.md 메인테이너 라인 public strip, spec-review stamp resolver 경로 fix, pre-bash-guard 5개 분류기 + post-edit-hygiene 의 명령 절-앵커링.
+- 스마트 라우팅 A+ (`0a908a7`): 인벤토리 스캐너 (`rein-scan-skill-mcp.py` / `rein-generate-skill-mcp-guide.py`) 폐기, `routing-procedure.md` 를 dev-only `orchestrator.md` 의 발견/매칭 알고리즘 이식으로 self-contained 화.
+- `tests/hooks` + `tests/rules` pre-existing 드리프트 23 suite 정리 (폐기 `.claude/hooks/` 경로 repoint, stale 단언 갱신, 미구현 migration 테스트 제거, bootstrap fixture 재설계). 전체 회귀 ALL SUITES PASSED.
+
 ## v1.3.0 — 2026-05-15 (Bootstrap gate deadlock fix + auto-bootstrap)
 
 v1.2.0 release 후 다른 프로젝트 fresh install 환경에서 SessionStart 의 "bootstrap 미완료" 안내 명령이 Bash gate 자체에 차단되어 회복 불가능한 deadlock 이 보고됐습니다. `${CLAUDE_PLUGIN_ROOT}` 가 사용자 shell 에서 expand 안 되어 안내 명령이 실패하고, Stop hook 이 무한 반복되어 세션 진행 불가였습니다. `rein update` 후 사용자 세션에서 바뀌는 것:

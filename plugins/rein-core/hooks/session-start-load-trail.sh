@@ -14,7 +14,7 @@
 #     pending incident 카운트, freshness 경고 1줄. 그 외 trail 파일은
 #     필요 시 명시 read 로 가져온다.
 #   - hook 의 maintenance 책임은 그대로 유지: .active-dod cleanup, incident
-#     session stamp, legacy pending heal, skill/MCP guide regen.
+#     session stamp, legacy pending heal.
 
 set -u
 
@@ -37,26 +37,19 @@ if [ ! -f "$PROJECT_DIR/.rein/project.json" ] || [ ! -f "$PROJECT_DIR/trail/inde
   exit 0
 fi
 
-# RES-1: plugin-aware helper script resolver. Five helpers are consumed
-# below (legacy-pending heal, incidents aggregate, skill/MCP scan + guide
-# regen, state-path resolver). Resolution is silent on absence; each call
-# site guards on non-empty so a missing helper degrades to a no-op.
-# SessionStart fails open — never block the session even if the resolver
-# library itself is missing; pre-initialise the variables so `set -u`
-# stays happy.
+# RES-1: plugin-aware helper script resolver. Two helpers are consumed
+# below (legacy-pending heal, incidents aggregate). Resolution is silent on
+# absence; each call site guards on non-empty so a missing helper degrades
+# to a no-op. SessionStart fails open — never block the session even if the
+# resolver library itself is missing; pre-initialise the variables so
+# `set -u` stays happy.
 HEAL_SCRIPT=""
 AGGREGATE_PY=""
-SCAN_SKILL_MCP=""
-GEN_SKILL_MCP=""
-STATE_PATHS_PY=""
 if ! . "$SCRIPT_DIR/lib/plugin-script-path.sh" 2>/dev/null; then
   echo "session-start-load-trail: plugin-script-path library missing at $SCRIPT_DIR/lib/plugin-script-path.sh" >&2
 else
   HEAL_SCRIPT=$(resolve_helper_script rein-heal-legacy-pending.py 2>/dev/null || true)
   AGGREGATE_PY=$(resolve_helper_script rein-aggregate-incidents.py 2>/dev/null || true)
-  SCAN_SKILL_MCP=$(resolve_helper_script rein-scan-skill-mcp.py 2>/dev/null || true)
-  GEN_SKILL_MCP=$(resolve_helper_script rein-generate-skill-mcp-guide.py 2>/dev/null || true)
-  STATE_PATHS_PY=$(resolve_helper_script rein-state-paths.py 2>/dev/null || true)
 fi
 
 emit_file_block() {
@@ -196,17 +189,20 @@ if [ -n "$HEAL_SCRIPT" ] && [ -f "$HEAL_SCRIPT" ]; then
     echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] rein-heal-legacy-pending FAILED rc=$HEAL_RC: $HEAL_ERR" \
       >> "$HEAL_LOG" 2>/dev/null || true
     # 세션 컨텍스트에도 짧은 경고 (agent 가 인지)
-    echo "### ⚠️ rein-heal-legacy-pending 실패 (rc=$HEAL_RC) — $HEAL_LOG 참조"
+    echo "### 세션 준비 작업 일부가 완료되지 않았습니다"
+    echo
+    echo "이전 리뷰 마커를 자동으로 정리하는 단계에서 문제가 생겼습니다. 대부분의 작업에는 영향이 없지만,"
+    echo "편집 중 spec review gate 가 예상치 못하게 차단한다면 \`$HEAL_LOG\` 를 확인해 주세요."
     echo
   fi
 fi
 
 echo "## trail 세션 시작 컨텍스트"
 echo
-echo "> lean mode — index.md + 미해결 게이트 요약만 주입 (비권위 캐시; bulk trail off)."
-echo "> release/branch/tag/publish 류 volatile claim 은 답변 전 \`git status\` / \`git log\` / \`git tag\` / \`git ls-remote\` 로 재검증."
-echo "> 단순 질문은 answer-only 모드 — DoD/routing/review ceremony 생략 (\${CLAUDE_PLUGIN_ROOT}/rules/answer-only-mode.md, plugin source)."
-echo "> 추가 trail 파일은 명시 Read 로 가져온다 (inbox/daily/weekly 자동 주입 없음)."
+echo "> 세션 상태 요약만 주입합니다 (비권위 캐시 — index.md 및 미해결 항목)."
+echo "> release/branch/tag/publish 관련 주장은 답변 전 \`git status\` / \`git log\` / \`git tag\` / \`git ls-remote\` 로 재검증해 주세요."
+echo "> 단순 조회·의견 요청은 작업 기록·라우팅·리뷰 절차 없이 바로 답변합니다 (\${CLAUDE_PLUGIN_ROOT}/rules/answer-only-mode.md)."
+echo "> inbox·daily·weekly 파일은 자동으로 주입되지 않습니다 — 필요하면 직접 Read 로 가져오세요."
 echo
 
 # 0. B2 pending spec review 요약 (있을 때만)
@@ -225,7 +221,7 @@ if [ -d "$SPEC_REVIEWS_DIR" ]; then
     echo '```'
     printf '%s' "$PENDING_LIST"
     echo '```'
-    echo "소스 편집 전 \`/codex-review\` 로 리뷰하거나 대체 경로로 해소 필요."
+    echo "소스를 편집하기 전에 \`/codex-review\` 를 실행하거나 다른 방법으로 리뷰를 먼저 완료해 주세요."
     echo
   fi
 fi
@@ -254,10 +250,10 @@ except Exception:
     print('0')
 " "$SNAPSHOT" 2>/dev/null)
     if [ "$ABNORMAL" = "1" ]; then
-      echo "### ⚠️ 직전 세션 비정상 종료 감지"
+      echo "### 직전 세션 종료가 확인되지 않았습니다"
       echo
-      echo "마지막 aggregate 이후 Stop hook 이 정상 실행되지 않았습니다."
-      echo "pending incident 가 있으면 이번 세션에서 처리됩니다."
+      echo "지난 세션이 예상치 못하게 종료됐을 수 있습니다."
+      echo "미처리 incident 가 있다면 이번 세션 시작 시 자동으로 집계됩니다."
       echo
     fi
   fi
@@ -302,7 +298,7 @@ except Exception:
   if [ "$PENDING" -gt 0 ]; then
     echo "### 미처리 incident: ${PENDING}건"
     echo
-    echo "**첫 source 편집 시도가 차단됩니다.** \`incidents-to-rule\` 스킬 호출 + AskUserQuestion 으로 처리하세요."
+    echo "편집을 시작하기 전에 미처리 incident 를 처리해 주세요 — \`incidents-to-rule\` 스킬을 호출하고 사용자에게 처리 방법을 확인하세요."
     echo
     mkdir -p "$(dirname "$STAMP_FILE")"
     touch "$STAMP_FILE"
@@ -313,109 +309,5 @@ fi
 
 # index.md — lean mode 의 유일한 파일 주입 대상
 emit_file_block "trail/index.md"
-
-# Skill/MCP 인벤토리 스캔 + 가이드 출력 (D)
-# BEGIN D skill-mcp
-#
-# v1.2.0 cycle RTG-2 (plan §Task 3.3) — guide path resolves through
-# rein-state-paths.py so plugin installs land at
-# ${CLAUDE_PLUGIN_DATA}/runtime/inventory/skill-mcp-guide.md, scaffold mode
-# at .rein/cache/inventory/skill-mcp-guide.md. Pre-RTG-2 the path was
-# hardcoded to ${PROJECT_DIR}/.claude/cache/, which broke the plugin
-# contract once .claude/ ceased to be the SSOT for cache files.
-# Inventory + regen stamp paths still trail the .claude/cache/ layout
-# because the scanner writes those internally; aligning them is a
-# separate concern outside this task's plan scope.
-SKILL_GUIDE=""
-if [ -n "$STATE_PATHS_PY" ] && command -v python3 >/dev/null 2>&1; then
-  SKILL_GUIDE=$(python3 "$STATE_PATHS_PY" skill-mcp-guide 2>/dev/null || true)
-fi
-# If the resolver could not be reached or returned empty, SKILL_GUIDE stays
-# empty — emit_skill_guide() guards on `[ -f "$SKILL_GUIDE" ]` so the
-# section is silently skipped (fail-open). No hardcoded .claude/cache
-# fallback: the plan deliberately routes the guide path through
-# rein-state-paths.py to break the v1.1.x drift where plugin installs
-# wrote to .claude/cache while the resolver pointed elsewhere.
-SKILL_INVENTORY="$PROJECT_DIR/.claude/cache/skill-mcp-inventory.json"
-SKILL_REGEN_STAMP="$PROJECT_DIR/.claude/cache/.skill-mcp-regen-pending"
-SKILL_GUIDE_MAX_BYTES=4096  # 4KB cap (Phase 3: 6KB → 4KB 축소, 단순 질문 ceremony drift 감소)
-
-emit_skill_guide() {
-  if [ -f "$SKILL_GUIDE" ]; then
-    GUIDE_SIZE=$(portable_stat_size "$SKILL_GUIDE")
-    echo "### Skill/MCP 활용 가이드"
-    if [ "$GUIDE_SIZE" -gt "$SKILL_GUIDE_MAX_BYTES" ]; then
-      head -c "$SKILL_GUIDE_MAX_BYTES" "$SKILL_GUIDE"
-      echo
-      echo "> ⚠️ truncated: 가이드가 ${GUIDE_SIZE}B 로 ${SKILL_GUIDE_MAX_BYTES}B 초과. 전체는 ${SKILL_GUIDE}."
-    else
-      cat "$SKILL_GUIDE"
-    fi
-    echo
-  fi
-}
-
-skill_scan_needed() {
-  [ -f "$SKILL_REGEN_STAMP" ] && return 0
-  [ ! -f "$SKILL_GUIDE" ] && return 0
-  [ ! -f "$SKILL_INVENTORY" ] && return 0
-  [ -f "$PROJECT_DIR/.claude/settings.json" ] && [ "$PROJECT_DIR/.claude/settings.json" -nt "$SKILL_GUIDE" ] && return 0
-  [ -f "$PROJECT_DIR/.claude/mcp.json" ] && [ "$PROJECT_DIR/.claude/mcp.json" -nt "$SKILL_GUIDE" ] && return 0
-  [ -n "${HOME:-}" ] && [ -f "$HOME/.claude.json" ] && [ "$HOME/.claude.json" -nt "$SKILL_GUIDE" ] && return 0
-  if [ -d "$PROJECT_DIR/.claude/skills" ]; then
-    if find "$PROJECT_DIR/.claude/skills" -name 'SKILL.md' -newer "$SKILL_GUIDE" -print -quit 2>/dev/null | grep -q .; then
-      return 0
-    fi
-  fi
-  return 1
-}
-
-NEEDS_REGEN="no"
-if command -v python3 >/dev/null 2>&1 && [ -n "$SCAN_SKILL_MCP" ] && skill_scan_needed; then
-  # 스캐너 결과를 임시 파일에 저장 후 검증. 평상시 세션 시작에서는 캐시된 guide
-  # 만 emit 하여 skill/MCP inventory scan 비용을 피한다.
-  SCAN_TMP=$(mktemp)
-  if python3 "$SCAN_SKILL_MCP" \
-       --project-dir "$PROJECT_DIR" --scan > "$SCAN_TMP" 2>/dev/null \
-     && python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$SCAN_TMP" 2>/dev/null; then
-    NEEDS_REGEN=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print("yes" if d.get("needs_regen") else "no")' "$SCAN_TMP")
-  else
-    NEEDS_REGEN="unknown"
-  fi
-  rm -f "$SCAN_TMP"
-
-  case "$NEEDS_REGEN" in
-    yes)
-      mkdir -p "$(dirname "$SKILL_REGEN_STAMP")"
-      touch "$SKILL_REGEN_STAMP"
-      # 자동 재생성 시도 (실패 시 stamp 유지하여 gate hook 이 재시도)
-      if [ -n "$GEN_SKILL_MCP" ]; then
-        if ( cd "$PROJECT_DIR" && python3 "$GEN_SKILL_MCP" >/dev/null 2>&1 ); then
-          echo "### 🔄 skill/MCP 가이드 자동 재생성 완료"
-          echo
-        else
-          echo "### ⚠️ skill/MCP 가이드 자동 재생성 실패 (stamp 유지)"
-          echo "수동 실행: rein-generate-skill-mcp-guide.py (plugin bundle 또는 repo scripts/)"
-          echo
-        fi
-      else
-        echo "### 🔄 skill/MCP 인벤토리 변경 감지"
-        echo "수동 재생성: rein-generate-skill-mcp-guide.py (plugin bundle 또는 repo scripts/)"
-        echo
-      fi
-      ;;
-    no)
-      rm -f "$SKILL_REGEN_STAMP"
-      ;;
-    unknown)
-      echo "### ⚠️ skill/MCP 스캔 실패"
-      echo "rein-scan-skill-mcp.py 출력이 손상됨. 수동 점검 필요."
-      echo
-      ;;
-  esac
-fi
-
-emit_skill_guide
-# END D skill-mcp
 
 exit 0

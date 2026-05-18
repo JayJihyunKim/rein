@@ -16,8 +16,11 @@
 #   H      — monorepo subdir walk-up to git root → exit 0
 #   I      — nested git boundary (no marker)     → exit 10
 #   J      — env hygiene (GIT_DIR/GIT_WORK_TREE) → exit 0
-#   K      — BG-1 false positive: trail/ only    → exit 10 (marker required)
-#   L      — BG-1 symmetric: .rein/project.json only → exit 10 (trail/ required)
+#   K      — partial: trail/ only                → exit 10 (PARTIAL guidance)
+#   L      — partial: .rein/project.json only     → exit 10 (PARTIAL guidance)
+#   M      — partial CRASH: marker+trail/ no index → exit 10 (PARTIAL guidance)
+#   N      — fresh install (nothing)              → exit 10 (generic guidance)
+#   O      — atomic marker-last write produces exit 0 + no .tmp leftover
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -50,12 +53,15 @@ record_skip() {
 }
 
 # BG-1 (2026-05-14): "bootstrapped" requires BOTH trail/ AND .rein/project.json.
-# Tests that exercise the happy path must materialise both — using a helper keeps
-# the predicate change localised so future contract bumps update one site.
+# Partial-bootstrap fix (v1.3.0+1): also requires trail/index.md (the trail-step
+# completion sentinel). Tests that exercise the happy path must materialise all
+# three — using a helper keeps the predicate change localised so future contract
+# bumps update one site.
 mk_bootstrap_marker() {
   local d="$1"
   mkdir -p "$d/trail" "$d/.rein"
   printf '{}' > "$d/.rein/project.json"
+  printf '# trail/index.md\n' > "$d/trail/index.md"
 }
 
 # Helper to clear inherited env that the resolution logic must NOT see.
@@ -521,12 +527,13 @@ fixture_j() {
 }
 
 # ---------------------------------------------------------------------------
-# Fixture K — BG-1 false positive: trail/ alone is not "bootstrapped".
+# Fixture K — partial-bootstrap: trail/ alone is not "bootstrapped".
 # Regression for 2026-05-14 BG-1 spec — overlay residue or unrelated processes
 # can drop a trail/ into a project. Pre-BG-1 the helper exited 0 here, silently
 # turning gate hooks into no-ops on a half-bootstrapped repo. Post-BG-1 the
-# marker (.rein/project.json) is required → exit 10 with guidance that names
-# the marker so the user knows what is actually missing.
+# marker (.rein/project.json) is required → exit 10. With the partial-bootstrap
+# fix (v1.3.0+1) this is the PARTIAL branch (one component present, two
+# missing): guidance must say "PARTIAL state" and name the missing marker.
 # ---------------------------------------------------------------------------
 fixture_k() {
   local dir
@@ -537,20 +544,25 @@ fixture_k() {
   rc=$?
   err=$(cat "$SCRATCH_ROOT/bc-err-K")
   if [ "$rc" -ne 10 ]; then
-    record_fail "K: expected exit 10 (BG-1: trail/ alone insufficient), got $rc (stderr: $err)"
+    record_fail "K: expected exit 10 (trail/ alone insufficient), got $rc (stderr: $err)"
     return
   fi
   if ! printf '%s' "$out" | grep -q "\.rein/project\.json"; then
     record_fail "K: guidance must name '.rein/project.json' marker when trail/ alone present (got: $out)"
     return
   fi
-  record_pass "K (BG-1 false positive: trail/ alone insufficient)"
+  if ! printf '%s' "$out" | grep -q "PARTIAL state"; then
+    record_fail "K: trail/ alone is partial state — guidance must say 'PARTIAL state' (got: $out)"
+    return
+  fi
+  record_pass "K (partial: trail/ alone insufficient)"
 }
 
 # ---------------------------------------------------------------------------
-# Fixture L — BG-1 symmetric: .rein/project.json alone is not "bootstrapped".
-# A residual marker without an accompanying trail/ (e.g. user deleted trail/
-# manually) must also fail closed → exit 10 with guidance that names trail/.
+# Fixture L — partial-bootstrap symmetric: .rein/project.json alone is not
+# "bootstrapped". A residual marker without an accompanying trail/ (e.g. user
+# deleted trail/ manually) must also fail closed → exit 10 PARTIAL branch with
+# guidance that names trail/.
 # ---------------------------------------------------------------------------
 fixture_l() {
   local dir
@@ -562,14 +574,170 @@ fixture_l() {
   rc=$?
   err=$(cat "$SCRATCH_ROOT/bc-err-L")
   if [ "$rc" -ne 10 ]; then
-    record_fail "L: expected exit 10 (BG-1 symmetric: marker alone insufficient), got $rc (stderr: $err)"
+    record_fail "L: expected exit 10 (marker alone insufficient), got $rc (stderr: $err)"
     return
   fi
   if ! printf '%s' "$out" | grep -q "trail/"; then
     record_fail "L: guidance must name 'trail/' when marker alone present (got: $out)"
     return
   fi
-  record_pass "L (BG-1 symmetric: marker alone insufficient)"
+  if ! printf '%s' "$out" | grep -q "PARTIAL state"; then
+    record_fail "L: marker alone is partial state — guidance must say 'PARTIAL state' (got: $out)"
+    return
+  fi
+  record_pass "L (partial: marker alone insufficient)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture M — partial-bootstrap CRASH SCENARIO: marker + trail/ present but
+# trail/index.md MISSING. This is the exact failure mode the v1.3.0+1 fix
+# targets (codex round 1 missed defect #3): rein-bootstrap-project.py crashed
+# (SIGINT / disk full / kill) AFTER mkdir created trail/ + .rein/ but BEFORE
+# write_text_if_missing wrote trail/index.md. Pre-fix the BG-1 two-marker
+# check (trail dir + marker) reported exit 0 here → FALSE PASS, and downstream
+# session-start-load-trail.sh would crash reading the absent index. Post-fix:
+# trail/index.md is a required third marker → exit 10 PARTIAL branch.
+# Asserts: (1) exit 10, (2) "PARTIAL state" phrasing, (3) missing list names
+# trail/index.md, (4) present list names trail/ and the marker, (5) the
+# re-run command is flagged idempotent/safe.
+# ---------------------------------------------------------------------------
+fixture_m() {
+  local dir
+  dir="$(mktemp -d "$SCRATCH_ROOT/M-XXXXXX")"
+  mkdir -p "$dir/trail" "$dir/.rein"
+  printf '{}' > "$dir/.rein/project.json"
+  # Deliberately DO NOT create trail/index.md — simulates the mid-bootstrap
+  # crash after the marker was (pre-fix) written but before index.md.
+  local out err rc
+  out=$( (cd "$dir" && env -u CLAUDE_PLUGIN_ROOT bash "$HELPER" "$dir") 2>"$SCRATCH_ROOT/bc-err-M" )
+  rc=$?
+  err=$(cat "$SCRATCH_ROOT/bc-err-M")
+  if [ "$rc" -ne 10 ]; then
+    record_fail "M: expected exit 10 (marker+trail/ but no index.md = partial), got $rc (stderr: $err)"
+    return
+  fi
+  if ! printf '%s' "$out" | grep -q "PARTIAL state"; then
+    record_fail "M: guidance must say 'PARTIAL state' for crash-mid-bootstrap (got: $out)"
+    return
+  fi
+  # Missing list must name trail/index.md.
+  if ! printf '%s' "$out" | grep -qE 'Missing:.*trail/index\.md'; then
+    record_fail "M: Missing line must name 'trail/index.md' (got: $out)"
+    return
+  fi
+  # Present list must name trail/ and .rein/project.json.
+  if ! printf '%s' "$out" | grep -qE 'Present:.*trail/'; then
+    record_fail "M: Present line must name 'trail/' (got: $out)"
+    return
+  fi
+  if ! printf '%s' "$out" | grep -qE 'Present:.*\.rein/project\.json'; then
+    record_fail "M: Present line must name '.rein/project.json' (got: $out)"
+    return
+  fi
+  # Re-run command must be flagged safe/idempotent.
+  if ! printf '%s' "$out" | grep -qi "idempotent"; then
+    record_fail "M: partial guidance must flag the re-run as idempotent/safe (got: $out)"
+    return
+  fi
+  # stderr diagnostic should still carry project_dir + guidance_size.
+  if ! printf '%s' "$err" | grep -q "project_dir="; then
+    record_fail "M: stderr must carry project_dir diagnostic (got: $err)"
+    return
+  fi
+  record_pass "M (partial crash: marker+trail/ but no index.md)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture N — fresh install still produces the GENERIC (non-partial) message.
+# Guards against the partial-state branch over-firing: when NOTHING exists
+# (truly fresh install / plugin enabled but never bootstrapped), the guidance
+# must remain the original "bootstrap not initialized" template and must NOT
+# claim a PARTIAL state. This is the negative control for fixtures K/L/M.
+# ---------------------------------------------------------------------------
+fixture_n() {
+  local dir
+  dir="$(mktemp -d "$SCRATCH_ROOT/N-XXXXXX")"
+  # No trail/, no .rein/, no index — truly fresh.
+  local out err rc
+  out=$( (cd "$dir" && env -u CLAUDE_PLUGIN_ROOT bash "$HELPER" "$dir") 2>"$SCRATCH_ROOT/bc-err-N" )
+  rc=$?
+  err=$(cat "$SCRATCH_ROOT/bc-err-N")
+  if [ "$rc" -ne 10 ]; then
+    record_fail "N: expected exit 10 (fresh install), got $rc (stderr: $err)"
+    return
+  fi
+  if printf '%s' "$out" | grep -q "PARTIAL state"; then
+    record_fail "N: fresh install must NOT claim 'PARTIAL state' (over-firing) — got: $out"
+    return
+  fi
+  if ! printf '%s' "$out" | grep -q "bootstrap not initialized"; then
+    record_fail "N: fresh install must use the generic 'bootstrap not initialized' template (got: $out)"
+    return
+  fi
+  record_pass "N (fresh install uses generic, non-partial guidance)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture O — atomic marker-last write: verify rein-bootstrap-project.py writes
+# .rein/project.json AFTER trail/index.md, so a successful run is observed by
+# the helper as fully bootstrapped (exit 0), and an interrupted run can never
+# leave the marker without the index. We assert ordering directly: after a
+# real bootstrap run, the marker's mtime must be >= trail/index.md's mtime.
+# This is the producer-side half of the fix (the helper change is the
+# consumer-side half exercised by K/L/M/N).
+# ---------------------------------------------------------------------------
+fixture_o() {
+  local boot_py
+  boot_py="$PROJECT_DIR/plugins/rein-core/scripts/rein-bootstrap-project.py"
+  if [ ! -f "$boot_py" ]; then
+    record_skip "O (atomic marker-last) — bootstrap script missing at $boot_py"
+    return
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    record_skip "O (atomic marker-last) — python3 not installed"
+    return
+  fi
+  local dir
+  dir="$(mktemp -d "$SCRATCH_ROOT/O-XXXXXX")"
+  # Run the real bootstrap. Non-git dir → script uses project_dir in-place.
+  if ! python3 "$boot_py" --project-dir "$dir" >/dev/null 2>"$SCRATCH_ROOT/bc-err-O"; then
+    record_fail "O: bootstrap run failed (stderr: $(cat "$SCRATCH_ROOT/bc-err-O"))"
+    return
+  fi
+  local marker="$dir/.rein/project.json"
+  local index="$dir/trail/index.md"
+  if [ ! -f "$marker" ]; then
+    record_fail "O: bootstrap did not create .rein/project.json"
+    return
+  fi
+  if [ ! -f "$index" ]; then
+    record_fail "O: bootstrap did not create trail/index.md"
+    return
+  fi
+  # No leftover temp file from the atomic write.
+  if [ -e "$dir/.rein/project.json.tmp" ]; then
+    record_fail "O: atomic write left behind .rein/project.json.tmp"
+    return
+  fi
+  # Ordering: marker mtime must be >= index mtime (marker written last).
+  # Use python3 for portable mtime comparison (stat flags differ GNU/BSD).
+  if ! python3 -c '
+import os, sys
+marker, index = sys.argv[1], sys.argv[2]
+sys.exit(0 if os.path.getmtime(marker) >= os.path.getmtime(index) else 1)
+' "$marker" "$index"; then
+    record_fail "O: .rein/project.json mtime must be >= trail/index.md mtime (marker must be written last)"
+    return
+  fi
+  # The freshly-bootstrapped dir must now read as fully bootstrapped (exit 0).
+  local rc
+  ( cd "$dir" && env -u CLAUDE_PLUGIN_ROOT bash "$HELPER" "$dir" ) >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    record_fail "O: helper must report exit 0 after a real bootstrap, got $rc"
+    return
+  fi
+  record_pass "O (atomic marker-last write + post-bootstrap exit 0)"
 }
 
 # ---------------------------------------------------------------------------
@@ -592,6 +760,9 @@ fixture_i
 fixture_j
 fixture_k
 fixture_l
+fixture_m
+fixture_n
+fixture_o
 
 echo
 echo "test-bootstrap-check-helper: pass=$PASS_COUNT fail=$FAIL_COUNT skip=$SKIP_COUNT"

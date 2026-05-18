@@ -19,7 +19,7 @@
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-HOOKS_DIR="$PROJECT_DIR/.claude/hooks"
+HOOKS_DIR="$PROJECT_DIR/plugins/rein-core/hooks"
 PORTABLE_LIB="$HOOKS_DIR/lib/portable.sh"
 
 if [ ! -f "$PORTABLE_LIB" ]; then

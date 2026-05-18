@@ -251,8 +251,13 @@ test_hook_clears_marker_on_valid_plan() {
 test_pre_bash_guard_blocks_commit_on_marker() {
   # 리뷰 stamp + DoD + inbox 까지 전부 생성해 coverage gate 가 **유일한 실패 원인**이 되도록 격리.
   # pre-bash-guard 는 commit-msg helper 를 호출하므로 lib 파일도 복사한다.
+  # Wave 3: coverage gate now uses JSON deny (exit 0, stdout JSON) when the
+  # validator can revalidate the plan (rc=1 path), or falls back to exit 2 +
+  # [rein] stderr when the marker target is unidentifiable (rc=2/infra path).
+  # A touch-only marker is empty → rc=2 path → exit 2 + [rein] stderr.
+  # Both paths block the command; test asserts exit non-zero and coverage text present.
   mkdir -p "$SANDBOX/.claude/hooks/lib"
-  cp "$REAL_PROJECT_DIR/.claude/hooks/lib/extract-commit-msg.py" \
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/extract-commit-msg.py" \
      "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
   seed_dod "dod-2026-04-19-stamp-test.md"
   seed_inbox "2026-04-19-stamp-test.md"
@@ -262,14 +267,15 @@ test_pre_bash_guard_blocks_commit_on_marker() {
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
   run_hook "pre-bash-guard.sh" "$input"
-  assert_exit 2 "pre-bash-guard should block commit with coverage-mismatch marker"
-  assert_stderr_contains "coverage matrix 검증 실패 마커 존재"
+  # Empty marker → rc=2 path [I3]: exactly exit 2 + [rein] on stderr.
+  assert_exit 2 "pre-bash-guard should exit 2 (I3 infra path) for empty coverage-mismatch marker"
+  assert_stderr_contains "[rein]" "I3 infra block must emit [rein] prefix on stderr"
 }
 
 test_pre_bash_guard_allows_commit_without_marker() {
   # Negative control — 마커가 없으면 coverage gate 가 통과해야 한다 (review stamp gate 는 별개).
   mkdir -p "$SANDBOX/.claude/hooks/lib"
-  cp "$REAL_PROJECT_DIR/.claude/hooks/lib/extract-commit-msg.py" \
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/extract-commit-msg.py" \
      "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
   seed_dod "dod-2026-04-19-stamp-test.md"
   seed_inbox "2026-04-19-stamp-test.md"
@@ -396,8 +402,9 @@ MD
 
 test_pre_bash_guard_blocks_pytest_on_marker() {
   # Mirror of commit-blocking test, for pytest command path.
+  # Same Wave 3 behavior: empty marker → infra-integrity exit 2 + [rein] stderr.
   mkdir -p "$SANDBOX/.claude/hooks/lib"
-  cp "$REAL_PROJECT_DIR/.claude/hooks/lib/extract-commit-msg.py" \
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/extract-commit-msg.py" \
      "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
   seed_dod "dod-2026-04-19-stamp-test.md"
   seed_inbox "2026-04-19-stamp-test.md"
@@ -407,8 +414,9 @@ test_pre_bash_guard_blocks_pytest_on_marker() {
 
   local input='{"tool_input":{"command":"pytest tests/unit/"},"tool_result":{}}'
   run_hook "pre-bash-guard.sh" "$input"
-  assert_exit 2 "pre-bash-guard should block pytest with coverage-mismatch marker"
-  assert_stderr_contains "coverage matrix 검증 실패 마커 존재"
+  # Empty marker → rc=2 path [I3]: exactly exit 2 + [rein] on stderr.
+  assert_exit 2 "pre-bash-guard should exit 2 (I3 infra path) for empty coverage-mismatch marker"
+  assert_stderr_contains "[rein]" "I3 infra block must emit [rein] prefix on stderr"
 }
 
 # --- main -----------------------------------------------------------

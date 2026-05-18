@@ -157,7 +157,7 @@ test_scenario_A_tier1_invalid_covers_blocks() {
 
   assert_exit 2 "Tier 1 + unknown covers → block"
   assert_file_exists "trail/dod/.dod-coverage-mismatch"
-  assert_stderr_contains "BLOCKED"
+  assert_stderr_contains "[rein] The coverage check failed"
 }
 
 # ---- Scenario B: Tier 1 pass → exit 0, no marker
@@ -255,7 +255,7 @@ test_scenario_G_governance_invalid_fails_closed() {
     grep -q "invalid_stage" "$SANDBOX/trail/incidents/governance-config-invalid.log" \
       || fail "governance-config-invalid.log missing 'invalid_stage' marker"
   fi
-  assert_stderr_contains "governance.json"
+  assert_stderr_contains "[rein] The edit gate cannot run because the governance config file"
 }
 
 # ---- Scenario H (2026-04-22 retro-review-sweep M1):
@@ -270,7 +270,7 @@ test_scenario_H_m1_claude_rules_blocks() {
 
   assert_exit 2 ".claude/rules/foo.md 편집 시 M1 whitelist 상 source → DoD gate block"
   assert_file_exists "trail/dod/.dod-coverage-mismatch"
-  assert_stderr_contains "BLOCKED"
+  assert_stderr_contains "[rein] The coverage check failed"
 }
 
 # ---- Scenario I (M1):
@@ -298,7 +298,7 @@ test_scenario_J_m1_agents_md_blocks() {
 
   assert_exit 2 "AGENTS.md 편집 시 M1 whitelist 상 source → DoD gate block"
   assert_file_exists "trail/dod/.dod-coverage-mismatch"
-  assert_stderr_contains "BLOCKED"
+  assert_stderr_contains "[rein] The coverage check failed"
 }
 
 # ---- Scenario K (M1):
@@ -312,7 +312,7 @@ test_scenario_K_m1_claude_skills_blocks() {
 
   assert_exit 2 ".claude/skills/foo/SKILL.md 편집 시 M1 whitelist 상 source → block"
   assert_file_exists "trail/dod/.dod-coverage-mismatch"
-  assert_stderr_contains "BLOCKED"
+  assert_stderr_contains "[rein] The coverage check failed"
 }
 
 # ---- Scenario L (M1 Round 2, 2026-04-22):
@@ -326,7 +326,7 @@ test_scenario_L_m1_gitignore_blocks() {
 
   assert_exit 2 ".gitignore 편집 시 M1 whitelist 상 source → DoD gate block"
   assert_file_exists "trail/dod/.dod-coverage-mismatch"
-  assert_stderr_contains "BLOCKED"
+  assert_stderr_contains "[rein] The coverage check failed"
 }
 
 # ---- Scenario L2 (M1 Round 3, 2026-04-22): cache 경로의 .gitignore 도 차단.
@@ -342,7 +342,7 @@ test_scenario_L2_m1_cache_gitignore_still_blocks() {
 
   assert_exit 2 ".claude/cache/.gitignore 편집 시 cache exemption 무시하고 block"
   assert_file_exists "trail/dod/.dod-coverage-mismatch"
-  assert_stderr_contains "BLOCKED"
+  assert_stderr_contains "[rein] The coverage check failed"
 }
 
 # ---- Scenario M (M1 Round 2): `.gitkeep` 은 여전히 면제 (placeholder).

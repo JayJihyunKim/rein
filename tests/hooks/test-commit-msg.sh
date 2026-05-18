@@ -14,6 +14,11 @@
 # This suite drives pre-bash-guard.sh with crafted JSON payloads and
 # verifies the expected allow/block outcome and the extracted message
 # (indirectly via the block message content).
+#
+# Wave 2 Phase 2 note: P7 (commit message format violation) was converted
+# from exit 2 + stderr to exit 0 + JSON deny (reason_code COMMIT_MSG_FORMAT).
+# Block cases now assert: exit 0 + permissionDecision=="deny" +
+# "COMMIT_MSG_FORMAT" in permissionDecisionReason.
 
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -74,25 +79,25 @@ test_allow_scoped_refactor_underscore() {
 
 # ============================================================
 # Blocked: malformed messages
+# Wave 2 Phase 2: P7 now emits exit 0 + JSON deny (COMMIT_MSG_FORMAT).
 # ============================================================
 test_block_no_type() {
   local cmd; cmd="$(_gc) -m \"just a random message\""
   run_hook "$HOOK" "$(json_cmd "$cmd")"
-  assert_exit 2 "no type should block"
-  assert_stderr_contains "형식"
+  assert_json_deny "COMMIT_MSG_FORMAT" "no type should emit JSON deny COMMIT_MSG_FORMAT"
 }
 
 test_block_unknown_type() {
   local cmd; cmd="$(_gc) -m \"wip: scratch work\""
   run_hook "$HOOK" "$(json_cmd "$cmd")"
-  assert_exit 2 "unknown type (wip) should block"
+  assert_json_deny "COMMIT_MSG_FORMAT" "unknown type (wip) should emit JSON deny COMMIT_MSG_FORMAT"
 }
 
 test_block_empty_description() {
   # "fix: " with only whitespace after colon → regex `.+` fails (needs ≥1 char)
   local cmd; cmd="$(_gc) -m \"fix:\""
   run_hook "$HOOK" "$(json_cmd "$cmd")"
-  assert_exit 2 "empty description should block"
+  assert_json_deny "COMMIT_MSG_FORMAT" "empty description should emit JSON deny COMMIT_MSG_FORMAT"
 }
 
 # ============================================================
@@ -138,7 +143,7 @@ this has no type prefix
 XEOF
 )\""
   run_hook "$HOOK" "$(json_cmd "$cmd")"
-  assert_exit 2 "heredoc with invalid first line should block"
+  assert_json_deny "COMMIT_MSG_FORMAT" "heredoc with invalid first line should emit JSON deny COMMIT_MSG_FORMAT"
 }
 
 # ============================================================
@@ -243,13 +248,48 @@ test_block_when_helper_missing() {
   assert_stderr_contains "helper"
 }
 
+# ============================================================
+# assert_json_deny helper (local — mirrors test-pre-bash-guard.sh)
+# Asserts: HOOK_EXIT==0, stdout is valid JSON,
+# permissionDecision=="deny", and reason_code appears in
+# permissionDecisionReason.
+# Usage: assert_json_deny "REASON_CODE" ["message for failure"]
+# ============================================================
+assert_json_deny() {
+  local reason_code="$1"
+  local msg="${2:-JSON deny with reason_code=$reason_code}"
+  # exit 0
+  [ "$HOOK_EXIT" = "0" ] \
+    || fail "$msg: expected exit 0 (JSON deny), got exit $HOOK_EXIT"
+  # valid JSON with permissionDecision=deny
+  local decision
+  decision=$(printf '%s' "$HOOK_STDOUT" | python3 -c '
+import json,sys
+data=json.load(sys.stdin)
+print(data["hookSpecificOutput"]["permissionDecision"])
+' 2>/dev/null)
+  [ "$decision" = "deny" ] \
+    || fail "$msg: permissionDecision not \"deny\" (got: '$decision', stdout: $HOOK_STDOUT)"
+  # reason_code present in permissionDecisionReason
+  local pdr
+  pdr=$(printf '%s' "$HOOK_STDOUT" | python3 -c '
+import json,sys
+data=json.load(sys.stdin)
+print(data["hookSpecificOutput"]["permissionDecisionReason"])
+' 2>/dev/null)
+  case "$pdr" in
+    *"$reason_code"*) ;;
+    *) fail "$msg: reason_code '$reason_code' not found in permissionDecisionReason: '$pdr'" ;;
+  esac
+}
+
 # Note: extract-commit-msg.py is required by the hook. Ensure the test
 # sandbox has the lib dir populated. We do this by copying it in a
 # per-test setup below.
 
 setup_lib() {
   mkdir -p "$SANDBOX/.claude/hooks/lib"
-  cp "$REAL_PROJECT_DIR/.claude/hooks/lib/extract-commit-msg.py" \
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/extract-commit-msg.py" \
      "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
   # trail dirs so DOD check is a no-op (no dod files → skip stamp check)
   mkdir -p "$SANDBOX/trail/dod" "$SANDBOX/trail/incidents"

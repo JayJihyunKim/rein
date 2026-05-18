@@ -42,7 +42,6 @@ copy_hooks_into_sandbox() {
   cp "$REAL_PROJECT_DIR/scripts/rein-aggregate-incidents.py" "$SANDBOX/scripts/"
   cp "$REAL_PROJECT_DIR/scripts/rein-stop-emit-block.py" "$SANDBOX/scripts/" 2>/dev/null || true
   cp "$REAL_PROJECT_DIR/scripts/rein-heal-legacy-pending.py" "$SANDBOX/scripts/" 2>/dev/null || true
-  cp "$REAL_PROJECT_DIR/scripts/rein-scan-skill-mcp.py" "$SANDBOX/scripts/" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------

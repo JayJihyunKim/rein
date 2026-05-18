@@ -29,17 +29,17 @@ PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 # GI-governance-stage-config). Missing either library is fail-closed: a
 # silently degraded DoD gate is the drift we are trying to prevent.
 if ! . "$SCRIPT_DIR/lib/select-active-dod.sh" 2>/dev/null; then
-  echo "BLOCKED: [DoD gate] select-active-dod library missing at $SCRIPT_DIR/lib/select-active-dod.sh" >&2
+  echo "[rein] The edit gate cannot run because a required library is missing (lib/select-active-dod.sh). Run 'rein update' to restore it." >&2
   exit 2
 fi
 if ! . "$SCRIPT_DIR/lib/governance-stage.sh" 2>/dev/null; then
-  echo "BLOCKED: [DoD gate] governance-stage library missing at $SCRIPT_DIR/lib/governance-stage.sh" >&2
+  echo "[rein] The edit gate cannot run because a required library is missing (lib/governance-stage.sh). Run 'rein update' to restore it." >&2
   exit 2
 fi
 # RES-1: plugin-aware helper script resolver. CLAUDE_PLUGIN_ROOT/scripts
 # preferred, repo scripts/ as fallback.
 if ! . "$SCRIPT_DIR/lib/plugin-script-path.sh" 2>/dev/null; then
-  echo "BLOCKED: [DoD gate] plugin-script-path library missing at $SCRIPT_DIR/lib/plugin-script-path.sh" >&2
+  echo "[rein] The edit gate cannot run because a required library is missing (lib/plugin-script-path.sh). Run 'rein update' to restore it." >&2
   exit 2
 fi
 
@@ -132,10 +132,10 @@ resolve_python
 rc=$?
 if [ "$rc" -ne 0 ]; then
   case "$rc" in
-    10) echo "BLOCKED: [DoD gate] Python 인터프리터 부재." >&2 ;;
-    11) echo "BLOCKED: [DoD gate] WindowsApps Python stub 감지. 실제 Python 설치 필요." >&2 ;;
-    12) echo "BLOCKED: [DoD gate] Python launch 실패 (9009 계열) — Windows Git Bash/MSYS 가능성 또는 REIN_PYTHON invalid override." >&2 ;;
-    *)  echo "BLOCKED: [DoD gate] resolve_python 실패 (rc=$rc)." >&2 ;;
+    10) echo "[rein] The edit gate cannot run because Python is not installed. Install Python 3 to restore all edit checks." >&2 ;;
+    11) echo "[rein] The edit gate cannot run because the Windows App Execution Alias Python stub was detected instead of a real Python installation. Install Python 3 from python.org or the Microsoft Store to proceed." >&2 ;;
+    12) echo "[rein] The edit gate cannot run because Python failed to launch (exit 9009 family) — this is common in Windows Git Bash or MSYS, or when REIN_PYTHON points to an invalid interpreter. Check your Python installation or unset REIN_PYTHON." >&2 ;;
+    *)  echo "[rein] The edit gate cannot run because the Python resolver failed (rc=$rc). Check your Python installation or run 'rein update'." >&2 ;;
   esac
   print_windows_diagnostics_if_applicable >&2
   log_block "python runtime unavailable" "unknown"
@@ -146,7 +146,7 @@ FILE_PATH=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extrac
 EXTRACT_RC=$?
 
 if [ "$EXTRACT_RC" -ne 0 ]; then
-  echo "BLOCKED: [DoD gate] Edit/Write 입력 JSON 파싱 실패 (extract-hook-json.py exit $EXTRACT_RC)." >&2
+  echo "[rein] The edit gate cannot read the tool input because the hook JSON could not be parsed (extract-hook-json.py exited $EXTRACT_RC). This is an installation issue — run 'rein update' to repair." >&2
   log_block "json parse failure" "unknown"
   exit 2
 fi
@@ -244,8 +244,7 @@ if [ "$GOVERNANCE_STAGE" = "INVALID" ]; then
   # governance.json path is mode-aware. Surface the actually-resolved path so
   # the user fixes the right file in plugin / legacy installs.
   GOVERNANCE_CONFIG_PATH=$(cd "$PROJECT_DIR" && resolve_governance_config_path)
-  echo "BLOCKED: [DoD gate] corrupt $GOVERNANCE_CONFIG_PATH." >&2
-  echo "  fix or remove the file to re-initialize to Stage 1 (advisory)." >&2
+  echo "[rein] The edit gate cannot run because the governance config file ($GOVERNANCE_CONFIG_PATH) is corrupt. Fix or remove the file to re-initialize to Stage 1 (advisory mode)." >&2
   log_block "governance config invalid" "$FILE_PATH"
   exit 2
 fi
@@ -265,7 +264,7 @@ if [ -f "$INCIDENT_STAMP" ]; then
   # 동일). plugin install 환경에서 ${CLAUDE_PLUGIN_ROOT}/scripts/ 우선, 메인테이너
   # repo fallback 으로 ${PROJECT_DIR}/scripts/ 가 사용된다.
   AGGREGATE_PY=$(resolve_helper_script rein-aggregate-incidents.py) || {
-    echo "BLOCKED: [DoD gate] aggregate helper rein-aggregate-incidents.py not resolvable" >&2
+    echo "[rein] The incident count check cannot run because the aggregate helper (rein-aggregate-incidents.py) could not be found. Run 'rein update' to restore it." >&2
     log_block "aggregate helper missing" "$FILE_PATH"
     exit 2
   }
@@ -273,7 +272,7 @@ if [ -f "$INCIDENT_STAMP" ]; then
     --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null)
   LIVE_RC=$?
   if [ "$LIVE_RC" -ne 0 ]; then
-    echo "BLOCKED: incident count 검증 실패 (exit $LIVE_RC)." >&2
+    echo "[rein] The incident count check failed (exit $LIVE_RC). Check that Python is working correctly and run 'rein update' if the problem persists." >&2
     log_block "incident count 검증 실패" "$FILE_PATH"
     exit 2
   fi
@@ -285,15 +284,15 @@ if [ -f "$INCIDENT_STAMP" ]; then
     log_block "incident gate bypass" "$FILE_PATH"
     rm -f "$INCIDENT_BYPASS"
   else
-    echo "BLOCKED: 미처리 incident ${LIVE_COUNT}건. 먼저 처리하세요." >&2
-    echo "  1) /incidents-to-rule 스킬 호출" >&2
-    echo "  2) AskUserQuestion 으로 승격/거부 결정" >&2
-    echo "  3) 승인된 rule 을 AGENTS.md 에 추가" >&2
-    echo "  4) python3 <scripts-dir>/rein-mark-incident-processed.py <path> <processed|declined>" >&2
+    echo "[rein] There are $LIVE_COUNT unresolved incidents that need a decision before source files can be edited. To proceed:" >&2
+    echo "  1) Run /incidents-to-rule to review and resolve them." >&2
+    echo "  2) Ask the user to approve or decline each incident." >&2
+    echo "  3) Add any approved rule to AGENTS.md." >&2
+    echo "  4) Mark each incident as processed: python3 <scripts-dir>/rein-mark-incident-processed.py <path> <processed|declined>" >&2
     echo "     (scripts-dir = \${CLAUDE_PLUGIN_ROOT}/scripts/ on plugin install, \${PROJECT_DIR}/scripts/ on maintainer repo)" >&2
-    echo "  5) (자동) 다음 source 편집 시 stamp 자가 해소" >&2
+    echo "  5) The check clears itself automatically on the next source edit once all incidents are resolved." >&2
     echo "" >&2
-    echo "긴급: echo 'reason=<사유>' > $INCIDENT_BYPASS" >&2
+    echo "  Emergency bypass: echo 'reason=<reason>' > $INCIDENT_BYPASS" >&2
     log_block "incident review pending" "$FILE_PATH"
     exit 2
   fi
@@ -366,8 +365,8 @@ if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]; then
   done
 
   if [ "$UNRESOLVED_SPECS" = true ]; then
-    echo "BLOCKED: 미리뷰 사양 문서가 있습니다." >&2
-    echo "리뷰 완료 후: bash <scripts-dir>/rein-mark-spec-reviewed.sh \"$spec_path\" codex" >&2
+    echo "[rein] There is a design document that has not been reviewed yet. Complete the review, then mark it done:" >&2
+    echo "  bash <scripts-dir>/rein-mark-spec-reviewed.sh \"$spec_path\" codex" >&2
     echo "  (scripts-dir = \${CLAUDE_PLUGIN_ROOT}/scripts/ on plugin install, \${PROJECT_DIR}/scripts/ on maintainer repo)" >&2
     log_block "미리뷰 사양 문서" "$FILE_PATH"
     exit 2
@@ -395,13 +394,13 @@ if [ "${#MISSING_MARKERS[@]}" -gt 0 ]; then
     log_block "routing missing section bypass" "$FILE_PATH"
     rm -f "$ROUTING_BYPASS"
   else
-    echo "BLOCKED: 다음 DoD 에 '## 라우팅 추천' 섹션이 없습니다:" >&2
+    echo "[rein] The following task records are missing the '## 라우팅 추천' routing section:" >&2
     for m in "${MISSING_MARKERS[@]}"; do
       echo "  - $(basename -- "$m" | sed 's/^\.routing-missing-//')" >&2
     done
-    echo "  DoD 에 '## 라우팅 추천' 섹션을 추가하세요. 형식: agent / skills / mcps / rationale / approved_by_user." >&2
-    echo "  DoD 작성 후 PostToolUse 단계의 'post-write-routing-procedure-rule.sh' 가 routing 절차 본문을 inject 합니다." >&2
-    echo "  긴급 바이패스: echo 'reason=<사유>' > $ROUTING_BYPASS" >&2
+    echo "  Add a '## 라우팅 추천' section to the task record with fields: agent / skills / mcps / rationale / approved_by_user." >&2
+    echo "  The PostToolUse hook will inject the routing procedure body after the task record is saved." >&2
+    echo "  Emergency bypass: echo 'reason=<reason>' > $ROUTING_BYPASS" >&2
     log_block "routing section missing" "$FILE_PATH"
     exit 2
   fi
@@ -467,30 +466,14 @@ if [ -n "$ROUTING_VIOLATIONS" ]; then
     log_block "routing gate bypass" "$FILE_PATH"
     rm -f "$ROUTING_BYPASS"
   else
-    printf "BLOCKED: active DoD 의 '## 라우팅 추천' 섹션 위반:%b\n" "$ROUTING_VIOLATIONS" >&2
-    echo "  '## 라우팅 추천' 섹션에 approved_by_user: true 를 기록하세요 (사용자 승인 후)." >&2
-    echo "  긴급 바이패스: echo 'reason=<사유>' > $ROUTING_BYPASS" >&2
+    printf "[rein] The following active task records have a routing section without user approval:%b\n" "$ROUTING_VIOLATIONS" >&2
+    echo "  Add 'approved_by_user: true' to the '## 라우팅 추천' section after the user confirms the routing plan." >&2
+    echo "  Emergency bypass: echo 'reason=<reason>' > $ROUTING_BYPASS" >&2
     log_block "routing section 위반" "$FILE_PATH"
     exit 2
   fi
 fi
 
-# skill/MCP 가이드 재생성 pending: 자동 생성 시도 → 실패 시 WARNING 만 (block 아님)
-# RES-1: helper script 경로는 plugin-aware resolver 로 해석한다. 본 블록은 advisory
-# (block 아님) 이므로 resolver 실패도 WARNING 으로 graceful skip — fail-closed 가
-# 아닌 fail-graceful 패턴 (AGGREGATE_PY / VALIDATOR_PATH 의 fail-closed 와 의도적
-# 으로 분리). plugin install 환경에서 ${CLAUDE_PLUGIN_ROOT}/scripts/ 우선, 메인테이너
-# repo fallback 으로 ${PROJECT_DIR}/scripts/ 가 사용된다.
-SKILL_REGEN_STAMP="$PROJECT_DIR/.claude/cache/.skill-mcp-regen-pending"
-if [ -f "$SKILL_REGEN_STAMP" ]; then
-  GEN_SKILL_MCP=$(resolve_helper_script rein-generate-skill-mcp-guide.py 2>/dev/null || true)
-  if [ -n "$GEN_SKILL_MCP" ] && [ -f "$GEN_SKILL_MCP" ]; then
-    ( cd "$PROJECT_DIR" && "${PYTHON_RUNNER[@]}" "$GEN_SKILL_MCP" >/dev/null 2>&1 ) || \
-      echo "WARNING: skill-mcp-guide 자동 생성 실패 (stamp 유지)" >&2
-  else
-    echo "WARNING: skill/MCP 가이드 재생성 pending. .claude/cache/skill-mcp-guide.md 를 확인하세요." >&2
-  fi
-fi
 # END routing-gate
 
 if [ "$DOD_FOUND" = true ]; then
@@ -522,7 +505,7 @@ if [ "$DOD_FOUND" = true ]; then
     VALIDATOR_PATH=$(resolve_helper_script rein-validate-coverage-matrix.py) || {
       mkdir -p "$DOD_DIR" 2>/dev/null
       touch "$DOD_MISMATCH_MARKER" 2>/dev/null
-      echo "BLOCKED: [DoD gate] validator helper rein-validate-coverage-matrix.py not resolvable" >&2
+      echo "[rein] The coverage validator (rein-validate-coverage-matrix.py) could not be found. Run 'rein update' to restore it." >&2
       log_block "validator helper missing" "$SAD_PATH"
       exit 2
     }
@@ -550,15 +533,14 @@ if [ "$DOD_FOUND" = true ]; then
       printf '%s\tdod\t%s\ttimeout\n' "$(date -u +%FT%TZ)" "$SAD_PATH" \
         >> "$PROJECT_DIR/trail/incidents/validator-timeout.log" 2>/dev/null || true
       touch "$DOD_MISMATCH_MARKER"
-      echo "BLOCKED: [DoD gate] validator timeout on $SAD_PATH — fail-closed (Tier 1)." >&2
+      echo "[rein] The coverage validator timed out while checking $SAD_PATH — the edit is blocked until the validator can complete. Check if the plan file is valid." >&2
       log_block "validator timeout (tier 1)" "$SAD_PATH"
       exit 2
       ;;
     1:*)
       touch "$DOD_MISMATCH_MARKER"
       rm -f "$DOD_ADVISORY_MARKER"
-      echo "BLOCKED: [DoD gate] DoD validator failed for $SAD_PATH (exit $VEXIT, Tier 1 marker)." >&2
-      echo "  fix the DoD's '## 범위 연결' coverage list to reference 'implemented' IDs from the plan matrix." >&2
+      echo "[rein] The coverage check failed for the active task record ($SAD_PATH, exit $VEXIT). Update the '## 범위 연결' section to reference the IDs that are actually marked 'implemented' in the plan." >&2
       log_block "dod covers mismatch (tier 1)" "$SAD_PATH"
       exit 2
       ;;
@@ -581,8 +563,7 @@ if [ "$DOD_FOUND" = true ]; then
   touch "$SRC_EDIT_MARKER" 2>/dev/null
   exit 0
 else
-  echo "BLOCKED: 미완료 DoD 파일이 없습니다." >&2
-  echo "소스 코드를 편집하기 전에 먼저 trail/dod/dod-$(date +%Y-%m-%d)-<slug>.md 를 작성하세요." >&2
+  echo "[rein] Source files cannot be edited yet because there is no active task record. Create trail/dod/dod-$(date +%Y-%m-%d)-<slug>.md to describe what this task changes before editing any source." >&2
   log_block "미완료 DoD 없음" "$FILE_PATH"
   exit 2
 fi

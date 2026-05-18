@@ -3,7 +3,8 @@
 # Task 2.1):
 #   (A) trail/ missing on safe project_dir → bootstrap guidance is prepended to
 #       the answer-only-mode body inside a single additionalContext envelope.
-#   (B) trail/ present → no bootstrap guidance, only the existing body.
+#   (B) bootstrap complete (trail/ + .rein/project.json + trail/index.md) → no
+#       bootstrap guidance, only the existing body.
 #   (C) helper exit 11 (sensitive-path — $HOME as cwd) → no bootstrap guidance,
 #       silent passthrough, only the existing body.
 set -e
@@ -44,8 +45,13 @@ if ctx.index("rein-bootstrap-project.py") >= ctx.index("행동 강령"):
     print("FAIL(A): bootstrap guidance must precede the rule body", file=sys.stderr); sys.exit(1)
 PY
 
-# ---------- (B) trail/ present → no bootstrap advisory -----------------------
-mkdir "$B_DIR/trail"
+# ---------- (B) bootstrap complete → no bootstrap advisory -------------------
+# Partial-bootstrap fix (v1.3.0+1): bootstrap_check requires all three markers
+# (trail/ dir, .rein/project.json, trail/index.md). Seed all three so the
+# helper takes the rc=0 (bootstrapped) path and no advisory is prepended.
+mkdir "$B_DIR/trail" "$B_DIR/.rein"
+printf '%s' '{"mode":"plugin","scope":"project","version":"1.3.0"}' > "$B_DIR/.rein/project.json"
+printf '# trail/index.md\n' > "$B_DIR/trail/index.md"
 ( cd "$B_DIR" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK" </dev/null >"$B_OUT" 2>/dev/null )
 python3 - "$B_OUT" <<'PY' || exit 1
 import json, sys
@@ -55,7 +61,7 @@ if not raw.strip():
 data = json.loads(raw)
 ctx = data["hookSpecificOutput"]["additionalContext"]
 if "rein-bootstrap-project.py" in ctx:
-    print("FAIL(B): trail/ present yet bootstrap advisory still prepended", file=sys.stderr); sys.exit(1)
+    print("FAIL(B): bootstrap complete yet bootstrap advisory still prepended", file=sys.stderr); sys.exit(1)
 if "행동 강령" not in ctx:
     print("FAIL(B): missing answer-only-mode body marker '행동 강령'", file=sys.stderr); sys.exit(1)
 PY

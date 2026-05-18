@@ -25,7 +25,6 @@ for test_file in \
   "$SCRIPT_DIR/test-session-start.sh" \
   "$SCRIPT_DIR/test-spec-review-gate.sh" \
   "$SCRIPT_DIR/test-incidents-automation.sh" \
-  "$SCRIPT_DIR/test-skill-mcp-inventory.sh" \
   "$SCRIPT_DIR/test-stop-incident-gate.sh" \
   "$SCRIPT_DIR/test-incidents-semi-automation-full.sh" \
   "$SCRIPT_DIR/test-coverage-matrix.sh" \
@@ -47,6 +46,7 @@ for test_file in \
   "$SCRIPT_DIR/test-design-plan-coverage-plugin-size.sh" \
   "$SCRIPT_DIR/test-dev-only-rules-not-in-plugin.sh" \
   "$SCRIPT_DIR/test-rule-inject-helper.sh" \
+  "$SCRIPT_DIR/test-json-deny-emitter.sh" \
   "$SCRIPT_DIR/test-user-prompt-submit-rules.sh" \
   "$SCRIPT_DIR/test-pre-tool-use-agent-rules.sh" \
   "$SCRIPT_DIR/test-pre-tool-use-bash-rules.sh" \

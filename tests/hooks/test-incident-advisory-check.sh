@@ -9,7 +9,8 @@ trap "rm -rf $TMP" EXIT
 
 mkdir -p "$TMP/trail/incidents" "$TMP/trail/inbox" "$TMP/trail/dod"
 ln -s "$PROJECT_DIR/scripts" "$TMP/scripts"
-ln -s "$PROJECT_DIR/.claude" "$TMP/.claude"
+mkdir -p "$TMP/.claude/hooks/lib"
+cp -R "$PROJECT_DIR/plugins/rein-core/hooks/." "$TMP/.claude/hooks/"
 touch "$TMP/trail/index.md"
 
 echo "1" > "$TMP/trail/incidents/.session-start-line"
@@ -24,7 +25,7 @@ TODAY=$(date +%Y-%m-%d)
 echo "# test" > "$TMP/trail/inbox/${TODAY}-test.md"
 echo "# idx" > "$TMP/trail/index.md"
 
-OUTPUT=$(REIN_PROJECT_DIR="$TMP" bash "$PROJECT_DIR/.claude/hooks/stop-session-gate.sh" 2>&1 1>/dev/null || true)
+OUTPUT=$(REIN_PROJECT_DIR="$TMP" bash "$PROJECT_DIR/plugins/rein-core/hooks/stop-session-gate.sh" 2>&1 1>/dev/null || true)
 
 echo "$OUTPUT" | grep -q "incidents-to-agent" || {
   echo "FAIL: expected 'incidents-to-agent' in stderr"

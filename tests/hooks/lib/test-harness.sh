@@ -26,28 +26,44 @@ sandbox_setup() {
   mkdir -p "$SANDBOX/trail/weekly"
   mkdir -p "$SANDBOX/trail/incidents"
   # 훅이 공용으로 source 하는 lib/ 를 먼저 복사 (portable.sh 등)
+  # Phase 3 후 dev overlay `.claude/hooks/lib` 부재 → plugin SSOT 사용
   if [ -d "$REAL_PROJECT_DIR/.claude/hooks/lib" ]; then
     mkdir -p "$SANDBOX/.claude/hooks/lib"
     cp -R "$REAL_PROJECT_DIR/.claude/hooks/lib/." "$SANDBOX/.claude/hooks/lib/"
+  elif [ -d "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib" ]; then
+    mkdir -p "$SANDBOX/.claude/hooks/lib"
+    cp -R "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/." "$SANDBOX/.claude/hooks/lib/"
   fi
   # 호출자가 전달한 훅 파일들을 샌드박스로 복사 (누락 시 fail-fast)
+  # Option C Phase 3 후 dev overlay `.claude/hooks/` 폐기 — 플러그인 SSOT
+  # (`plugins/rein-core/hooks/`) 가 단일 소스. fallback 우선순위는
+  # (1) dev overlay (메인테이너 환경에 잔존할 수도 있는 ad-hoc 훅 위치)
+  # (2) 플러그인 SSOT (Phase 3 후 실제 본체)
+  # (3) scripts/ (helper 스크립트)
   for h in "$@"; do
-    # 훅 파일 시도
+    # (1) dev overlay 훅 (legacy / Phase 3 이후 통상 부재)
     local src="$REAL_PROJECT_DIR/.claude/hooks/$h"
     if [ -f "$src" ]; then
       cp "$src" "$SANDBOX/.claude/hooks/$h"
       chmod +x "$SANDBOX/.claude/hooks/$h"
       continue
     fi
-    # 스크립트 파일 시도
+    # (2) 플러그인 SSOT 훅 (Phase 3 후 단일 진실 소스)
+    src="$REAL_PROJECT_DIR/plugins/rein-core/hooks/$h"
+    if [ -f "$src" ]; then
+      cp "$src" "$SANDBOX/.claude/hooks/$h"
+      chmod +x "$SANDBOX/.claude/hooks/$h"
+      continue
+    fi
+    # (3) 스크립트 파일 시도
     src="$REAL_PROJECT_DIR/scripts/$h"
     if [ -f "$src" ]; then
       cp "$src" "$SANDBOX/scripts/$h"
       chmod +x "$SANDBOX/scripts/$h"
       continue
     fi
-    # 둘 다 없으면 실패
-    echo "sandbox_setup: file not found: $h (checked hooks and scripts)" >&2
+    # 모두 없으면 실패
+    echo "sandbox_setup: file not found: $h (checked .claude/hooks, plugins/rein-core/hooks, scripts)" >&2
     sandbox_teardown
     return 1
   done

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test-plugin-scripts-bundle.sh — Plugin-First Restructure Task 1.3 + Task 2.7
 #
-# Asserts the helper script bundle for the rein-core plugin: 13 files
+# Asserts the helper script bundle for the rein-core plugin: 11 files
 # mirrored from `scripts/` into `plugins/rein-core/scripts/`. The plugin
 # manifest references these helpers via the `helperScripts` slot; this
 # test guards drift between the source-of-truth and the plugin mirror.
@@ -22,20 +22,15 @@
 #     and skills now resolve via ${CLAUDE_PLUGIN_ROOT} (RES-1) so the plugin
 #     mirror is required for fresh installs → 12 total.
 #   - 2026-05-14 v1.2.0 cycle RTG-2: +1 helper — rein-scan-skill-mcp.py
-#     shipped into plugins/rein-core/scripts/. SessionStart now resolves
-#     the scanner via RES-1 and the guide path via rein-state-paths.py
-#     (new skill-mcp-guide state), replacing the .claude/cache hardcoded
-#     reference → 13 total.
-#   - 2026-05-14 v1.2.0 cycle Wave 5 Fix F1: rein-scan-skill-mcp.py
-#     write path refactored — inventory.json now routes through
-#     _resolve_inventory_dir() mirroring rein-generate-skill-mcp-guide.py
-#     so plugin mode write (${CLAUDE_PLUGIN_DATA}/runtime/inventory/) and
-#     scaffold mode write stay in lockstep with the generator's read path.
-#     Composition unchanged → still 13 total. dev fallback scripts/
-#     mirror seeded to maintain sha256 parity invariant (b).
+#     shipped into plugins/rein-core/scripts/ → 13 total.
+#   - 2026-05-18 smart-routing A+: -2 helpers — the skill/MCP inventory
+#     scanner subsystem (rein-scan-skill-mcp.py, rein-generate-skill-mcp-guide.py)
+#     retired. Routing now relies on the skill/agent/MCP list Claude Code
+#     injects per session, so the disk scanner and its guide generator
+#     were deleted → 11 total.
 #
 # Assertions (3 invariants):
-#   (a) All 13 expected files exist in plugins/rein-core/scripts/.
+#   (a) All 11 expected files exist in plugins/rein-core/scripts/.
 #   (b) sha256(plugin mirror) == sha256(source) for each file.
 #       Failure names the diverging file with both hashes.
 #   (c) Executable bit is set on the 3 .sh files in the mirror.
@@ -59,14 +54,12 @@ SOURCES=(
   "scripts/rein-mark-spec-reviewed.sh"
   "scripts/rein-codex-review.sh"
   "scripts/rein-route-record.py"
-  "scripts/rein-generate-skill-mcp-guide.py"
   "scripts/rein-heal-legacy-pending.py"
   "scripts/rein-policy-loader.py"
   "scripts/rein-aggregate-incidents.py"
   "scripts/rein-stop-emit-block.py"
   "scripts/rein-mark-incident-processed.py"
   "scripts/rein-mark-agent-candidate.py"
-  "scripts/rein-scan-skill-mcp.py"
 )
 DESTS=(
   "rein-job-wrapper.sh"
@@ -74,14 +67,12 @@ DESTS=(
   "rein-mark-spec-reviewed.sh"
   "rein-codex-review.sh"
   "rein-route-record.py"
-  "rein-generate-skill-mcp-guide.py"
   "rein-heal-legacy-pending.py"
   "rein-policy-loader.py"
   "rein-aggregate-incidents.py"
   "rein-stop-emit-block.py"
   "rein-mark-incident-processed.py"
   "rein-mark-agent-candidate.py"
-  "rein-scan-skill-mcp.py"
 )
 
 # Files that must have the executable bit set in the plugin mirror.
@@ -94,8 +85,8 @@ EXECUTABLE_DESTS=(
 )
 
 count=${#SOURCES[@]}
-if [ "$count" -ne 13 ] || [ "${#DESTS[@]}" -ne 13 ]; then
-  echo "FAIL: source/dest arrays must have exactly 13 entries each (sources=$count, dests=${#DESTS[@]})" >&2
+if [ "$count" -ne 11 ] || [ "${#DESTS[@]}" -ne 11 ]; then
+  echo "FAIL: source/dest arrays must have exactly 11 entries each (sources=$count, dests=${#DESTS[@]})" >&2
   exit 1
 fi
 
@@ -112,7 +103,7 @@ sha256_of() {
   fi
 }
 
-# --- (a) all 13 mirror files exist -------------------------------------
+# --- (a) all 11 mirror files exist -------------------------------------
 for i in "${!DESTS[@]}"; do
   dest="$MIRROR_DIR/${DESTS[$i]}"
   if [ ! -f "$dest" ]; then
@@ -151,4 +142,4 @@ for name in "${EXECUTABLE_DESTS[@]}"; do
   fi
 done
 
-echo "test-plugin-scripts-bundle: OK (13 helpers mirrored sha256-identical)"
+echo "test-plugin-scripts-bundle: OK (11 helpers mirrored sha256-identical)"

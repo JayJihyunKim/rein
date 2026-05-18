@@ -42,8 +42,19 @@ source "$SCRIPT_DIR/lib/test-harness.sh"
 # This is exactly the real-world failure condition we're trying to
 # capture.
 
+_seed_bootstrap_marker() {
+  # BG-1 / BG-D 신 contract: stop-session-gate.sh 는 .rein/project.json 부재 시
+  # "bootstrap incomplete" 분기로 즉시 exit 0. 이 파일의 legacy 픽스처는
+  # bootstrap 이 정상 완료된 환경에서의 inbox/git/index 동작을 검증하므로
+  # 마커를 명시적으로 시드한다 (BG-D escape 를 의도적으로 우회).
+  mkdir -p "$SANDBOX/.rein"
+  printf '%s' '{"mode":"plugin","scope":"project","version":"1.3.0"}' \
+    > "$SANDBOX/.rein/project.json"
+}
+
 _init_git_with_today_commit() {
   # Initialize a git repo in the sandbox and create ONE commit today.
+  _seed_bootstrap_marker
   (
     cd "$SANDBOX" || exit 1
     git init --quiet >/dev/null 2>&1
@@ -60,6 +71,7 @@ _init_git_no_commits() {
   # The v0.4.3 gate uses `git diff HEAD` (tracked changes only), so any
   # untracked files left over from test harness setup do NOT count as
   # activity — no .gitignore trick needed.
+  _seed_bootstrap_marker
   (
     cd "$SANDBOX" || exit 1
     git init --quiet >/dev/null 2>&1
@@ -222,7 +234,10 @@ EOF
 # =============================================================================
 
 test_non_git_project_empty_session_blocks() {
-  # Not a git repo, no inbox → must block (git safety net not available)
+  # Not a git repo, no inbox → must block (git safety net not available).
+  # Bootstrap marker is required so the BG-D early-escape does NOT trigger
+  # before we reach the inbox-or-git validation (the contract under test).
+  _seed_bootstrap_marker
   _refresh_index_mtime_to_today
 
   run_hook "stop-session-gate.sh"
@@ -274,5 +289,153 @@ run_test test_stale_index_still_blocks                          "stop-session-ga
 run_test test_non_git_project_empty_session_blocks              "stop-session-gate.sh"
 run_test test_untracked_only_state_still_blocks                 "stop-session-gate.sh"
 run_test test_bypass_writes_audit_log                           "stop-session-gate.sh"
+
+# =============================================================================
+# BG-I fixtures (v1.3.0 deadlock fix) — BG-D contract: stop hook must NOT
+# block when bootstrap is incomplete (fresh install) or degraded mode is
+# active. Spec: /Users/jihyunkim/.claude/plans/b-prancy-valiant.md §BG-D.
+# =============================================================================
+# These fixtures bypass the test-harness `run_test`/`sandbox_setup` path
+# because the harness expects hooks under .claude/hooks/, but the plugin-SSOT
+# layout (Option C Phase 3) keeps the real hook only in plugins/rein-core/.
+# Instead we invoke the plugin hook directly with a fresh tmpdir sandbox
+# (the same pattern test-pre-tool-use-bash-bootstrap-gate.sh uses for
+# fixtures A-I). The fixtures still feed back into TEST_COUNT/FAIL_COUNT so
+# the summary line is accurate.
+
+BGI_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BGI_PROJECT_DIR="$(cd "$BGI_SCRIPT_DIR/../.." && pwd)"
+BGI_PLUGIN_ROOT="$BGI_PROJECT_DIR/plugins/rein-core"
+BGI_HOOK="$BGI_PLUGIN_ROOT/hooks/stop-session-gate.sh"
+
+_bgi_record_pass() {
+  TEST_COUNT=$((TEST_COUNT + 1))
+  echo "RUN $1"
+  echo "  OK"
+}
+_bgi_record_fail() {
+  TEST_COUNT=$((TEST_COUNT + 1))
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+  echo "RUN $1"
+  echo "  FAIL: $2" >&2
+}
+
+# ----------------------------------------------------------------------------
+# Fixture H — SRC_EDIT_MARKER present + .rein/project.json absent
+#   → exit 0 + stderr "bootstrap incomplete" (BG-D fresh-install escape)
+# ----------------------------------------------------------------------------
+# Reproduction of the bootstrap-gate-deadlock.md incident: a session that
+# touched source files (SRC_EDIT_MARKER created) but the user's repo never
+# completed bootstrap (.rein/project.json absent). Pre-BG-D the stop hook
+# would fall into the incident gate aggregation and block forever — the
+# user could not exit the session even with REIN_BYPASS_STOP_GATE because
+# the loop counter kept growing. BG-D adds an early `exit 0` once the
+# advisory check has run.
+fixture_h() {
+  local label="fixture_h_bootstrap_incomplete_escape"
+  if [ ! -x "$BGI_HOOK" ]; then
+    _bgi_record_fail "$label" "plugin hook not executable: $BGI_HOOK"
+    return
+  fi
+  local dir
+  dir="$(mktemp -d "/tmp/bgi-stop-H-XXXXXX")"
+  # Build a "session with source edits but incomplete bootstrap" sandbox:
+  #   - trail/dod/.session-has-src-edit (SRC_EDIT_MARKER)  → present
+  #   - trail/                                             → present (partial)
+  #   - .rein/project.json                                 → absent (BG-1)
+  #   - degraded marker                                    → absent
+  mkdir -p "$dir/trail/dod" "$dir/trail/inbox" "$dir/trail/incidents"
+  touch "$dir/trail/dod/.session-has-src-edit"
+  cat > "$dir/trail/index.md" <<'EOF'
+# index
+- status: bootstrap-incomplete fixture
+- current: stop gate H
+- next: verify BG-D escape
+- note: regression test
+EOF
+  touch "$dir/trail/index.md"
+  local errfile
+  errfile="$(mktemp)"
+  local rc
+  (cd "$dir" \
+    && REIN_PROJECT_DIR_OVERRIDE="$dir" \
+       CLAUDE_PLUGIN_ROOT="$BGI_PLUGIN_ROOT" \
+       bash "$BGI_HOOK" </dev/null >/dev/null 2>"$errfile")
+  rc=$?
+  local err
+  err=$(cat "$errfile")
+  rm -f "$errfile"
+  rm -rf "$dir"
+  if [ "$rc" -ne 0 ]; then
+    _bgi_record_fail "$label" "expected exit 0 (BG-D escape), got $rc; stderr: $err"
+    return
+  fi
+  if ! printf '%s' "$err" | grep -q "bootstrap incomplete"; then
+    _bgi_record_fail "$label" "stderr missing 'bootstrap incomplete' (got: $err)"
+    return
+  fi
+  _bgi_record_pass "$label"
+}
+
+# ----------------------------------------------------------------------------
+# Fixture I — SRC_EDIT_MARKER present + degraded marker present
+#   → exit 0 + stderr "degraded mode" (BG-D degraded escape)
+# ----------------------------------------------------------------------------
+# When SessionStart wrote .claude/cache/.rein-session-degraded (because git
+# is missing / cwd is not a git repo / user opted out / bootstrap helper
+# refused), the stop gate must skip the incident aggregation entirely and
+# emit a clear "degraded mode" diagnostic so blocks.log auditors can
+# correlate the bypass to the SessionStart decision.
+fixture_i() {
+  local label="fixture_i_degraded_mode_escape"
+  if [ ! -x "$BGI_HOOK" ]; then
+    _bgi_record_fail "$label" "plugin hook not executable: $BGI_HOOK"
+    return
+  fi
+  local dir
+  dir="$(mktemp -d "/tmp/bgi-stop-I-XXXXXX")"
+  # Build a "session with source edits + degraded marker" sandbox.
+  # We include .rein/project.json here so the degraded branch is what
+  # actually triggers the exit 0 (and not the BG-D bootstrap-incomplete
+  # branch, which would also pass but with a different stderr message).
+  mkdir -p "$dir/trail/dod" "$dir/trail/inbox" "$dir/trail/incidents" \
+           "$dir/.claude/cache" "$dir/.rein"
+  touch "$dir/trail/dod/.session-has-src-edit"
+  printf 'non-git-dir\n' > "$dir/.claude/cache/.rein-session-degraded"
+  printf '%s' '{"mode":"plugin","scope":"project","version":"1.3.0"}' \
+    > "$dir/.rein/project.json"
+  cat > "$dir/trail/index.md" <<'EOF'
+# index
+- status: degraded fixture
+- current: stop gate I
+- next: verify BG-D degraded escape
+- note: regression test
+EOF
+  touch "$dir/trail/index.md"
+  local errfile
+  errfile="$(mktemp)"
+  local rc
+  (cd "$dir" \
+    && REIN_PROJECT_DIR_OVERRIDE="$dir" \
+       CLAUDE_PLUGIN_ROOT="$BGI_PLUGIN_ROOT" \
+       bash "$BGI_HOOK" </dev/null >/dev/null 2>"$errfile")
+  rc=$?
+  local err
+  err=$(cat "$errfile")
+  rm -f "$errfile"
+  rm -rf "$dir"
+  if [ "$rc" -ne 0 ]; then
+    _bgi_record_fail "$label" "expected exit 0 (BG-D degraded escape), got $rc; stderr: $err"
+    return
+  fi
+  if ! printf '%s' "$err" | grep -q "degraded mode"; then
+    _bgi_record_fail "$label" "stderr missing 'degraded mode' (got: $err)"
+    return
+  fi
+  _bgi_record_pass "$label"
+}
+
+fixture_h
+fixture_i
 
 summary

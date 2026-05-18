@@ -1,7 +1,7 @@
 #!/bin/bash
 # tests/hooks/test-incidents-automation.sh
 # Incidents Automation 테스트 스위트
-# 커버: aggregate / count_pending / migration / session-start stamp / gate
+# 커버: aggregate / count_pending / session-start stamp / gate
 
 # NOTE: no set -e here — test functions must handle failures via assert_*
 
@@ -10,7 +10,6 @@ source "$SCRIPT_DIR/lib/test-harness.sh"
 
 REAL_PROJECT_DIR="${REAL_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 PY="$REAL_PROJECT_DIR/scripts/rein-aggregate-incidents.py"
-MIGRATE_PY="$REAL_PROJECT_DIR/scripts/rein-migrate-blocks-log.py"
 
 # ---------------------------------------------------------------------------
 # Helper: run aggregate script against sandbox
@@ -21,10 +20,6 @@ run_aggregate() {
 
 run_count() {
   python3 "$PY" --project-dir "$SANDBOX" --count-pending 2>/dev/null
-}
-
-run_migrate() {
-  python3 "$MIGRATE_PY" "$SANDBOX" 2>&1
 }
 
 append_jsonl() {
@@ -375,7 +370,7 @@ test_gate_blocks_when_pending() {
   touch "$SANDBOX/trail/dod/.incident-review-pending"
   run_gate "/fake/scripts/test.py"
   assert_exit 2 "gate should block when pending"
-  echo "$HOOK_STDERR" | grep -q "BLOCKED" || fail "stderr should contain BLOCKED"
+  echo "$HOOK_STDERR" | grep -q "\[rein\]" || fail "stderr should contain [rein]"
 }
 
 test_gate_self_heal_when_zero() {
@@ -399,72 +394,6 @@ test_gate_bypass_consumes() {
   # bypass consumed + gate passes (warning only, no block)
   assert_exit 0 "gate should pass when bypass stamp present"
   assert_file_missing "trail/dod/.skip-incident-gate"
-}
-
-# ---------------------------------------------------------------------------
-# Migration
-# ---------------------------------------------------------------------------
-
-test_migration_empty_log() {
-  # blocks.log doesn't exist → migration prints message, no dst created
-  local out
-  out=$(run_migrate 2>&1) || true
-  echo "$out" | grep -q "no blocks.log" || fail "should note missing blocks.log"
-  assert_file_missing "trail/incidents/blocks.jsonl"
-}
-
-test_migration_valid_lines() {
-  mkdir -p "$SANDBOX/trail/incidents"
-  printf '2026-01-01T10:00:00|pre-bash-guard|파이프 쉘 실행|echo x\n' \
-    > "$SANDBOX/trail/incidents/blocks.log"
-  printf '2026-01-02T11:00:00|pre-edit-dod-gate|미완료 DoD 없음|/foo.py\n' \
-    >> "$SANDBOX/trail/incidents/blocks.log"
-  run_migrate >/dev/null 2>&1
-  assert_file_exists "trail/incidents/blocks.jsonl"
-  assert_file_exists "trail/incidents/blocks.log.legacy"
-  assert_file_missing "trail/incidents/blocks.log"
-  # check line count
-  local lines
-  lines=$(wc -l < "$SANDBOX/trail/incidents/blocks.jsonl" | tr -d ' ')
-  [ "$lines" -eq 2 ] || fail "expected 2 JSONL lines, got $lines"
-  # validate JSON on first line
-  python3 -c "
-import json
-with open('$SANDBOX/trail/incidents/blocks.jsonl') as f:
-    json.loads(f.readline())
-print('valid')
-" 2>&1 | grep -q "valid" || fail "first line is not valid JSON"
-}
-
-test_migration_malformed_skipped() {
-  mkdir -p "$SANDBOX/trail/incidents"
-  printf 'not-enough-fields\n' > "$SANDBOX/trail/incidents/blocks.log"
-  printf '2026-01-01T10:00:00|hook|reason|target\n' >> "$SANDBOX/trail/incidents/blocks.log"
-  local out
-  out=$(run_migrate 2>&1) || true
-  # should mention migration outcome
-  echo "$out" | grep -qiE "malformed|skipping|migrated|skipped" \
-    || fail "should mention malformed or migration stats"
-  assert_file_exists "trail/incidents/blocks.jsonl"
-  # only 1 valid line should be in jsonl
-  local lines
-  lines=$(wc -l < "$SANDBOX/trail/incidents/blocks.jsonl" | tr -d ' ')
-  [ "$lines" -eq 1 ] || fail "expected 1 valid JSONL line, got $lines"
-}
-
-test_migration_dst_exists() {
-  mkdir -p "$SANDBOX/trail/incidents"
-  printf '2026-01-01T10:00:00|hook|reason|target\n' > "$SANDBOX/trail/incidents/blocks.log"
-  # pre-create dst
-  printf '{}\n' > "$SANDBOX/trail/incidents/blocks.jsonl"
-  local out
-  out=$(run_migrate 2>&1) || true
-  echo "$out" | grep -q "WARN" || fail "should warn about existing dst"
-  # src should be archived
-  assert_file_exists "trail/incidents/blocks.log.legacy"
-  assert_file_missing "trail/incidents/blocks.log"
-  # dst should still be original content (not overwritten)
-  grep -q '{}' "$SANDBOX/trail/incidents/blocks.jsonl" || fail "dst should be preserved"
 }
 
 # ---------------------------------------------------------------------------
@@ -707,12 +636,6 @@ main() {
     "pre-edit-dod-gate.sh" "rein-aggregate-incidents.py"
   run_test test_gate_bypass_consumes \
     "pre-edit-dod-gate.sh" "rein-aggregate-incidents.py"
-
-  # Migration
-  run_test test_migration_empty_log "rein-migrate-blocks-log.py"
-  run_test test_migration_valid_lines "rein-migrate-blocks-log.py"
-  run_test test_migration_malformed_skipped "rein-migrate-blocks-log.py"
-  run_test test_migration_dst_exists "rein-migrate-blocks-log.py"
 
   # Watermark
   run_test test_watermark_prevents_double_processing "rein-aggregate-incidents.py"

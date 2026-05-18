@@ -14,7 +14,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DISPATCHER="$PROJECT_DIR/.claude/hooks/post-edit-dispatcher.sh"
+DISPATCHER="$PROJECT_DIR/plugins/rein-core/hooks/post-edit-dispatcher.sh"
 
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -30,10 +30,10 @@ ok() { echo "  ok: $1"; }
 setup_sandbox() {
   local sb="$1"
   mkdir -p "$sb/.claude/hooks/lib"
-  cp "$PROJECT_DIR/.claude/hooks/lib/python-runner.sh" "$sb/.claude/hooks/lib/"
-  cp "$PROJECT_DIR/.claude/hooks/lib/hook-input-cache.sh" "$sb/.claude/hooks/lib/"
-  cp "$PROJECT_DIR/.claude/hooks/lib/extract-hook-json.py" "$sb/.claude/hooks/lib/"
-  cp "$PROJECT_DIR/.claude/hooks/lib/aggregator.sh" "$sb/.claude/hooks/lib/"
+  cp "$PROJECT_DIR/plugins/rein-core/hooks/lib/python-runner.sh" "$sb/.claude/hooks/lib/"
+  cp "$PROJECT_DIR/plugins/rein-core/hooks/lib/hook-input-cache.sh" "$sb/.claude/hooks/lib/"
+  cp "$PROJECT_DIR/plugins/rein-core/hooks/lib/extract-hook-json.py" "$sb/.claude/hooks/lib/"
+  cp "$PROJECT_DIR/plugins/rein-core/hooks/lib/aggregator.sh" "$sb/.claude/hooks/lib/"
   cp "$DISPATCHER" "$sb/.claude/hooks/post-edit-dispatcher.sh"
   chmod +x "$sb/.claude/hooks/post-edit-dispatcher.sh"
 }
@@ -104,7 +104,7 @@ ok "Fixture B: hook_input_export(2-arg) + hook_input_clear roundtrip"
 # Fixture C: 직접 호출 시 sub-hook fallback (no cache).
 # ---------------------------------------------------------------------------
 C_PAYLOAD='{"tool_input":{"file_path":"/nonexistent/path/example.py"}}'
-echo "$C_PAYLOAD" | "$PROJECT_DIR/.claude/hooks/post-edit-hygiene.sh"
+echo "$C_PAYLOAD" | "$PROJECT_DIR/plugins/rein-core/hooks/post-edit-hygiene.sh"
 rc=$?
 [ "$rc" = "0" ] || fail "Fixture C: post-edit-hygiene fallback returned $rc"
 ok "Fixture C: post-edit-hygiene direct invocation (no cache) returns 0"

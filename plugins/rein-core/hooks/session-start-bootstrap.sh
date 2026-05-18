@@ -81,7 +81,7 @@ if [ "$HELPER_RC" = "10" ]; then
   # 1. Opt-out
   if [ "${REIN_NO_AUTO_BOOTSTRAP:-}" = "1" ]; then
     rein_write_degraded "$PROJECT_DIR" "user-opt-out"
-    echo "rein: degraded mode (REIN_NO_AUTO_BOOTSTRAP=1). Gates inactive for this session."
+    echo "rein: REIN_NO_AUTO_BOOTSTRAP=1 이 설정되어 있어 자동 초기화를 건너뜁니다. 감시 기능이 이번 세션에서 비활성화됩니다."
     exit 0
   fi
 
@@ -89,13 +89,13 @@ if [ "$HELPER_RC" = "10" ]; then
   if ! command -v git >/dev/null 2>&1; then
     rein_write_degraded "$PROJECT_DIR" "git-missing"
     cat <<'EOF'
-rein: degraded mode — git is not installed. Install git first, then run `git init` + bootstrap.
-  macOS:        xcode-select --install   (or: brew install git)
+rein: git 가 설치되어 있지 않아 초기화를 진행할 수 없습니다. git 을 먼저 설치한 뒤 `git init` 과 bootstrap 을 실행해 주세요.
+  macOS:         xcode-select --install   (또는: brew install git)
   Debian/Ubuntu: sudo apt install git
   Fedora:        sudo dnf install git
   Arch:          sudo pacman -S git
-  Windows:       install Git for Windows or `winget install Git.Git`
-Gates inactive for this session.
+  Windows:       Git for Windows 설치 또는 `winget install Git.Git`
+감시 기능이 이번 세션에서 비활성화됩니다.
 EOF
     exit 0
   fi
@@ -103,7 +103,7 @@ EOF
   # 3. cwd-in-git-repo check
   if ! git -C "$PROJECT_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
     rein_write_degraded "$PROJECT_DIR" "non-git-dir"
-    echo "rein: degraded mode — '$PROJECT_DIR' is not a git repo. Run \`git init\` here first, then bootstrap. Gates inactive for this session."
+    echo "rein: '$PROJECT_DIR' 는 git 저장소가 아닙니다. \`git init\` 을 먼저 실행한 뒤 bootstrap 을 진행해 주세요. 감시 기능이 이번 세션에서 비활성화됩니다."
     exit 0
   fi
 

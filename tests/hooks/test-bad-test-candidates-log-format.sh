@@ -9,7 +9,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-WRITER_LIB="$PROJECT_DIR/.claude/hooks/lib/test-oracle-log.sh"
+WRITER_LIB="$PROJECT_DIR/plugins/rein-core/hooks/lib/test-oracle-log.sh"
 
 PASS=0
 FAIL=0

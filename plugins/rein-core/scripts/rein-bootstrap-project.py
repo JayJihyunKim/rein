@@ -186,19 +186,18 @@ def bootstrap(project_dir: Path, scope: str, version: str) -> tuple[Path, bool]:
     policy_dir = rein_dir / "policy"
     trail_dir = root / "trail"
 
+    # Partial-bootstrap fix (v1.3.0+1, codex round 1 missed defect #3):
+    # `.rein/project.json` is the COMPLETION SENTINEL. Write it LAST and
+    # atomically (temp + os.replace) so its presence guarantees every prior
+    # step succeeded. Pre-fix, the marker was written before trail/ +
+    # security profile + policy files. If the script crashed mid-run (SIGINT,
+    # disk full, kernel kill, permission flip), bootstrap-check.sh would
+    # observe `.rein/project.json` AND `trail/` (created by mkdir during the
+    # crash) and report "bootstrapped" → false PASS, downstream gates run
+    # against an incomplete repo and surface confusing errors (e.g. missing
+    # trail/index.md when emit_file_block tries to read it).
+    rein_dir.mkdir(parents=True, exist_ok=True)
     policy_dir.mkdir(parents=True, exist_ok=True)
-    project_json = rein_dir / "project.json"
-    if not project_json.exists():
-        payload = {
-            "mode": "plugin",
-            "scope": scope,
-            "version": version,
-        }
-        project_json.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-
     write_text_if_missing(policy_dir / "hooks.yaml", POLICY_HOOKS_TEMPLATE)
     write_text_if_missing(policy_dir / "rules.yaml", POLICY_RULES_TEMPLATE)
 
@@ -209,6 +208,25 @@ def bootstrap(project_dir: Path, scope: str, version: str) -> tuple[Path, bool]:
     write_text_if_missing(trail_dir / "index.md", INDEX_TEMPLATE)
 
     ensure_security_profile(root)
+
+    # Marker write — LAST step, atomic. Use os.replace so the marker either
+    # appears fully formed or not at all (no partial JSON observable by
+    # bootstrap-check.sh). Idempotent: if marker already exists from a prior
+    # successful run we leave it (preserves user-edited fields if any future
+    # version adds them).
+    project_json = rein_dir / "project.json"
+    if not project_json.exists():
+        payload = {
+            "mode": "plugin",
+            "scope": scope,
+            "version": version,
+        }
+        tmp_path = project_json.with_suffix(".json.tmp")
+        tmp_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(tmp_path, project_json)
 
     return root, non_git
 

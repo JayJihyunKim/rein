@@ -24,7 +24,7 @@ print(json.dumps({
 
 copy_infra() {
   mkdir -p "$SANDBOX/.claude/hooks" "$SANDBOX/scripts" "$SANDBOX/trail/dod" "$SANDBOX/trail/incidents"
-  cp "$REAL_PROJECT_DIR/.claude/hooks/stop-session-gate.sh" "$SANDBOX/.claude/hooks/"
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/stop-session-gate.sh" "$SANDBOX/.claude/hooks/"
   cp "$REAL_PROJECT_DIR/scripts/rein-aggregate-incidents.py" "$SANDBOX/scripts/"
   cp "$REAL_PROJECT_DIR/scripts/rein-stop-emit-block.py" "$SANDBOX/scripts/"
   cp "$REAL_PROJECT_DIR/scripts/rein-mark-incident-processed.py" "$SANDBOX/scripts/"
@@ -166,7 +166,7 @@ test_abnormal_termination_recovery() {
   copy_infra
   seed_valid_state
   # Also copy session-start hook
-  cp "$REAL_PROJECT_DIR/.claude/hooks/session-start-load-trail.sh" "$SANDBOX/.claude/hooks/"
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/session-start-load-trail.sh" "$SANDBOX/.claude/hooks/"
 
   append_jsonl "pre-bash-guard" "abnormal" "d1"
   append_jsonl "pre-bash-guard" "abnormal" "d2"
@@ -177,7 +177,7 @@ test_abnormal_termination_recovery() {
   # New session starts — should detect abnormal termination
   local out
   out=$(cd "$SANDBOX" && bash .claude/hooks/session-start-load-trail.sh </dev/null 2>&1)
-  echo "$out" | grep -q "비정상 종료" || fail "warning emitted on new session"
+  echo "$out" | grep -q "직전 세션 종료가 확인되지 않았습니다" || fail "warning emitted on new session"
 
   # Session scope stamps should be clean (removed by SessionStart)
   assert_true "[ ! -f \"$SANDBOX/trail/dod/.incident-decision-deferred\" ]" "deferred cleared"

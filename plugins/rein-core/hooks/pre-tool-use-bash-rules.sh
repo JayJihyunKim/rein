@@ -27,5 +27,5 @@ fi
 BODY="${BODY%x}"
 [ -n "$BODY" ] || exit 0
 
-ESCAPED=$(printf '%s' "$BODY" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))')
+ESCAPED=$(printf '%s' "$BODY" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))' 2>/dev/null) || exit 0
 printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s}}\n' "$ESCAPED"

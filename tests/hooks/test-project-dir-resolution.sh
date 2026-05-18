@@ -17,7 +17,7 @@
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-HELPER="$PROJECT_ROOT/.claude/hooks/lib/project-dir.sh"
+HELPER="$PROJECT_ROOT/plugins/rein-core/hooks/lib/project-dir.sh"
 
 PASS=0
 FAIL=0
@@ -167,11 +167,11 @@ assert_equal "no SCRIPT_DIR + no git -> \$PWD" "$NO_GIT_CWD" "$out"
 # Codex round 2: relative + absolute-outside FILE_PATH must NOT trigger
 # inbox writes when invoked with hostile cwd. Reuses Suite A (real rein
 # project) and Suite B's hostile cwd.
-HOOK_SRC="$PROJECT_ROOT/.claude/hooks/post-edit-index-sync-inbox.sh"
+HOOK_SRC="$PROJECT_ROOT/plugins/rein-core/hooks/post-edit-index-sync-inbox.sh"
 mkdir -p "$SANDBOX_A_REAL/.claude/hooks"
 cp "$HOOK_SRC" "$SANDBOX_A_REAL/.claude/hooks/post-edit-index-sync-inbox.sh"
 # Need supporting libs the hook sources (python-runner.sh, extract-hook-json.py).
-cp -R "$PROJECT_ROOT/.claude/hooks/lib/." "$SANDBOX_A_REAL/.claude/hooks/lib/"
+cp -R "$PROJECT_ROOT/plugins/rein-core/hooks/lib/." "$SANDBOX_A_REAL/.claude/hooks/lib/"
 INDEX_HOOK="$SANDBOX_A_REAL/.claude/hooks/post-edit-index-sync-inbox.sh"
 INBOX_DIR_A="$SANDBOX_A_REAL/trail/inbox"
 INBOX_DIR_B="$SANDBOX_B_REAL/trail/inbox"

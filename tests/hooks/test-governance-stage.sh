@@ -18,7 +18,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-LIB="$PROJECT_DIR/.claude/hooks/lib/governance-stage.sh"
+LIB="$PROJECT_DIR/plugins/rein-core/hooks/lib/governance-stage.sh"
 
 PASS=0
 FAIL=0

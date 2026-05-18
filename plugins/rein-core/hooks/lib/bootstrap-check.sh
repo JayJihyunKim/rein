@@ -2,9 +2,10 @@
 # Plugin helper — bootstrap predicate.
 #
 # Purpose: detect whether the resolved project_dir has been bootstrapped
-# (i.e. has BOTH a `trail/` directory AND a `.rein/project.json` marker).
-# When not, emit a bilingual guidance message instructing the user how to
-# run rein-bootstrap-project.py.
+# (i.e. has a `trail/` directory, a `.rein/project.json` marker, AND a
+# `trail/index.md`). When not, emit a bilingual guidance message with
+# either the fresh-install template OR a partial-state template that names
+# which components are present vs missing.
 #
 # BG-1 (2026-05-14): require both trail/ and .rein/project.json — eliminates
 # false positive when overlay residue trail/ exists without bootstrap
@@ -12,10 +13,18 @@
 # leaves a stray trail/ without the plugin-mode .rein/project.json marker).
 # Pre-BG-1 behaviour was trail/-only, which mistakenly signalled
 # "bootstrapped" for any project that happened to have a trail/ from
-# unrelated processes. trail/index.md is still NOT consulted, because the
-# bootstrap script (rein-bootstrap-project.py) generates project.json and
-# trail/ atomically — presence of project.json is a reliable proxy for
-# "bootstrap script ran to completion in plugin mode".
+# unrelated processes.
+#
+# Partial-bootstrap fix (v1.3.0+1, codex round 1 missed defect #3): also
+# require trail/index.md. Combined with the bootstrap script's atomic
+# "marker-last" write order (rein-bootstrap-project.py writes
+# `.rein/project.json` LAST via temp+os.replace), this eliminates the
+# class of failures where the marker existed but trail/ was incomplete
+# (e.g. SIGINT mid-bootstrap leaving stale `.session-has-src-edit`-style
+# markers behind that downstream session-start hooks could not recover
+# from). Three components are checked because a future bootstrap step
+# could add a fourth marker and the partial-state branch must continue to
+# render diagnostically.
 #
 # Usage (direct invocation):
 #   bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bootstrap-check.sh" [<project_dir_override>]
@@ -281,17 +290,47 @@ bootstrap_check() {
     echo "bootstrap-check: warning: probe cleanup failed at $probe_file" >&2
   fi
 
-  # ---- Predicate: trail/ AND .rein/project.json both present ------------
+  # ---- Predicate: trail/, .rein/project.json, AND trail/index.md --------
   # BG-1 (2026-05-14): require both trail/ and .rein/project.json — eliminates
   # false positive when overlay residue trail/ exists without bootstrap
   # completion (e.g. maintainer dogfood install where dev-overlay residue
   # leaves a stray trail/ without the plugin-mode .rein/project.json marker).
   # Pre-BG-1: trail/-only check produced false positives.
-  if [ -d "$resolved_real/trail" ] && [ -f "$resolved_real/.rein/project.json" ]; then
+  #
+  # Partial-bootstrap fix (v1.3.0+1, codex round 1 missed defect #3): the
+  # paired bootstrap script (rein-bootstrap-project.py) writes
+  # `.rein/project.json` LAST as the completion sentinel via atomic
+  # temp+rename. Combined with this gate's tri-marker check (trail dir +
+  # marker + trail/index.md), the false PASS / partial-state class of
+  # failures is eliminated. Pre-fix scenario: bootstrap crashes between
+  # marker write and trail subdir creation -> BG-1 sees marker + trail dir
+  # (created by mkdir mid-run) -> reports "bootstrapped" -> downstream
+  # gates (e.g. session-start-load-trail.sh) crash on missing
+  # trail/index.md, leaving stale `.session-has-src-edit` markers behind.
+  local has_trail_dir=0 has_marker=0 has_index=0
+  [ -d "$resolved_real/trail" ] && has_trail_dir=1
+  [ -f "$resolved_real/.rein/project.json" ] && has_marker=1
+  [ -f "$resolved_real/trail/index.md" ] && has_index=1
+
+  if [ "$has_trail_dir" = "1" ] && [ "$has_marker" = "1" ] && [ "$has_index" = "1" ]; then
     # Happy path — no stdout, optional debug to stderr.
     # Keep silent on success: many hooks invoke this and chatty stderr
     # pollutes the platform log.
     return 0
+  fi
+
+  # ---- Partial-bootstrap detection --------------------------------------
+  # Distinct from "fresh install" (nothing exists). Partial = at least one
+  # marker present, at least one missing. We surface a re-run command that is
+  # safe to invoke (rein-bootstrap-project.py is idempotent —
+  # write_text_if_missing + mkdir(exist_ok=True) + atomic marker write) and
+  # explicitly name which parts are present vs missing so the user
+  # understands the recovery state.
+  local partial=0
+  if [ "$has_trail_dir" = "1" ] || [ "$has_marker" = "1" ] || [ "$has_index" = "1" ]; then
+    if [ "$has_trail_dir" = "0" ] || [ "$has_marker" = "0" ] || [ "$has_index" = "0" ]; then
+      partial=1
+    fi
   fi
 
   # ---- Guidance message (exit 10) ---------------------------------------
@@ -303,7 +342,31 @@ bootstrap_check() {
   local plugin_root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
   local bootstrap_script="${plugin_root}/scripts/rein-bootstrap-project.py"
   local guidance
-  guidance=$(cat <<EOF
+  if [ "$partial" = "1" ]; then
+    # Partial-state branch — name each present/missing component so the user
+    # understands why a re-run is safe (and so support diagnostics get
+    # enough context from a copy-pasted error).
+    local present_list="" missing_list=""
+    if [ "$has_trail_dir" = "1" ]; then present_list="${present_list}trail/ "; else missing_list="${missing_list}trail/ "; fi
+    if [ "$has_marker" = "1" ]; then present_list="${present_list}.rein/project.json "; else missing_list="${missing_list}.rein/project.json "; fi
+    if [ "$has_index" = "1" ]; then present_list="${present_list}trail/index.md "; else missing_list="${missing_list}trail/index.md "; fi
+    # Trim trailing spaces.
+    present_list="${present_list% }"
+    missing_list="${missing_list% }"
+    guidance=$(cat <<EOF
+ERROR: rein plugin bootstrap가 부분 완료 상태입니다 — 이전 bootstrap이 중간에 실패했을 수 있습니다.
+ERROR: rein plugin bootstrap is in PARTIAL state — a prior bootstrap likely crashed mid-run.
+  존재 / Present: ${present_list}
+  누락 / Missing: ${missing_list}
+
+재실행 (idempotent — 안전): python3 "${bootstrap_script}" --project-dir "${resolved_real}"
+Re-run (idempotent — safe): python3 "${bootstrap_script}" --project-dir "${resolved_real}"
+
+(Claude: surface this message to the user immediately before doing anything else.)
+EOF
+)
+  else
+    guidance=$(cat <<EOF
 ERROR: rein plugin의 trail/ 디렉토리가 없거나 .rein/project.json marker가 없습니다 — bootstrap 미완료.
 ERROR: rein plugin trail/ directory missing or .rein/project.json marker absent — bootstrap not initialized.
 
@@ -313,6 +376,7 @@ Run: python3 "${bootstrap_script}" --project-dir "${resolved_real}"
 (Claude: surface this message to the user immediately before doing anything else.)
 EOF
 )
+  fi
   # Append trailing newline (heredoc strips the final \n once via $(...))
   guidance="${guidance}
 "

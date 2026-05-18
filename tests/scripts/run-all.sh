@@ -36,6 +36,7 @@ for test_file in \
   "$SCRIPT_DIR/test-job-gc.sh" \
   "$SCRIPT_DIR/test-bg-guide-exists.sh" \
   "$SCRIPT_DIR/test-ci-matrix.sh" \
+  "$SCRIPT_DIR/test-mirror-workflow-q9-fix.sh" \
   "$SCRIPT_DIR/test-local-marketplace.sh" \
   "$SCRIPT_DIR/../hooks/test-session-start-bootstrap.sh" \
   "$SCRIPT_DIR/test-plugin-hooks-bundle.sh" \

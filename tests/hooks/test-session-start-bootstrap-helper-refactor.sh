@@ -1,17 +1,39 @@
 #!/usr/bin/env bash
 # test-session-start-bootstrap-helper-refactor.sh
 #
-# Verifies session-start-bootstrap.sh delegates the bootstrap predicate to
-# the shared helper `hooks/lib/bootstrap-check.sh` and preserves the legacy
-# external emit contract (plain stdout, no JSON envelope).
+# Verifies session-start-bootstrap.sh BG-A (v1.3.0) behavior and its
+# delegation to the shared helper `hooks/lib/bootstrap-check.sh`.
 #
 # Fixtures:
-#   A — trail/ missing on a safe project_dir → stdout contains the helper
-#       bilingual guidance (rc=10 emit path).
-#   B — trail/ present                       → stdout silent (rc=0 path).
+#   A — git-init'd dir, REIN_NO_AUTO_BOOTSTRAP=1 (opt-out)
+#       → stdout contains opt-out notice; degraded marker written (rc=0).
+#       This is the opt-out branch (BG-A step 1): the hook does NOT
+#       auto-bootstrap; it emits a user-visible notice and marks the session
+#       degraded. This verifies the opt-out contract rather than the old
+#       "emit bootstrap guidance" contract which only fires on step 5
+#       (bootstrap-refused), a path unreachable on a normal writable git dir.
+#
+#   A2 — git-init'd dir, no opt-out (auto-bootstrap path, BG-A step 4)
+#        → stdout contains "bootstrap completed automatically"; trail/ and
+#        .rein/project.json created; rc=0.
+#        This verifies the primary self-healing contract introduced in v1.3.0.
+#
+#   B — bootstrap complete (trail/ + .rein/project.json + trail/index.md)
+#       → stdout silent (rc=0 path).
+#
 #   C — $HOME (sensitive-path)               → stdout silent (rc=11 path).
+#
 #   D — source pattern grep                   → hook actually source(s) the
 #       shared helper (Scope ID `share-helper-via-source`).
+#
+# Note on the trailing-newline parity sub-test (removed):
+#   The prior test asserted byte-parity between hook stdout and direct
+#   bootstrap-check.sh stdout on a non-git dir. With BG-A, the hook no longer
+#   forwards the helper's rc=10 guidance text to stdout on the normal un-
+#   bootstrapped-git-dir path — it either auto-bootstraps (step 4) or emits
+#   its own opt-out message (step 1). The parity assertion was valid for the
+#   pre-BG-A "emit guidance" design; it is not a current contract and has been
+#   removed to avoid testing a code path that no longer exists.
 
 set -e
 
@@ -24,68 +46,92 @@ PLUGIN_ROOT="$PROJECT_DIR/plugins/rein-core"
 [ -x "$HOOK" ] || { echo "FAIL: $HOOK not executable" >&2; exit 1; }
 
 A_DIR=""
+A2_DIR=""
 B_DIR=""
 A_OUT=""
+A2_OUT=""
 B_OUT=""
 C_OUT=""
-A_DIRECT_OUT=""
 cleanup() {
-  rm -rf "$A_DIR" "$B_DIR" 2>/dev/null || true
-  rm -f "$A_OUT" "$B_OUT" "$C_OUT" "$A_DIRECT_OUT" 2>/dev/null || true
+  rm -rf "$A_DIR" "$A2_DIR" "$B_DIR" 2>/dev/null || true
+  rm -f "$A_OUT" "$A2_OUT" "$B_OUT" "$C_OUT" 2>/dev/null || true
 }
 trap cleanup EXIT
 
 # ---------------------------------------------------------------------------
-# Fixture A: trail/ 부재 → stdout 에 bootstrap 안내 substring (rc=10)
+# Fixture A: git-init'd dir + REIN_NO_AUTO_BOOTSTRAP=1 (opt-out branch)
 # ---------------------------------------------------------------------------
+# BG-A step 1: hook detects rc=10 from helper but skips auto-bootstrap due to
+# the opt-out env var. It writes a degraded marker and emits a Korean/English
+# notice so the user understands monitoring is inactive for this session.
+# This is the principal way to test the hook's rc=10 branch without triggering
+# auto-bootstrap (which would succeed and leave the dir bootstrapped).
 A_DIR="$(mktemp -d "/tmp/ssb-A-XXXXXX")"
+git -C "$A_DIR" init -q 2>/dev/null
 A_OUT="$(mktemp)"
 set +e
-( cd "$A_DIR" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK" </dev/null >"$A_OUT" 2>/dev/null )
+( cd "$A_DIR" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" REIN_NO_AUTO_BOOTSTRAP=1 bash "$HOOK" </dev/null >"$A_OUT" 2>/dev/null )
 A_RC=$?
 set -e
 [ "$A_RC" = "0" ] || { echo "FAIL (A): exit $A_RC expected 0" >&2; exit 1; }
-grep -q "rein-bootstrap-project.py" "$A_OUT" || {
-  echo "FAIL (A): stdout missing bootstrap command" >&2
-  echo "--- A stdout ---" >&2
-  cat "$A_OUT" >&2
-  exit 1
-}
-grep -q "surface this message to the user immediately" "$A_OUT" || {
-  echo "FAIL (A): stdout missing surface instruction" >&2
+
+grep -q "REIN_NO_AUTO_BOOTSTRAP" "$A_OUT" || {
+  echo "FAIL (A): stdout missing REIN_NO_AUTO_BOOTSTRAP opt-out notice" >&2
   echo "--- A stdout ---" >&2
   cat "$A_OUT" >&2
   exit 1
 }
 
-# Fixture A 확장 — byte-level trailing-newline parity:
-# bootstrap-check helper 의 직접 stdout 과 session-start hook 의 stdout 이
-# byte-for-byte 동일해야 한다 (Codex Round 1: plain $(...) capture 가
-# trailing \n 을 strip 하던 회귀의 regression 가드).
-A_DIRECT_OUT="$(mktemp)"
-HELPER="$PROJECT_DIR/plugins/rein-core/hooks/lib/bootstrap-check.sh"
-set +e
-( cd "$A_DIR" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HELPER" </dev/null >"$A_DIRECT_OUT" 2>/dev/null )
-A_DIRECT_RC=$?
-set -e
-[ "$A_DIRECT_RC" = "10" ] || {
-  echo "FAIL (A trailing newline): helper direct exit $A_DIRECT_RC expected 10 (trail/ missing on safe dir)" >&2
-  exit 1
-}
-if ! diff -q "$A_OUT" "$A_DIRECT_OUT" >/dev/null; then
-  echo "FAIL (A trailing newline): session-start hook stdout differs from helper direct output" >&2
-  echo "diff:" >&2
-  diff "$A_OUT" "$A_DIRECT_OUT" >&2
-  echo "hook stdout size: $(wc -c < "$A_OUT")" >&2
-  echo "helper direct size: $(wc -c < "$A_DIRECT_OUT")" >&2
+# Degraded marker must be written so downstream gates pass through silently.
+A_DEGRADED_MARKER="$A_DIR/.claude/cache/.rein-session-degraded"
+if [ ! -f "$A_DEGRADED_MARKER" ]; then
+  echo "FAIL (A): degraded marker not written at $A_DEGRADED_MARKER" >&2
   exit 1
 fi
 
 # ---------------------------------------------------------------------------
-# Fixture B: trail/ 존재 → stdout silent (rc=0)
+# Fixture A2: git-init'd dir, auto-bootstrap (BG-A step 4, the primary path)
 # ---------------------------------------------------------------------------
+# On a writable git-init'd dir without opt-out, SessionStart runs
+# rein-bootstrap-project.py, creates trail/ + .rein/project.json, and emits
+# the "bootstrap completed automatically" notice. This is the v1.3.0 self-
+# healing contract — the main new behavior of BG-A.
+A2_DIR="$(mktemp -d "/tmp/ssb-A2-XXXXXX")"
+git -C "$A2_DIR" init -q 2>/dev/null
+A2_OUT="$(mktemp)"
+set +e
+( cd "$A2_DIR" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK" </dev/null >"$A2_OUT" 2>/dev/null )
+A2_RC=$?
+set -e
+[ "$A2_RC" = "0" ] || { echo "FAIL (A2): exit $A2_RC expected 0" >&2; exit 1; }
+
+grep -q "bootstrap completed automatically" "$A2_OUT" || {
+  echo "FAIL (A2): stdout missing 'bootstrap completed automatically'" >&2
+  echo "--- A2 stdout ---" >&2
+  cat "$A2_OUT" >&2
+  exit 1
+}
+
+# trail/ and .rein/project.json must have been created.
+if [ ! -d "$A2_DIR/trail" ]; then
+  echo "FAIL (A2): trail/ directory not created by auto-bootstrap" >&2
+  exit 1
+fi
+if [ ! -f "$A2_DIR/.rein/project.json" ]; then
+  echo "FAIL (A2): .rein/project.json not created by auto-bootstrap" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Fixture B: bootstrap complete (trail/ + .rein/project.json + index) → silent (rc=0)
+# ---------------------------------------------------------------------------
+# Partial-bootstrap fix (v1.3.0+1): bootstrap_check requires all three
+# markers — trail/ dir, .rein/project.json, and trail/index.md. Seed all
+# three so the helper takes the rc=0 (bootstrapped) path.
 B_DIR="$(mktemp -d "/tmp/ssb-B-XXXXXX")"
-mkdir "$B_DIR/trail"
+mkdir "$B_DIR/trail" "$B_DIR/.rein"
+printf '%s' '{"mode":"plugin","scope":"project","version":"1.3.0"}' > "$B_DIR/.rein/project.json"
+printf '# trail/index.md\n' > "$B_DIR/trail/index.md"
 B_OUT="$(mktemp)"
 set +e
 ( cd "$B_DIR" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK" </dev/null >"$B_OUT" 2>/dev/null )
@@ -124,4 +170,4 @@ if ! grep -E '(^|[[:space:]])(source|\.)[[:space:]]+("?\$\{?CLAUDE_PLUGIN_ROOT\}
   exit 1
 fi
 
-echo "test-session-start-bootstrap-helper-refactor: OK (A advisory + A trailing-newline parity + B silent + C unsafe-silent + D source pattern)"
+echo "test-session-start-bootstrap-helper-refactor: OK (A opt-out notice + A2 auto-bootstrap + B silent + C unsafe-silent + D source pattern)"

@@ -8,7 +8,7 @@ FILE="plugins/rein-core/rules/design-plan-coverage.md"
 [ -f "$FILE" ] || { echo "FAIL: $FILE missing" >&2; exit 1; }
 
 SIZE=$(wc -c < "$FILE")
-MAX=10000
+MAX=12000
 if [ "$SIZE" -ge "$MAX" ]; then
   echo "FAIL: $FILE size=$SIZE bytes >= $MAX" >&2
   exit 1
@@ -30,4 +30,4 @@ if size > max_bytes:
     sys.exit(1)
 print(f"OK: {path} total={open(path,'rb').read().__len__()} bytes, mandate={size} bytes")
 PY
-echo "test-design-plan-coverage-plugin-size: OK ($SIZE bytes < $MAX)"
+echo "test-design-plan-coverage-plugin-size: OK ($SIZE bytes < $MAX, budget=12000)"

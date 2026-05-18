@@ -22,6 +22,13 @@ EOF
   touch "$SANDBOX/trail/index.md"
   # QA 세션 감지: 소스 편집이 있었던 세션으로 마킹 (없으면 gate 가 즉시 exit 0)
   touch "$SANDBOX/trail/dod/.session-has-src-edit"
+  # BG-1 contract: stop-session-gate.sh exits early when .rein/project.json is
+  # absent ("bootstrap incomplete — incident gate skipped"), so the stale-DoD
+  # WARNING loop is never reached. Seed the marker so the gate proceeds past
+  # the bootstrap-incomplete escape hatch.
+  mkdir -p "$SANDBOX/.rein"
+  printf '%s' '{"mode":"plugin","scope":"project","version":"1.0.0"}' \
+    > "$SANDBOX/.rein/project.json"
 }
 
 test_stop_gate_warns_on_stale_dod() {

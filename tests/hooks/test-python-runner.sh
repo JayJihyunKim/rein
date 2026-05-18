@@ -31,7 +31,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib/test-harness.sh"
 
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-PYTHON_RUNNER_LIB="$PROJECT_DIR/.claude/hooks/lib/python-runner.sh"
+PYTHON_RUNNER_LIB="$PROJECT_DIR/plugins/rein-core/hooks/lib/python-runner.sh"
 
 # real_host_python: CI 가 fake stub 을 PATH 앞에 주입한 상태로 이 스크립트를
 # 부를 때, 테스트 내부에서 실제 python 경로가 필요하면 REIN_TEST_REAL_PY env 를

@@ -9,7 +9,8 @@ trap "rm -rf $TMP" EXIT
 
 mkdir -p "$TMP/.rein" "$TMP/trail/incidents" "$TMP/trail/inbox" "$TMP/trail/daily" "$TMP/trail/weekly" "$TMP/trail/dod"
 ln -s "$PROJECT_DIR/scripts" "$TMP/scripts"
-ln -s "$PROJECT_DIR/.claude" "$TMP/.claude"
+mkdir -p "$TMP/.claude/hooks/lib"
+cp -R "$PROJECT_DIR/plugins/rein-core/hooks/." "$TMP/.claude/hooks/"
 printf '{"version":1}\n' > "$TMP/.rein/project.json"
 touch "$TMP/trail/index.md"
 cat > "$TMP/trail/incidents/blocks.jsonl" <<'EOF'
@@ -17,7 +18,7 @@ cat > "$TMP/trail/incidents/blocks.jsonl" <<'EOF'
 {"ts":"2026-04-19T09:05:00Z","source":"s","reason":"r","target":"t"}
 EOF
 
-REIN_PROJECT_DIR="$TMP" bash "$PROJECT_DIR/.claude/hooks/session-start-load-trail.sh" > /dev/null 2>&1 || true
+REIN_PROJECT_DIR="$TMP" bash "$PROJECT_DIR/plugins/rein-core/hooks/session-start-load-trail.sh" > /dev/null 2>&1 || true
 
 STAMP="$TMP/trail/incidents/.session-start-line"
 [ -f "$STAMP" ] || { echo "FAIL: stamp file missing at $STAMP"; exit 1; }

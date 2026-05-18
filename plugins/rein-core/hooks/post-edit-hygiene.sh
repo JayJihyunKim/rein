@@ -31,9 +31,12 @@ if [ -z "$FILE_PATH" ] || [ ! -f "$FILE_PATH" ]; then
   exit 0
 fi
 
-# test 디렉토리는 제외
+# test 디렉토리·테스트 파일은 제외.
+# FU-4: `*test_*` 는 `latest_release.py` 같은 일반 소스를 test 파일로 오인했다
+# (substring glob). `*/test_*|test_*` 로 좁혀 basename 이 `test_` 로 시작하는
+# 파일 (pytest 규약) 만 잡는다 — 경로 컴포넌트 경계를 요구한다.
 case "$FILE_PATH" in
-  */test/*|*/tests/*|*/__tests__/*|*test_*|*.test.*|*.spec.*)
+  */test/*|*/tests/*|*/__tests__/*|*/test_*|test_*|*.test.*|*.spec.*)
     exit 0
     ;;
 esac

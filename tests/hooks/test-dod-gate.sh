@@ -37,7 +37,7 @@ test_gate_matched_inbox_blocks() {
 
   # then: 새 작업에는 새 dod 가 필요
   assert_exit 2 "매칭 inbox 있는 dod 는 pending 아님 → 차단"
-  assert_stderr_contains "BLOCKED"
+  assert_stderr_contains "[rein] Source files cannot be edited yet"
 }
 
 test_gate_no_dod_blocks() {
@@ -50,7 +50,7 @@ test_gate_no_dod_blocks() {
 
   # then
   assert_exit 2
-  assert_stderr_contains "BLOCKED"
+  assert_stderr_contains "[rein] Source files cannot be edited yet"
 }
 
 test_gate_legacy_dod_ignored() {
@@ -150,12 +150,12 @@ test_gate_windows_stub_blocks_with_diagnostics() {
     "$(make_input scripts/foo.sh)")
   rc=$(printf '%s' "$out" | awk -F= '/^_RC=/{print $2}' | tail -1)
 
-  # then: exit 2 + [DoD gate] prefix + Windows 진단 키워드 (9009/WSL2/
+  # then: exit 2 + [rein] prefix + Windows 진단 키워드 (9009/WSL2/
   #       App execution alias 중 하나 이상)
   [ "$rc" = "2" ] \
     || fail "expected exit 2, got rc='$rc' (out first lines: $(printf '%s' "$out" | head -3 | tr '\n' ' | '))"
-  printf '%s' "$out" | grep -qF "[DoD gate]" \
-    || fail "stderr missing '[DoD gate]' prefix (out: $(printf '%s' "$out" | head -5 | tr '\n' ' | '))"
+  printf '%s' "$out" | grep -qF "[rein]" \
+    || fail "stderr missing '[rein]' prefix (out: $(printf '%s' "$out" | head -5 | tr '\n' ' | '))"
   printf '%s' "$out" | grep -qE '9009|WSL2|App execution alias' \
     || fail "stderr missing Windows diagnostics keyword (9009/WSL2/App execution alias)"
 }
@@ -173,8 +173,8 @@ test_gate_posix_host_resolver_unchanged() {
 
   # then: resolver 관련 메시지 없이 DoD 판정만 수행 → 통과
   assert_exit 0 "host python3 사용 시 resolver 실패 분기 미트리거"
-  echo "$HOOK_STDERR" | grep -qF "[DoD gate]" \
-    && fail "POSIX 호스트에서는 [DoD gate] resolver 에러 프리픽스가 나오면 안 됨"
+  echo "$HOOK_STDERR" | grep -qF "[rein] The edit gate cannot run" \
+    && fail "POSIX 호스트에서는 [rein] resolver 에러 메시지가 나오면 안 됨"
   echo "$HOOK_STDERR" | grep -qE '9009|WSL2|App execution alias' \
     && fail "POSIX 호스트에서는 Windows 진단이 나오면 안 됨"
   return 0

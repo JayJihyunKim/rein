@@ -2287,3 +2287,329 @@ approved_by_user: true
 - [ ] CHANGELOG.md 항목 추가 (user-facing 효과 — 행동 강령 적시 inject, broken ref 해소)
 - [ ] main 머지 + `v1.1.0` tag 는 별도 release task (본 DoD 외부)
 
+---
+## dod-2026-05-14-plugin-mode-gap-fix.md (mtime: 2026-05-14, archived: 2026-05-16)
+# DoD — scaffold→plugin migration gap fix (v1.2.0)
+
+- 날짜: 2026-05-14
+- 유형: feat (cycle)
+- 슬러그: plugin-mode-gap-fix
+- 대상 버전: v1.2.0 (versioning Rule A — minor bump)
+- 브랜치: dev (단방향 원칙 준수, 완료 시 main 선별 체크아웃)
+
+## 범위 연결
+
+plan ref: docs/plans/2026-05-14-plugin-mode-gap-fix.md
+work unit: 전체 cycle (Phase 1~3, 14 work units)
+covers: [BS-1-security-overlay-exclusion-reason-rewritten-to-state-plugin-source-has-no-security-and-bootstrap-creates-defaults-on-fresh-install, BS-2-scripts-rein-helper-include-reason-clarified-as-plugin-aware-resolver-prefers-plugin-root-and-falls-back-to-repo-only-for-maintainer-dogfood, SEC-1-bootstrap-creates-only-default-security-profile-yaml-in-user-repo-pointing-to-standard-level-without-copying-rules-files-which-stay-in-plugin-source, SEC-2-security-rule-and-agent-resolve-both-profile-and-rules-paths-via-explicit-priority-list-with-repo-override-then-plugin-source-fallback-applied-uniformly-to-profile-yaml-and-rules-level-md, SEC-3-standard-level-security-rules-md-shipped-with-base-five-checks-plus-deserialization-path-traversal-log-leak-tls-enforcement, RES-1-plugin-aware-helper-script-resolver-lib-introduced-and-sourced-by-all-hooks-that-call-scripts-rein-with-plugin-root-priority-over-repo-fallback-on-fresh-plugin-install, RES-2-helper-scripts-needed-by-fresh-plugin-user-shipped-in-plugin-bundle-with-bundle-test-asserting-presence-of-rein-mark-spec-reviewed-rein-codex-review-rein-validate-coverage-matrix, TST-1-plugin-bundle-parity-tests-rewritten-to-assert-overlay-absence-and-plugin-presence-matching-option-c-in-test-plugin-skills-agents-hooks-bundle-sh, VER-1-plugin-json-version-field-bumped-to-1-2-0-and-rein-publish-script-aborts-on-pre-publish-mismatch-between-plugin-json-and-rein-sh-version, BG-1-bootstrap-completion-detection-shared-helper-corrected-to-treat-trail-dir-plus-rein-project-json-marker-as-bootstrapped-and-eliminate-false-positive-across-all-four-gate-hooks, OPSEQ-1-operating-sequence-rule-injects-compact-action-mandate-listing-dod-routing-review-test-inbox-index-flow-on-session-start, WF-1-feature-builder-and-researcher-agent-descriptions-inline-non-obvious-workflow-rules-instead-of-naming-deleted-workflow-files, INC-1-incident-automation-helper-scripts-shipped-in-plugin-bundle-and-skills-resolve-via-plugin-aware-resolver-not-repo-local-paths, RTG-1-routing-procedure-injection-hook-fulfils-pre-edit-dod-gate-stderr-promise-by-emitting-routing-rule-body-on-dod-write-via-post-edit-dispatcher-sub-hook, RTG-2-skill-mcp-inventory-scanner-shipped-in-plugin-bundle-and-rein-state-paths-extended-with-skill-mcp-guide-state-path-replacing-claude-cache-hardcoded-reference]
+
+## 배경
+
+Option C migration (v1.1.0~v1.1.3) 후 plugin SSOT 와 scaffold-mode contract (branch-strategy.md, hook stderr 메시지) 사이 9 drift + 메인테이너 발견 2 추가 (SEC-3 standard.md ship, BG-1 bootstrap-gate false positive). codex 2 round audit + 사용자 product 결정 (incident-automation Keep, routing ceremony Keep) → 15 Scope IDs / 14 work units / 3 phases 로 spec/plan 작성. spec/plan codex review 4 round 후 self-review (Round 4 medium-only 1줄) 로 stamp 완료 (`.spec-reviews/0d935f44a966d2e8.reviewed`, `.spec-reviews/1ce69242c69817e6.reviewed`).
+
+## 완료 기준 (cycle 전체)
+
+### Phase 1 — Contract repair
+- [x] BS-1, BS-2: branch-strategy.md L43-50 + L79 정정 (Wave 1 Task 1.1 PASS)
+- [x] SEC-1: bootstrap 이 `.claude/security/profile.yaml` 만 생성 (rules 파일 제외) — Wave 2 PASS
+- [x] SEC-2: security.md + security-reviewer.md 가 profile + rules 둘 다 priority list (repo override → plugin fallback) — Wave 2 PASS
+- [x] SEC-3: `plugins/rein-core/security/rules/{base,standard}.md` ship (Wave 1 Task 1.5 PASS — 146 줄, 9 검사)
+- [x] RES-1: `plugins/rein-core/hooks/lib/plugin-script-path.sh` 신축 + 5 hook sourcing (Wave 1 Task 1.2 + Fix A + Fix B 완료, 4 hook 추가 sourcing 14+ 지점)
+- [x] RES-2: 3 helper plugin bundle 추가 (Wave 1 Task 1.6 + Fix E stale SOURCES 정리 + 보너스 rein-policy-loader drift sync)
+- [x] TST-1: 3 bundle test 가 overlay 부재 + plugin presence assert (Wave 1 Task 1.7 PASS)
+- [x] VER-1: plugin.json 1.2.0 + rein.sh VERSION 1.2.0 + rein-publish.sh parity assert (Wave 1 Task 1.8 + Fix C run-all.sh 등록)
+- [x] BG-1: `lib/bootstrap-check.sh` 가 trail/ + `.rein/project.json` 동시 존재 시 PASS (Wave 1 Task 1.9 + Fix D fixture 갱신 + 신 K/L case + lib bilingual guidance 정정 + Wave 5 F7 English message + F8 fixture G(b) BG-1 신 contract, 17/17 + 7/7 PASS)
+
+### Phase 2 — Operating-model legibility
+- [x] OPSEQ-1: `plugins/rein-core/rules/operating-sequence.md` 신축 (1946 B ≤ 2 KB) + SessionStart inject 4번째 rule (Wave 3 PASS)
+- [x] WF-1: feature-builder/researcher agent description 에 minimum workflow procedure inline (Wave 3 PASS)
+
+### Phase 3 — Routing & incident data paths
+- [x] INC-1: 4 incident helper plugin ship + 2 skill SKILL.md 의 호출 instruction plugin path + 2 hook RES-1 sourcing (Wave 4 PASS)
+- [x] RTG-1: `post-write-routing-procedure-rule.sh` 신축 + `routing-procedure.md` (1019 B ≤ 1 KB) + dispatcher 등록 + stderr false promise 해소 (Wave 3 PASS)
+- [x] RTG-2: `rein-scan-skill-mcp.py` plugin ship + `rein-state-paths.py` 에 `skill-mcp-guide` state 추가 + session-start-load-trail.sh 의 `.claude/cache` 하드코딩 제거 + Wave 5 F1 scanner plugin-aware refactor (Wave 4 + F1)
+
+### Wave 5 — 잔존 fix (사용자 Option A 승인)
+- [x] F1: scanner plugin-aware refactor (`_resolve_inventory_dir(project)` 추가, 두 mirror sha256 parity) — plugin mode mismatch 해소
+- [x] F2: pre-edit-dod-gate.sh L267 (rein-aggregate-incidents resolver, fail-closed) + L292-293 message
+- [x] F3: test bundle L31 "12" → "13" doc drift fix
+- [x] F4: pre-edit-dod-gate.sh L370 message + L478-486 (rein-generate-skill-mcp-guide resolver, fail-graceful — advisory WARNING 의도 보존)
+- [x] F5: scripts/rein-codex-review.sh layout probe (`${PROJECT_DIR}/plugins/rein-core/hooks/lib/` 추가, Option C dogfood drift 해소)
+- [x] F6: plugins/rein-core/scripts/rein-codex-review.sh mirror sync (F5 누락 해소, sha256-identical)
+- [x] F7: bootstrap-check.sh 영문 메시지에 "directory" 단어 추가 (test fixture A grep substring 호환)
+- [x] F8: test-session-start-bootstrap fixture G(b) BG-1 신 contract 갱신 (trail/ only → prompt, 이전 silent)
+- [x] F9: test-rules-prompt-bundle-drift skip 처리 (b8f2191 incomplete work, 별 cycle 후속)
+
+### 통합 검증
+- [x] `bash tests/scripts/run-all.sh` PASS — ALL SUITES PASSED (test-rules-prompt-bundle-drift SKIP 적용 후)
+- [x] codex review (구현 완료 후) PASS — sonnet-fallback path (codex wrapper hang → general-purpose agent) → HIGH 1 + MEDIUM 1 + LOW 2 발견 → F6/F7/F8/F9 fix → ALL SUITES PASSED
+- [x] security review PASS — base level, CRITICAL/HIGH/MEDIUM 0, LOW 3 advisory + INFO 4 defense-in-depth
+- [x] CHANGELOG.md user-facing 항목 추가 (rein update 사용자 시점)
+- [x] inbox 기록 — `trail/inbox/2026-05-14-v1-2-0-cycle-complete.md`
+- [x] trail/index.md 갱신
+- [ ] dev → main 선별 체크아웃 + tag v1.2.0 + push (사용자 확인 후, 별 turn)
+
+### 제외 (versioning Rule A — internal 변경, no bump 영향 없음)
+- 본 cycle 의 spec/plan/brainstorm 자체 (`docs/{specs,plans,brainstorms}/2026-05-14-plugin-mode-gap-fix.md`) — main 제외
+- branch-strategy.md 정정 (BS-1, BS-2) — dev-only
+
+## 작업 순서 (plan §작업 순서 권고)
+
+1. **Task 1.2 (RES-1) + Task 1.9 (BG-1)** 먼저 — Phase 2/3 acceptance 가 둘 다 의존
+2. SEC 묶음: Task 1.5 (SEC-3) → Task 1.3 (SEC-1) → Task 1.4 (SEC-2)
+3. Phase 1 나머지 (1.1, 1.6, 1.7, 1.8) — 독립 병렬
+4. Phase 2 (2.1, 2.2) — Phase 1 의 BG-1 PASS 후
+5. Phase 3 (3.1, 3.2, 3.3) — Phase 1 의 RES-1, BG-1 PASS 후
+
+본 DoD 의 첫 routing 추천은 **Task 1.2 (RES-1) 단독 시작** — 가장 의존성 많은 lib helper 부터.
+
+## 라우팅 추천
+
+```yaml
+agent: rein:feature-builder
+skills:
+  - rein:codex-review
+  - rein:writing-plans
+mcps: []
+rationale:
+  - 작업 성격: 신규 hook lib 작성 (`plugin-script-path.sh`) + 5 기존 hook 의 sourcing 패턴 통일 + unit test 6 case 신축. 전형적 feature 추가 + refactor.
+  - 파일 패턴: `plugins/rein-core/hooks/lib/*.sh` (신규), `plugins/rein-core/hooks/*.sh` (편집), `tests/hooks/test-plugin-script-path-resolver.sh` (신규)
+  - feature-builder 가 1차 구현 → codex-review 로 리뷰 게이트 (mandatory) → 코드 변경 적은 hook sourcing 은 sonnet self-review path 가능
+  - writing-plans 는 본 cycle 의 plan 이 이미 있으므로 추가 plan 작성에는 불필요할 수 있음. 하지만 Task 1.2 가 lib 신설이므로 sub-plan 형태로 caller 패턴 표 작성 시 유용
+  - mcps: 외부 데이터/문서 조회 불필요 — lib helper + 내부 hook refactor 만
+approved_by_user: true   # 2026-05-14 user-approved (Task 1.2 RES-1 시작)
+```
+
+## 자가 점검 (착수 전)
+
+- [x] trail/index.md 읽음 (session start)
+- [x] spec/plan stamp 확인 (`.spec-reviews/0d935f44a966d2e8.reviewed`, `.spec-reviews/1ce69242c69817e6.reviewed`)
+- [x] dev 브랜치 확인
+- [x] coverage validator PASS (15 ID 일치)
+- [ ] 라우팅 사용자 승인 받기 (`approved_by_user: true` 로 교체)
+
+## 위험 요약 (spec Risks 5건 압축)
+
+- R1: RES-1 lib 이 5+ hook 에서 sourced — caller 패턴 통일 + unit test 6 case 로 회귀 방지
+- R2: RTG-1 routing-procedure.md ≤ 1 KB 압축 가능
+- R3: SEC-1 default `standard` 의 false positive — generated profile.yaml 헤더에 base 변경 안내
+- R4: branch-strategy.md 정정이 main 머지 절차와 동시 — dev 단방향 + main 머지 PR description 강조
+- R5: BG-1 marker 강화로 의도된 차단 유지 — `.rein/project.json` 부재 시 차단 (test-bootstrap-check-helper.sh 갱신)
+
+## 다음 단계 (라우팅 승인 후)
+
+1. 사용자 "진행해" 또는 라우팅 수정 의견 → `approved_by_user: true` 갱신
+2. Task 1.2 (RES-1) IMPLEMENT — `plugin-script-path.sh` 신축 + 5 hook sourcing + unit test
+3. `/codex-review` (Mode A) — Task 1.2 완료 후 코드 리뷰 게이트
+4. security-reviewer — Task 1.2 가 hook 동작 변경이므로 보안 리뷰 (lib 의 fail-open 정책 검증)
+5. 두 stamp 통과 후 Task 1.9 (BG-1) 또는 다른 Phase 1 task 로 이동
+
+---
+## dod-2026-05-14-v1-1-3-release-option-c-shipped.md (mtime: 2026-05-14, archived: 2026-05-16)
+# DoD — v1.1.3 release: Option C plugin SSOT + dogfood model shipped
+
+- 날짜: 2026-05-14
+- 유형: release (patch — Phase 4 plugin rule body 변화 = minimal user-facing, Rule A patch)
+- plan ref: docs/plans/2026-05-13-option-c-plugin-ssot-thin-overlay.md (Phase 6 — release 보류 결정을 본 DoD 가 override: 사용자 결정으로 즉시 release)
+
+## 범위 연결
+
+plan ref: docs/plans/2026-05-13-option-c-plugin-ssot-thin-overlay.md
+work unit: Phase 6 / release (Rule A 보류 → 사용자 결정으로 즉시 release)
+covers: [S1, S2, S3, S4, S5, S6, S7, S8, S9, S10]
+
+## 목적
+
+Option C Phase 1~5 의 변경분 (`c1cb693..16c0184`, 11 commits) 을 v1.1.3 patch release 로 사용자에게 ship. 본 cycle 의 핵심 산출물:
+
+- **plugin SSOT 단독 source** — `.claude/{hooks,skills,agents}/` overlay 폐기, plugin source 가 사용자 ship 단일 SSOT
+- **drift checker 통합 도구** — boundary + parity + validation 3 layer 단일 도구 (`scripts/rein-check-plugin-drift.py`)
+- **plugin rule body 정확성 회복** — `design-plan-coverage.md` 의 mandate section + enrichment sync (user-facing inject content)
+- **branch-strategy + workflow surface 갱신** — 9 workflow 분류 명시, mirror-to-public strip 패턴과 일관
+
+## user-facing 영향 (versioning.md Rule A 판정)
+
+| 변경 | user-facing? | 정당화 |
+|---|---|---|
+| plugin SessionStart inject 시 `design-plan-coverage.md` 본문 풍부해짐 | ✅ 약간 — SessionStart 시 사용자가 받는 rule body content 변화 | patch bump 정당화 |
+| plugin tarball 사이즈 감소 (docs/rules 4 mirror 폐기) | ✅ 약간 — install size + cache footprint 감소 | positive delta |
+| `${CLAUDE_PLUGIN_ROOT}/rules/answer-only-mode.md` banner path 정확화 | ✅ minor — installed plugin 환경에서 메시지 정확 | patch |
+| 메인테이너 dev overlay 폐기 (`.claude/hooks/` 등) | ❌ 사용자 환경에는 overlay 자체 부재 | internal |
+| drift checker 도구 통합 | ❌ 메인테이너 도구 | internal |
+
+→ **Rule A patch bump 정당화** (user-facing 영향 약함 + breaking 없음).
+
+## 변경 작업
+
+### Task 1 — VERSION bump (dev 에서 먼저)
+
+`scripts/rein.sh` 의 `VERSION="1.1.2"` → `VERSION="1.1.3"`.
+
+### Task 2 — CHANGELOG.md 새 v1.1.3 entry
+
+플랫 (`## v1.1.3 — 2026-05-14 (Option C plugin SSOT + dogfood model shipped)`) 본문:
+- user-facing 변화 위주 (`feedback_release_readme_version_entry.md` 권고)
+- internal cleanup 은 짧게 언급
+- v1.1.2 entry 위에 추가
+
+### Task 3 — README.md / README.ko.md 버전 히스토리 1~2줄 + CHANGELOG 링크
+
+`feedback_release_readme_version_entry.md` 의 patterns 따름:
+- 간략 1~2줄 entry
+- 상세는 CHANGELOG.md 의 `#v113-...` anchor 로 링크
+
+### Task 4 — dev commit ("chore(release): v1.1.3 prep") + push
+
+VERSION + CHANGELOG + README 변경 묶음 단일 commit.
+
+### Task 5 — main 머지 (선별 체크아웃, `feedback_branch_strategy_order.md` 준수)
+
+```
+git checkout main
+git checkout dev -- <branch-strategy.md ✅ 포함 list>
+```
+
+main 머지 대상 (Option C Phase 5 의 branch-strategy.md ✅ 포함 표 따름):
+- `plugins/rein-core/**`
+- `.claude-plugin/marketplace.json`
+- `AGENTS.md`, `README.md`, `README.ko.md`, `main_img.png`, `CHANGELOG.md`
+- `docs/{changelog-archive,troubleshooting,agents-md-examples.md}/**`
+- `scripts/rein*.{sh,py}`
+- `.gitignore`, `.github/workflows/*.yml` (mirror 가 strip 대상 처리)
+
+❌ 제외: `.claude/{CLAUDE.md,rules/,settings*.json,orchestrator.md,workflows/,cache/,.rein-state/}`, `tests/**`, `docs/{specs,plans,brainstorms,reports}/**`, `trail/**`, `need-to-confirm.md` 등
+
+### Task 6 — main commit + tag v1.1.3
+
+```
+git commit -m "feat(release): v1.1.3 — Option C plugin SSOT + dogfood model"
+git tag v1.1.3
+```
+
+### Task 7 — main + tag push
+
+```
+git push origin main
+git push origin v1.1.3
+```
+
+mirror-to-public + publish-plugin workflow 가 자동 trigger.
+
+### Task 8 — dev sync (post-release 기록)
+
+dev 에 commit: `docs(trail): v1.1.3 release 종결 — main <sha> + tag v1.1.3 반영` + trail/index.md 갱신.
+
+## 검증 게이트
+
+- [ ] Task 1: `grep '^VERSION=' scripts/rein.sh` = `VERSION="1.1.3"`
+- [ ] Task 2: CHANGELOG.md 의 `## v1.1.3 — 2026-05-14` entry 존재
+- [ ] Task 3: README.md + README.ko.md 의 v1.1.3 entry 1~2줄 + CHANGELOG 링크
+- [ ] Task 4: dev commit 후 origin/dev push (ahead 0)
+- [ ] Task 5: main 의 working tree 가 dev 의 main-mergeable subset 과 일치 (memory `feedback_plugin_validate_before_main.md` — `claude plugin validate` 권고)
+- [ ] Task 6: main HEAD = 새 commit, `git tag -l v1.1.3` = exists
+- [ ] Task 7: `git ls-remote --tags origin v1.1.3` 매치
+- [ ] Task 8: dev/origin/dev ahead 0, trail/index.md "이전 완료" 에 v1.1.3 추가
+- [ ] codex-review PASS (release commit 전체 변경분)
+- [ ] security-review No concerns
+
+## Rollback
+
+문제 시:
+- main push 전: `git checkout dev` + main working tree reset
+- main push 후 tag 전: `git push --delete origin main` 위험 (force push to main 금지) — 새 commit 으로 revert
+- tag push 후: `git tag -d v1.1.3` (로컬) + `git push --delete origin v1.1.3` (사용자 명시 승인 필요)
+
+## Release
+
+본 cycle main 머지 = v1.1.3. tag v1.1.3 생성. mirror-to-public + publish-plugin workflow trigger.
+
+## 라우팅 추천
+
+```yaml
+agent: feature-builder
+skills:
+  - codex-review        # release 변경분 (VERSION/CHANGELOG/README) 리뷰
+  - changelog-writer    # CHANGELOG entry 작성 권고 (선택)
+mcps: []
+rationale: |
+  release cycle 의 변경은 작음 (VERSION + CHANGELOG + README 3 파일 변경 + main 머지
+  + tag). codex-review medium effort 가 적합. changelog-writer skill 은 git log
+  기반 자동 CHANGELOG 작성에 사용 (선택, manual 작성도 가능).
+approved_by_user: true
+```
+
+## Self-review (release cycle 종료 시 작성)
+
+- [ ] 모든 Task 검증 게이트 통과
+- [ ] codex-review PASS + security-reviewer No concerns
+- [ ] main HEAD = v1.1.3 tag commit + origin push 완료
+- [ ] mirror-to-public + publish-plugin workflow trigger 확인
+- [ ] dev sync + trail 갱신
+
+---
+## dod-2026-05-16-q9-mirror-tag-trigger.md (mtime: 2026-05-16, archived: 2026-05-18)
+# DoD — Q9 mirror-to-public tag trigger fix
+
+- 작업 시작일: 2026-05-16
+- 유형: fix (CI workflow — internal, no version bump per versioning.md Rule A)
+- plan ref: `docs/reports/2026-05-15-mirror-public-q9-diagnosis.md` (진단 + Option A/B/C 설계, §4 권고 = A+C)
+
+## 배경 / 문제
+
+`mirror-to-public.yml` 은 `push: branches:[main]` 만 trigger. release flow 가 main push 후 tag 를 별도 push 하므로, mirror runner checkout 시점에 tag 가 origin 에 부재 → Q9 retag block 의 `git tag --points-at "$GITHUB_SHA"` 가 empty → retag + tag-push 루프 모두 skip → workflow 는 success 인데 tag 미전파 (silent). v1.2.0 / v1.3.0 둘 다 이 결함으로 public tag 수동 push 필요했음. 미수정 시 v1.4.0 재발.
+
+## 완료 기준 (codex-ask 검토 반영 — 아래 §codex-ask 참조)
+
+1. `on.push` 에 `tags: ['v*']` 추가 — tag push 시 workflow 실행.
+2. `concurrency` 그룹 = `mirror-${{ github.ref_type }}-${{ github.ref_name }}` + `cancel-in-progress: false`. branch run 은 `mirror-branch-main` 으로 직렬화, tag run 은 tag별 고유 group → branch run 과 미직렬화 (codex-ask #2: 단일 group 은 tag run 선행 시 public main 을 갱신할 branch run 을 가두는 deadlock).
+3. branch-triggered step (`if: github.ref_type == 'branch'`): 기존 strip + `git push public HEAD:main --force` 유지. postcondition 추가 — public main 을 fetch 해 `== pushed HEAD` 확인, 불일치 시 `exit 1`.
+4. tag-triggered step (`if: github.ref_type == 'tag'`) 신규:
+   - `TAG_COMMIT = git rev-parse "${GITHUB_REF}^{commit}"` 명시 resolve (codex-ask: `$GITHUB_SHA` 직접 의존 회피, annotated tag 안전).
+   - `TAG_COMMIT == origin/main` 검증 — 불일치 시 fail-loud (codex-ask #3: 오래된 commit 재태깅 / 늦은 tag run false-pass 방어. retroactive 태그 복구는 수동).
+   - `public` remote 추가 → public main 을 fetch+poll (`git merge-base --is-ancestor "$TAG_COMMIT" <public/main>` 만족까지, 10s 간격 최대 30회). codex-ask #4: `ls-remote` SHA 만으로는 merge-base 불가 — fetch 필수.
+   - poll 만족 후 `<public/main>:refs/tags/<tag>` lightweight force-push → postcondition (`git ls-remote public refs/tags/<tag>` == public/main, 불일치 시 `exit 1`).
+   - poll timeout 시 fail-loud (branch run 미완료/실패 의미).
+5. 깨진 Q9 retag block (`ATTACHED_TAGS` / `git tag -f -a` 루프) 제거 — tag-triggered step 이 tag 전파 단독 경로. split push + atomic push 양쪽 커버.
+6. `PUBLIC_REPO_TOKEN` 은 step `env:` 로 전달 (script inline `${{ secrets }}` interpolation 회피). 토큰은 `git remote add public <url>` 1회 사용 후 remote 이름으로만 참조. `set -x` 미사용·`git remote -v` 미호출 — URL embed 토큰 노출 차단.
+7. grep-contract 테스트 1개 추가 — tag trigger / 조건부 concurrency / ref_type 분기 / ancestor poll / postcondition / Q9 block 제거를 lock-in.
+8. YAML 문법 유효성 검증 통과.
+9. codex-review + security-review 통과.
+
+## codex-ask 설계 검토 (2026-05-16, gpt-5.5 high)
+
+진단 §4 의 A+C 권고를 구현하려던 초안 (단일 concurrency group + ancestor guard fail-loud) 에 codex-ask 가 결함 3건 지적:
+
+1. **단일 concurrency group deadlock** — tag run 이 슬롯을 먼저 잡으면 public main 을 갱신할 branch run 이 뒤에 갇힘 → tag run 영구 실패. → ref별 조건부 group + tag run polling.
+2. **ancestor guard false-pass** — 오래된 M 이 새 public main 의 ancestor 라 guard 통과 → 엉뚱 commit 태깅. → `TAG_COMMIT == origin/main` precondition.
+3. **`merge-base --is-ancestor` 는 객체 필요** — `ls-remote` SHA 만으로 불가, `git fetch public` 선행.
+
+codex 권고 최종 설계를 위 완료 기준 #2~#6 에 반영. 원문: codex-ask 세션 출력 (요약: trail/inbox).
+
+## 범위
+
+- `.github/workflows/mirror-to-public.yml` — 편집
+- `tests/scripts/test-mirror-workflow-q9-fix.sh` (또는 동등 위치) — 신규
+
+## 비범위
+
+- mirror strip set 변경 (진단 §5 out-of-scope — `tests/`·`.claude` 잔존은 별도 cycle)
+- main 머지 (별도 — versioning Rule B 하루 1머지, 다른 변경과 batch 판단 필요. 본 변경은 no-bump CI 변경)
+- `publish-plugin.yml` (별도 후보)
+- v1.0.0~v1.3.0 public tag 의 기존 annotated/lightweight 혼재 (소급 정리 안 함)
+
+## 라우팅 추천
+
+```yaml
+agent: none  # main session 직접 구현 — 단일 파일 YAML + 테스트 1개, 설계 분석 완료
+skills:
+  - rein:codex-ask      # 구현 전 설계 second opinion — concurrency + ancestor guard 가 진단 A+C 의 확장 (사용자 승인)
+  - rein:codex-review   # step 5 필수 게이트 — public force-push workflow 안전성 검토
+mcps: []
+rationale: |
+  단일 workflow 파일 + grep-contract 테스트의 focused 변경. 설계는 진단 리포트가
+  이미 Option A/B/C 탐색 완료, 본 작업은 A+C 구현 + concurrency/ancestor-guard 보강.
+  public repo force-push 를 다루는 risky 변경이므로 구현 전 codex-ask 설계 검토 +
+  구현 후 codex-review 필수.
+approved_by_user: true
+```
+
