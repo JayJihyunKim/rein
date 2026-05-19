@@ -1,6 +1,0 @@
-reviewed_at: 2026-05-19T10:22:56Z
-reviewer: rein:security-reviewer
-verdict: PASS
-security_level: base
-scope: cc-feature-adoption Phase 1 (57301c8, 02a69b1..HEAD, 82 files)
-findings: none
