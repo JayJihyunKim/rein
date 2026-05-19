@@ -20,7 +20,13 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WRAPPER="$PROJECT_DIR/scripts/rein-codex-review.sh"
-SELECTOR_LIB="$PROJECT_DIR/.claude/hooks/lib/select-active-dod.sh"
+# select-active-dod lives in the plugin SSOT after Option C Phase 3 removed
+# the dev `.claude/hooks/` overlay; fall back to the overlay for legacy envs.
+if [ -f "$PROJECT_DIR/.claude/hooks/lib/select-active-dod.sh" ]; then
+  SELECTOR_LIB="$PROJECT_DIR/.claude/hooks/lib/select-active-dod.sh"
+else
+  SELECTOR_LIB="$PROJECT_DIR/plugins/rein-core/hooks/lib/select-active-dod.sh"
+fi
 EMPTY_TREE_SHA="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 PASS=0

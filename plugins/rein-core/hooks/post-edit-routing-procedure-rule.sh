@@ -10,7 +10,7 @@
 # Emits a PostToolUse envelope containing the routing-procedure rule body so
 # the model sees the routing-section template and procedure in the next
 # request — fulfilling the promise made by pre-edit-dod-gate.sh and
-# post-write-dod-routing-check.sh stderr messages ("PostToolUse hook 이
+# post-edit-dod-routing-check.sh stderr messages ("PostToolUse hook 이
 # routing 절차 본문 자동 inject").
 #
 # Silent exit 0 when:
@@ -22,7 +22,7 @@
 #
 # This hook never blocks (no exit 2). It is advisory inject only — the gate
 # itself (pre-edit-dod-gate.sh routing-gate block) does the blocking, and
-# the .routing-missing-* marker is written by post-write-dod-routing-check.sh.
+# the .routing-missing-* marker is written by post-edit-dod-routing-check.sh.
 #
 # Scope ID: routing-procedure-injection-hook-fulfils-pre-edit-dod-gate-stderr-promise-by-emitting-routing-rule-body-on-dod-write-via-post-edit-dispatcher-sub-hook
 set -euo pipefail
@@ -32,7 +32,7 @@ if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ]; then
 fi
 
 # Hook input on stdin (Claude Code JSON envelope). Extract file_path with
-# the same fallback chain used by post-write-design-plan-coverage-rule.sh:
+# the same fallback chain used by post-edit-design-plan-coverage-rule.sh:
 #   tool_input.file_path  (primary)
 #   tool_response.filePath (secondary — Claude Code response field)
 #   tool_result.file_path  (legacy tertiary — older payload shape)

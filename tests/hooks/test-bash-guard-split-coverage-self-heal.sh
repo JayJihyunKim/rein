@@ -1,15 +1,16 @@
 #!/bin/bash
-# tests/hooks/test-pre-bash-guard-coverage-self-heal.sh
+# tests/hooks/test-bash-guard-split-coverage-self-heal.sh
 #
-# Verifies the consumer-side coverage marker self-heal added to
-# pre-bash-guard.sh by dod-2026-05-15-pre-bash-guard-marker-self-heal.
+# Verifies the consumer-side coverage marker self-heal in the test/commit gate
+# pre-bash-test-commit-gate.sh (originally added to the pre-split Bash guard by
+# DoD dod-2026-05-15-marker-self-heal; carried over by HK-2 Task 1.2 split).
 #
-# Contract under test (pre-bash-guard.sh `revalidate_coverage_marker`):
+# Contract under test (pre-bash-test-commit-gate.sh `revalidate_coverage_marker`):
 #   rc=0  validator PASS for >=1 actually-validated target → caller silent rm + continue
 #   rc=1  validator FAIL → caller blocks + emits target in message
 #   rc=2  cannot revalidate → caller conservatively blocks (legacy behavior)
 #
-# Sandbox model: copy pre-bash-guard.sh + lib/ + a stub validator into a
+# Sandbox model: copy pre-bash-test-commit-gate.sh + lib/ + a stub validator into a
 # tempdir, drive the hook with synthetic JSON on stdin, assert exit code + stderr.
 
 set -u
@@ -61,9 +62,9 @@ mk_sandbox() {
   mkdir -p "$SANDBOX/trail/incidents"
 
   # Plugin SSOT (Option C Phase 3): hooks live under plugins/rein-core/.
-  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/pre-bash-guard.sh" "$SANDBOX/.claude/hooks/"
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/pre-bash-test-commit-gate.sh" "$SANDBOX/.claude/hooks/"
   cp -R "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/." "$SANDBOX/.claude/hooks/lib/"
-  chmod +x "$SANDBOX/.claude/hooks/pre-bash-guard.sh"
+  chmod +x "$SANDBOX/.claude/hooks/pre-bash-test-commit-gate.sh"
 
   # Stub validator: any target file containing literal "VALIDATOR_PASS" → exit 0.
   # Otherwise exit 1 (mimicking real coverage validator failure).
@@ -89,11 +90,11 @@ rm_sandbox() {
   SANDBOX=""
 }
 
-# Run pre-bash-guard.sh with the given Bash command on stdin, capture stderr+exit.
+# Run pre-bash-test-commit-gate.sh with the given Bash command on stdin, capture stderr+exit.
 # Sets HOOK_EXIT and HOOK_STDERR.
 #
 # INFO-2 (security review): unset CLAUDE_PLUGIN_ROOT before invoking the hook
-# so the policy-loader block at the top of pre-bash-guard.sh runs in scaffold
+# so the policy-loader block at the top of pre-bash-test-commit-gate.sh runs in scaffold
 # mode (skips loader). Maintainer dev environments export CLAUDE_PLUGIN_ROOT
 # pointing at the real plugin tree, which would let the loader resolve real
 # files outside the sandbox and mask test failures. `env -u` produces a
@@ -109,7 +110,7 @@ run_hook() {
   err_file=$(mktemp)
   HOOK_EXIT=0
   printf '%s' "$input" \
-    | (cd "$SANDBOX" && env -u CLAUDE_PLUGIN_ROOT bash .claude/hooks/pre-bash-guard.sh) \
+    | (cd "$SANDBOX" && env -u CLAUDE_PLUGIN_ROOT bash .claude/hooks/pre-bash-test-commit-gate.sh) \
     > "$out_file" 2> "$err_file"
   HOOK_EXIT=$?
   HOOK_STDOUT=$(cat "$out_file")

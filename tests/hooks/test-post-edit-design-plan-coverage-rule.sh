@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# tests/hooks/test-post-write-design-plan-coverage-rule.sh
+# tests/hooks/test-post-edit-design-plan-coverage-rule.sh
 #
 # Verifies the plugin PostToolUse sub-hook
-# `plugins/rein-core/hooks/post-write-design-plan-coverage-rule.sh`:
+# `plugins/rein-core/hooks/post-edit-design-plan-coverage-rule.sh`:
 #
 #   (a) Match cases emit a PostToolUse envelope whose additionalContext
 #       contains the design-plan-coverage 행동 강령.
@@ -20,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_DIR"
 
-HOOK="$PROJECT_DIR/plugins/rein-core/hooks/post-write-design-plan-coverage-rule.sh"
+HOOK="$PROJECT_DIR/plugins/rein-core/hooks/post-edit-design-plan-coverage-rule.sh"
 PLUGIN_ROOT="$PROJECT_DIR/plugins/rein-core"
 
 [ -f "$HOOK" ] || { echo "FAIL: $HOOK missing" >&2; exit 1; }
@@ -107,4 +107,4 @@ printf '%s' '{"tool_input":{"file_path":"docs/specs/foo.md"}}' \
   | env -u CLAUDE_PLUGIN_ROOT bash "$HOOK" >"$OUT" 2>/dev/null || true
 assert_silent "CLAUDE_PLUGIN_ROOT unset → silent"
 
-echo "test-post-write-design-plan-coverage-rule: OK"
+echo "test-post-edit-design-plan-coverage-rule: OK"

@@ -14,7 +14,7 @@
 #
 # Fixtures (each in its own mktemp -d cwd; loader resolves .rein/policy/*.yaml
 # relative to cwd, so we never touch the rein-dev repo's own .rein/ tree):
-#   Fixture A: hooks.yaml has only `other-hook`, query `pre-bash-guard` -> exit 0
+#   Fixture A: hooks.yaml has only `other-hook`, query `pre-bash-safety-guard` -> exit 0
 #   Fixture B: rules.yaml empty file, query rule override `code-style`    -> empty stdout, exit 0
 #   Fixture C: rules.yaml has only `security`, query
 #       - `code-style` -> empty stdout, exit 0 (missing key default)
@@ -61,7 +61,7 @@ run_loader() {
 }
 
 # -----------------------------------------------------------------------------
-# Fixture A: hooks.yaml has only `other-hook`, query `pre-bash-guard`.
+# Fixture A: hooks.yaml has only `other-hook`, query `pre-bash-safety-guard`.
 # Default behavior is enabled (exit 0) per is_enabled(... default=True).
 # -----------------------------------------------------------------------------
 A_DIR="$TMP_ROOT/A"
@@ -70,9 +70,9 @@ cat >"$A_DIR/.rein/policy/hooks.yaml" <<'YAML'
 other-hook:
   enabled: false
 YAML
-A_RC="$(run_loader "$A_DIR" "pre-bash-guard")"
+A_RC="$(run_loader "$A_DIR" "pre-bash-safety-guard")"
 [ "$A_RC" = "0" ] || fail "Fixture A: expected exit 0 (default enabled), got $A_RC"
-ok "Fixture A: hooks.yaml has only other-hook, queried pre-bash-guard -> exit 0"
+ok "Fixture A: hooks.yaml has only other-hook, queried pre-bash-safety-guard -> exit 0"
 
 # -----------------------------------------------------------------------------
 # Fixture B: rules.yaml is empty (parses to None). Query rule override.

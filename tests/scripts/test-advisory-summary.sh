@@ -9,8 +9,8 @@ trap "rm -rf $FIXTURES" EXIT
 
 # fixture blocks.jsonl 생성
 cat > "$FIXTURES/blocks.jsonl" <<'EOF'
-{"ts":"2026-04-19T10:00:00Z","source":"pre-bash-guard","reason":"dod-missing","target":"src/foo.py"}
-{"ts":"2026-04-19T10:05:00Z","source":"pre-bash-guard","reason":"dod-missing","target":"src/bar.py"}
+{"ts":"2026-04-19T10:00:00Z","source":"pre-bash-safety-guard","reason":"dod-missing","target":"src/foo.py"}
+{"ts":"2026-04-19T10:05:00Z","source":"pre-bash-safety-guard","reason":"dod-missing","target":"src/bar.py"}
 {"ts":"2026-04-19T10:10:00Z","source":"pre-edit-dod-gate","reason":"coverage-mismatch","target":"plan.md"}
 EOF
 

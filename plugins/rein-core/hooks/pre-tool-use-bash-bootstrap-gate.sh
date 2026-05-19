@@ -20,9 +20,9 @@
 #
 # Ordering note (informational — see Task 1.4 for hooks.json wiring):
 # Within the PreToolUse(Bash) matcher group, this gate must run BEFORE
-# pre-bash-guard.sh so that an exit-2 here short-circuits the chain and the
+# the policy Bash guards so that an exit-2 here short-circuits the chain and the
 # user sees the bootstrap message without being distracted by review-stamp
-# errors from pre-bash-guard. Task 3.3 (trigger parity test) validates the
+# errors from the policy guards. Task 3.3 (trigger parity test) validates the
 # end-to-end ordering.
 #
 # Scope IDs covered:
@@ -103,7 +103,7 @@ fi
 # tool_input.command best-effort: missing python3 / parse failure → empty
 # COMMAND → no allow-list match → fall through to bootstrap_check, which
 # does its own python3-resilient handling. Using python-runner.sh keeps
-# the runner discovery consistent with pre-bash-guard.sh.
+# the runner discovery consistent with the policy Bash guards.
 INPUT=$(cat)
 COMMAND=""
 if [ -f "$SCRIPT_DIR/lib/python-runner.sh" ]; then

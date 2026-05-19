@@ -63,8 +63,8 @@ A_TRACE="$A_SB/trace"
 mkdir -p "$A_TRACE"
 for sub in \
   post-edit-hygiene.sh post-edit-review-gate.sh post-edit-index-sync-inbox.sh \
-  post-write-spec-review-gate.sh post-edit-plan-coverage.sh post-write-dod-routing-check.sh \
-  post-write-design-plan-coverage-rule.sh
+  post-edit-spec-review-gate.sh post-edit-plan-coverage.sh post-edit-dod-routing-check.sh \
+  post-edit-design-plan-coverage-rule.sh post-edit-routing-procedure-rule.sh
 do
   write_trace_shim "$A_SB/.claude/hooks/$sub" "$A_TRACE/$sub.log"
 done
@@ -74,15 +74,15 @@ echo "$A_PAYLOAD" | "$A_SB/.claude/hooks/post-edit-dispatcher.sh" || fail "dispa
 
 for sub in \
   post-edit-hygiene.sh post-edit-review-gate.sh post-edit-index-sync-inbox.sh \
-  post-write-spec-review-gate.sh post-edit-plan-coverage.sh post-write-dod-routing-check.sh \
-  post-write-design-plan-coverage-rule.sh
+  post-edit-spec-review-gate.sh post-edit-plan-coverage.sh post-edit-dod-routing-check.sh \
+  post-edit-design-plan-coverage-rule.sh post-edit-routing-procedure-rule.sh
 do
   [ -f "$A_TRACE/$sub.log" ] || fail "sub-hook not called: $sub"
   grep -q "cache=1" "$A_TRACE/$sub.log" || fail "$sub did not see REIN_HOOK_INPUT_CACHE=1"
   grep -q "file_path=/tmp/example.py" "$A_TRACE/$sub.log" || fail "$sub did not see FILE_PATH via cache"
   grep -q "input_file=/" "$A_TRACE/$sub.log" || fail "$sub did not see REIN_HOOK_INPUT_FILE"
 done
-ok "Fixture A: dispatcher calls all 7 sub-hooks with cache + INPUT_FILE populated"
+ok "Fixture A: dispatcher calls all 8 sub-hooks with cache + INPUT_FILE populated"
 
 # ---------------------------------------------------------------------------
 # Fixture B: hook_input_export 2-arg signature + clear roundtrip.
@@ -124,8 +124,8 @@ D_TRACE="$D_SB/trace"
 mkdir -p "$D_TRACE"
 for sub in \
   post-edit-hygiene.sh post-edit-review-gate.sh post-edit-index-sync-inbox.sh \
-  post-write-spec-review-gate.sh post-edit-plan-coverage.sh post-write-dod-routing-check.sh \
-  post-write-design-plan-coverage-rule.sh
+  post-edit-spec-review-gate.sh post-edit-plan-coverage.sh post-edit-dod-routing-check.sh \
+  post-edit-design-plan-coverage-rule.sh post-edit-routing-procedure-rule.sh
 do
   write_trace_shim "$D_SB/.claude/hooks/$sub" "$D_TRACE/$sub.log"
 done
@@ -134,15 +134,15 @@ D_PAYLOAD='{"tool_input":{"file_path":"/tmp/example.py"}}'
 ( cd "$D_SB" && CLAUDE_PLUGIN_ROOT="$D_SB" echo "$D_PAYLOAD" | CLAUDE_PLUGIN_ROOT="$D_SB" "$D_SB/.claude/hooks/post-edit-dispatcher.sh" ) || fail "Fixture D dispatcher exited non-zero"
 
 # lean profile disables 3 hooks → trace logs should NOT exist for them
-for disabled in post-edit-plan-coverage.sh post-write-spec-review-gate.sh post-write-dod-routing-check.sh; do
+for disabled in post-edit-plan-coverage.sh post-edit-spec-review-gate.sh post-edit-dod-routing-check.sh; do
   [ ! -f "$D_TRACE/$disabled.log" ] || fail "Fixture D: $disabled was called despite profile:lean"
 done
 # enabled hooks should be called (lean leaves these on; the design-plan-coverage
 # rule injector is not in the lean disable list, so it should run too)
-for enabled in post-edit-hygiene.sh post-edit-review-gate.sh post-edit-index-sync-inbox.sh post-write-design-plan-coverage-rule.sh; do
+for enabled in post-edit-hygiene.sh post-edit-review-gate.sh post-edit-index-sync-inbox.sh post-edit-design-plan-coverage-rule.sh post-edit-routing-procedure-rule.sh; do
   [ -f "$D_TRACE/$enabled.log" ] || fail "Fixture D: $enabled was not called despite being enabled"
 done
-ok "Fixture D: profile:lean blocks 3 heavy hooks, lets 4 light hooks run"
+ok "Fixture D: profile:lean blocks 3 heavy hooks, lets 5 light hooks run"
 
 # ---------------------------------------------------------------------------
 # Fixture E: sub-hook exit 2 propagates through dispatcher.
@@ -154,9 +154,9 @@ mkdir -p "$E_TRACE"
 write_trace_shim "$E_SB/.claude/hooks/post-edit-hygiene.sh" "$E_TRACE/hygiene.log"
 write_trace_shim "$E_SB/.claude/hooks/post-edit-review-gate.sh" "$E_TRACE/review.log"
 write_trace_shim "$E_SB/.claude/hooks/post-edit-index-sync-inbox.sh" "$E_TRACE/index.log"
-write_trace_shim "$E_SB/.claude/hooks/post-write-spec-review-gate.sh" "$E_TRACE/spec.log" 2
+write_trace_shim "$E_SB/.claude/hooks/post-edit-spec-review-gate.sh" "$E_TRACE/spec.log" 2
 write_trace_shim "$E_SB/.claude/hooks/post-edit-plan-coverage.sh" "$E_TRACE/coverage.log"
-write_trace_shim "$E_SB/.claude/hooks/post-write-dod-routing-check.sh" "$E_TRACE/dod.log"
+write_trace_shim "$E_SB/.claude/hooks/post-edit-dod-routing-check.sh" "$E_TRACE/dod.log"
 
 E_PAYLOAD='{"tool_input":{"file_path":"/tmp/example.py"}}'
 set +e
@@ -175,8 +175,8 @@ F_TRACE="$F_SB/trace"
 mkdir -p "$F_TRACE"
 for sub in \
   post-edit-hygiene.sh post-edit-review-gate.sh post-edit-index-sync-inbox.sh \
-  post-write-spec-review-gate.sh post-edit-plan-coverage.sh post-write-dod-routing-check.sh \
-  post-write-design-plan-coverage-rule.sh
+  post-edit-spec-review-gate.sh post-edit-plan-coverage.sh post-edit-dod-routing-check.sh \
+  post-edit-design-plan-coverage-rule.sh post-edit-routing-procedure-rule.sh
 do
   write_trace_shim "$F_SB/.claude/hooks/$sub" "$F_TRACE/$sub.log"
 done
@@ -199,8 +199,8 @@ G_TRACE="$G_SB/trace"
 mkdir -p "$G_TRACE"
 for sub in \
   post-edit-hygiene.sh post-edit-review-gate.sh post-edit-index-sync-inbox.sh \
-  post-write-spec-review-gate.sh post-edit-plan-coverage.sh post-write-dod-routing-check.sh \
-  post-write-design-plan-coverage-rule.sh
+  post-edit-spec-review-gate.sh post-edit-plan-coverage.sh post-edit-dod-routing-check.sh \
+  post-edit-design-plan-coverage-rule.sh post-edit-routing-procedure-rule.sh
 do
   write_trace_shim "$G_SB/.claude/hooks/$sub" "$G_TRACE/$sub.log"
 done

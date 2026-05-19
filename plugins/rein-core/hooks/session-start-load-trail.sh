@@ -261,14 +261,19 @@ except Exception:
   # session_end 도장 reset — 이번 세션의 stop hook 이 다시 도장 찍어야 의미 유지.
   # ABNORMAL 판정/메시지 출력 직후, recovery aggregate 호출 직전에 위치해야 함
   # (그 사이에 다른 reader 가 직전 세션의 stale true 를 읽지 않도록).
+  # PERF-1: combine set-session-end + aggregate + count-pending into ONE Python
+  # subprocess spawn (was 3 separate spawns). Guaranteed internal order:
+  #   set-session-end false → aggregate → count-pending (inside cmd_combined).
+  # JSON output is parsed with a small python3 -c helper (no jq dependency).
   if [ -n "$AGGREGATE_PY" ]; then
-    python3 "$AGGREGATE_PY" \
-      --project-dir "$PROJECT_DIR" set-session-end false >/dev/null 2>&1 || true
-
-    # 세션 시작 시 aggregate 한 번 실행 (비정상 종료로 stop-gate 를 놓친 세션의
-    # blocks.jsonl 신규 라인을 반영). flock 으로 동시성 안전.
-    python3 "$AGGREGATE_PY" \
-      --project-dir "$PROJECT_DIR" >/dev/null 2>&1 || true
+    _COMBINED_JSON=$(python3 "$AGGREGATE_PY" \
+      --project-dir "$PROJECT_DIR" \
+      --set-session-end false \
+      --run-aggregate \
+      --count-pending \
+      --output-json 2>/dev/null) || _COMBINED_JSON=""
+  else
+    _COMBINED_JSON=""
   fi
 
   # --- H3.2: session-start-line stamp (recovery aggregate 완료 후) ---
@@ -288,10 +293,18 @@ except Exception:
   }
   _write_session_start_line
 
-  if [ -n "$AGGREGATE_PY" ]; then
-    PENDING=$(python3 "$AGGREGATE_PY" \
-      --project-dir "$PROJECT_DIR" --count-pending 2>/dev/null || echo 0)
+  # Parse pending_count from the combined JSON result (python3 inline — no jq).
+  if [ -n "$_COMBINED_JSON" ]; then
+    PENDING=$(python3 -c "
+import json, sys
+try:
+    d = json.loads(sys.argv[1])
+    print(int(d.get('pending_count', 0)))
+except Exception:
+    print(0)
+" "$_COMBINED_JSON" 2>/dev/null || echo 0)
   else
+    # Fallback: AGGREGATE_PY absent or combined call failed — degrade gracefully.
     PENDING=0
   fi
 

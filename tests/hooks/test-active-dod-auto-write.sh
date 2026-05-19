@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/hooks/test-active-dod-auto-write.sh
-# Unit tests for .claude/hooks/post-write-dod-routing-check.sh auto-write extension
+# Unit tests for plugins/rein-core/hooks/post-edit-dod-routing-check.sh auto-write extension
 # (묶음 C — wrapper context lifecycle hardening, Phase 1).
 #
 # Scope IDs covered:
@@ -19,7 +19,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-HOOK="$PROJECT_DIR/.claude/hooks/post-write-dod-routing-check.sh"
+HOOK="$PROJECT_DIR/plugins/rein-core/hooks/post-edit-dod-routing-check.sh"
 
 PASS=0
 FAIL=0

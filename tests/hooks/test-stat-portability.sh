@@ -259,7 +259,7 @@ test_portable_date_ymd_to_epoch_invalid_returns_empty() {
 # ============================================================
 test_hooks_source_portable_lib() {
   begin "test_hooks_source_portable_lib"
-  for f in pre-edit-dod-gate.sh pre-bash-guard.sh trail-rotate.sh session-start-load-trail.sh stop-session-gate.sh; do
+  for f in pre-edit-dod-gate.sh pre-bash-safety-guard.sh pre-bash-test-commit-gate.sh trail-rotate.sh session-start-load-trail.sh stop-session-gate.sh; do
     local path="$HOOKS_DIR/$f"
     if [ ! -f "$path" ]; then
       fail "hook missing: $f"

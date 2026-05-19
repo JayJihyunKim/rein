@@ -137,7 +137,7 @@ YAML
 
 B_STDERR="$B_DIR/stderr"
 set +e
-( cd "$B_DIR" && python3 "$LOADER" "pre-bash-guard" 2>"$B_STDERR" )
+( cd "$B_DIR" && python3 "$LOADER" "pre-bash-safety-guard" 2>"$B_STDERR" )
 B_RC=$?
 set -e
 [ "$B_RC" = "0" ] || {

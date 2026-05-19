@@ -60,9 +60,20 @@ sandbox_setup() {
   mkdir -p "$SANDBOX/docs/specs"
   mkdir -p "$SANDBOX/docs/plans"
 
-  # Copy the wrapper + its deps.
-  cp "$REAL_PROJECT_DIR/.claude/hooks/lib/select-active-dod.sh" \
-     "$SANDBOX/.claude/hooks/lib/select-active-dod.sh"
+  # Copy the wrapper + its deps. The select-active-dod library lives in the
+  # plugin SSOT (plugins/rein-core/hooks/lib/) after Option C Phase 3 removed
+  # the dev `.claude/hooks/` overlay; fall back to the overlay for legacy
+  # maintainer environments that still carry it.
+  local _sad_src=""
+  if [ -f "$REAL_PROJECT_DIR/.claude/hooks/lib/select-active-dod.sh" ]; then
+    _sad_src="$REAL_PROJECT_DIR/.claude/hooks/lib/select-active-dod.sh"
+  elif [ -f "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/select-active-dod.sh" ]; then
+    _sad_src="$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/select-active-dod.sh"
+  else
+    echo "sandbox_setup: select-active-dod.sh not found in .claude/ or plugin SSOT" >&2
+    return 1
+  fi
+  cp "$_sad_src" "$SANDBOX/.claude/hooks/lib/select-active-dod.sh"
   cp "$REAL_PROJECT_DIR/scripts/rein-codex-review.sh" \
      "$SANDBOX/scripts/rein-codex-review.sh"
   chmod +x "$SANDBOX/scripts/rein-codex-review.sh"
@@ -933,6 +944,86 @@ test_wrapper_plugin_layout_user_repo_without_claude_dir_uses_bundled_lib() {
 }
 
 # ------------------------------------------------------------
+# Verification 8 (PD-2, 2026-05-19): PROJECT_DIR sanity check.
+# The wrapper resolves PROJECT_DIR then cd's into it + writes a stamp there.
+# If PROJECT_DIR does not point at a real repo root (no trail/, or not the
+# git toplevel) the wrapper must fail loudly (exit 2) BEFORE running codex,
+# instead of silently reviewing the wrong tree and stamping outside the repo.
+# Normal PROJECT_DIR (sandbox with trail/ + git) must keep working — that is
+# covered by every other test in this file, so here we only assert the new
+# failure modes plus one positive control.
+# ------------------------------------------------------------
+test_pd2_sanity_rejects_project_dir_without_trail() {
+  # Arrange: a directory that exists but has NO trail/ subdirectory.
+  local bad_dir="$SANDBOX/no-trail-here"
+  mkdir -p "$bad_dir"
+
+  local stdin_file="$SANDBOX/.stdin-pd2.txt"
+  local tmp_stdout tmp_stderr
+  tmp_stdout=$(mktemp); tmp_stderr=$(mktemp)
+  printf 'code review please' > "$stdin_file"
+  (
+    cd "$SANDBOX"
+    export CODEX_BIN="$FAKE_CODEX"
+    export REIN_PROJECT_DIR_OVERRIDE="$bad_dir"
+    bash "$SANDBOX/scripts/rein-codex-review.sh" --non-interactive \
+      < "$stdin_file" > "$tmp_stdout" 2> "$tmp_stderr"
+  )
+  local rc=$?
+  local err
+  err=$(cat "$tmp_stderr")
+  rm -f "$tmp_stdout" "$tmp_stderr" "$stdin_file"
+
+  [ "$rc" -eq 2 ] \
+    || fail "wrapper exited $rc for PROJECT_DIR without trail/ (expected exit 2)"
+  echo "$err" | grep -qF "[codex-review]" \
+    || fail "stderr missing '[codex-review]' diagnostic for bad PROJECT_DIR (got: $err)"
+}
+
+test_pd2_sanity_rejects_project_dir_not_git_toplevel() {
+  # Arrange: a git repo, but point PROJECT_DIR at a SUBDIRECTORY of it that
+  # has its own trail/. trail/ alone passes; the git-toplevel mismatch must
+  # still trip the sanity check.
+  local subdir="$SANDBOX/subdir"
+  mkdir -p "$subdir/trail/dod"
+
+  local stdin_file="$SANDBOX/.stdin-pd2b.txt"
+  local tmp_stdout tmp_stderr
+  tmp_stdout=$(mktemp); tmp_stderr=$(mktemp)
+  printf 'code review please' > "$stdin_file"
+  (
+    cd "$SANDBOX"
+    export CODEX_BIN="$FAKE_CODEX"
+    export REIN_PROJECT_DIR_OVERRIDE="$subdir"
+    bash "$SANDBOX/scripts/rein-codex-review.sh" --non-interactive \
+      < "$stdin_file" > "$tmp_stdout" 2> "$tmp_stderr"
+  )
+  local rc=$?
+  local err
+  err=$(cat "$tmp_stderr")
+  rm -f "$tmp_stdout" "$tmp_stderr" "$stdin_file"
+
+  [ "$rc" -eq 2 ] \
+    || fail "wrapper exited $rc for PROJECT_DIR != git toplevel (expected exit 2)"
+  echo "$err" | grep -qF "[codex-review]" \
+    || fail "stderr missing '[codex-review]' diagnostic for non-toplevel PROJECT_DIR"
+}
+
+test_pd2_sanity_accepts_valid_project_dir() {
+  # Positive control: a proper repo root (trail/ + git toplevel) passes the
+  # sanity check and the wrapper runs to completion (fake-codex PASS).
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-05-19-pd2.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-05-19-pd2.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] \
+    || fail "valid PROJECT_DIR rejected by sanity check (rc=$RUN_WRAPPER_RC, err: $RUN_WRAPPER_ERR)"
+}
+
+# ------------------------------------------------------------
 # Main
 # ------------------------------------------------------------
 
@@ -963,6 +1054,10 @@ main() {
   run_test test_parse_verdict_no_keyword_returns_needs_fix
   # Plugin self-containment hotfix (2026-05-12)
   run_test test_wrapper_plugin_layout_user_repo_without_claude_dir_uses_bundled_lib
+  # PROJECT_DIR sanity check (PD-2, 2026-05-19)
+  run_test test_pd2_sanity_rejects_project_dir_without_trail
+  run_test test_pd2_sanity_rejects_project_dir_not_git_toplevel
+  run_test test_pd2_sanity_accepts_valid_project_dir
   summary
 }
 

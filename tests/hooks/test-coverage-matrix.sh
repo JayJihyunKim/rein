@@ -248,9 +248,9 @@ test_hook_clears_marker_on_valid_plan() {
   assert_file_missing "trail/dod/.coverage-mismatch"
 }
 
-test_pre_bash_guard_blocks_commit_on_marker() {
+test_test_commit_gate_blocks_commit_on_marker() {
   # 리뷰 stamp + DoD + inbox 까지 전부 생성해 coverage gate 가 **유일한 실패 원인**이 되도록 격리.
-  # pre-bash-guard 는 commit-msg helper 를 호출하므로 lib 파일도 복사한다.
+  # pre-bash-test-commit-gate 는 commit-msg helper 를 호출하므로 lib 파일도 복사한다.
   # Wave 3: coverage gate now uses JSON deny (exit 0, stdout JSON) when the
   # validator can revalidate the plan (rc=1 path), or falls back to exit 2 +
   # [rein] stderr when the marker target is unidentifiable (rc=2/infra path).
@@ -266,13 +266,13 @@ test_pre_bash_guard_blocks_commit_on_marker() {
   touch "$SANDBOX/trail/dod/.coverage-mismatch"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   # Empty marker → rc=2 path [I3]: exactly exit 2 + [rein] on stderr.
-  assert_exit 2 "pre-bash-guard should exit 2 (I3 infra path) for empty coverage-mismatch marker"
+  assert_exit 2 "test-commit gate should exit 2 (I3 infra path) for empty coverage-mismatch marker"
   assert_stderr_contains "[rein]" "I3 infra block must emit [rein] prefix on stderr"
 }
 
-test_pre_bash_guard_allows_commit_without_marker() {
+test_test_commit_gate_allows_commit_without_marker() {
   # Negative control — 마커가 없으면 coverage gate 가 통과해야 한다 (review stamp gate 는 별개).
   mkdir -p "$SANDBOX/.claude/hooks/lib"
   cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/extract-commit-msg.py" \
@@ -284,7 +284,7 @@ test_pre_bash_guard_allows_commit_without_marker() {
   # NO .coverage-mismatch
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   # stderr 에 coverage 문구가 **없어야** 한다 (다른 gate 에서 exit 돼도 coverage 는 무관)
   echo "$HOOK_STDERR" | grep -qF "coverage matrix 검증 실패" \
     && fail "coverage gate should not fire without marker" || true
@@ -400,7 +400,7 @@ MD
   assert_file_contains "trail/dod/.coverage-mismatch" "$planC"
 }
 
-test_pre_bash_guard_blocks_pytest_on_marker() {
+test_test_commit_gate_blocks_pytest_on_marker() {
   # Mirror of commit-blocking test, for pytest command path.
   # Same Wave 3 behavior: empty marker → infra-integrity exit 2 + [rein] stderr.
   mkdir -p "$SANDBOX/.claude/hooks/lib"
@@ -413,9 +413,9 @@ test_pre_bash_guard_blocks_pytest_on_marker() {
   touch "$SANDBOX/trail/dod/.coverage-mismatch"
 
   local input='{"tool_input":{"command":"pytest tests/unit/"},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   # Empty marker → rc=2 path [I3]: exactly exit 2 + [rein] on stderr.
-  assert_exit 2 "pre-bash-guard should exit 2 (I3 infra path) for empty coverage-mismatch marker"
+  assert_exit 2 "test-commit gate should exit 2 (I3 infra path) for empty coverage-mismatch marker"
   assert_stderr_contains "[rein]" "I3 infra block must emit [rein] prefix on stderr"
 }
 
@@ -434,15 +434,15 @@ run_test test_hook_creates_marker_on_invalid_plan \
   post-edit-plan-coverage.sh rein-validate-coverage-matrix.py
 run_test test_hook_clears_marker_on_valid_plan \
   post-edit-plan-coverage.sh rein-validate-coverage-matrix.py
-run_test test_pre_bash_guard_blocks_commit_on_marker \
-  pre-bash-guard.sh
-run_test test_pre_bash_guard_allows_commit_without_marker \
-  pre-bash-guard.sh
+run_test test_test_commit_gate_blocks_commit_on_marker \
+  pre-bash-test-commit-gate.sh
+run_test test_test_commit_gate_allows_commit_without_marker \
+  pre-bash-test-commit-gate.sh
 run_test test_hook_marker_is_plan_specific \
   post-edit-plan-coverage.sh rein-validate-coverage-matrix.py
 run_test test_hook_removes_fixed_plan_keeps_others \
   post-edit-plan-coverage.sh rein-validate-coverage-matrix.py
-run_test test_pre_bash_guard_blocks_pytest_on_marker \
-  pre-bash-guard.sh
+run_test test_test_commit_gate_blocks_pytest_on_marker \
+  pre-bash-test-commit-gate.sh
 
 summary

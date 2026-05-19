@@ -1,7 +1,7 @@
 #!/bin/bash
 # tests/hooks/test-commit-msg.sh
 #
-# Regression tests for pre-bash-guard.sh commit message format validation.
+# Regression tests for pre-bash-test-commit-gate.sh commit message format validation.
 #
 # Background: v0.4.1 hotfix surfaced three bugs in the prior sed/grep-based
 # extractor:
@@ -11,7 +11,7 @@
 #      bypassed validation because sed is line-oriented.
 #   3) Conventional commits scope notation `fix(auth): foo` was rejected.
 #
-# This suite drives pre-bash-guard.sh with crafted JSON payloads and
+# This suite drives pre-bash-test-commit-gate.sh with crafted JSON payloads and
 # verifies the expected allow/block outcome and the extracted message
 # (indirectly via the block message content).
 #
@@ -24,7 +24,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/test-harness.sh"
 
-HOOK=pre-bash-guard.sh
+HOOK=pre-bash-test-commit-gate.sh
 
 # Build a command string containing the literal `git commit` at runtime,
 # so that THIS test script source does not accidentally trigger outer hooks
@@ -249,7 +249,7 @@ test_block_when_helper_missing() {
 }
 
 # ============================================================
-# assert_json_deny helper (local — mirrors test-pre-bash-guard.sh)
+# assert_json_deny helper (local — mirrors test-pre-bash-test-commit-gate.sh)
 # Asserts: HOOK_EXIT==0, stdout is valid JSON,
 # permissionDecision=="deny", and reason_code appears in
 # permissionDecisionReason.

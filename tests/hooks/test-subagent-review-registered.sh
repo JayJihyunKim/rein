@@ -2,9 +2,9 @@
 # test-subagent-review-registered.sh — Plugin-First Restructure Phase 2 Task 2.3.
 #
 # Verifies the subagent-review rule is registered in the rein-core plugin:
-#   (a) pre-bash-guard.sh hook script exists in the plugin mirror.
+#   (a) pre-bash-test-commit-gate.sh hook script exists in the plugin mirror (HK-2 split successor of the former Bash guard — owns the review-stamp gate).
 #   (b) hooks.json contains a PreToolUse registration with matcher Bash whose
-#       command basename is pre-bash-guard.sh.
+#       command basename is pre-bash-test-commit-gate.sh.
 #   (c) docs/rules/subagent-review.md exists in the plugin and is sha256-identical
 #       to the source .claude/rules/subagent-review.md.
 #
@@ -16,7 +16,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_DIR"
 
 PLUGIN_DIR="plugins/rein-core"
-HOOK_SCRIPT="$PLUGIN_DIR/hooks/pre-bash-guard.sh"
+HOOK_SCRIPT="$PLUGIN_DIR/hooks/pre-bash-test-commit-gate.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 RULE_NAME="subagent-review.md"
 PLUGIN_RULE_DOC="$PLUGIN_DIR/rules/$RULE_NAME"

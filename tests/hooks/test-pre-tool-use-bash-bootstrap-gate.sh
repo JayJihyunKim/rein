@@ -10,10 +10,10 @@
 #   D — helper missing (CLAUDE_PLUGIN_ROOT set but lib/bootstrap-check.sh gone)
 #       → exit 0 (install regression — not this gate's job to alarm)
 #   E — Bash conflict order (concept-level)
-#       trail/ absent + simulated co-resident pre-bash-guard preconditions.
+#       trail/ absent + simulated co-resident Bash-guard preconditions.
 #       Single-task limitation: this fixture validates that the gate returns
 #       exit 2 (so an upstream dispatcher would short-circuit the chain). The
-#       actual chain ordering — i.e. pre-bash-guard NOT running after this
+#       actual chain ordering — i.e. the policy Bash guards NOT running after this
 #       gate's exit 2 — is governed by hooks.json (Task 1.4) and validated
 #       end-to-end by Task 3.3 (trigger parity test).
 #
@@ -162,8 +162,8 @@ fixture_d() {
 # ---------------------------------------------------------------------------
 # Fixture E — Bash conflict order (concept-level assertion)
 # ---------------------------------------------------------------------------
-# The full ordering contract — bootstrap gate fires BEFORE pre-bash-guard so
-# that an exit-2 here suppresses pre-bash-guard's stamp-missing message — is
+# The full ordering contract — bootstrap gate fires BEFORE the policy Bash guards so
+# that an exit-2 here suppresses the policy guards' stamp-missing message — is
 # enforced by hooks.json (Task 1.4) and validated end-to-end by Task 3.3
 # (trigger parity test). At this single-task level, hook-chain dispatch is
 # not mocked. The most this fixture can assert is:
@@ -172,12 +172,12 @@ fixture_d() {
 #     to short-circuit the chain), the gate returns exit 2 cleanly.
 #
 # If this fixture fails, the chain-ordering contract cannot possibly hold;
-# if it passes, Task 3.3 must still verify that pre-bash-guard does not run
+# if it passes, Task 3.3 must still verify that the policy guards do not run
 # after this exit 2.
 fixture_e() {
   local dir
   dir="$(mktemp -d "$SCRATCH_ROOT/E-XXXXXX")"
-  # Intentionally simulate the co-resident precondition for pre-bash-guard:
+  # Intentionally simulate the co-resident precondition for the policy Bash guards:
   # trail/dod/ exists (so guard would try to read stamps) but trail/ at root
   # is the actual signal the gate keys on. We do NOT create trail/ — gate
   # must fire first.
@@ -194,7 +194,7 @@ fixture_e() {
     record_fail "E: stderr missing 'rein-bootstrap-project.py' (got: $err)"
     return
   fi
-  # NOTE: chain-suppression of pre-bash-guard is validated by Task 3.3.
+  # NOTE: chain-suppression of the policy guards is validated by Task 3.3.
   record_pass "E (conflict order — gate exit 2 first; chain suppression deferred to Task 3.3)"
 }
 

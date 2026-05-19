@@ -35,9 +35,10 @@ assert any(h.endswith("pre-edit-dod-gate.sh") for h in edit_hooks[2:]), \
 assert bash_hooks[0].endswith("pre-tool-use-bash-bootstrap-gate.sh"), \
     f"FAIL: Bash group first hook expected pre-tool-use-bash-bootstrap-gate.sh, got: {bash_hooks[0]}"
 
-# Bash group: second hook must be pre-bash-guard (preserved)
-assert bash_hooks[1].endswith("pre-bash-guard.sh"), \
-    f"FAIL: Bash group second hook expected pre-bash-guard.sh, got: {bash_hooks[1]}"
+# Bash group: second hook must be the safety guard (HK-2 split — the always-on
+# successor to the former single Bash guard, preserved right after bootstrap)
+assert bash_hooks[1].endswith("pre-bash-safety-guard.sh"), \
+    f"FAIL: Bash group second hook expected pre-bash-safety-guard.sh, got: {bash_hooks[1]}"
 
 # All commands must use plugin root marker
 marker = "${CLAUDE_PLUGIN_ROOT}/hooks/"

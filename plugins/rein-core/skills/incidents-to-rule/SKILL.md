@@ -24,7 +24,7 @@ triggers:
 ---
 status: "pending"
 pattern_hash: "3f4a8b2c9d1e5f6a"
-hook: "pre-bash-guard"
+hook: "pre-bash-safety-guard"
 reason: "파이프 쉘 실행"
 count: "5"
 first_seen: "2026-04-10T14:23:10"
@@ -33,7 +33,7 @@ agent_eligible: unknown      # true | false | unknown — 분류 후 기록 (선
 root_cause: unknown           # bug | missing_rule | missing_agent | tooling | user_error | unknown (선택)
 ---
 
-# Incident: pre-bash-guard / 파이프 쉘 실행
+# Incident: pre-bash-safety-guard / 파이프 쉘 실행
 
 ## 예시 (최근 최대 5건)
 ...
@@ -74,7 +74,7 @@ python3 "$REIN_PLUGIN_ROOT/scripts/rein-mark-incident-processed.py" \
   trail/incidents/auto-<hook>-<hash>.md \
   --set-agent-eligible false \
   --set-root-cause bug \
-  --reason "pre-bash-guard regex false positive — hook 소스 수정으로 해결"
+  --reason "pre-bash-safety-guard regex false positive — hook 소스 수정으로 해결"
 
 # status 갱신 + 분류 동시
 python3 "$REIN_PLUGIN_ROOT/scripts/rein-mark-incident-processed.py" \

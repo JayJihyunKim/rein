@@ -113,7 +113,7 @@ compute_hash() {
 
 test_aggregate_below_threshold() {
   # single occurrence → no incident file (threshold=2)
-  append_jsonl "pre-bash-guard" "파이프 쉘 실행" "echo x"
+  append_jsonl "pre-bash-safety-guard" "파이프 쉘 실행" "echo x"
   REIN_INCIDENT_THRESHOLD=2 run_aggregate >/dev/null 2>&1
   local n
   n=$(count_incident_files)
@@ -122,8 +122,8 @@ test_aggregate_below_threshold() {
 
 test_aggregate_at_threshold() {
   # 2 occurrences with THRESHOLD=2 → 1 incident file created
-  append_jsonl "pre-bash-guard" "파이프 쉘 실행" "cmd1"
-  append_jsonl "pre-bash-guard" "파이프 쉘 실행" "cmd2"
+  append_jsonl "pre-bash-safety-guard" "파이프 쉘 실행" "cmd1"
+  append_jsonl "pre-bash-safety-guard" "파이프 쉘 실행" "cmd2"
   REIN_INCIDENT_THRESHOLD=2 run_aggregate >/dev/null 2>&1
   local n
   n=$(count_incident_files)
@@ -137,8 +137,8 @@ test_aggregate_at_threshold() {
 
 test_aggregate_multiple_patterns() {
   # 2 different patterns, each 2 occurrences → 2 incident files
-  append_jsonl "pre-bash-guard" "파이프 쉘 실행" "cmd1"
-  append_jsonl "pre-bash-guard" "파이프 쉘 실행" "cmd2"
+  append_jsonl "pre-bash-safety-guard" "파이프 쉘 실행" "cmd1"
+  append_jsonl "pre-bash-safety-guard" "파이프 쉘 실행" "cmd2"
   append_jsonl "pre-edit-dod-gate" "미완료 DoD 없음" "/foo.py"
   append_jsonl "pre-edit-dod-gate" "미완료 DoD 없음" "/bar.py"
   REIN_INCIDENT_THRESHOLD=2 run_aggregate >/dev/null 2>&1
@@ -149,8 +149,8 @@ test_aggregate_multiple_patterns() {
 
 test_reason_with_pipe() {
   # reason contains a pipe character — JSON handles safely
-  append_jsonl "pre-bash-guard" "pipe|in|reason" "target"
-  append_jsonl "pre-bash-guard" "pipe|in|reason" "target2"
+  append_jsonl "pre-bash-safety-guard" "pipe|in|reason" "target"
+  append_jsonl "pre-bash-safety-guard" "pipe|in|reason" "target2"
   REIN_INCIDENT_THRESHOLD=2 run_aggregate >/dev/null 2>&1
   local n
   n=$(count_incident_files)
@@ -162,8 +162,8 @@ test_reason_with_pipe() {
 
 test_reason_with_quote() {
   # reason contains double quotes
-  append_jsonl "pre-bash-guard" 'say "hello"' "target"
-  append_jsonl "pre-bash-guard" 'say "hello"' "target2"
+  append_jsonl "pre-bash-safety-guard" 'say "hello"' "target"
+  append_jsonl "pre-bash-safety-guard" 'say "hello"' "target2"
   REIN_INCIDENT_THRESHOLD=2 run_aggregate >/dev/null 2>&1
   local n
   n=$(count_incident_files)
@@ -179,7 +179,7 @@ from datetime import datetime, timezone
 for _ in range(2):
     print(json.dumps({
         'ts': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S'),
-        'hook': 'pre-bash-guard',
+        'hook': 'pre-bash-safety-guard',
         'reason': 'newline target',
         'target': 'line1\nline2',
     }, ensure_ascii=False))
@@ -196,8 +196,8 @@ for _ in range(2):
 
 test_pending_update() {
   # first aggregate creates pending file; second aggregate updates count
-  append_jsonl "pre-bash-guard" "파이프 쉘 실행" "cmd1"
-  append_jsonl "pre-bash-guard" "파이프 쉘 실행" "cmd2"
+  append_jsonl "pre-bash-safety-guard" "파이프 쉘 실행" "cmd1"
+  append_jsonl "pre-bash-safety-guard" "파이프 쉘 실행" "cmd2"
   REIN_INCIDENT_THRESHOLD=2 run_aggregate >/dev/null 2>&1
   local inc_file
   inc_file=$(ls "$SANDBOX/trail/incidents/auto-"*.md 2>/dev/null | head -1)
@@ -206,8 +206,8 @@ test_pending_update() {
   count_before=$(grep '^count:' "$inc_file" | grep -oE '[0-9]+' | head -1)
 
   # add 2 more — second aggregate should update existing pending
-  append_jsonl "pre-bash-guard" "파이프 쉘 실행" "cmd3"
-  append_jsonl "pre-bash-guard" "파이프 쉘 실행" "cmd4"
+  append_jsonl "pre-bash-safety-guard" "파이프 쉘 실행" "cmd3"
+  append_jsonl "pre-bash-safety-guard" "파이프 쉘 실행" "cmd4"
   REIN_INCIDENT_THRESHOLD=2 run_aggregate >/dev/null 2>&1
 
   local count_after
@@ -222,12 +222,12 @@ test_pending_update() {
 test_declined_skip() {
   # If existing file status=declined, new occurrences should create new suffix file
   local hash
-  hash=$(compute_hash "pre-bash-guard" "reason-x")
-  make_incident "auto-pre-bash-guard-${hash}.md" "declined" "pre-bash-guard" "reason-x" "$hash"
+  hash=$(compute_hash "pre-bash-safety-guard" "reason-x")
+  make_incident "auto-pre-bash-safety-guard-${hash}.md" "declined" "pre-bash-safety-guard" "reason-x" "$hash"
 
   # Now add 2 new occurrences
-  append_jsonl "pre-bash-guard" "reason-x" "target1"
-  append_jsonl "pre-bash-guard" "reason-x" "target2"
+  append_jsonl "pre-bash-safety-guard" "reason-x" "target1"
+  append_jsonl "pre-bash-safety-guard" "reason-x" "target2"
   REIN_INCIDENT_THRESHOLD=2 run_aggregate >/dev/null 2>&1
   # Should create a new suffix file (auto-...-2.md or similar)
   local n
@@ -238,11 +238,11 @@ test_declined_skip() {
 test_processed_new_suffix() {
   # If existing file status=processed, new occurrences create a new suffix file
   local hash
-  hash=$(compute_hash "pre-bash-guard" "reason-y")
-  make_incident "auto-pre-bash-guard-${hash}.md" "processed" "pre-bash-guard" "reason-y" "$hash"
+  hash=$(compute_hash "pre-bash-safety-guard" "reason-y")
+  make_incident "auto-pre-bash-safety-guard-${hash}.md" "processed" "pre-bash-safety-guard" "reason-y" "$hash"
 
-  append_jsonl "pre-bash-guard" "reason-y" "target1"
-  append_jsonl "pre-bash-guard" "reason-y" "target2"
+  append_jsonl "pre-bash-safety-guard" "reason-y" "target1"
+  append_jsonl "pre-bash-safety-guard" "reason-y" "target2"
   REIN_INCIDENT_THRESHOLD=2 run_aggregate >/dev/null 2>&1
   local n
   n=$(count_incident_files)
@@ -260,14 +260,14 @@ test_count_pending_empty() {
 }
 
 test_count_one_auto_pending() {
-  make_pending_incident "auto-pre-bash-guard-abc123.md" "pre-bash-guard" "test reason" "abc123"
+  make_pending_incident "auto-pre-bash-safety-guard-abc123.md" "pre-bash-safety-guard" "test reason" "abc123"
   local cnt
   cnt=$(run_count)
   [ "$cnt" -eq 1 ] || fail "expected 1 pending, got $cnt"
 }
 
 test_count_one_declined() {
-  make_incident "auto-pre-bash-guard-def456.md" "declined" "pre-bash-guard" "declined reason" "def456"
+  make_incident "auto-pre-bash-safety-guard-def456.md" "declined" "pre-bash-safety-guard" "declined reason" "def456"
   local cnt
   cnt=$(run_count)
   [ "$cnt" -eq 0 ] || fail "expected 0 pending (declined should not count), got $cnt"
@@ -402,8 +402,8 @@ test_gate_bypass_consumes() {
 
 test_watermark_prevents_double_processing() {
   # Run aggregate twice with same data → second run should not create extra files
-  append_jsonl "pre-bash-guard" "double-test" "t1"
-  append_jsonl "pre-bash-guard" "double-test" "t2"
+  append_jsonl "pre-bash-safety-guard" "double-test" "t1"
+  append_jsonl "pre-bash-safety-guard" "double-test" "t2"
   REIN_INCIDENT_THRESHOLD=2 run_aggregate >/dev/null 2>&1
   local n1
   n1=$(count_incident_files)
@@ -419,8 +419,8 @@ test_watermark_prevents_double_processing() {
 # ---------------------------------------------------------------------------
 
 test_aggregate_writes_snapshot() {
-  append_jsonl "pre-bash-guard" "test-pattern-snap" "dummy-1"
-  append_jsonl "pre-bash-guard" "test-pattern-snap" "dummy-2"
+  append_jsonl "pre-bash-safety-guard" "test-pattern-snap" "dummy-1"
+  append_jsonl "pre-bash-safety-guard" "test-pattern-snap" "dummy-2"
   run_aggregate >/dev/null
 
   local snap="$SANDBOX/trail/incidents/.last-aggregate-state.json"
@@ -447,7 +447,7 @@ test_aggregate_writes_snapshot() {
 
 test_aggregate_snapshot_empty_pending() {
   # Single block — below THRESHOLD=2, no pending should be created.
-  append_jsonl "pre-bash-guard" "below-threshold-pattern" "d1"
+  append_jsonl "pre-bash-safety-guard" "below-threshold-pattern" "d1"
   run_aggregate >/dev/null
 
   local snap="$SANDBOX/trail/incidents/.last-aggregate-state.json"
@@ -477,7 +477,7 @@ setup_sandbox() {
 
 test_helper_allows_error_status() {
   setup_sandbox
-  make_jsonl_pending_incident "pre-bash-guard" "err-test-pattern"
+  make_jsonl_pending_incident "pre-bash-safety-guard" "err-test-pattern"
   local auto_file
   auto_file=$(ls "$SANDBOX/trail/incidents/auto-"*.md | head -1)
 
@@ -490,7 +490,7 @@ test_helper_allows_error_status() {
 
 test_error_excluded_from_pending() {
   setup_sandbox
-  make_jsonl_pending_incident "pre-bash-guard" "err-exclude-pattern"
+  make_jsonl_pending_incident "pre-bash-safety-guard" "err-exclude-pattern"
   local auto_file
   auto_file=$(ls "$SANDBOX/trail/incidents/auto-"*.md | head -1)
 
@@ -503,7 +503,7 @@ test_error_excluded_from_pending() {
 
 test_trace_log_written() {
   setup_sandbox
-  make_jsonl_pending_incident "pre-bash-guard" "trace-test-pattern"
+  make_jsonl_pending_incident "pre-bash-safety-guard" "trace-test-pattern"
   local auto_file
   auto_file=$(ls "$SANDBOX/trail/incidents/auto-"*.md | head -1)
 

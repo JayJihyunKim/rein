@@ -1,7 +1,7 @@
 #!/bin/bash
 # Hook: PostToolUse(Write|Edit|MultiEdit)
 # plan 파일 편집 시 coverage matrix validator 실행.
-# 실패 시 trail/dod/.coverage-mismatch 마커 생성. pre-bash-guard 가 이후 차단.
+# 실패 시 trail/dod/.coverage-mismatch 마커 생성. pre-bash-test-commit-gate 가 이후 차단.
 
 set -u
 

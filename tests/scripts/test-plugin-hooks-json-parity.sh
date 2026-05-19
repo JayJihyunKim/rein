@@ -80,6 +80,7 @@ settings_path, hooks_path = sys.argv[1], sys.argv[2]
 PLUGIN_ONLY_BASENAMES = {
     "session-start-bootstrap.sh",
     "session-start-rules.sh",
+    "post-agent-review-trigger.sh",
 }
 
 with open(settings_path, "r", encoding="utf-8") as fh:

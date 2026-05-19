@@ -18,14 +18,21 @@
 #         b) $PWD as last resort
 #      Reason: in plugin mode SCRIPT_DIR points at ~/.claude/plugins/...,
 #      not the user's project. The user's project is the cwd.
-#   4. Scaffold install: SCRIPT_DIR/../.. looks like a rein project
-#      (i.e. has a trail/ directory). Use it.
-#      Reason: a hook physically inside a project owns that project. Falling
-#      back to cwd-git would let an unrelated repo capture trail/ writes when
-#      the hook is invoked by absolute path from outside (audit-integrity
-#      regression observed by codex review 2026-04-29).
-#   5. cd "$SCRIPT_DIR/../.." && pwd — positional fallback (no trail/ yet,
-#      e.g. fresh install before `rein init` finished).
+#   4. Scaffold install: walk up from SCRIPT_DIR until a directory with a
+#      trail/ subdirectory is found. The nearest trail/ ancestor is the
+#      rein project that owns this invocation. (PD-1, 2026-05-19: the old
+#      code assumed a fixed SCRIPT_DIR/../.. depth — correct for hooks at
+#      <repo>/.claude/hooks/ but wrong for helper scripts at <repo>/scripts/
+#      which are only one level deep, making ../.. point at the repo's
+#      PARENT.) Walk-up is caller-depth-agnostic.
+#      Reason for preferring this over cwd-git: a hook/script physically
+#      inside a project owns that project. Falling back to cwd-git would let
+#      an unrelated repo capture trail/ writes when invoked by absolute path
+#      from outside (audit-integrity regression, codex review 2026-04-29).
+#   5. No trail/ ancestor: git rev-parse --show-toplevel anchored at
+#      SCRIPT_DIR (the repo the script physically belongs to — NOT cwd, so
+#      an unrelated cwd repo cannot intercept trail/ writes). Covers fresh
+#      installs before `rein init` created trail/.
 #   6. git rev-parse --show-toplevel from cwd — last attempt before $PWD.
 #   7. $PWD — final fallback.
 #
@@ -35,7 +42,6 @@
 resolve_project_dir() {
   local script_dir="${1:-}"
   local candidate=""
-  local script_parent=""
 
   if [ -n "${REIN_PROJECT_DIR_OVERRIDE:-}" ]; then
     printf '%s\n' "$REIN_PROJECT_DIR_OVERRIDE"
@@ -57,19 +63,32 @@ resolve_project_dir() {
     return 0
   fi
 
+  # Step 4 — walk up from SCRIPT_DIR to the nearest trail/ ancestor. dirname
+  # monotonically shrinks toward "/", so the loop always terminates.
   if [ -n "$script_dir" ]; then
-    script_parent="$(cd "$script_dir/../.." 2>/dev/null && pwd)" || script_parent=""
-    if [ -n "$script_parent" ] && [ -d "$script_parent/trail" ]; then
-      printf '%s\n' "$script_parent"
+    local walk=""
+    walk="$(cd "$script_dir" 2>/dev/null && pwd)" || walk=""
+    while [ -n "$walk" ] && [ "$walk" != "/" ]; do
+      if [ -d "$walk/trail" ]; then
+        printf '%s\n' "$walk"
+        return 0
+      fi
+      walk="$(dirname "$walk")"
+    done
+  fi
+
+  # Step 5 — no trail/ ancestor: anchor git rev-parse at SCRIPT_DIR (not cwd)
+  # so the script resolves to the repo it physically belongs to.
+  if [ -n "$script_dir" ]; then
+    candidate="$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null)" \
+      || candidate=""
+    if [ -n "$candidate" ] && [ -d "$candidate" ]; then
+      printf '%s\n' "$candidate"
       return 0
     fi
   fi
 
-  if [ -n "$script_parent" ]; then
-    printf '%s\n' "$script_parent"
-    return 0
-  fi
-
+  # Step 6 — git rev-parse from cwd.
   candidate="$(git rev-parse --show-toplevel 2>/dev/null)" || candidate=""
   if [ -n "$candidate" ] && [ -d "$candidate" ]; then
     printf '%s\n' "$candidate"

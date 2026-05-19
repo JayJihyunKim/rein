@@ -2,7 +2,7 @@
 # tests/hooks/test-bash-rules-advisory-coexist.sh
 #
 # Task 2.4 (S6): Verifies that pre-tool-use-bash-rules.sh (advisory hook)
-# coexists correctly with pre-bash-guard.sh JSON deny without producing
+# coexists correctly with pre-bash-safety-guard.sh JSON deny without producing
 # duplicate deny decisions or unexpected exit codes.
 #
 # Three cases:
@@ -16,8 +16,8 @@
 #       before set -euo pipefail can abort the hook. Verified by removing
 #       python3 from PATH.
 #   D — hook output does NOT contain permissionDecision key (advisory only
-#       emits additionalContext; permissionDecision is pre-bash-guard territory).
-#   E — pre-bash-guard P8 (cat .env) → JSON deny; then advisory hook on same
+#       emits additionalContext; permissionDecision is pre-bash-safety-guard territory).
+#   E — pre-bash-safety-guard P8 (cat .env) → JSON deny; then advisory hook on same
 #       input → no permissionDecision in advisory output (only one deny per
 #       hook chain, from the guard hook).
 #
@@ -55,7 +55,7 @@ run_advisory() {
 }
 
 echo "TEST: Case A — advisory hook never exits 2 on blocking input (cat .env)"
-# Even with an input that pre-bash-guard would block, this hook is advisory only.
+# Even with an input that pre-bash-safety-guard would block, this hook is advisory only.
 run_advisory ""
 if [ "$ADVISORY_RC" -eq 0 ]; then
   pass "exit 0 on normal invocation"
@@ -136,9 +136,9 @@ else
   pass "advisory hook produced no stdout (no rules body) — no permissionDecision"
 fi
 
-echo "TEST: Case E — after pre-bash-guard JSON deny, advisory hook on same input produces no permissionDecision"
-# Run pre-bash-guard on a P8 input and confirm JSON deny is present.
-GUARD_HOOK="$PLUGIN_ROOT/hooks/pre-bash-guard.sh"
+echo "TEST: Case E — after pre-bash-safety-guard JSON deny, advisory hook on same input produces no permissionDecision"
+# Run pre-bash-safety-guard on a P8 input and confirm JSON deny is present.
+GUARD_HOOK="$PLUGIN_ROOT/hooks/pre-bash-safety-guard.sh"
 INPUT='{"tool_input":{"command":"cat .env"}}'
 GUARD_OUT=$(printf '%s' "$INPUT" | REIN_PROJECT_DIR_OVERRIDE="/tmp/nonexistent_$$" \
   bash "$GUARD_HOOK" 2>/dev/null)
@@ -153,9 +153,9 @@ print("true" if hso.get("permissionDecision") == "deny" else "false")
 ' <<<"$GUARD_OUT" 2>/dev/null || echo "false")
 fi
 if [ "$guard_deny" = "true" ]; then
-  pass "pre-bash-guard correctly emits JSON deny for P8 (cat .env)"
+  pass "pre-bash-safety-guard correctly emits JSON deny for P8 (cat .env)"
 else
-  fail "pre-bash-guard did not emit JSON deny for P8 (guard_rc=$GUARD_RC, out=$GUARD_OUT)"
+  fail "pre-bash-safety-guard did not emit JSON deny for P8 (guard_rc=$GUARD_RC, out=$GUARD_OUT)"
 fi
 
 # Advisory hook on same input: must not add another permissionDecision.

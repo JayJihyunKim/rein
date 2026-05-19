@@ -2,7 +2,7 @@
 
 ## 행동 강령
 
-design 의 `## Scope Items` 표의 모든 ID 는 plan 의 `## Design 범위 커버리지 매트릭스` 에 implemented 또는 deferred 로 등재되어야 한다. plan 의 work unit 은 `covers: [ID]` 메타로 1:1 매핑. validator (`scripts/rein-validate-coverage-matrix.py`) 가 자동 검증, mismatch 시 `.coverage-mismatch` 마커 생성 → pre-bash-guard 가 test/commit 차단. Scope ID v2 는 entity + direction/threshold + scenario 3요소 behavior-level contract — coarse Phase ID 금지. DoD 의 `## 범위 연결` 섹션이 plan ref + covers 를 명시.
+design 의 `## Scope Items` 표의 모든 ID 는 plan 의 `## Design 범위 커버리지 매트릭스` 에 implemented 또는 deferred 로 등재되어야 한다. plan 의 work unit 은 `covers: [ID]` 메타로 1:1 매핑. validator (`scripts/rein-validate-coverage-matrix.py`) 가 자동 검증, mismatch 시 `.coverage-mismatch` 마커 생성 → test/commit 게이트가 차단. Scope ID v2 는 entity + direction/threshold + scenario 3요소 behavior-level contract — coarse Phase ID 금지. DoD 의 `## 범위 연결` 섹션이 plan ref + covers 를 명시.
 
 ## 핵심 원칙
 
@@ -170,8 +170,8 @@ v1.1.0 DoD `covers:` 탐지는 rollout stage 에 따라 강도가 달라진다. 
 
 | Stage | 탐지 방식 | 결과 |
 |-------|-----------|------|
-| 1 (advisory, 기본값) | active DoD (Tier 1 마커 또는 Tier 2 최신-mtime) 에 `covers` mismatch 시 | `.dod-coverage-advisory` 생성 — pre-bash-guard **차단 안 함** |
-| 2 (blocking active DoD) | 동일 조건 | `.dod-coverage-mismatch` 생성 — pre-bash-guard 가 `git commit` / 테스트 차단 |
+| 1 (advisory, 기본값) | active DoD (Tier 1 마커 또는 Tier 2 최신-mtime) 에 `covers` mismatch 시 | `.dod-coverage-advisory` 생성 — 게이트 **차단 안 함** |
+| 2 (blocking active DoD) | 동일 조건 | `.dod-coverage-mismatch` 생성 — test/commit 게이트가 `git commit` / 테스트 차단 |
 | 3 (blocking legacy dated plan) | Stage 2 + 편집된 `docs/YYYY-MM-DD/*-plan.md` 까지 확대 | 동일 |
 
 Malformed config 는 **모든 Stage 에서 fail-closed** — Stage 1 silent downgrade 금지. 파일 부재 = Stage 1.
@@ -180,7 +180,7 @@ Malformed config 는 **모든 Stage 에서 fail-closed** — Stage 1 silent down
 
 - `scripts/rein-validate-coverage-matrix.py <plan-file>` — 정적 검증
 - `.claude/hooks/post-edit-plan-coverage.sh` — plan 편집 시 자동 실행, 실패 시 `trail/dod/.coverage-mismatch` 마커 생성
-- `.claude/hooks/pre-bash-guard.sh` — 마커 존재 시 `git commit` / `pytest` 차단 (exit 2)
+- `pre-bash-test-commit-gate.sh` — 마커 존재 시 `git commit` / `pytest` 차단 (exit 2)
 - 마커 해제: validator 가 성공할 때까지 plan 을 수정하거나, 예외 승인 후 `rm trail/dod/.coverage-mismatch`
 
 ## 5. v1 범위 (이번 구현)

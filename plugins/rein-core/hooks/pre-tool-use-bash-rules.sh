@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Plugin PreToolUse(Bash) hook — tool-brief delivery for background-jobs rule.
 #
-# This is a SEPARATE hook from pre-bash-guard.sh:
-#   - pre-bash-guard.sh: blocks (exit 2) on review-stamp / DoD violations
+# This is a SEPARATE hook from the policy Bash guards:
+#   - pre-bash-{safety-guard,test-commit-gate}.sh: block on review-stamp / DoD / safety violations
 #   - this hook: advisory reminder only (no blocking)
 #
 # Claude Code accumulates additionalContext from multiple hooks under the

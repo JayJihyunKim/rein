@@ -14,7 +14,7 @@ paths:
 
 ## 행동 강령
 
-사용자 repo 의 보안 프로파일 기준으로 security-reviewer 에이전트가 코드 편집 후 자동 호출된다. profile.yaml 과 rules/{level}.md 는 **priority list 순서로 해석**된다 (아래 §경로 우선순위 참조). 차단 패턴: hard-coded credentials, command injection, SQL injection, XSS, 안전하지 않은 deserialize. user input boundary 에서 항상 validation·escape. secret 은 환경변수 또는 secret manager 만 — 코드 hardcode 금지. Codex 리뷰 (.codex-reviewed stamp) 통과 후 security 리뷰 실행, 두 stamp 모두 있어야 test/commit 통과 (pre-bash-guard 차단).
+사용자 repo 의 보안 프로파일 기준으로 security-reviewer 에이전트가 코드 편집 후 자동 호출된다. profile.yaml 과 rules/{level}.md 는 **priority list 순서로 해석**된다 (아래 §경로 우선순위 참조). 차단 패턴: hard-coded credentials, command injection, SQL injection, XSS, 안전하지 않은 deserialize. user input boundary 에서 항상 validation·escape. secret 은 환경변수 또는 secret manager 만 — 코드 hardcode 금지. Codex 리뷰 (.codex-reviewed stamp) 통과 후 security 리뷰 실행, 두 stamp 모두 있어야 `git commit` 통과 (test/commit 게이트가 commit 을 차단). 테스트 실행 자체는 stamp 게이트 대상이 아니다 (GUARD-1 — TDD red-green 루프 허용).
 
 ## 절대 금지
 - `.env` 파일 Git 커밋 금지
@@ -39,7 +39,7 @@ JWT_SECRET=
 
 ## Claude Code 권한
 - `.env`, `secrets/**` 파일은 settings.json `deny`에 명시
-- 위험 Bash 명령어는 `pre-bash-guard.sh` hook으로 차단
+- 위험 Bash 명령어는 `pre-bash-safety-guard.sh` hook으로 차단
 
 ## Security Layer 연동
 

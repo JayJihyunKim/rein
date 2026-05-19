@@ -59,7 +59,8 @@ DoD 파일에서 아래 4가지 신호를 추출한다.
 | 작업 유형 | 에이전트 | 스킬 | MCP |
 |---|---|---|---|
 | 새 기능 추가 | `rein:feature-builder` | `rein:codex-review` | — |
-| 버그 수정 | `rein:feature-builder` | `rein:codex-review`, `superpowers:systematic-debugging` | — |
+| 버그 수정 | `rein:feature-builder-fix` | `rein:codex-review`, `superpowers:systematic-debugging` | — |
+| 리팩토링 | `rein:feature-builder-refactor` | `rein:codex-review` | — |
 | 새 모듈·서비스 초기화 | `rein:feature-builder` | `rein:writing-plans`, `rein:codex-review` | — |
 | 기술 조사 | `rein:researcher` | — | `context7` |
 | plan 작성 | `rein:plan-writer` | `rein:writing-plans` | — |
@@ -70,6 +71,32 @@ DoD 파일에서 아래 4가지 신호를 추출한다.
 | 독립 관점 질의 (second opinion) | — | `rein:codex-ask` | — |
 
 > 보안 리뷰는 별도 작업이 아니라 모든 구현 작업의 후행 단계이기도 하다 (`operating-sequence.md` 의 SECURITY REVIEW). 위 표는 "보안 리뷰가 작업의 주 목적인 경우"를 가리킨다.
+
+---
+
+## 5-A. feature-builder 변형 에이전트 — DoD 키워드 감지 규칙 (AG-1)
+
+`feature-builder` 계열 에이전트는 세 가지 변형으로 분리되어 있다. DoD 파일의 작업명·완료 기준·요약에서 아래 키워드를 감지해 가장 적합한 변형을 추천한다.
+
+### 키워드 → 변형 매핑
+
+| 감지 키워드 | 추천 에이전트 | 설명 |
+|---|---|---|
+| `bug`, `fix`, `버그`, `수정`, `오류`, `에러`, `error`, `crash`, `패치` | `rein:feature-builder-fix` | 버그 수정 전담. reproduction-first 전략. |
+| `refactor`, `리팩터`, `리팩토링`, `restructure`, `cleanup`, `정리`, `구조 개선` | `rein:feature-builder-refactor` | 리팩토링 전담. researcher-first 전략. |
+| 위 키워드 없음 (또는 `feature`, `기능`, `추가`, `신규`, `scaffold`, `구현`) | `rein:feature-builder` | 신규 기능 / build-from-scratch 전담. |
+
+### 키워드 감지의 한계 및 `approved_by_user` 확인 의무
+
+키워드 감지는 오분류할 수 있다. 예를 들어:
+- "버그성 동작을 수정하면서 기능도 추가"하는 경우 → fix 와 feature 가 혼재
+- "리팩토링 중 발견한 버그를 같이 수정"하는 경우 → 두 에이전트로 분리하거나 더 지배적인 작업으로 판단
+
+**이 때문에 `approved_by_user: true` 승인 단계가 반드시 에이전트 선택을 명시 확인해야 한다.** 라우팅 추천 시 채팅 메시지에 선택 근거와 함께 "이 에이전트가 맞습니까?"를 물어야 하며, 사용자가 확인하기 전까지 `approved_by_user: false` 를 유지한다.
+
+복합 작업 분리 원칙:
+- 버그 수정 + 신규 기능이 동시에 필요하면 **DoD 를 두 개로 분리**하고 각각 적합한 에이전트로 라우팅한다.
+- 단일 DoD 내에서 변형이 혼재하면 **더 지배적인 작업 유형**으로 판단하고 근거를 rationale 에 명시한다.
 
 ---
 
@@ -104,10 +131,37 @@ skills:
   - rein:codex-review
 mcps:
   - context7
+security_tier: standard      # (선택) light | standard(기본) | deep
+complexity: medium            # (선택) low | medium | high
+model_hint: sonnet            # (선택) haiku | sonnet | opus
+effort_hint: medium           # (선택) low | medium | high
 rationale:
   - DoD 변경 파일이 hook 소스 → feature-builder 적합
 approved_by_user: false  # 승인 시 true 로 교체
 ```
+
+신규 필드는 모두 **선택 사항**이다. 누락 시 기존 동작 그대로 (`security_tier: standard` 로 간주, complexity/model_hint/effort_hint 는 적용 안 함).
+
+### security_tier 결정 기준 (RT-1)
+
+| 신호 | 판정 |
+|---|---|
+| auth / authz / crypto / 외부 API 키 / `*.env` / `secrets/**` 관련 변경 | `deep` |
+| 신규 인터페이스 추가 또는 데이터 처리 로직 변경 | `standard` |
+| 1~2개 파일, 기존 패턴 확장만 (위 항목 미해당) | `light` |
+| **판단이 불명확하면** | `standard` (false-negative 방지) |
+
+`security_tier: light` 효과: `approved_by_user: true` 이면 `git commit` 게이트에서 `.security-reviewed` stamp 요구를 건너뜀. **`.codex-reviewed` stamp 는 항상 필수**이며 `light` 여도 면제되지 않는다. 승인 전(`approved_by_user: false`)이거나 `security_tier` 파싱 불가 시 fail-closed — 기존대로 stamp 필요.
+
+### complexity 결정 기준 (RT-2)
+
+| 신호 | 판정 |
+|---|---|
+| 1~2개 파일, 기존 패턴 확장 | `low` |
+| 3~10개 파일, 신규 기능 | `medium` |
+| 10개 이상 파일, 아키텍처 변경 | `high` |
+
+`model_hint` 와 `effort_hint` 는 정보성 힌트이며 현재 게이트를 변경하지 않는다. 향후 라우팅 통계 수집에 사용한다.
 
 ---
 

@@ -15,7 +15,7 @@
 #     → silent exit 0 (PASS, best-effort: the gate's job is not to block
 #                      sensitive paths, only to surface missing bootstrap)
 #
-# The helper is sourced (not exec'd) so future hooks (pre-bash-guard,
+# The helper is sourced (not exec'd) so future hooks (pre-bash-safety-guard,
 # user-prompt-submit-rules, session-start-bootstrap) can share the same
 # function via the same source pattern — satisfies Scope ID:
 #   session-start-bootstrap-and-pre-edit-gate-and-pre-bash-gate-and-user-prompt-submit-share-bootstrap-check-helper-via-source

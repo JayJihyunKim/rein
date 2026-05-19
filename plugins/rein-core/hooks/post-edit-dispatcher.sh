@@ -133,11 +133,11 @@ for sub in \
   post-edit-hygiene.sh \
   post-edit-review-gate.sh \
   post-edit-index-sync-inbox.sh \
-  post-write-spec-review-gate.sh \
+  post-edit-spec-review-gate.sh \
   post-edit-plan-coverage.sh \
-  post-write-dod-routing-check.sh \
-  post-write-design-plan-coverage-rule.sh \
-  post-write-routing-procedure-rule.sh
+  post-edit-dod-routing-check.sh \
+  post-edit-design-plan-coverage-rule.sh \
+  post-edit-routing-procedure-rule.sh
 do
   SUB_PATH="$SCRIPT_DIR/$sub"
   [ -x "$SUB_PATH" ] || continue

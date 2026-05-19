@@ -1,14 +1,6 @@
-reviewer: rein:security-reviewer (opus)
-timestamp: 2026-05-18T10:20:00
-cycle: 2026-05-17-hook-tone-impl (Wave 1 — Phase 1 + Task 3.3 + Task 3.5)
-security_level: base
+reviewed_at: 2026-05-19T10:22:56Z
+reviewer: rein:security-reviewer
 verdict: PASS
-critical: 0
-high: 0
-medium: 0
-low: 1
-info: 3
-scope: plugins/rein-core/hooks/lib/json-deny-emitter.sh, plugins/rein-core/hooks/session-start-load-trail.sh, plugins/rein-core/hooks/session-start-bootstrap.sh, AGENTS.md, tests/hooks/test-json-deny-emitter.sh, tests/hooks/test-session-start-tone.sh, tests/hooks/test-session-start-bootstrap.sh, tests/rules/test-agents-trail-language.sh
-findings: emitter 3-slot trust boundary correct (trusted_reason unframed, untrusted_input DATA-framed in additionalContext) / control-char + DEL + NUL stripping verified empirically / fail-closed verified for empty reason, empty/ctrl-only reason_code, missing python3, serialiser/parse failure — no fail-open path / json.dumps + os.environ transport blocks JSON and shell-metachar breakout (REIN_DENY_MAX_LEN env-injection probe negative) / MIN_MAX_LEN floor-clamp (84) math verified — length invariant holds across keep-region boundary, normal reason_code marker survives intact / LOW-1 (REIN_DENY_DATA_FRAME_PREFIX shell var is process-env overridable, not a true privilege boundary — same-trust as hook author, non-exploitable) / INFO-1 (untrusted_input frame is a single prefix, not a delimited block — model relies on instruction-following to honour it; acceptable defence-in-depth, consistent with documented design) / INFO-2 (session-start tone rewrite is string-only, no new injection surface, all data values preserved) / INFO-3 (no hardcoded secrets in any changed/new file)
-resolution: No blocking (Critical/High) findings. All four test suites pass (emitter 15 scenarios, tone 10, bootstrap 10, agents-lang 5). Wave 1 changes cleared.
-user_approved: false
+security_level: base
+scope: cc-feature-adoption Phase 1 (57301c8, 02a69b1..HEAD, 82 files)
+findings: none

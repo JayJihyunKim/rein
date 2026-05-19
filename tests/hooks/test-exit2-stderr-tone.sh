@@ -8,7 +8,7 @@
 #   - Contain natural-sentence language
 #
 # Hooks covered:
-#   pre-bash-guard.sh  — I1 (Python resolver failure), I2 (JSON parse failure),
+#   pre-bash guards (safety-guard + test-commit-gate)  — I1 (Python resolver failure), I2 (JSON parse failure),
 #                        I3 (coverage marker target unidentifiable),
 #                        I4 (commit msg helper missing), I5 (commit msg helper failed)
 #   pre-edit-dod-gate.sh — DoD missing (no active task record)
@@ -44,11 +44,11 @@ assert_tone_ok() {
 }
 
 # ============================================================
-# Suite A: pre-bash-guard.sh I1 — Windows Python stub (exit 2)
+# Suite A: pre-bash-safety-guard.sh I1 — Windows Python stub (exit 2)
 # ============================================================
 # [I1] path: resolver exits 11 (WindowsApps stub detected).
 # The test harness provides with_fake_python / with_fake_uname to simulate
-# the Windows stub path used by Suite 1 in test-pre-bash-guard.sh.
+# the Windows stub path used by Suite 1 in test-pre-bash-safety-guard.sh.
 
 _invoke_guard_windows_stub() {
   local stdin_json="$1"
@@ -58,14 +58,14 @@ _invoke_guard_windows_stub() {
     with_fake_python 49
     printf '%s' "$stdin_json" \
       | REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
-        bash "$SANDBOX/.claude/hooks/pre-bash-guard.sh" 2>&1
+        bash "$SANDBOX/.claude/hooks/pre-bash-safety-guard.sh" 2>&1
     local rc=$?
     printf '_RC=%s\n' "$rc"
     cleanup_fakes
   )
 }
 
-test_exit2_stderr_tone_pre_bash_guard_i1_windows_stub() {
+test_exit2_stderr_tone_pre_bash_safety_guard_i1_windows_stub() {
   local stdin_json='{"tool_input":{"command":"ls -la"}}'
 
   local out
@@ -77,16 +77,16 @@ test_exit2_stderr_tone_pre_bash_guard_i1_windows_stub() {
     || fail "I1 Windows stub: expected exit 2, got $rc"
 
   # stderr is merged into 'out' by 2>&1 in _invoke_guard_windows_stub
-  assert_tone_ok "$out" "pre-bash-guard I1 Windows stub"
+  assert_tone_ok "$out" "pre-bash-safety-guard I1 Windows stub"
 }
 
 # ============================================================
-# Suite B: pre-bash-guard.sh I3 — coverage marker target unidentifiable
+# Suite B: pre-bash-test-commit-gate.sh I3 — coverage marker target unidentifiable
 # ============================================================
 # [I3] path: .coverage-mismatch exists but is empty → revalidate_coverage_marker
 # returns 2 (target unidentifiable) → exit 2 stderr.
 
-test_exit2_stderr_tone_pre_bash_guard_i3_coverage_marker() {
+test_exit2_stderr_tone_pre_bash_test_commit_gate_i3_coverage_marker() {
   # Seed stamps and DoD so only I3 fires (other gates pass).
   mkdir -p "$SANDBOX/.claude/hooks/lib"
   cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/extract-commit-msg.py" \
@@ -99,18 +99,18 @@ test_exit2_stderr_tone_pre_bash_guard_i3_coverage_marker() {
   touch "$SANDBOX/trail/dod/.coverage-mismatch"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: i3 tone test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
 
   assert_exit 2 "I3: empty coverage marker should exit 2"
-  assert_tone_ok "$HOOK_STDERR" "pre-bash-guard I3 coverage marker"
+  assert_tone_ok "$HOOK_STDERR" "pre-bash-test-commit-gate I3 coverage marker"
 }
 
 # ============================================================
-# Suite C: pre-bash-guard.sh I4 — commit msg helper missing
+# Suite C: pre-bash-test-commit-gate.sh I4 — commit msg helper missing
 # ============================================================
 # [I4] path: EXTRACT_SCRIPT missing → exit 2 stderr.
 
-test_exit2_stderr_tone_pre_bash_guard_i4_helper_missing() {
+test_exit2_stderr_tone_pre_bash_test_commit_gate_i4_helper_missing() {
   # Seed stamps and DoD so commit passes P3-P6 gates and reaches I4.
   # sandbox_setup copies lib/ (including extract-commit-msg.py) automatically,
   # so we remove it after setup to simulate the missing-helper path [I4].
@@ -122,10 +122,10 @@ test_exit2_stderr_tone_pre_bash_guard_i4_helper_missing() {
   rm -f "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: i4 tone test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
 
   assert_exit 2 "I4: missing commit msg helper should exit 2"
-  assert_tone_ok "$HOOK_STDERR" "pre-bash-guard I4 helper missing"
+  assert_tone_ok "$HOOK_STDERR" "pre-bash-test-commit-gate I4 helper missing"
 }
 
 # ============================================================
@@ -179,7 +179,7 @@ EOF
 }
 
 # ============================================================
-# Suite F: pre-bash-guard.sh I2 — hook input JSON parse failure
+# Suite F: pre-bash-safety-guard.sh I2 — hook input JSON parse failure
 # ============================================================
 # [I2] path: extract-hook-json.py exits non-zero because stdin is not valid
 # JSON. This fires AFTER resolve_python() succeeds and BEFORE the empty-command
@@ -188,23 +188,23 @@ EOF
 # Sandbox keeps lib/ intact (Python + extract-hook-json.py present), so only
 # the JSON parse step fails.
 
-test_exit2_stderr_tone_pre_bash_guard_i2_json_parse_failure() {
+test_exit2_stderr_tone_pre_bash_safety_guard_i2_json_parse_failure() {
   # No extra setup needed — sandbox_setup already copied lib/ including
   # extract-hook-json.py. Python is available. We just send malformed JSON.
   local malformed_input='NOT_VALID_JSON { broken:'
 
-  run_hook "pre-bash-guard.sh" "$malformed_input"
+  run_hook "pre-bash-safety-guard.sh" "$malformed_input"
 
   assert_exit 2 "I2: malformed JSON input should exit 2"
   # The exact I2 message includes "extract-hook-json.py exited" (exit code 20
   # for invalid JSON as defined in extract-hook-json.py exit code table).
   printf '%s' "$HOOK_STDERR" | grep -qF "extract-hook-json.py exited" \
     || fail "I2: stderr missing 'extract-hook-json.py exited' (I2 marker)"
-  assert_tone_ok "$HOOK_STDERR" "pre-bash-guard I2 JSON parse failure"
+  assert_tone_ok "$HOOK_STDERR" "pre-bash-safety-guard I2 JSON parse failure"
 }
 
 # ============================================================
-# Suite G: pre-bash-guard.sh I5 — commit msg helper execution failure
+# Suite G: pre-bash-test-commit-gate.sh I5 — commit msg helper execution failure
 # ============================================================
 # [I5] path: extract-commit-msg.py is PRESENT but exits non-zero. This fires
 # when EXTRACT_RC != 0 after calling "${PYTHON_RUNNER[@]} $EXTRACT_SCRIPT $COMMAND".
@@ -214,7 +214,7 @@ test_exit2_stderr_tone_pre_bash_guard_i2_json_parse_failure() {
 # markers, valid conventional commit format (format check never fires because
 # the helper fails first).
 
-test_exit2_stderr_tone_pre_bash_guard_i5_helper_exec_failure() {
+test_exit2_stderr_tone_pre_bash_test_commit_gate_i5_helper_exec_failure() {
   # Seed stamps and DoD so commit passes P3-P6 gates and reaches I5.
   seed_dod "dod-2026-05-18-i5-test.md"
   seed_inbox "2026-05-18-i5-test.md"
@@ -230,31 +230,31 @@ sys.exit(1)
 PYSTUB
 
   local input='{"tool_input":{"command":"git commit -m \"feat: i5 tone test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
 
   assert_exit 2 "I5: failing commit msg helper should exit 2"
   # The exact I5 message includes "helper script failed" (the assistant-tone
-  # rewrite at pre-bash-guard.sh ~line 431).
+  # rewrite at pre-bash-test-commit-gate.sh ~line 431).
   printf '%s' "$HOOK_STDERR" | grep -qF "helper script failed" \
     || fail "I5: stderr missing 'helper script failed' (I5 marker)"
-  assert_tone_ok "$HOOK_STDERR" "pre-bash-guard I5 helper exec failure"
+  assert_tone_ok "$HOOK_STDERR" "pre-bash-test-commit-gate I5 helper exec failure"
 }
 
 main() {
-  # Suite A — pre-bash-guard I1 Windows stub
-  run_test test_exit2_stderr_tone_pre_bash_guard_i1_windows_stub  pre-bash-guard.sh
-  # Suite B — pre-bash-guard I3 coverage marker target unidentifiable
-  run_test test_exit2_stderr_tone_pre_bash_guard_i3_coverage_marker  pre-bash-guard.sh
-  # Suite C — pre-bash-guard I4 commit msg helper missing
-  run_test test_exit2_stderr_tone_pre_bash_guard_i4_helper_missing   pre-bash-guard.sh
+  # Suite A — pre-bash-safety-guard I1 Windows stub
+  run_test test_exit2_stderr_tone_pre_bash_safety_guard_i1_windows_stub  pre-bash-safety-guard.sh
+  # Suite B — pre-bash-test-commit-gate I3 coverage marker target unidentifiable
+  run_test test_exit2_stderr_tone_pre_bash_test_commit_gate_i3_coverage_marker  pre-bash-test-commit-gate.sh
+  # Suite C — pre-bash-test-commit-gate I4 commit msg helper missing
+  run_test test_exit2_stderr_tone_pre_bash_test_commit_gate_i4_helper_missing   pre-bash-test-commit-gate.sh
   # Suite D — pre-edit-dod-gate DoD missing
   run_test test_exit2_stderr_tone_pre_edit_dod_gate_dod_missing      pre-edit-dod-gate.sh
   # Suite E — stop-session-gate MISSING exit2
   run_test test_exit2_stderr_tone_stop_session_gate_missing_inbox     stop-session-gate.sh
-  # Suite F — pre-bash-guard I2 JSON parse failure
-  run_test test_exit2_stderr_tone_pre_bash_guard_i2_json_parse_failure  pre-bash-guard.sh
-  # Suite G — pre-bash-guard I5 commit msg helper exec failure
-  run_test test_exit2_stderr_tone_pre_bash_guard_i5_helper_exec_failure pre-bash-guard.sh
+  # Suite F — pre-bash-safety-guard I2 JSON parse failure
+  run_test test_exit2_stderr_tone_pre_bash_safety_guard_i2_json_parse_failure  pre-bash-safety-guard.sh
+  # Suite G — pre-bash-test-commit-gate I5 commit msg helper exec failure
+  run_test test_exit2_stderr_tone_pre_bash_test_commit_gate_i5_helper_exec_failure pre-bash-test-commit-gate.sh
   summary
 }
 

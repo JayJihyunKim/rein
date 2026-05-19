@@ -21,7 +21,7 @@ test_canonical_path_docs_specs() {
     "tool_result": {}
   }'
 
-  run_hook "post-write-spec-review-gate.sh" "$input"
+  run_hook "post-edit-spec-review-gate.sh" "$input"
   assert_exit 0 "canonical docs spec should allow"
   [ "$(ls -1 "$SANDBOX/trail/dod/.spec-reviews"/*.pending 2>/dev/null | wc -l)" -gt 0 ] || fail "should create pending marker"
 }
@@ -35,7 +35,7 @@ test_canonical_path_docs_plans() {
     "tool_result": {}
   }'
 
-  run_hook "post-write-spec-review-gate.sh" "$input"
+  run_hook "post-edit-spec-review-gate.sh" "$input"
   assert_exit 0 "canonical docs plan should allow"
   [ "$(ls -1 "$SANDBOX/trail/dod/.spec-reviews"/*.pending 2>/dev/null | wc -l)" -gt 0 ] || fail "should create pending marker" "should create pending marker"
 }
@@ -49,7 +49,7 @@ test_canonical_path_specs_root() {
     "tool_result": {}
   }'
 
-  run_hook "post-write-spec-review-gate.sh" "$input"
+  run_hook "post-edit-spec-review-gate.sh" "$input"
   assert_exit 0 "canonical specs root should allow"
   [ "$(ls -1 "$SANDBOX/trail/dod/.spec-reviews"/*.pending 2>/dev/null | wc -l)" -gt 0 ] || fail "should create pending marker" "should create pending marker"
 }
@@ -63,7 +63,7 @@ test_canonical_path_plans_root() {
     "tool_result": {}
   }'
 
-  run_hook "post-write-spec-review-gate.sh" "$input"
+  run_hook "post-edit-spec-review-gate.sh" "$input"
   assert_exit 0 "canonical plans root should allow"
   [ "$(ls -1 "$SANDBOX/trail/dod/.spec-reviews"/*.pending 2>/dev/null | wc -l)" -gt 0 ] || fail "should create pending marker" "should create pending marker"
 }
@@ -77,7 +77,7 @@ test_non_canonical_src_file() {
     "tool_result": {}
   }'
 
-  run_hook "post-write-spec-review-gate.sh" "$input"
+  run_hook "post-edit-spec-review-gate.sh" "$input"
   assert_exit 0 "non-canonical src file should allow (no marker)"
   [ "$(ls -1 "$SANDBOX/trail/dod/.spec-reviews"/*.pending 2>/dev/null | wc -l)" -eq 0 ] || fail "should NOT create marker" "should NOT create marker"
 }
@@ -91,7 +91,7 @@ test_non_canonical_readme() {
     "tool_result": {}
   }'
 
-  run_hook "post-write-spec-review-gate.sh" "$input"
+  run_hook "post-edit-spec-review-gate.sh" "$input"
   assert_exit 0 "non-canonical README should allow"
   [ "$(ls -1 "$SANDBOX/trail/dod/.spec-reviews"/*.pending 2>/dev/null | wc -l)" -eq 0 ] || fail "should NOT create marker" "should NOT create marker"
 }
@@ -105,7 +105,7 @@ test_canonical_deeply_nested_specs() {
     "tool_result": {}
   }'
 
-  run_hook "post-write-spec-review-gate.sh" "$input"
+  run_hook "post-edit-spec-review-gate.sh" "$input"
   assert_exit 0 "deeply nested canonical spec should allow"
   [ "$(ls -1 "$SANDBOX/trail/dod/.spec-reviews"/*.pending 2>/dev/null | wc -l)" -gt 0 ] || fail "should create pending marker" "should create pending marker"
 }
@@ -119,7 +119,7 @@ test_canonical_deeply_nested_plans() {
     "tool_result": {}
   }'
 
-  run_hook "post-write-spec-review-gate.sh" "$input"
+  run_hook "post-edit-spec-review-gate.sh" "$input"
   assert_exit 0 "deeply nested canonical plan should allow"
   [ "$(ls -1 "$SANDBOX/trail/dod/.spec-reviews"/*.pending 2>/dev/null | wc -l)" -gt 0 ] || fail "should create pending marker" "should create pending marker"
 }
@@ -133,7 +133,7 @@ test_false_positive_specs_in_filename() {
     "tool_result": {}
   }'
 
-  run_hook "post-write-spec-review-gate.sh" "$input"
+  run_hook "post-edit-spec-review-gate.sh" "$input"
   assert_exit 0 "specs in filename only should not trigger"
   [ "$(ls -1 "$SANDBOX/trail/dod/.spec-reviews"/*.pending 2>/dev/null | wc -l)" -eq 0 ] || fail "should NOT create marker" "should NOT create marker"
 }
@@ -147,7 +147,7 @@ test_false_positive_plans_in_dir() {
     "tool_result": {}
   }'
 
-  run_hook "post-write-spec-review-gate.sh" "$input"
+  run_hook "post-edit-spec-review-gate.sh" "$input"
   assert_exit 0 "plans in path but wrong dir should not trigger"
   [ "$(ls -1 "$SANDBOX/trail/dod/.spec-reviews"/*.pending 2>/dev/null | wc -l)" -eq 0 ] || fail "should NOT create marker" "should NOT create marker"
 }
@@ -161,7 +161,7 @@ test_gate_blocks_unreviewed_spec() {
   mkdir -p "$SANDBOX/specs"
   touch "$SANDBOX/specs/api-design.md"
 
-  # Create pending marker (simulate post-write hook)
+  # Create pending marker (simulate post-edit hook)
   mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
   hash=$(printf '%s' "$SANDBOX/specs/api-design.md" | shasum 2>/dev/null | head -c 16 || printf 'abc123def456')
   {
@@ -296,7 +296,7 @@ test_gate_multiple_unreviewed_specs() {
   [ $? -eq 2 ] || fail "should block when multiple unreviewed specs exist"
 }
 
-test_post_write_hook_hash_consistency() {
+test_post_edit_hook_hash_consistency() {
   seed_dod "dod-2026-04-13-test.md"
 
   # Create spec file
@@ -304,14 +304,14 @@ test_post_write_hook_hash_consistency() {
   local spec_file="$SANDBOX/specs/consistency-test.md"
   echo "# Test Spec" > "$spec_file"
 
-  # Run post-write hook
+  # Run post-edit hook
   local input='{
     "tool_input": {"file_path": "'$spec_file'"},
     "tool_result": {}
   }'
 
-  run_hook "post-write-spec-review-gate.sh" "$input"
-  assert_exit 0 "post-write should succeed"
+  run_hook "post-edit-spec-review-gate.sh" "$input"
+  assert_exit 0 "post-edit should succeed"
 
   # Check that marker was created (hash should be deterministic)
   [ -d "$SANDBOX/trail/dod/.spec-reviews" ] || fail "should create .spec-reviews directory"
@@ -342,7 +342,7 @@ test_multiedit_extracts_all_files() {
     "tool_result": {}
   }'
 
-  run_hook "post-write-spec-review-gate.sh" "$input"
+  run_hook "post-edit-spec-review-gate.sh" "$input"
   assert_exit 0 "multiedit should process all files"
   [ "$(ls -1 "$SANDBOX/trail/dod/.spec-reviews"/*.pending 2>/dev/null | wc -l)" -gt 0 ] || fail "should create pending marker" "should create marker for spec"
 }
@@ -364,7 +364,7 @@ test_multiedit_deduplicates_files() {
     }
   }'
 
-  run_hook "post-write-spec-review-gate.sh" "$input"
+  run_hook "post-edit-spec-review-gate.sh" "$input"
   assert_exit 0 "multiedit should handle duplicates"
 
   # Should only create one marker (deduplicated)
@@ -462,29 +462,29 @@ test_helper_normalizes_relative_paths() {
 # RUN ALL TESTS
 # =================================================================
 
-run_test test_canonical_path_docs_specs post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_canonical_path_docs_plans post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_canonical_path_specs_root post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_canonical_path_plans_root post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_non_canonical_src_file post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_non_canonical_readme post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_canonical_deeply_nested_specs post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_canonical_deeply_nested_plans post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_false_positive_specs_in_filename post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_false_positive_plans_in_dir post-write-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_canonical_path_docs_specs post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_canonical_path_docs_plans post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_canonical_path_specs_root post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_canonical_path_plans_root post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_non_canonical_src_file post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_non_canonical_readme post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_canonical_deeply_nested_specs post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_canonical_deeply_nested_plans post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_false_positive_specs_in_filename post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_false_positive_plans_in_dir post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
 
-run_test test_gate_blocks_unreviewed_spec post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_allows_reviewed_spec post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_ignores_deleted_spec post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_respects_bypass_file post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_no_spec_reviews_dir post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_multiple_unreviewed_specs post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_post_write_hook_hash_consistency post-write-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_gate_blocks_unreviewed_spec post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_gate_allows_reviewed_spec post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_gate_ignores_deleted_spec post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_gate_respects_bypass_file post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_gate_no_spec_reviews_dir post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_gate_multiple_unreviewed_specs post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_post_edit_hook_hash_consistency post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
 
-run_test test_multiedit_extracts_all_files post-write-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_multiedit_deduplicates_files post-write-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_multiedit_extracts_all_files post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_multiedit_deduplicates_files post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
 
-run_test test_helper_marks_spec_reviewed post-write-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
-run_test test_helper_normalizes_relative_paths post-write-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
+run_test test_helper_marks_spec_reviewed post-edit-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
+run_test test_helper_normalizes_relative_paths post-edit-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
 
 summary

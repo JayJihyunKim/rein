@@ -138,7 +138,7 @@ with tempfile.TemporaryDirectory() as td:
     tdp = pathlib.Path(td)
     hooks_dir = _setup_sandbox(tdp)
     _write_exec(
-        hooks_dir / "post-write-design-plan-coverage-rule.sh",
+        hooks_dir / "post-edit-design-plan-coverage-rule.sh",
         "#!/usr/bin/env bash\nexit 0\n",
     )
     errs = []
@@ -152,7 +152,7 @@ with tempfile.TemporaryDirectory() as td:
     tdp = pathlib.Path(td)
     hooks_dir = _setup_sandbox(tdp)
     _write_exec(
-        hooks_dir / "post-write-design-plan-coverage-rule.sh",
+        hooks_dir / "post-edit-design-plan-coverage-rule.sh",
         "#!/usr/bin/env bash\n"
         "set -e\n"
         "cat >/dev/null\n"

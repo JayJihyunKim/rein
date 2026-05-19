@@ -42,8 +42,8 @@ except ImportError:
 PROFILE_HOOK_DEFAULTS = {
     "lean": {
         "post-edit-plan-coverage": False,
-        "post-write-spec-review-gate": False,
-        "post-write-dod-routing-check": False,
+        "post-edit-spec-review-gate": False,
+        "post-edit-dod-routing-check": False,
     },
     "standard": {},
     "strict": {},
@@ -57,9 +57,16 @@ PROFILE_HOOK_DEFAULTS = {
 #
 # - bootstrap-gate: toggles both the pre-edit and pre-tool-use-bash variants of
 #   the bootstrap gate (Wave 2 bootstrap gate split).
+# - pre-bash-guard: legacy compatibility umbrella (HK-2, cc-feature-adoption
+#   Task 1.2). pre-bash-guard.sh was split into pre-bash-safety-guard.sh +
+#   pre-bash-test-commit-gate.sh. A project that disabled the old single hook
+#   via `pre-bash-guard: false` keeps BOTH halves disabled through this
+#   umbrella; explicit per-hook entries still override it.
 UMBRELLA_KEYS = {
     "pre-edit-trail-bootstrap-gate": "bootstrap-gate",
     "pre-tool-use-bash-bootstrap-gate": "bootstrap-gate",
+    "pre-bash-safety-guard": "pre-bash-guard",
+    "pre-bash-test-commit-gate": "pre-bash-guard",
 }
 
 

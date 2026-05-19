@@ -14,6 +14,7 @@ for test_file in \
   "$SCRIPT_DIR/test-rein-policy-loader-bootstrap-gate.sh" \
   "$SCRIPT_DIR/test-rein-bootstrap-project-non-git.sh" \
   "$SCRIPT_DIR/test-advisory-summary.sh" \
+  "$SCRIPT_DIR/test-aggregate-combined-cli.sh" \
   "$SCRIPT_DIR/test-route-record-validation.sh" \
   "$SCRIPT_DIR/test-incident-agent-eligible.sh" \
   "$SCRIPT_DIR/test-rein-govcheck.sh" \
@@ -48,6 +49,7 @@ for test_file in \
   "$SCRIPT_DIR/test-rein-route-record-paths.sh" \
   "$SCRIPT_DIR/test-rein-route-record-default.sh" \
   "$SCRIPT_DIR/test-plugin-agents-bundle.sh" \
+  "$SCRIPT_DIR/test-feature-builder-variants.sh" \
   "$SCRIPT_DIR/test-plugin-skills-bundle.sh" \
   "$SCRIPT_DIR/test-version-parity.sh" \
   "$SCRIPT_DIR/test-rules-prompt-bundle-drift.sh" \

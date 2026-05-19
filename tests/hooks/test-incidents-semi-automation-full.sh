@@ -80,8 +80,8 @@ test_happy_path_pending_processed_then_pass() {
   setup_sandbox
   copy_infra
   seed_valid_state
-  append_jsonl "pre-bash-guard" "happy-pattern" "d1"
-  append_jsonl "pre-bash-guard" "happy-pattern" "d2"
+  append_jsonl "pre-bash-safety-guard" "happy-pattern" "d1"
+  append_jsonl "pre-bash-safety-guard" "happy-pattern" "d2"
 
   # First Stop: should block
   local out1
@@ -112,8 +112,8 @@ test_defer_path() {
   setup_sandbox
   copy_infra
   seed_valid_state
-  append_jsonl "pre-bash-guard" "defer-pattern" "d1"
-  append_jsonl "pre-bash-guard" "defer-pattern" "d2"
+  append_jsonl "pre-bash-safety-guard" "defer-pattern" "d1"
+  append_jsonl "pre-bash-safety-guard" "defer-pattern" "d2"
 
   # First Stop: block
   run_stop >/dev/null
@@ -137,8 +137,8 @@ test_infinite_loop_guard() {
   setup_sandbox
   copy_infra
   seed_valid_state
-  append_jsonl "pre-bash-guard" "stuck" "d1"
-  append_jsonl "pre-bash-guard" "stuck" "d2"
+  append_jsonl "pre-bash-safety-guard" "stuck" "d1"
+  append_jsonl "pre-bash-safety-guard" "stuck" "d2"
 
   for i in 1 2 3 4; do
     run_stop >/dev/null
@@ -168,8 +168,8 @@ test_abnormal_termination_recovery() {
   # Also copy session-start hook
   cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/session-start-load-trail.sh" "$SANDBOX/.claude/hooks/"
 
-  append_jsonl "pre-bash-guard" "abnormal" "d1"
-  append_jsonl "pre-bash-guard" "abnormal" "d2"
+  append_jsonl "pre-bash-safety-guard" "abnormal" "d1"
+  append_jsonl "pre-bash-safety-guard" "abnormal" "d2"
 
   # aggregate 실행 (session_end=false 로 snapshot 기록됨)
   python3 "$SANDBOX/scripts/rein-aggregate-incidents.py" --project-dir "$SANDBOX" >/dev/null 2>&1

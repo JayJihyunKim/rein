@@ -43,3 +43,6 @@ data/processed/
 # Git worktrees (로컬 작업 분리용)
 .worktrees/
 worktrees/
+
+# Serena MCP 로컬 프로젝트 캐시 (도구 상태 — 공유 불가)
+.serena/

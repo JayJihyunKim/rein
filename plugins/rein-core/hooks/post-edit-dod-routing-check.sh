@@ -75,7 +75,7 @@ else
   echo "created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$MARKER"
   echo "WARNING: $FNAME 에 '## 라우팅 추천' 섹션이 없습니다. 다음 소스 편집이 차단됩니다." >&2
   echo "  DoD 에 '## 라우팅 추천' 섹션을 추가하세요." >&2
-  echo "  PostToolUse 단계의 'post-write-routing-procedure-rule.sh' 가 본 DoD write 직후 routing 절차 본문을 inject 합니다." >&2
+  echo "  PostToolUse 단계의 'post-edit-routing-procedure-rule.sh' 가 본 DoD write 직후 routing 절차 본문을 inject 합니다." >&2
 fi
 
 # Auto-write `.active-dod` when routing approval is final.

@@ -30,7 +30,10 @@ for test_file in \
   "$SCRIPT_DIR/test-coverage-matrix.sh" \
   "$SCRIPT_DIR/test-session-start-line-stamp.sh" \
   "$SCRIPT_DIR/test-incident-advisory-check.sh" \
-  "$SCRIPT_DIR/test-pre-bash-guard.sh" \
+  "$SCRIPT_DIR/test-bash-guard-split.sh" \
+  "$SCRIPT_DIR/test-pre-bash-safety-guard.sh" \
+  "$SCRIPT_DIR/test-pre-bash-test-commit-gate.sh" \
+  "$SCRIPT_DIR/test-security-tier-gate.sh" \
   "$SCRIPT_DIR/test-python-runner.sh" \
   "$SCRIPT_DIR/test-extract-hook-json.sh" \
   "$SCRIPT_DIR/test-path-policy.sh" \
@@ -50,13 +53,14 @@ for test_file in \
   "$SCRIPT_DIR/test-user-prompt-submit-rules.sh" \
   "$SCRIPT_DIR/test-pre-tool-use-agent-rules.sh" \
   "$SCRIPT_DIR/test-pre-tool-use-bash-rules.sh" \
-  "$SCRIPT_DIR/test-post-write-design-plan-coverage-rule.sh" \
+  "$SCRIPT_DIR/test-post-edit-design-plan-coverage-rule.sh" \
   "$SCRIPT_DIR/test-hooks-json-schema.sh" \
   "$SCRIPT_DIR/test-overflow-handoff-no-truncation.sh" \
   "$SCRIPT_DIR/test-pre-edit-dod-gate-no-orchestrator-ref.sh" \
-  "$SCRIPT_DIR/test-post-write-dod-routing-check-no-orchestrator-ref.sh" \
+  "$SCRIPT_DIR/test-post-edit-dod-routing-check-no-orchestrator-ref.sh" \
   "$SCRIPT_DIR/test-rein-validate-plugin-rules.sh" \
-  "$SCRIPT_DIR/test-rein-validate-plugin-rules-hardening.sh"
+  "$SCRIPT_DIR/test-rein-validate-plugin-rules-hardening.sh" \
+  "$SCRIPT_DIR/test-post-agent-review-trigger.sh"
 do
   echo ""
   echo "######## $(basename "$test_file") ########"

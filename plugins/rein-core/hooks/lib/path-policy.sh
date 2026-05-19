@@ -26,7 +26,7 @@
 #   is_spec_path  "<rel>"  — 0 iff path is a design spec (canonical or legacy)
 #
 # Missing this library → fail-closed per consumer hook (see
-# post-edit-plan-coverage.sh / post-write-spec-review-gate.sh for the
+# post-edit-plan-coverage.sh / post-edit-spec-review-gate.sh for the
 # "library missing" handler).
 
 # Guard against double-sourcing (harmless but avoids re-defining functions).

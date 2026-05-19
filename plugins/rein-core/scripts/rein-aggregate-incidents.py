@@ -454,11 +454,64 @@ def cmd_advisory_summary(args) -> int:
     return 0
 
 
+def cmd_combined(project_dir: Path, session_end_value: bool, run_agg: bool) -> dict:
+    """PERF-1 combined-execution mode.
+
+    Executes the three session-start steps in guaranteed order inside one process:
+      1. set_session_end(false)   — reset stamp from previous session
+      2. aggregate()              — incorporate any new blocks.jsonl lines
+      3. count_pending()          — read final pending count
+
+    Returns a dict suitable for JSON serialisation.
+    """
+    # Step 1 — always runs (session_end reset)
+    set_session_end(project_dir, session_end_value)
+
+    # Step 2 — conditional on --run-aggregate flag
+    aggregate_ran = False
+    if run_agg:
+        aggregate(project_dir)
+        aggregate_ran = True
+
+    # Step 3 — always runs
+    pending = count_pending(project_dir)
+
+    return {
+        "pending_count": pending,
+        "session_end_set": session_end_value,
+        "aggregate_ran": aggregate_ran,
+    }
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--project-dir", default=os.environ.get("REIN_PROJECT_DIR"))
     parser.add_argument("--count-pending", action="store_true",
                         help="aggregate 대신 pending 개수만 출력")
+
+    # PERF-1: combined-execution mode flags (use alongside --output-json).
+    # These are TOP-LEVEL flags so they compose with any future subcommand path
+    # without conflicting with the existing `set-session-end <value>` subcommand.
+    parser.add_argument(
+        "--set-session-end",
+        dest="set_session_end_value",
+        choices=["true", "false"],
+        default=None,
+        metavar="true|false",
+        help="(combined mode) session_end 값을 설정 (true|false)"
+    )
+    parser.add_argument(
+        "--run-aggregate",
+        action="store_true",
+        dest="run_aggregate",
+        help="(combined mode) aggregate() 를 실행"
+    )
+    parser.add_argument(
+        "--output-json",
+        action="store_true",
+        dest="output_json",
+        help="(combined mode) 결과를 JSON 으로 출력 (pending_count, session_end_set, aggregate_ran)"
+    )
 
     subparsers = parser.add_subparsers(dest="subcommand")
 
@@ -495,6 +548,18 @@ if __name__ == "__main__":
 
     if args.subcommand == "set-session-end":
         sys.exit(set_session_end(project_dir, args.value == "true"))
+
+    # PERF-1 combined mode: triggered when --output-json is present.
+    # Guarantees execution order: set-session-end → aggregate → count-pending.
+    if args.output_json:
+        session_end_value = (args.set_session_end_value == "true") if args.set_session_end_value is not None else False
+        result = cmd_combined(
+            project_dir=project_dir,
+            session_end_value=session_end_value,
+            run_agg=args.run_aggregate,
+        )
+        print(json.dumps(result, ensure_ascii=False))
+        sys.exit(0)
 
     if args.count_pending:
         print(count_pending(project_dir))

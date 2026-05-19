@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test-post-edit-review-gate-external-paths.sh
 #
-# Regression test for incident pre-bash-guard-2fbe7edae5a10b1f (declined as
+# Regression test for incident bash-guard-2fbe7edae5a10b1f (declined as
 # bug, fixed at the hook source). post-edit-review-gate.sh used to create
 # trail/dod/.review-pending even when subagent-driven codex/security review
 # wrote temp .sh fixtures via mktemp -d (typically under /var/folders/ on

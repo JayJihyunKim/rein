@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Extract the commit message first-line from a raw bash COMMAND string.
 
-Used by pre-bash-guard.sh to validate conventional commit format in a way
+Used by pre-bash-test-commit-gate.sh to validate conventional commit format in a way
 that is robust against three historical bugs:
 
   1) Compound commands like `<commit-cmd> && git tag -m "..."` where the
@@ -15,7 +15,7 @@ Usage:
     extract-commit-msg.py <COMMAND>
 
 Exit 0 with the extracted first line on stdout, or exit 0 with empty stdout
-if no commit-style -m was found. Never throws — pre-bash-guard should treat
+if no commit-style -m was found. Never throws — the test/commit gate should treat
 empty output as "skip format check".
 """
 

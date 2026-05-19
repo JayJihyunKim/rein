@@ -2,6 +2,25 @@
 
 > **Versioning policy**: 버전 bump 는 `.claude/rules/versioning.md` 의 Rule A/B/C 를 따른다.
 
+## v1.3.2 — 2026-05-19 (Claude Code v2.1.144 hook 기능 채택 + 기록 버그 수정)
+
+`rein update` 후 사용자 세션에서 바뀌는 것:
+
+- **테스트 실행이 더 이상 리뷰 stamp 를 요구하지 않습니다** — 이전엔 `pytest` 등 테스트 실행 자체가 코드 리뷰 stamp 없이는 차단돼 TDD 의 red→green 루프가 구조적으로 불가능했습니다. 이제 테스트 실행은 게이트 대상이 아니며, 리뷰 stamp 게이트는 `git commit` 에만 적용됩니다.
+- **feature-builder 서브에이전트 완료 시 코드 리뷰 안내가 자동으로 뜹니다** — 새 PostToolUse hook 이 feature-builder 계열 에이전트의 작업 완료를 감지해 `/codex-review` 실행을 안내합니다 (리뷰 대기 마커가 있을 때).
+- **라우팅 추천에 보안 등급·복잡도 힌트가 추가됩니다** — `## 라우팅 추천` 에 `security_tier`(light/standard/deep) 와 `complexity`/`model_hint`/`effort_hint` 필드가 생깁니다. `security_tier: light` + 사용자 승인 시 보안 리뷰 stamp 가 면제됩니다 (보안 키워드 없는 소규모 변경 한정 — 불명확하면 standard 로 fail-closed).
+- **feature-builder 가 작업 유형별로 분화됩니다** — `feature-builder`(신규 기능) / `feature-builder-fix`(버그 수정) / `feature-builder-refactor`(리팩터링) 3개로 나뉘고, DoD 키워드로 적합한 변형이 추천됩니다.
+- **commit/안전 게이트 hook 이 둘로 분리됩니다** — 기존 `pre-bash-guard` 가 `pre-bash-safety-guard`(모든 Bash 호출에 상시 — `.env` 접근·파괴적 git 차단)와 `pre-bash-test-commit-gate`(테스트·커밋 명령에만 실행)로 나뉩니다. **차단 동작과 범위는 불변**이며, 일반 Bash 호출에서 불필요한 hook 실행이 줄어듭니다.
+- **세션 시작이 약간 빨라집니다** — incident 집계 subprocess 호출이 3회에서 1회로 통합됩니다.
+
+Internal (메인테이너 dev 환경, 사용자 무관):
+
+- post-write-* sub-hook 4종을 post-edit-* 로 rename (dispatch 동작 불변).
+- project-dir 해소 / codex-review wrapper 의 경로 sanity 강화 (PD-1·PD-2).
+- 17 정책 차단지점(P1-P11·I1-I6)을 분리된 두 게이트에 전수 재배정, 공통 infra lib 추출.
+
+> 변경 분류상 새 hook·에이전트·라우팅 필드 추가는 minor(v1.4.0)에 해당하나, 메인테이너 판단으로 patch(v1.3.2)로 릴리즈한다.
+
 ## v1.3.1 — 2026-05-18 (hook 비서 톤 2단계 + 분류기 정밀화 + 스마트 라우팅 정리)
 
 `rein update` 후 사용자 세션에서 바뀌는 것:

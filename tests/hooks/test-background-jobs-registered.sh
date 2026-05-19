@@ -3,17 +3,17 @@
 #
 # Verifies the background-jobs rule (codex foreground policy) is registered in
 # the rein-core plugin:
-#   (a) pre-bash-guard.sh hook script exists in the plugin mirror.
+#   (a) both HK-2 split hook scripts exist in the plugin mirror.
 #   (b) hooks.json contains a PreToolUse / Bash registration whose command
-#       basename is pre-bash-guard.sh.
-#   (c) pre-bash-guard.sh contains the codex foreground policy enforcement
+#       basename is pre-tool-use-bash-rules.sh (the background-jobs rule hook).
+#   (c) the HK-2 split hooks contain the codex foreground policy enforcement
 #       surface — namely the pipe-to-bash blocking pattern that prevents
 #       'codex exec ... | tail -N' or similar pipe-bash forms (which the Bash
 #       tool would auto-background, breaking codex's TTY/stdin contract; see
 #       .claude/rules/background-jobs.md "Exception — codex 계열 명령은
 #       foreground 전용"). Detection is structural: we require the bash-pipe
-#       blocking grep pattern AND the codex review stamp logic to coexist in
-#       this hook so that the codex foreground policy has both the gate
+#       blocking grep pattern (safety guard) AND the codex review stamp logic
+#       (test/commit gate) so the codex foreground policy has both the gate
 #       (pipe-bash block) and the review stamp consumer.
 #   (d) docs/rules/background-jobs.md exists in the plugin and is sha256-
 #       identical to the source .claude/rules/background-jobs.md.
@@ -26,7 +26,11 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_DIR"
 
 PLUGIN_DIR="plugins/rein-core"
-HOOK_SCRIPT="$PLUGIN_DIR/hooks/pre-bash-guard.sh"
+# HK-2 split: the former single Bash guard became two hooks. The pipe-to-bash
+# block (P1, codex foreground gate) lives in the safety guard; the codex
+# review-stamp consumer lives in the test/commit gate.
+SAFETY_GUARD="$PLUGIN_DIR/hooks/pre-bash-safety-guard.sh"
+TEST_COMMIT_GATE="$PLUGIN_DIR/hooks/pre-bash-test-commit-gate.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 RULE_NAME="background-jobs.md"
 PLUGIN_RULE_DOC="$PLUGIN_DIR/rules/$RULE_NAME"
@@ -51,8 +55,9 @@ sha256_of() {
   fi
 }
 
-# (a) Hook script presence.
-[ -f "$HOOK_SCRIPT" ] || fail "hook script missing: $HOOK_SCRIPT"
+# (a) Hook script presence — both halves of the HK-2 split must exist.
+[ -f "$SAFETY_GUARD" ] || fail "hook script missing: $SAFETY_GUARD"
+[ -f "$TEST_COMMIT_GATE" ] || fail "hook script missing: $TEST_COMMIT_GATE"
 
 # (b) hooks.json registration check via Python.
 [ -f "$HOOKS_JSON" ] || fail "hooks.json missing: $HOOKS_JSON"
@@ -87,17 +92,17 @@ sys.exit(1)
 PY
 
 # (c) Codex foreground policy enforcement structure.
-#     Two complementary surfaces must both be present in pre-bash-guard.sh:
-#       (c1) pipe-to-bash blocking pattern (prevents auto-background of
-#            'cmd | bash' which is the failure mode in
-#            trail/dod/dod-2026-04-22-codex-foreground-policy.md).
-#       (c2) codex review stamp logic — the hook is the consumer of the
-#            .codex-reviewed stamp, so codex must be referenced in the gate.
-if ! grep -qE '\| *(bash|sh)' "$HOOK_SCRIPT"; then
-  fail "$HOOK_SCRIPT missing pipe-to-bash blocking pattern (codex foreground gate)"
+#     HK-2 split: the two complementary surfaces now live in separate hooks.
+#       (c1) pipe-to-bash blocking pattern — in the always-on safety guard
+#            (prevents auto-background of 'cmd | bash' which is the failure
+#            mode in trail/dod/dod-2026-04-22-codex-foreground-policy.md).
+#       (c2) codex review stamp logic — in the test/commit gate, which is the
+#            consumer of the .codex-reviewed stamp.
+if ! grep -qE '\| *(bash|sh)' "$SAFETY_GUARD"; then
+  fail "$SAFETY_GUARD missing pipe-to-bash blocking pattern (codex foreground gate)"
 fi
-if ! grep -qi 'codex' "$HOOK_SCRIPT"; then
-  fail "$HOOK_SCRIPT missing codex reference (foreground policy consumer)"
+if ! grep -qi 'codex' "$TEST_COMMIT_GATE"; then
+  fail "$TEST_COMMIT_GATE missing codex reference (foreground policy consumer)"
 fi
 
 # (d) Rule reference doc presence + sha256 parity with source.

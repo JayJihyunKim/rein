@@ -13,7 +13,7 @@
 # CRITICAL invariant (Plan A Phase 6 Task 6.3 Step 3, spec B / SKILL §6.6):
 #   In spec-review mode, this wrapper MUST NOT create or modify
 #   trail/dod/.codex-reviewed, and MUST NOT touch trail/dod/.review-pending.
-#   The pre-bash-guard code-commit/test gate depends on .codex-reviewed as a
+#   The test/commit Bash gate depends on .codex-reviewed as a
 #   code-review stamp — spec-review writes would let reviewers bypass the
 #   gate without a real code review. Regression tests live in
 #   tests/skills/test-codex-review-wrapper.sh (verifications 5 + 6).
@@ -59,6 +59,33 @@ else
     _select_active_dod_lib="$PROJECT_DIR/plugins/rein-core/hooks/lib/select-active-dod.sh"
   else
     _select_active_dod_lib="$PROJECT_DIR/.claude/hooks/lib/select-active-dod.sh"
+  fi
+fi
+
+# PD-2 (2026-05-19): sanity-check PROJECT_DIR before cd'ing into it and
+# stamping there. The inline resolution above falls back to $PWD when
+# CLAUDE_PROJECT_DIR is unset — if the wrapper is invoked from the wrong
+# directory that silently makes codex review an unrelated tree and writes
+# the .codex-reviewed stamp outside the repo. Fail loudly instead.
+#   - trail/ must exist (every rein project root has it).
+#   - if PROJECT_DIR is inside a git repo, it must BE the toplevel (a
+#     subdirectory would put trail/dod writes off the repo root).
+#   - if PROJECT_DIR is not a git repo at all (scaffold / test sandbox),
+#     skip the toplevel check — the trail/ check alone is sufficient.
+if [ ! -d "$PROJECT_DIR/trail" ]; then
+  echo "ERROR: [codex-review] resolved PROJECT_DIR has no trail/ directory: $PROJECT_DIR" >&2
+  echo "ERROR: [codex-review] set CLAUDE_PROJECT_DIR or run from the repo root before invoking codex review." >&2
+  exit 2
+fi
+_pd_toplevel=$(git -C "$PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null || true)
+if [ -n "$_pd_toplevel" ]; then
+  # Canonicalize both sides so /tmp vs /private/tmp symlinks don't false-flag.
+  _pd_canon=$(cd "$PROJECT_DIR" 2>/dev/null && pwd -P || printf '%s' "$PROJECT_DIR")
+  _pd_top_canon=$(cd "$_pd_toplevel" 2>/dev/null && pwd -P || printf '%s' "$_pd_toplevel")
+  if [ "$_pd_canon" != "$_pd_top_canon" ]; then
+    echo "ERROR: [codex-review] PROJECT_DIR ($PROJECT_DIR) is not the git repo root ($_pd_toplevel)." >&2
+    echo "ERROR: [codex-review] set CLAUDE_PROJECT_DIR or run from the repo root before invoking codex review." >&2
+    exit 2
   fi
 fi
 

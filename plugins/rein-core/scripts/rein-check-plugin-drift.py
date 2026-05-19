@@ -22,7 +22,7 @@ Three concerns checked in a single tool:
       - dev-only 4종이 plugins/rein-core/rules/ 에 진입 안 함
       - 4 unconditional inject hook (session-start-rules, user-prompt-submit-rules,
         pre-tool-use-agent-rules, pre-tool-use-bash-rules) envelope JSON 유효
-      - conditional emit hook (post-write-design-plan-coverage-rule) matching path 시
+      - conditional emit hook (post-edit-design-plan-coverage-rule) matching path 시
         envelope + non-matching path 시 silent
       - hooks.json 의 모든 command 가 실제 실행 가능
 
@@ -124,7 +124,7 @@ EXPECTED_EVENT = {
     "user-prompt-submit-rules.sh": "UserPromptSubmit",
     "pre-tool-use-agent-rules.sh": "PreToolUse",
     "pre-tool-use-bash-rules.sh": "PreToolUse",
-    "post-write-design-plan-coverage-rule.sh": "PostToolUse",
+    "post-edit-design-plan-coverage-rule.sh": "PostToolUse",
 }
 
 
@@ -378,7 +378,7 @@ def check_inject_hooks_envelope(repo_root: Path, errors: list[str]) -> None:
 def check_conditional_event_hook(repo_root: Path, errors: list[str]) -> None:
     plugin_root = repo_root / "plugins" / "rein-core"
     hooks_dir = plugin_root / "hooks"
-    hook = "post-write-design-plan-coverage-rule.sh"
+    hook = "post-edit-design-plan-coverage-rule.sh"
     hook_path = hooks_dir / hook
     if not hook_path.exists():
         errors.append(f"VALIDATION: conditional hook missing: {hook}")

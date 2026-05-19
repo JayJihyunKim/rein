@@ -12,10 +12,10 @@ DoD → routing → implement → codex-review → security-review → fix → t
 | 2 | WRITE DoD | `trail/dod/dod-YYYY-MM-DD-<slug>.md` | 작업 기준 — gate 가 source 편집 차단 |
 | 3 | ROUTE | DoD `## 라우팅 추천` (agent/skills/mcps/approved_by_user) | 조합 추천 후 사용자 승인 |
 | 4 | IMPLEMENT | 승인된 조합으로 코드 편집 | DoD 범위 안에서만 변경 |
-| 5 | CODEX REVIEW | `/codex-review` → `.codex-reviewed` stamp | 외부 모델 second opinion + gate |
-| 6 | SECURITY REVIEW | `security-reviewer` → `.security-reviewed` stamp | profile.yaml 레벨 기준 검토 |
+| 5 | CODEX REVIEW | `/codex-review` → `.codex-reviewed` stamp | 외부 모델 second opinion. stamp 는 commit gate 가 강제 |
+| 6 | SECURITY REVIEW | `security-reviewer` → `.security-reviewed` stamp | profile.yaml 레벨 기준 검토. stamp 는 commit gate 가 강제. **단**, DoD 라우팅 추천의 `security_tier: light` + `approved_by_user: true` 이면 stamp 없이 commit 허용 (`.codex-reviewed` 는 여전히 필수) |
 | 7 | FIX | 두 리뷰 결과 반영 수정 | 의견 반영 후 stamp 유지 |
-| 8 | TEST | 테스트 실행 | 두 stamp 있어야 통과 (`pre-bash-guard.sh`) |
+| 8 | TEST | 테스트 실행 | 테스트 실행 자체는 비차단 (TDD red-green 허용) — 두 stamp 는 `git commit` gate 가 강제 (`pre-bash-test-commit-gate.sh`) |
 | 9 | SELF-REVIEW | AGENTS.md §6 명시적 답변 | 자가 점검으로 누락 방지 |
 | 10 | WRITE inbox | `trail/inbox/YYYY-MM-DD-<작업명>.md` | 작업 완료 기록 (gate 강제) |
 | 11 | UPDATE index | `trail/index.md` 갱신 | 세션 종료 전 상태 (gate 강제) |

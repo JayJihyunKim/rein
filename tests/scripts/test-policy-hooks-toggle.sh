@@ -63,7 +63,7 @@ post-edit-plan-coverage:
   enabled: true
 YAML
 A_STDERR="$A_DIR/stderr"
-rc="$(run_loader "$A_DIR" "pre-bash-guard" "$A_STDERR")"
+rc="$(run_loader "$A_DIR" "pre-bash-safety-guard" "$A_STDERR")"
 [ "$rc" = "0" ] || fail "Fixture A: expected exit 0 (enabled default), got $rc"
 ok "Fixture A: hook enabled by default (no entry) -> exit 0"
 
@@ -73,11 +73,11 @@ ok "Fixture A: hook enabled by default (no entry) -> exit 0"
 B_DIR="$TMP_ROOT/B"
 mkdir -p "$B_DIR/.rein/policy"
 cat >"$B_DIR/.rein/policy/hooks.yaml" <<'YAML'
-pre-bash-guard:
+pre-bash-safety-guard:
   enabled: false
 YAML
 B_STDERR="$B_DIR/stderr"
-rc="$(run_loader "$B_DIR" "pre-bash-guard" "$B_STDERR")"
+rc="$(run_loader "$B_DIR" "pre-bash-safety-guard" "$B_STDERR")"
 [ "$rc" = "1" ] || fail "Fixture B: expected exit 1 (disabled), got $rc"
 ok "Fixture B: hook explicitly disabled -> exit 1"
 
@@ -88,7 +88,7 @@ C_DIR="$TMP_ROOT/C"
 mkdir -p "$C_DIR"
 [ ! -e "$C_DIR/.rein/policy/hooks.yaml" ] || fail "Fixture C setup: yaml should not exist"
 C_STDERR="$C_DIR/stderr"
-rc="$(run_loader "$C_DIR" "pre-bash-guard" "$C_STDERR")"
+rc="$(run_loader "$C_DIR" "pre-bash-safety-guard" "$C_STDERR")"
 [ "$rc" = "0" ] || fail "Fixture C: expected exit 0 (default enabled), got $rc"
 ok "Fixture C: yaml missing -> exit 0"
 
@@ -104,7 +104,7 @@ not yaml: at all: extra: colons:
   : invalid
 YAML
 D_STDERR="$D_DIR/stderr"
-rc="$(run_loader "$D_DIR" "pre-bash-guard" "$D_STDERR")"
+rc="$(run_loader "$D_DIR" "pre-bash-safety-guard" "$D_STDERR")"
 [ "$rc" = "0" ] || fail "Fixture D: expected exit 0 (fail-open on malformed), got $rc"
 if ! grep -q -i "warning" "$D_STDERR"; then
   echo "  loader stderr captured:" >&2
@@ -123,7 +123,7 @@ other-hook:
   enabled: false
 YAML
 E_STDERR="$E_DIR/stderr"
-rc="$(run_loader "$E_DIR" "pre-bash-guard" "$E_STDERR")"
+rc="$(run_loader "$E_DIR" "pre-bash-safety-guard" "$E_STDERR")"
 [ "$rc" = "0" ] || fail "Fixture E: expected exit 0 (missing key default), got $rc"
 ok "Fixture E: target hook key missing -> exit 0 (default enabled)"
 
@@ -133,10 +133,10 @@ ok "Fixture E: target hook key missing -> exit 0 (default enabled)"
 F_DIR="$TMP_ROOT/F"
 mkdir -p "$F_DIR/.rein/policy"
 cat >"$F_DIR/.rein/policy/hooks.yaml" <<'YAML'
-pre-bash-guard: false
+pre-bash-safety-guard: false
 YAML
 F_STDERR="$F_DIR/stderr"
-rc="$(run_loader "$F_DIR" "pre-bash-guard" "$F_STDERR")"
+rc="$(run_loader "$F_DIR" "pre-bash-safety-guard" "$F_STDERR")"
 [ "$rc" = "1" ] || fail "Fixture F: expected exit 1 (boolean shorthand disabled), got $rc"
 ok "Fixture F: boolean shorthand disabled -> exit 1"
 
@@ -151,13 +151,13 @@ YAML
 G_STDERR="$G_DIR/stderr"
 rc="$(run_loader "$G_DIR" "post-edit-plan-coverage" "$G_STDERR")"
 [ "$rc" = "1" ] || fail "Fixture G: lean profile expected disable post-edit-plan-coverage (exit 1), got $rc"
-rc="$(run_loader "$G_DIR" "post-write-spec-review-gate" "$G_STDERR")"
-[ "$rc" = "1" ] || fail "Fixture G: lean profile expected disable post-write-spec-review-gate (exit 1), got $rc"
-rc="$(run_loader "$G_DIR" "post-write-dod-routing-check" "$G_STDERR")"
-[ "$rc" = "1" ] || fail "Fixture G: lean profile expected disable post-write-dod-routing-check (exit 1), got $rc"
+rc="$(run_loader "$G_DIR" "post-edit-spec-review-gate" "$G_STDERR")"
+[ "$rc" = "1" ] || fail "Fixture G: lean profile expected disable post-edit-spec-review-gate (exit 1), got $rc"
+rc="$(run_loader "$G_DIR" "post-edit-dod-routing-check" "$G_STDERR")"
+[ "$rc" = "1" ] || fail "Fixture G: lean profile expected disable post-edit-dod-routing-check (exit 1), got $rc"
 # unrelated hook 은 기본값 enabled 유지
-rc="$(run_loader "$G_DIR" "pre-bash-guard" "$G_STDERR")"
-[ "$rc" = "0" ] || fail "Fixture G: lean profile expected enable pre-bash-guard (exit 0), got $rc"
+rc="$(run_loader "$G_DIR" "pre-bash-safety-guard" "$G_STDERR")"
+[ "$rc" = "0" ] || fail "Fixture G: lean profile expected enable pre-bash-safety-guard (exit 0), got $rc"
 ok "Fixture G: profile=lean disables heavy gates, leaves others enabled"
 
 # -----------------------------------------------------------------------------
@@ -195,7 +195,7 @@ I_STDERR="$I_DIR/stderr"
 rc="$(run_loader "$I_DIR" "post-edit-plan-coverage" "$I_STDERR")"
 [ "$rc" = "0" ] || fail "Fixture I: per-hook=true expected to override profile=lean, got $rc"
 # 다른 lean-disabled hook 은 여전히 disabled
-rc="$(run_loader "$I_DIR" "post-write-spec-review-gate" "$I_STDERR")"
+rc="$(run_loader "$I_DIR" "post-edit-spec-review-gate" "$I_STDERR")"
 [ "$rc" = "1" ] || fail "Fixture I: unrelated lean default still disabled, got $rc"
 ok "Fixture I: per-hook entry overrides profile default"
 

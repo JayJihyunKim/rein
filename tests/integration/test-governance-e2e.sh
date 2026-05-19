@@ -2,7 +2,7 @@
 # tests/integration/test-governance-e2e.sh
 #
 # Plan A Phase 8 Task 8.1 end-to-end integration test for the governance
-# integrity trio (validator v2 + pre-edit-dod-gate + pre-bash-guard +
+# integrity trio (validator v2 + pre-edit-dod-gate + pre-bash-test-commit-gate +
 # codex-review wrapper + govcheck).
 #
 # Scope IDs covered (regression):
@@ -12,7 +12,7 @@
 # Scenarios (plan Task 8.1):
 #   1. Happy path — design + plan + DoD all align → edit passes, commit passes.
 #   2. DoD unknown-covers-ID + Tier 1 marker → pre-edit-dod-gate exits 2 +
-#      .dod-coverage-mismatch created → pre-bash-guard blocks commit.
+#      .dod-coverage-mismatch created → pre-bash-test-commit-gate blocks commit.
 #   3. Governance stage corruption → pre-edit-dod-gate blocks.
 #   4. codex-review wrapper emits envelope with diff_base (fake codex).
 #   5. govcheck smoke — running it in a sandbox with a fake broken ref
@@ -56,8 +56,8 @@ sandbox_init() {
   # Copy hooks + libs
   cp "$REAL_PROJECT_DIR/.claude/hooks/pre-edit-dod-gate.sh" \
      "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh"
-  cp "$REAL_PROJECT_DIR/.claude/hooks/pre-bash-guard.sh" \
-     "$SANDBOX/.claude/hooks/pre-bash-guard.sh"
+  cp "$REAL_PROJECT_DIR/.claude/hooks/pre-bash-test-commit-gate.sh" \
+     "$SANDBOX/.claude/hooks/pre-bash-test-commit-gate.sh"
   cp -R "$REAL_PROJECT_DIR/.claude/hooks/lib/." \
         "$SANDBOX/.claude/hooks/lib/"
   chmod +x "$SANDBOX/.claude/hooks"/*.sh
@@ -158,7 +158,7 @@ print(json.dumps({"tool_input": {"command": sys.argv[1]}}))
 ' "$command")
   printf '%s' "$json" \
     | REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
-      bash "$SANDBOX/.claude/hooks/pre-bash-guard.sh" \
+      bash "$SANDBOX/.claude/hooks/pre-bash-test-commit-gate.sh" \
       > /tmp/bg-stdout.$$ 2> /tmp/bg-stderr.$$
   GUARD_RC=$?
   GUARD_STDOUT=$(cat /tmp/bg-stdout.$$)
@@ -209,7 +209,7 @@ test_happy_path_passes_gate_and_guard() {
 
 # ------------------------------------------------------------
 # Scenario 2 — Tier 1 marker + unknown ID → gate blocks + marker set,
-# then pre-bash-guard blocks commit due to the marker.
+# then pre-bash-test-commit-gate blocks commit due to the marker.
 # ------------------------------------------------------------
 test_tier1_unknown_id_blocks_edit_and_commit() {
   seed_trio_with_bad_dod
@@ -226,7 +226,7 @@ test_tier1_unknown_id_blocks_edit_and_commit() {
   [ -f "$SANDBOX/trail/dod/.dod-coverage-mismatch" ] \
     || fail "tier1 unknown ID should create .dod-coverage-mismatch"
 
-  # Now pre-bash-guard must refuse commit while the marker exists.
+  # Now pre-bash-test-commit-gate must refuse commit while the marker exists.
   run_bash_guard 'git commit -m "feat: integration test"'
   [ "$GUARD_RC" = "2" ] || fail "bash-guard should block with marker (exit=$GUARD_RC, stderr=$GUARD_STDERR)"
   echo "$GUARD_STDERR" | grep -qF ".dod-coverage-mismatch" \

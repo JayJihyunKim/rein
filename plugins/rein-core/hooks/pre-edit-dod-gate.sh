@@ -381,7 +381,7 @@ fi
 # 바이패스: trail/dod/.skip-routing-gate 마커 (reason 기록 후 1회 사용 → 자동 삭제)
 ROUTING_BYPASS="$DOD_DIR/.skip-routing-gate"
 ACTIVE_DODS_TMP=$(mktemp)
-# (a) 신규 DoD 섹션 누락 차단: post-write-dod-routing-check.sh 가 DoD 작성 시
+# (a) 신규 DoD 섹션 누락 차단: post-edit-dod-routing-check.sh 가 DoD 작성 시
 #     '## 라우팅 추천' 섹션 없으면 .routing-missing-<basename> 마커를 남긴다.
 #     마커가 있으면 바로 BLOCK. legacy DoD 는 post-write 이전에 작성된 것이라 마커 없음.
 shopt -s nullglob

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-HOOK="$SCRIPT_DIR/.claude/hooks/pre-bash-guard.sh"
+HOOK="$SCRIPT_DIR/.claude/hooks/pre-bash-test-commit-gate.sh"
 TEST_DIR="$(mktemp -d)"
 PASS=0
 FAIL=0
@@ -33,8 +33,8 @@ setup_project() {
   mkdir -p "$dir/.claude/hooks"
   mkdir -p "$dir/trail/dod"
   mkdir -p "$dir/trail/incidents"
-  cp "$HOOK" "$dir/.claude/hooks/pre-bash-guard.sh"
-  chmod +x "$dir/.claude/hooks/pre-bash-guard.sh"
+  cp "$HOOK" "$dir/.claude/hooks/pre-bash-test-commit-gate.sh"
+  chmod +x "$dir/.claude/hooks/pre-bash-test-commit-gate.sh"
 }
 
 # Run hook with a given command, from a given project dir
@@ -43,7 +43,7 @@ run_hook() {
   local command="$2"
   local input
   input=$(python3 -c "import json; print(json.dumps({'tool_input':{'command':'$command'}}))")
-  echo "$input" | (cd "$project_dir" && bash ".claude/hooks/pre-bash-guard.sh") 2>/dev/null
+  echo "$input" | (cd "$project_dir" && bash ".claude/hooks/pre-bash-test-commit-gate.sh") 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------

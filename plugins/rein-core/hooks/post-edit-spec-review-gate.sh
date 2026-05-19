@@ -19,7 +19,7 @@ SPEC_REVIEWS_DIR="$DOD_DIR/.spec-reviews"
 # library is missing — silent degrade to "no matcher" would stop creating
 # pending markers for real specs, defeating the spec review gate.
 if ! . "$SCRIPT_DIR/lib/path-policy.sh" 2>/dev/null; then
-  echo "BLOCKED: [post-write-spec-review-gate] path-policy library missing at $SCRIPT_DIR/lib/path-policy.sh" >&2
+  echo "BLOCKED: [post-edit-spec-review-gate] path-policy library missing at $SCRIPT_DIR/lib/path-policy.sh" >&2
   exit 2
 fi
 
@@ -51,7 +51,7 @@ if [ "${REIN_HOOK_INPUT_CACHE:-0}" != "1" ]; then
 
   # helper 가 실패했으면 세션은 차단하지 않되 사용자가 stderr 로 인지 가능하게 한다.
   if [ "$PY_EXIT" -ne 0 ]; then
-    echo "WARNING: post-write-spec-review-gate JSON 파싱 실패 — marker 미생성" >&2
+    echo "WARNING: post-edit-spec-review-gate JSON 파싱 실패 — marker 미생성" >&2
     exit 0
   fi
 

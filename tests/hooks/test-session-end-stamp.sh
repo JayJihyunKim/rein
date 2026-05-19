@@ -104,7 +104,7 @@ test_aggregate_preserves_existing_session_end_true() {
   # 먼저 session_end=true 로 만들기
   python3 "$AGG_PY" --project-dir "$SANDBOX" set-session-end true >/dev/null
   # blocks.jsonl 한 줄 추가 → aggregate 가 새 라인 처리해 snapshot rewrite
-  echo '{"ts":"2026-04-29T00:00:00","hook":"pre-bash-guard","reason":"r","target":"t"}' \
+  echo '{"ts":"2026-04-29T00:00:00","hook":"pre-bash-safety-guard","reason":"r","target":"t"}' \
     > "$SANDBOX/trail/incidents/blocks.jsonl"
   python3 "$AGG_PY" --project-dir "$SANDBOX" >/dev/null
   local snap="$SANDBOX/trail/incidents/.last-aggregate-state.json"
@@ -115,7 +115,7 @@ test_aggregate_warns_and_defaults_false_on_non_dict_snapshot() {
   mkdir -p "$SANDBOX/trail/incidents"
   # JSON-valid but non-dict (list) — must not crash, must warn
   echo "[]" > "$SANDBOX/trail/incidents/.last-aggregate-state.json"
-  echo '{"ts":"2026-04-29T00:00:00","hook":"pre-bash-guard","reason":"r","target":"t"}' \
+  echo '{"ts":"2026-04-29T00:00:00","hook":"pre-bash-safety-guard","reason":"r","target":"t"}' \
     > "$SANDBOX/trail/incidents/blocks.jsonl"
   local stderr
   stderr=$(python3 "$AGG_PY" --project-dir "$SANDBOX" 2>&1 >/dev/null)
@@ -130,7 +130,7 @@ test_aggregate_warns_and_defaults_false_on_undecodable_bytes_snapshot() {
   mkdir -p "$SANDBOX/trail/incidents"
   # binary 바이트 (UTF-8 디코드 불가) — UnicodeDecodeError 가 except 에 잡혀야 함
   printf '\xff\xfe\x00\x00' > "$SANDBOX/trail/incidents/.last-aggregate-state.json"
-  echo '{"ts":"2026-04-29T00:00:00","hook":"pre-bash-guard","reason":"r","target":"t"}' \
+  echo '{"ts":"2026-04-29T00:00:00","hook":"pre-bash-safety-guard","reason":"r","target":"t"}' \
     > "$SANDBOX/trail/incidents/blocks.jsonl"
   local stderr
   stderr=$(python3 "$AGG_PY" --project-dir "$SANDBOX" 2>&1 >/dev/null)
@@ -156,7 +156,7 @@ test_set_session_end_warns_on_undecodable_bytes_snapshot() {
 test_aggregate_warns_and_defaults_false_on_corrupt_json_snapshot() {
   mkdir -p "$SANDBOX/trail/incidents"
   echo "{not valid json" > "$SANDBOX/trail/incidents/.last-aggregate-state.json"
-  echo '{"ts":"2026-04-29T00:00:00","hook":"pre-bash-guard","reason":"r","target":"t"}' \
+  echo '{"ts":"2026-04-29T00:00:00","hook":"pre-bash-safety-guard","reason":"r","target":"t"}' \
     > "$SANDBOX/trail/incidents/blocks.jsonl"
   local stderr
   stderr=$(python3 "$AGG_PY" --project-dir "$SANDBOX" 2>&1 >/dev/null)
@@ -169,7 +169,7 @@ test_aggregate_warns_and_defaults_false_on_corrupt_json_snapshot() {
 
 test_aggregate_session_end_defaults_false_when_no_prior_snapshot() {
   mkdir -p "$SANDBOX/trail/incidents"
-  echo '{"ts":"2026-04-29T00:00:00","hook":"pre-bash-guard","reason":"r","target":"t"}' \
+  echo '{"ts":"2026-04-29T00:00:00","hook":"pre-bash-safety-guard","reason":"r","target":"t"}' \
     > "$SANDBOX/trail/incidents/blocks.jsonl"
   python3 "$AGG_PY" --project-dir "$SANDBOX" >/dev/null
   local snap="$SANDBOX/trail/incidents/.last-aggregate-state.json"
@@ -224,11 +224,11 @@ test_stop_hook_trap_marks_session_end_true_on_pending_incident_block() {
   mkdir -p "$SANDBOX/trail/inbox"
   echo "# note" > "$SANDBOX/trail/inbox/${today}-test.md"
   printf '%s\n' "# index" "" "line2" "line3" "line4" "line5" > "$SANDBOX/trail/index.md"
-  cat > "$SANDBOX/trail/incidents/auto-pre-bash-guard-deadbeef12345678.md" <<INC
+  cat > "$SANDBOX/trail/incidents/auto-pre-bash-safety-guard-deadbeef12345678.md" <<INC
 ---
 status: "pending"
 pattern_hash: "deadbeef12345678"
-hook: "pre-bash-guard"
+hook: "pre-bash-safety-guard"
 reason: "test-fixture"
 count: "2"
 first_seen: "2026-04-29T00:00:00"
@@ -252,11 +252,11 @@ test_stop_hook_trap_marks_session_end_true_on_loop_3x_block() {
   mkdir -p "$SANDBOX/trail/inbox"
   echo "# note" > "$SANDBOX/trail/inbox/${today}-test.md"
   printf '%s\n' "# index" "" "line2" "line3" "line4" "line5" > "$SANDBOX/trail/index.md"
-  cat > "$SANDBOX/trail/incidents/auto-pre-bash-guard-deadbeef12345678.md" <<INC
+  cat > "$SANDBOX/trail/incidents/auto-pre-bash-safety-guard-deadbeef12345678.md" <<INC
 ---
 status: "pending"
 pattern_hash: "deadbeef12345678"
-hook: "pre-bash-guard"
+hook: "pre-bash-safety-guard"
 reason: "test-fixture"
 count: "2"
 first_seen: "2026-04-29T00:00:00"

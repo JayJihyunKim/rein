@@ -110,8 +110,8 @@ extract_decision() {
 
 test_stop_blocks_when_pending() {
   seed_valid_state
-  append_jsonl "pre-bash-guard" "test-block-pattern" "d1"
-  append_jsonl "pre-bash-guard" "test-block-pattern" "d2"
+  append_jsonl "pre-bash-safety-guard" "test-block-pattern" "d1"
+  append_jsonl "pre-bash-safety-guard" "test-block-pattern" "d2"
 
   local out decision
   out=$(run_stop_hook 2>/dev/null)
@@ -135,8 +135,8 @@ test_stop_passes_when_no_pending() {
 
 test_stop_passes_when_deferred() {
   seed_valid_state
-  append_jsonl "pre-bash-guard" "test-defer-pattern" "d1"
-  append_jsonl "pre-bash-guard" "test-defer-pattern" "d2"
+  append_jsonl "pre-bash-safety-guard" "test-defer-pattern" "d1"
+  append_jsonl "pre-bash-safety-guard" "test-defer-pattern" "d2"
   touch "$SANDBOX/trail/dod/.incident-decision-deferred"
 
   local out decision
@@ -179,8 +179,8 @@ copy_infra_stop() {
 test_block_counter_resets_on_hash_change() {
   setup_sandbox
   copy_infra_stop
-  append_jsonl "pre-bash-guard" "hash-pattern-A" "d1"
-  append_jsonl "pre-bash-guard" "hash-pattern-A" "d2"
+  append_jsonl "pre-bash-safety-guard" "hash-pattern-A" "d1"
+  append_jsonl "pre-bash-safety-guard" "hash-pattern-A" "d2"
 
   run_stop_hook >/dev/null
   local counter1
@@ -193,8 +193,8 @@ test_block_counter_resets_on_hash_change() {
     python3 "$SANDBOX/scripts/rein-mark-incident-processed.py" \
       "$auto_a" declined --reason "test" >/dev/null 2>&1 || true
   fi
-  append_jsonl "pre-bash-guard" "hash-pattern-B" "d1"
-  append_jsonl "pre-bash-guard" "hash-pattern-B" "d2"
+  append_jsonl "pre-bash-safety-guard" "hash-pattern-B" "d1"
+  append_jsonl "pre-bash-safety-guard" "hash-pattern-B" "d2"
 
   run_stop_hook >/dev/null
   local counter2
@@ -205,8 +205,8 @@ test_block_counter_resets_on_hash_change() {
 test_three_blocks_require_bypass() {
   setup_sandbox
   copy_infra_stop
-  append_jsonl "pre-bash-guard" "stuck-pattern" "d1"
-  append_jsonl "pre-bash-guard" "stuck-pattern" "d2"
+  append_jsonl "pre-bash-safety-guard" "stuck-pattern" "d1"
+  append_jsonl "pre-bash-safety-guard" "stuck-pattern" "d2"
 
   run_stop_hook >/dev/null
   run_stop_hook >/dev/null
@@ -229,8 +229,8 @@ test_three_blocks_require_bypass() {
 test_meta_incident_does_not_reset_counter() {
   setup_sandbox
   copy_infra_stop
-  append_jsonl "pre-bash-guard" "persistent-pattern" "d1"
-  append_jsonl "pre-bash-guard" "persistent-pattern" "d2"
+  append_jsonl "pre-bash-safety-guard" "persistent-pattern" "d1"
+  append_jsonl "pre-bash-safety-guard" "persistent-pattern" "d2"
 
   # 4번 연속 block → meta incident 생성 이후에도 counter 는 계속 유지
   run_stop_hook >/dev/null

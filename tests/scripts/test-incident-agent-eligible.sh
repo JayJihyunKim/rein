@@ -58,7 +58,7 @@ seed_incident() {
     echo "---"
     echo 'status: "pending"'
     echo 'pattern_hash: "abc123"'
-    echo 'hook: "pre-bash-guard"'
+    echo 'hook: "pre-bash-safety-guard"'
     echo 'reason: "test pattern"'
     echo 'count: "5"'
     [ -n "$extra" ] && echo "$extra"
@@ -77,7 +77,7 @@ test_backward_compat_status_only() {
   begin "test_backward_compat_status_only"
   local sb path
   sb=$(make_sandbox)
-  path=$(seed_incident "$sb" "auto-pre-bash-guard-abc123.md")
+  path=$(seed_incident "$sb" "auto-pre-bash-safety-guard-abc123.md")
 
   if ! python3 "$sb/scripts/rein-mark-incident-processed.py" "$path" processed --reason "test" >/dev/null 2>&1; then
     fail "command failed for baseline processed update"
@@ -99,7 +99,7 @@ test_set_agent_eligible_appends_field() {
   begin "test_set_agent_eligible_appends_field"
   local sb path
   sb=$(make_sandbox)
-  path=$(seed_incident "$sb" "auto-pre-bash-guard-abc123.md")
+  path=$(seed_incident "$sb" "auto-pre-bash-safety-guard-abc123.md")
 
   python3 "$sb/scripts/rein-mark-incident-processed.py" "$path" \
     --set-agent-eligible false \
@@ -128,7 +128,7 @@ test_update_field_in_place_no_duplicate() {
   begin "test_update_field_in_place_no_duplicate"
   local sb path
   sb=$(make_sandbox)
-  path=$(seed_incident "$sb" "auto-pre-bash-guard-abc123.md")
+  path=$(seed_incident "$sb" "auto-pre-bash-safety-guard-abc123.md")
 
   python3 "$sb/scripts/rein-mark-incident-processed.py" "$path" \
     --set-agent-eligible unknown --reason "initial" >/dev/null 2>&1
@@ -154,7 +154,7 @@ test_combined_status_and_classification() {
   begin "test_combined_status_and_classification"
   local sb path
   sb=$(make_sandbox)
-  path=$(seed_incident "$sb" "auto-pre-bash-guard-abc123.md")
+  path=$(seed_incident "$sb" "auto-pre-bash-safety-guard-abc123.md")
 
   python3 "$sb/scripts/rein-mark-incident-processed.py" "$path" declined \
     --set-agent-eligible false \
@@ -178,7 +178,7 @@ test_invalid_agent_eligible_rejected() {
   begin "test_invalid_agent_eligible_rejected"
   local sb path
   sb=$(make_sandbox)
-  path=$(seed_incident "$sb" "auto-pre-bash-guard-abc123.md")
+  path=$(seed_incident "$sb" "auto-pre-bash-safety-guard-abc123.md")
 
   if python3 "$sb/scripts/rein-mark-incident-processed.py" "$path" \
        --set-agent-eligible maybe --reason "invalid" >/dev/null 2>&1; then
@@ -195,7 +195,7 @@ test_no_args_rejected() {
   begin "test_no_args_rejected"
   local sb path
   sb=$(make_sandbox)
-  path=$(seed_incident "$sb" "auto-pre-bash-guard-abc123.md")
+  path=$(seed_incident "$sb" "auto-pre-bash-safety-guard-abc123.md")
 
   if python3 "$sb/scripts/rein-mark-incident-processed.py" "$path" \
        --reason "nothing" >/dev/null 2>&1; then

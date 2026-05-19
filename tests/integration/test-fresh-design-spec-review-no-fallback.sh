@@ -8,9 +8,9 @@
 #   - Stale stamp + new commit → wrapper self-heals (HEAD~1 base, not stamp's stale base).
 #
 # Ties together:
-#   - .claude/hooks/post-write-dod-routing-check.sh (Phase 1 auto-write)
-#   - .claude/hooks/session-start-load-trail.sh (Phase 3 cleanup)
-#   - .claude/hooks/lib/select-active-dod.sh (Tier 1/2 selection)
+#   - plugins/rein-core/hooks/post-edit-dod-routing-check.sh (Phase 1 auto-write)
+#   - plugins/rein-core/hooks/session-start-load-trail.sh (Phase 3 cleanup)
+#   - plugins/rein-core/hooks/lib/select-active-dod.sh (Tier 1/2 selection)
 #   - scripts/rein-codex-review.sh::_resolve_diff_base (Phase 2 self-healing)
 
 set -u
@@ -18,8 +18,8 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WRAPPER="$PROJECT_DIR/scripts/rein-codex-review.sh"
-SELECTOR_LIB="$PROJECT_DIR/.claude/hooks/lib/select-active-dod.sh"
-POST_WRITE_HOOK="$PROJECT_DIR/.claude/hooks/post-write-dod-routing-check.sh"
+SELECTOR_LIB="$PROJECT_DIR/plugins/rein-core/hooks/lib/select-active-dod.sh"
+POST_WRITE_HOOK="$PROJECT_DIR/plugins/rein-core/hooks/post-edit-dod-routing-check.sh"
 
 PASS=0
 FAIL=0
@@ -38,7 +38,7 @@ _mksandbox() {
   mkdir -p "$dir/.claude/hooks/lib"
   # Copy the full lib/ tree so newly-added helpers (project-dir.sh, etc.)
   # source-resolve cleanly without per-helper additions here.
-  cp -R "$PROJECT_DIR/.claude/hooks/lib/." "$dir/.claude/hooks/lib/" 2>/dev/null
+  cp -R "$PROJECT_DIR/plugins/rein-core/hooks/lib/." "$dir/.claude/hooks/lib/" 2>/dev/null
   cp "$POST_WRITE_HOOK" "$dir/.claude/hooks/"
   git -C "$dir" init -q -b main 2>/dev/null
   git -C "$dir" config user.email test@example.com
@@ -71,7 +71,7 @@ _call_post_write() {
   local sandbox="$1"
   local file_path="$2"
   REIN_PROJECT_DIR_OVERRIDE="$sandbox" \
-    bash "$sandbox/.claude/hooks/post-write-dod-routing-check.sh" <<EOF 2>/dev/null
+    bash "$sandbox/.claude/hooks/post-edit-dod-routing-check.sh" <<EOF 2>/dev/null
 {"tool_input":{"file_path":"$file_path"}}
 EOF
 }
@@ -184,7 +184,7 @@ echo "path=trail/dod/dod-2026-03-01-gone.md" > "$S/trail/dod/.active-dod"
 
 # Invoke session-start hook.
 REIN_PROJECT_DIR_OVERRIDE="$S" \
-  bash "$PROJECT_DIR/.claude/hooks/session-start-load-trail.sh" >/dev/null 2>/dev/null
+  bash "$PROJECT_DIR/plugins/rein-core/hooks/session-start-load-trail.sh" >/dev/null 2>/dev/null
 
 if [ ! -f "$S/trail/dod/.active-dod" ]; then
   _pass "Phase 3 cleanup removed dangling marker"

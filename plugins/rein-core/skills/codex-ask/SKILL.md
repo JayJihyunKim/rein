@@ -78,7 +78,7 @@ Hang 감지 시: `lsof -p <pid> -i` 결과가 비어 있거나 (`ps -o %cpu` 가
 - `.review-pending` 등 기존 marker 도 건드리지 않는다.
 - `trail/dod/dod-*.md` 같은 **DoD 파일도 자발적으로 생성하지 않는다**. DoD 는 주 세션의 작업 기준 문서이며, second opinion 세션이 자동으로 만들면 주 세션 라우팅/승인 흐름을 건너뛰게 된다.
 
-리뷰 게이트가 필요한 경우 (테스트/커밋 통과가 목적) 는 반드시 `/codex-review` (Mode A) 를 사용한다. 실수로 `/codex-ask` 결과로 stamp 를 생성하면 리뷰 없이 테스트/커밋이 통과되어 `pre-bash-guard.sh` 의 게이트가 무력화된다. DoD 를 자발 생성하면 `pre-edit-dod-gate.sh` 가 요구하는 주 세션 routing 단계가 생략된 채 편집 권한이 생기는 우회 경로가 된다.
+리뷰 게이트가 필요한 경우 (테스트/커밋 통과가 목적) 는 반드시 `/codex-review` (Mode A) 를 사용한다. 실수로 `/codex-ask` 결과로 stamp 를 생성하면 리뷰 없이 테스트/커밋이 통과되어 `pre-bash-test-commit-gate.sh` 의 게이트가 무력화된다. DoD 를 자발 생성하면 `pre-edit-dod-gate.sh` 가 요구하는 주 세션 routing 단계가 생략된 채 편집 권한이 생기는 우회 경로가 된다.
 
 ---
 

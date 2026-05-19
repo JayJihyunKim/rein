@@ -1,11 +1,11 @@
 #!/bin/bash
-# tests/hooks/test-pre-bash-guard.sh
+# tests/hooks/test-bash-guard-split.sh
 #
 # Test suites:
 #
 # 1. Windows Git Bash stub (existing, WGB-12c / Task 4.3 Step 2).
 # 2. BLOCK_MARKERS array (Plan A Phase 5 / GI-dod-mismatch-marker-consumer).
-#    Verifies pre-bash-guard consumes both legacy `.coverage-mismatch` (plan
+#    Verifies the test-commit gate consumes both legacy `.coverage-mismatch` (plan
 #    coverage) and new `.dod-coverage-mismatch` (DoD coverage) as blocking
 #    markers, while leaving `.dod-coverage-advisory` non-blocking.
 #
@@ -28,8 +28,8 @@ source "$SCRIPT_DIR/lib/test-harness.sh"
 
 # _invoke_guard_with_windows_stub <stdin-json>
 #   subshell 안에서 fake python(exit 49) + fake uname(MINGW) 을 세팅하고
-#   SANDBOX 에 복사된 pre-bash-guard.sh 를 실행. stdout 말미에 _RC=<exit> 를
-#   덧붙여 caller 가 exit code 를 파싱할 수 있게 한다.
+#   SANDBOX 에 복사된 pre-bash-safety-guard.sh 를 실행. stdout 말미에 _RC=<exit>
+#   를 덧붙여 caller 가 exit code 를 파싱할 수 있게 한다.
 _invoke_guard_with_windows_stub() {
   local stdin_json="$1"
   (
@@ -38,7 +38,7 @@ _invoke_guard_with_windows_stub() {
     with_fake_python 49
     printf '%s' "$stdin_json" \
       | REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
-        bash "$SANDBOX/.claude/hooks/pre-bash-guard.sh" 2>&1
+        bash "$SANDBOX/.claude/hooks/pre-bash-safety-guard.sh" 2>&1
     local rc=$?
     printf '_RC=%s\n' "$rc"
     cleanup_fakes
@@ -62,7 +62,7 @@ test_pre_bash_guard_windows_stub_blocks() {
 
 test_pre_bash_guard_posix_resolver_unchanged() {
   local stdin_json='{"tool_input":{"command":"ls -la"}}'
-  run_hook "pre-bash-guard.sh" "$stdin_json"
+  run_hook "pre-bash-safety-guard.sh" "$stdin_json"
 
   assert_exit 0 "host python3 사용 + 안전 명령이므로 통과"
   echo "$HOOK_STDERR" | grep -qF "[rein] The Bash guard cannot run" \
@@ -78,9 +78,9 @@ test_pre_bash_guard_posix_resolver_unchanged() {
 #
 # Fixture contract for these tests: stamps + DoD + inbox are seeded so the
 # *only* blocking gate in play is the coverage-marker array. run_hook uses
-# SANDBOX/.claude/hooks/pre-bash-guard.sh which requires:
+# SANDBOX/.claude/hooks/<the two split hooks> which require:
 #   - the hook itself
-#   - lib/extract-commit-msg.py (for commit-msg helper — pre-bash-guard BLOCKs
+#   - lib/extract-commit-msg.py (for commit-msg helper — the gate BLOCKs
 #     if helper missing)
 #   - stamp files under trail/dod
 #
@@ -111,7 +111,7 @@ test_block_markers_coverage_mismatch_blocks_commit() {
   touch "$SANDBOX/trail/dod/.coverage-mismatch"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   assert_exit 2 "plan coverage marker should block commit"
   assert_stderr_contains ".coverage-mismatch"
 }
@@ -123,7 +123,7 @@ test_block_markers_dod_coverage_mismatch_blocks_commit() {
   touch "$SANDBOX/trail/dod/.dod-coverage-mismatch"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   assert_exit 2 "DoD coverage marker should block commit"
   assert_stderr_contains ".dod-coverage-mismatch"
 }
@@ -136,7 +136,7 @@ test_block_markers_both_markers_block_commit() {
   touch "$SANDBOX/trail/dod/.dod-coverage-mismatch"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   assert_exit 2 "both markers should block commit"
   # Iteration order is fixed: .coverage-mismatch first, so its message wins.
   assert_stderr_contains ".coverage-mismatch"
@@ -148,7 +148,7 @@ test_block_markers_neither_marker_passes() {
   # Explicitly no markers.
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   # stderr must not contain the coverage-matrix block message.
   echo "$HOOK_STDERR" | grep -qF "coverage matrix 검증 실패" \
     && fail "coverage gate fired without any marker present"
@@ -163,7 +163,7 @@ test_block_markers_advisory_does_not_block() {
   touch "$SANDBOX/trail/dod/.dod-coverage-advisory"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   # Advisory marker must never be in BLOCK_MARKERS.
   echo "$HOOK_STDERR" | grep -qF ".dod-coverage-advisory" \
     && fail ".dod-coverage-advisory should be non-blocking, but guard cited it"
@@ -177,7 +177,7 @@ test_block_markers_dod_marker_blocks_pytest() {
   touch "$SANDBOX/trail/dod/.dod-coverage-mismatch"
 
   local input='{"tool_input":{"command":"pytest tests/"},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   assert_exit 2 "DoD coverage marker should block pytest"
   assert_stderr_contains ".dod-coverage-mismatch"
 }
@@ -200,7 +200,7 @@ test_block_markers_dod_marker_blocks_pytest() {
 # (P1 was converted from exit 2 + stderr to exit 0 + JSON deny in Task 2.2)
 test_pipe_bash_blocks_with_redirect_hint() {
   local input='{"tool_input":{"command":"printf hello | bash scripts/wrapper.sh"},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-safety-guard.sh" "$input"
   assert_json_deny "PIPE_SHELL_BLOCKED" "pipe + bash + script 는 JSON deny 를 발행해야 함"
 }
 
@@ -208,7 +208,7 @@ test_pipe_bash_blocks_with_redirect_hint() {
 test_pipe_bash_pattern_false_positive_in_grep_alternation_passes() {
   # Quote 안의 `|bash` 는 shell pipe 가 아님. word-boundary 로 false-positive 차단.
   local input='{"tool_input":{"command":"grep -E \"x|bash tests\" file.md | head -3"},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-safety-guard.sh" "$input"
   # pipe 자체는 있으나 (`grep ... | head`), bash/sh 토큰이 pipe 직후가 아님.
   echo "$HOOK_STDERR" | grep -qF "파이프로 쉘 스크립트 실행" \
     && fail "alternation 안 |bash substring 이 차단됨 (false positive)"
@@ -218,7 +218,7 @@ test_pipe_bash_pattern_false_positive_in_grep_alternation_passes() {
 # Scenario 3.3: file redirect 형태 → 통과 (정상 우회)
 test_bash_with_file_redirect_passes() {
   local input='{"tool_input":{"command":"bash scripts/wrapper.sh < /tmp/prompt.txt"},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-safety-guard.sh" "$input"
   echo "$HOOK_STDERR" | grep -qF "파이프로 쉘 스크립트 실행" \
     && fail "file redirect 가 잘못 차단됨"
   return 0
@@ -266,7 +266,7 @@ print(data["hookSpecificOutput"]["permissionDecisionReason"])
 # Suite 4 Scenario 4.1: P1 — pipe + bash → JSON deny PIPE_SHELL_BLOCKED
 test_json_deny_p1_pipe_bash() {
   local input='{"tool_input":{"command":"printf hello | bash scripts/wrapper.sh"},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-safety-guard.sh" "$input"
   assert_json_deny "PIPE_SHELL_BLOCKED" "P1 pipe-bash should emit JSON deny"
 }
 
@@ -275,21 +275,21 @@ test_json_deny_p7_commit_msg_format() {
   _seed_review_stamps
   # Bad commit message: missing conventional commits type
   local input='{"tool_input":{"command":"git commit -m \"bad message without type\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   assert_json_deny "COMMIT_MSG_FORMAT" "P7 bad commit msg should emit JSON deny"
 }
 
 # Suite 4 Scenario 4.3: P8 — cat .env → JSON deny ENV_READ_BLOCKED
 test_json_deny_p8_env_read() {
   local input='{"tool_input":{"command":"cat .env"},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-safety-guard.sh" "$input"
   assert_json_deny "ENV_READ_BLOCKED" "P8 cat .env should emit JSON deny"
 }
 
 # Suite 4 Scenario 4.4: P11 — git reset --hard → JSON deny DESTRUCTIVE_GIT_CONFIRM
 test_json_deny_p11_destructive_git() {
   local input='{"tool_input":{"command":"git reset --hard HEAD~1"},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-safety-guard.sh" "$input"
   assert_json_deny "DESTRUCTIVE_GIT_CONFIRM" "P11 destructive git should emit JSON deny"
 }
 
@@ -353,7 +353,7 @@ test_json_deny_p2_coverage_mismatch_failing_target() {
   touch "$SANDBOX/trail/dod/.security-reviewed"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: p2-test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   assert_json_deny "COVERAGE_MISMATCH" \
     "P2: non-empty .coverage-mismatch with failing target should emit JSON deny"
 }
@@ -367,7 +367,7 @@ test_json_deny_p3_review_pending_no_stamp() {
   touch "$SANDBOX/trail/dod/.review-pending"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: p3-test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   assert_json_deny "REVIEW_PENDING_NO_STAMP" \
     "P3: .review-pending present but no .codex-reviewed should emit JSON deny"
 }
@@ -382,7 +382,7 @@ test_json_deny_p4_code_edited_after_review() {
   touch "$SANDBOX/trail/dod/.review-pending"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: p4-test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   assert_json_deny "CODE_EDITED_AFTER_REVIEW" \
     "P4: .review-pending newer than .codex-reviewed should emit JSON deny"
 }
@@ -400,7 +400,7 @@ test_json_deny_p5_codex_stamp_missing() {
   # Explicitly no .codex-reviewed, no .review-pending, no .security-reviewed.
 
   local input='{"tool_input":{"command":"git commit -m \"feat: p5-test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   assert_json_deny "CODEX_STAMP_MISSING" \
     "P5: DoD exists but no .codex-reviewed should emit JSON deny"
 }
@@ -418,7 +418,7 @@ test_json_deny_p6_security_stamp_missing() {
   # Explicitly no .security-reviewed.
 
   local input='{"tool_input":{"command":"git commit -m \"feat: p6-test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
   assert_json_deny "SECURITY_STAMP_MISSING" \
     "P6: .codex-reviewed present but no .security-reviewed should emit JSON deny"
 }
@@ -439,7 +439,7 @@ test_json_deny_p9_env_stage_blocked() {
   # Seed a .env file in the sandbox root so the P9 condition fires.
   touch "$SANDBOX/.env"
   local input='{"tool_input":{"command":"git add -A"},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-safety-guard.sh" "$input"
   assert_json_deny "ENV_STAGE_BLOCKED" \
     "P9: git add -A with .env present should emit JSON deny ENV_STAGE_BLOCKED"
 }
@@ -453,7 +453,7 @@ test_json_deny_p10_env_commit_am_blocked() {
   # Seed a .env file in the sandbox root so the P10 condition fires.
   touch "$SANDBOX/.env"
   local input='{"tool_input":{"command":"git commit -am \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-safety-guard.sh" "$input"
   assert_json_deny "ENV_COMMIT_AM_BLOCKED" \
     "P10: git commit -am with .env present should emit JSON deny ENV_COMMIT_AM_BLOCKED"
 }
@@ -474,7 +474,7 @@ test_emitter_unavailable_fails_closed() {
   # Use a P8-triggering input: "cat .env" would call deny_emit if the emitter
   # were present. With the emitter absent the [I6] guard must fire first.
   local input='{"tool_input":{"command":"cat .env"},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-safety-guard.sh" "$input"
 
   # Must exit 2 (infra integrity block) — NOT 127 (undefined command) or 0 (fail-open).
   [ "$HOOK_EXIT" = "2" ] \
@@ -533,7 +533,7 @@ EOF
   # Use "cat .env" — would trigger P8 if a real deny_emit function were present.
   # With the emitter absent and only a PATH executable, the [I6] guard must fire.
   local input='{"tool_input":{"command":"cat .env"},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-safety-guard.sh" "$input"
 
   # Restore PATH before any assertion (cleanup_fakes resets PATH + removes tmpdir).
   cleanup_fakes
@@ -573,7 +573,7 @@ except Exception:
 
 test_json_deny_tone_p8_natural_sentence() {
   local input='{"tool_input":{"command":"cat .env"},"tool_result":{}}'
-  run_hook "pre-bash-guard.sh" "$input"
+  run_hook "pre-bash-safety-guard.sh" "$input"
   assert_json_deny "ENV_READ_BLOCKED" "P8 tone: must emit JSON deny"
 
   # Extract the permissionDecisionReason for tone checks.
@@ -595,39 +595,107 @@ print(data["hookSpecificOutput"]["permissionDecisionReason"])
   return 0
 }
 
+# ============================================================
+# Suite 8: GUARD-1 (2026-05-19) — test-execution gate re-scoping.
+# ============================================================
+#
+# The review-stamp gate that blocked *test execution* (pytest etc.) when no
+# .codex-reviewed stamp existed made the TDD red-green loop structurally
+# impossible — you cannot run a failing reproduction test before the code is
+# even written/reviewed. The gate target is *commit / completion*, not test
+# runs. GUARD-1 removes the test-execution stamp gate and keeps the commit
+# gate. coverage-matrix marker gating of pytest is a SEPARATE discipline and
+# is unchanged (see Suite 2 Scenario 6).
+#
+# Contract after GUARD-1:
+#   - DoD present + no stamps + pytest  → NOT blocked (gate removed).
+#   - DoD present + no stamps + git commit → still blocked (commit gate kept).
+
+# Seed a DoD only (no stamps), plus the commit-msg helper so the git-commit
+# path reaches check_review_stamp rather than failing on a missing helper.
+_seed_dod_only_no_stamps() {
+  mkdir -p "$SANDBOX/.claude/hooks/lib"
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/extract-commit-msg.py" \
+     "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
+  seed_dod "dod-2026-05-19-guard1-test.md"
+  seed_inbox "2026-05-19-guard1-test.md"
+  # Explicitly NO .codex-reviewed / .security-reviewed.
+}
+
+# Scenario 8.1: pytest with DoD present + no review stamps → NOT blocked.
+test_guard1_pytest_not_blocked_without_stamps() {
+  _seed_dod_only_no_stamps
+
+  local input='{"tool_input":{"command":"pytest tests/"},"tool_result":{}}'
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  assert_exit 0 "pytest must not be blocked by a missing review stamp (GUARD-1)"
+  # No JSON deny on stdout either — the test-execution stamp gate is gone.
+  echo "$HOOK_STDOUT" | grep -qF "CODEX_STAMP_MISSING" \
+    && fail "pytest emitted CODEX_STAMP_MISSING deny — test-execution gate not removed"
+  echo "$HOOK_STDOUT" | grep -qF "SECURITY_STAMP_MISSING" \
+    && fail "pytest emitted SECURITY_STAMP_MISSING deny — test-execution gate not removed"
+  return 0
+}
+
+# Scenario 8.2: bash tests/ runner with DoD + no stamps → NOT blocked.
+test_guard1_bash_tests_not_blocked_without_stamps() {
+  _seed_dod_only_no_stamps
+
+  local input='{"tool_input":{"command":"bash tests/hooks/test-foo.sh"},"tool_result":{}}'
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  assert_exit 0 "bash tests/ must not be blocked by a missing review stamp (GUARD-1)"
+  echo "$HOOK_STDOUT" | grep -qF "CODEX_STAMP_MISSING" \
+    && fail "bash tests/ emitted CODEX_STAMP_MISSING deny — test-execution gate not removed"
+  return 0
+}
+
+# Scenario 8.3: git commit with DoD + no stamps → STILL blocked (commit gate kept).
+test_guard1_git_commit_still_blocked_without_stamps() {
+  _seed_dod_only_no_stamps
+
+  local input='{"tool_input":{"command":"git commit -m \"feat: guard1-test\""},"tool_result":{}}'
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  assert_json_deny "CODEX_STAMP_MISSING" \
+    "git commit must still be blocked when no codex review stamp exists (commit gate kept)"
+}
+
 main() {
   # Suite 1
-  run_test test_pre_bash_guard_windows_stub_blocks       pre-bash-guard.sh
-  run_test test_pre_bash_guard_posix_resolver_unchanged  pre-bash-guard.sh
+  run_test test_pre_bash_guard_windows_stub_blocks       pre-bash-safety-guard.sh
+  run_test test_pre_bash_guard_posix_resolver_unchanged  pre-bash-safety-guard.sh
   # Suite 2 — BLOCK_MARKERS (Plan A Phase 5)
-  run_test test_block_markers_coverage_mismatch_blocks_commit      pre-bash-guard.sh
-  run_test test_block_markers_dod_coverage_mismatch_blocks_commit  pre-bash-guard.sh
-  run_test test_block_markers_both_markers_block_commit            pre-bash-guard.sh
-  run_test test_block_markers_neither_marker_passes                pre-bash-guard.sh
-  run_test test_block_markers_advisory_does_not_block              pre-bash-guard.sh
-  run_test test_block_markers_dod_marker_blocks_pytest             pre-bash-guard.sh
+  run_test test_block_markers_coverage_mismatch_blocks_commit      pre-bash-test-commit-gate.sh
+  run_test test_block_markers_dod_coverage_mismatch_blocks_commit  pre-bash-test-commit-gate.sh
+  run_test test_block_markers_both_markers_block_commit            pre-bash-test-commit-gate.sh
+  run_test test_block_markers_neither_marker_passes                pre-bash-test-commit-gate.sh
+  run_test test_block_markers_advisory_does_not_block              pre-bash-test-commit-gate.sh
+  run_test test_block_markers_dod_marker_blocks_pytest             pre-bash-test-commit-gate.sh
   # Suite 3 — Pipe-bash block (A + B fix)
-  run_test test_pipe_bash_blocks_with_redirect_hint                              pre-bash-guard.sh
-  run_test test_pipe_bash_pattern_false_positive_in_grep_alternation_passes      pre-bash-guard.sh
-  run_test test_bash_with_file_redirect_passes                                   pre-bash-guard.sh
+  run_test test_pipe_bash_blocks_with_redirect_hint                              pre-bash-safety-guard.sh
+  run_test test_pipe_bash_pattern_false_positive_in_grep_alternation_passes      pre-bash-safety-guard.sh
+  run_test test_bash_with_file_redirect_passes                                   pre-bash-safety-guard.sh
   # Suite 4 — JSON deny: P1, P7, P8, P11 representative (Task 2.2)
-  run_test test_json_deny_p1_pipe_bash          pre-bash-guard.sh
-  run_test test_json_deny_p7_commit_msg_format  pre-bash-guard.sh
-  run_test test_json_deny_p8_env_read           pre-bash-guard.sh
-  run_test test_json_deny_p11_destructive_git   pre-bash-guard.sh
+  run_test test_json_deny_p1_pipe_bash          pre-bash-safety-guard.sh
+  run_test test_json_deny_p7_commit_msg_format  pre-bash-test-commit-gate.sh
+  run_test test_json_deny_p8_env_read           pre-bash-safety-guard.sh
+  run_test test_json_deny_p11_destructive_git   pre-bash-safety-guard.sh
   # Suite 5 — JSON deny regression: P2, P3, P4, P5, P6 (Task 2.5)
-  run_test test_json_deny_p2_coverage_mismatch_failing_target  pre-bash-guard.sh
-  run_test test_json_deny_p3_review_pending_no_stamp           pre-bash-guard.sh
-  run_test test_json_deny_p4_code_edited_after_review          pre-bash-guard.sh
-  run_test test_json_deny_p5_codex_stamp_missing               pre-bash-guard.sh
-  run_test test_json_deny_p6_security_stamp_missing            pre-bash-guard.sh
+  run_test test_json_deny_p2_coverage_mismatch_failing_target  pre-bash-test-commit-gate.sh
+  run_test test_json_deny_p3_review_pending_no_stamp           pre-bash-test-commit-gate.sh
+  run_test test_json_deny_p4_code_edited_after_review          pre-bash-test-commit-gate.sh
+  run_test test_json_deny_p5_codex_stamp_missing               pre-bash-test-commit-gate.sh
+  run_test test_json_deny_p6_security_stamp_missing            pre-bash-test-commit-gate.sh
   # Suite 6 — P9, P10 direct JSON deny + emitter-unavailable fail-closed (Fix 1 regression)
-  run_test test_json_deny_p9_env_stage_blocked                             pre-bash-guard.sh
-  run_test test_json_deny_p10_env_commit_am_blocked                        pre-bash-guard.sh
-  run_test test_emitter_unavailable_fails_closed                           pre-bash-guard.sh
-  run_test test_emitter_unavailable_fake_deny_emit_on_path_fails_closed    pre-bash-guard.sh
+  run_test test_json_deny_p9_env_stage_blocked                             pre-bash-safety-guard.sh
+  run_test test_json_deny_p10_env_commit_am_blocked                        pre-bash-safety-guard.sh
+  run_test test_emitter_unavailable_fails_closed                           pre-bash-safety-guard.sh
+  run_test test_emitter_unavailable_fake_deny_emit_on_path_fails_closed    pre-bash-safety-guard.sh
   # Suite 7 — Task 3.1 tone assertions (S7)
-  run_test test_json_deny_tone_p8_natural_sentence                          pre-bash-guard.sh
+  run_test test_json_deny_tone_p8_natural_sentence                          pre-bash-safety-guard.sh
+  # Suite 8 — GUARD-1: test-execution gate re-scoping (2026-05-19)
+  run_test test_guard1_pytest_not_blocked_without_stamps                    pre-bash-test-commit-gate.sh
+  run_test test_guard1_bash_tests_not_blocked_without_stamps                pre-bash-test-commit-gate.sh
+  run_test test_guard1_git_commit_still_blocked_without_stamps              pre-bash-test-commit-gate.sh
   summary
 }
 

@@ -83,7 +83,7 @@ while IFS= read -r FILE_PATH; do
   # 프로젝트 외부 경로는 source 가 아니다. subagent 가 codex/security review 중
   # mktemp -d 로 만든 임시 fixture (/tmp/*, /var/folders/* — macOS mktemp 기본
   # 위치) 에 .sh 등을 쓸 때 .review-pending 이 잘못 재생성되어 stamp 비교가
-  # 깨지는 회귀 (incident pre-bash-guard-2fbe7edae5a10b1f). PROJECT_DIR 시작
+  # 깨지는 회귀 (incident bash-guard-2fbe7edae5a10b1f). PROJECT_DIR 시작
   # 검사로 외부 경로 면제. 상대 경로는 PROJECT_DIR 내부로 간주 (cwd-based).
   case "$FILE_PATH_NORM" in
     /*)

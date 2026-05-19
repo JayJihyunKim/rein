@@ -156,12 +156,156 @@ SCRIPT_E="$SANDBOX_E_REAL/repo/.claude/hooks"
 NO_GIT_CWD="$SANDBOX_E_REAL"
 
 echo "Suite E — legacy fallbacks"
+# PD-1 (2026-05-19): the fixed `SCRIPT_DIR/../..` positional fallback was
+# removed in favor of trail/ walk-up + script_dir-anchored git. When there is
+# no trail/ ancestor AND neither script_dir nor cwd is a git repo, resolution
+# falls through to $PWD (step 7). The old behavior returned a guessed
+# `SCRIPT_DIR/../..` which could silently point at the wrong directory for
+# callers at a non-hook depth — that guesswork is intentionally gone.
 out=$(_invoke "$NO_GIT_CWD" "$SCRIPT_E")
-assert_equal "no trail/ + no git -> SCRIPT_DIR/../.. fallback" \
-  "$SANDBOX_E_REAL/repo" "$out"
+assert_equal "no trail/ + no git (script_dir not in git) -> \$PWD" \
+  "$NO_GIT_CWD" "$out"
 
 out=$(_invoke "$NO_GIT_CWD" "")
 assert_equal "no SCRIPT_DIR + no git -> \$PWD" "$NO_GIT_CWD" "$out"
+
+# --- Suite G: PD-1 — caller-depth-agnostic trail/ walk-up ------------------
+# A helper script lives in `<repo>/scripts/` (one level deep), not the hook
+# layout `<repo>/.claude/hooks/` (two levels deep). The old fixed `../..`
+# assumption made resolve_project_dir return the repo's PARENT for a
+# 1-level-deep caller. The walk-up must climb to the nearest trail/ ancestor
+# regardless of caller depth.
+SANDBOX_G=$(mktemp -d "/tmp/proj-dir-G-XXXXXX")
+TMP_DIRS+=("$SANDBOX_G")
+SANDBOX_G_REAL="$(_realpath "$SANDBOX_G")"
+# rein-style repo with trail/ + a 1-level-deep scripts/ dir.
+mkdir -p "$SANDBOX_G_REAL/repo/scripts" "$SANDBOX_G_REAL/repo/trail/dod"
+cp "$HELPER" "$SANDBOX_G_REAL/repo/scripts/project-dir.sh" 2>/dev/null || true
+(
+  cd "$SANDBOX_G_REAL/repo"
+  git init -q
+  git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init
+)
+SCRIPT_G="$SANDBOX_G_REAL/repo/scripts"
+
+echo "Suite G — PD-1: 1-level-deep caller resolves to repo, not its parent"
+out=$(_invoke "$SANDBOX_G_REAL/repo" "$SCRIPT_G")
+assert_equal "scripts/ (1-level) caller -> repo root (not parent) via trail/ walk-up" \
+  "$SANDBOX_G_REAL/repo" "$out"
+
+# Sub-case: caller depth is irrelevant — a deeply nested helper also climbs
+# to the same trail/ ancestor.
+mkdir -p "$SANDBOX_G_REAL/repo/scripts/sub/deep"
+out=$(_invoke "$SANDBOX_G_REAL/repo" "$SANDBOX_G_REAL/repo/scripts/sub/deep")
+assert_equal "deeply-nested caller -> same trail/ ancestor" \
+  "$SANDBOX_G_REAL/repo" "$out"
+
+# Sub-case: no trail/ ancestor but caller is inside a git repo → fall back to
+# `git -C "$script_dir" rev-parse`, NOT the parent directory. cwd is an
+# unrelated location so cwd-git cannot mask the script_dir-git fallback.
+SANDBOX_G2=$(mktemp -d "/tmp/proj-dir-G2-XXXXXX")
+TMP_DIRS+=("$SANDBOX_G2")
+SANDBOX_G2_REAL="$(_realpath "$SANDBOX_G2")"
+mkdir -p "$SANDBOX_G2_REAL/gitrepo/scripts"
+(
+  cd "$SANDBOX_G2_REAL/gitrepo"
+  git init -q
+  git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init
+)
+# No trail/ anywhere → step 5 git-from-script_dir must return the gitrepo root.
+out=$(_invoke "$NO_GIT_CWD" "$SANDBOX_G2_REAL/gitrepo/scripts")
+assert_equal "no trail/: 1-level caller -> script_dir git toplevel (not parent)" \
+  "$SANDBOX_G2_REAL/gitrepo" "$out"
+
+# --- Suite H: PD-1 — rein-mark-spec-reviewed.sh loud fail on bad trail/ ----
+# When PROJECT_DIR resolves to a directory without trail/, the script must
+# fail loudly (non-zero exit) instead of writing a stamp to a place the gate
+# never reads + exiting 0.
+MARK_SCRIPT="$PROJECT_ROOT/scripts/rein-mark-spec-reviewed.sh"
+echo "Suite H — PD-1: rein-mark-spec-reviewed.sh loud fail when trail/ absent"
+if [ -f "$MARK_SCRIPT" ]; then
+  SANDBOX_H=$(mktemp -d "/tmp/proj-dir-H-XXXXXX")
+  TMP_DIRS+=("$SANDBOX_H")
+  SANDBOX_H_REAL="$(_realpath "$SANDBOX_H")"
+  # A directory with NO trail/ — point PROJECT_DIR there via override.
+  mkdir -p "$SANDBOX_H_REAL/no-trail-dir"
+  : > "$SANDBOX_H_REAL/spec.md"
+  mark_rc=0
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX_H_REAL/no-trail-dir" \
+    bash "$MARK_SCRIPT" "$SANDBOX_H_REAL/spec.md" tester >/dev/null 2>&1 || mark_rc=$?
+  if [ "$mark_rc" -ne 0 ]; then
+    PASS=$((PASS + 1))
+    printf '  ok  %s\n' "mark-spec-reviewed exits non-zero when trail/ absent"
+  else
+    FAIL=$((FAIL + 1))
+    printf '  FAIL %s\n    expected non-zero exit, got 0\n' \
+      "mark-spec-reviewed exits non-zero when trail/ absent"
+  fi
+  # And it must NOT have written a stamp into the bad dir.
+  if ls "$SANDBOX_H_REAL/no-trail-dir/trail/dod/.spec-reviews/"*.reviewed \
+       >/dev/null 2>&1; then
+    FAIL=$((FAIL + 1))
+    printf '  FAIL %s\n' "mark-spec-reviewed wrote stamp despite missing trail/"
+  else
+    PASS=$((PASS + 1))
+    printf '  ok  %s\n' "mark-spec-reviewed wrote no stamp when trail/ absent"
+  fi
+  # Positive control: with a proper trail/ dir, the script must succeed.
+  mkdir -p "$SANDBOX_H_REAL/good-repo/trail/dod"
+  : > "$SANDBOX_H_REAL/good-spec.md"
+  good_rc=0
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX_H_REAL/good-repo" \
+    bash "$MARK_SCRIPT" "$SANDBOX_H_REAL/good-spec.md" tester >/dev/null 2>&1 \
+    || good_rc=$?
+  if [ "$good_rc" -eq 0 ]; then
+    PASS=$((PASS + 1))
+    printf '  ok  %s\n' "mark-spec-reviewed succeeds when trail/ present"
+  else
+    FAIL=$((FAIL + 1))
+    printf '  FAIL %s\n    expected exit 0, got %s\n' \
+      "mark-spec-reviewed succeeds when trail/ present" "$good_rc"
+  fi
+  # Write-failure path (codex review 2026-05-19, High): even with a valid
+  # trail/, if the .reviewed marker cannot be written the script must fail
+  # loudly — never print "OK" + exit 0 with a stale/old marker. Simulate by
+  # making the .spec-reviews/ dir read-only so the temp write cannot happen.
+  RO_REPO="$SANDBOX_H_REAL/ro-repo"
+  mkdir -p "$RO_REPO/trail/dod/.spec-reviews"
+  : > "$SANDBOX_H_REAL/ro-spec.md"
+  chmod 500 "$RO_REPO/trail/dod/.spec-reviews"
+  ro_rc=0
+  ro_out=$(REIN_PROJECT_DIR_OVERRIDE="$RO_REPO" \
+    bash "$MARK_SCRIPT" "$SANDBOX_H_REAL/ro-spec.md" tester 2>&1) || ro_rc=$?
+  chmod 700 "$RO_REPO/trail/dod/.spec-reviews"
+  if [ "$ro_rc" -ne 0 ] && ! printf '%s' "$ro_out" | grep -q '^OK:'; then
+    PASS=$((PASS + 1))
+    printf '  ok  %s\n' "mark-spec-reviewed fails loudly when marker write fails"
+  else
+    FAIL=$((FAIL + 1))
+    printf '  FAIL %s\n    expected non-zero exit + no OK line, got rc=%s out=%s\n' \
+      "mark-spec-reviewed fails loudly when marker write fails" "$ro_rc" "$ro_out"
+  fi
+  # Stale-marker replacement (codex review 2026-05-19, High): re-running mark
+  # with a different reviewer must REPLACE the existing .reviewed (mv -f over
+  # an existing marker) — never leave stale content behind. good-repo already
+  # has a .reviewed from the positive control above (reviewer=tester).
+  repl_rc=0
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX_H_REAL/good-repo" \
+    bash "$MARK_SCRIPT" "$SANDBOX_H_REAL/good-spec.md" second-reviewer >/dev/null 2>&1 \
+    || repl_rc=$?
+  repl_file=$(ls "$SANDBOX_H_REAL/good-repo/trail/dod/.spec-reviews/"*.reviewed 2>/dev/null | head -1)
+  if [ "$repl_rc" -eq 0 ] && [ -n "$repl_file" ] \
+     && grep -q '^reviewer=second-reviewer$' "$repl_file"; then
+    PASS=$((PASS + 1))
+    printf '  ok  %s\n' "mark-spec-reviewed replaces an existing .reviewed marker"
+  else
+    FAIL=$((FAIL + 1))
+    printf '  FAIL %s\n    expected fresh reviewer, rc=%s file=%s\n' \
+      "mark-spec-reviewed replaces an existing .reviewed marker" "$repl_rc" "$repl_file"
+  fi
+else
+  printf '  skip rein-mark-spec-reviewed.sh not found at %s\n' "$MARK_SCRIPT"
+fi
 
 # --- Suite F: post-edit-index-sync-inbox ancestry guard --------------------
 # Codex round 2: relative + absolute-outside FILE_PATH must NOT trigger
