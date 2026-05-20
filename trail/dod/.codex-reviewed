@@ -1,7 +1,7 @@
-reviewed_at: 2026-05-19T10:18:30Z
+reviewed_at: 2026-05-20T12:48:51Z
 reviewer: codex
-diff_base: 02a69b1733d0ca1819560e59b4a1dbee8177b384
+diff_base: b2ccf7f085d36028f533b6f0b3c17595fb15ba4b
 verdict: PASS
-cycle: 
+cycle: 2026-05-20-cycle-x1-scaffold-cleanup
 scope: wrapper-generated
-active_dod: 
+active_dod: trail/dod/dod-2026-05-20-cycle-x1-scaffold-cleanup.md

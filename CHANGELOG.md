@@ -2,6 +2,17 @@
 
 > **Versioning policy**: 버전 bump 는 `.claude/rules/versioning.md` 의 Rule A/B/C 를 따른다.
 
+## v1.3.3 — 2026-05-20 (rule injection 경량화 + background-jobs advisory cold-path skip)
+
+`rein update` 후 사용자 세션에서 바뀌는 것:
+
+- **매 user turn / 매 Bash 호출 마다 들어가던 rule 본문이 약 91~92% 줄어듭니다** — 이전엔 `user-prompt-submit-rules.sh` 가 매 turn 마다 `answer-only-mode.md` 본문 (~7 KB), `pre-tool-use-bash-rules.sh` 가 매 Bash 호출마다 `background-jobs.md` 본문 (~6 KB) 을 그대로 inject 했습니다. 이제 두 hook 은 short summary (`plugins/rein-core/rules/short/{answer-only-summary,background-jobs-summary}.md`, 각 ≤ 600 B) 만 inject 합니다. SessionStart 의 4-rule (code-style / security / testing / operating-sequence) full inject 는 그대로이며, 원본 rule 본문도 plugin source 에 보존됩니다 (필요 시 직접 read 가능). 차단 동작은 변하지 않습니다.
+- **일반 Bash 호출에서 advisory rule hook 이 더 이상 spawn 되지 않습니다** — `pre-tool-use-bash-rules.sh` (background-jobs 환기 inject) 가 이제 hot-path 명령 (`pytest`, `npm test`, `yarn test`, `pnpm test`, `npm run test`, `cargo build`, `docker build`, `playwright`, `make`, `tsc`, `python -m pytest`, `npx jest`, `npx vitest` — bare + args 둘 다) 에만 spawn 됩니다. `ls`, `git status`, `grep` 같은 일반 명령에서는 이 hook 이 호출되지 않아 cold-path 응답이 빨라집니다. 안전 가드 (`pre-bash-safety-guard.sh`) 와 bootstrap check (`pre-tool-use-bash-bootstrap-gate.sh`) 는 항상 실행 — 차단 동작은 그대로입니다.
+
+내부 변경 (사용자 영향 없음):
+
+- 2026-05-20 미처리 incident 3건 declined 처리 + 원본 삭제 (`auto-pre-bash-guard-712c619297124005`, `auto-pre-edit-dod-gate-bef187256cf7608e`, `auto-pre-edit-dod-gate-eee46f3711b27315`). 모두 hook 의 의도된 차단 동작이라 새 규칙 불필요.
+
 ## v1.3.2 — 2026-05-19 (Claude Code v2.1.144 hook 기능 채택 + 기록 버그 수정)
 
 `rein update` 후 사용자 세션에서 바뀌는 것:

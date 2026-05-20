@@ -48,7 +48,7 @@ fi
 # helper's pass-through body would lose its final `\n` (violating the
 # no-truncation contract). Append `x` inside a guarded subshell so the
 # subshell's exit code reflects rule_inject_body's rc, not printf's.
-if ! BODY=$(if rule_inject_body answer-only-mode; then printf x; else exit 1; fi); then
+if ! BODY=$(if rule_inject_body short/answer-only-summary; then printf x; else exit 1; fi); then
   exit 0
 fi
 BODY="${BODY%x}"

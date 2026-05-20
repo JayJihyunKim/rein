@@ -1,13 +1,27 @@
 #!/bin/bash
-# Hook: PostToolUse(Edit|Write|MultiEdit) — dispatcher
+# Hook: PostToolUse(Edit|Write|MultiEdit) — dispatcher (DEPRECATED, Phase 2b)
 #
-# 기존 7개 post-hook 을 단일 entry 로 묶어 다음 비용을 1회만 지불한다:
+# 2026-05-20 (Phase 2b — HK-4) 이후 본 dispatcher 는 hooks.json 에서 **등록 해제**.
+# 8 sub-hook 이 hooks.json 의 별개 entry 로 직접 등록되며 Claude Code 의 native
+# entry merge 의미 (SPIKE-1 GO: OR-propagation 등가) 가 dispatcher 의 aggregator
+# 역할을 대체한다. PERF-2 의 resolver-cache (`lib/hook-resolver-cache.sh`) 가
+# dispatcher 의 env-var cache 역할을 대체 — pre-edit-dod-gate 가 PreToolUse 에서
+# write, 분할된 sub-hook 들이 PostToolUse 에서 read.
+#
+# 본 파일은 codex review + 회귀 테스트 통과 시 다음 cycle 에 완전 제거 검토.
+# 그 사이 hooks.json 에서 호출되지 않으므로 runtime 영향 없음.
+
+echo "[rein] post-edit-dispatcher.sh: DEPRECATED — 본 dispatcher 는 hooks.json 에서 등록 해제됐습니다 (Phase 2b HK-4 분할). 호출되는 경로가 있다면 hooks.json 을 확인하세요." >&2
+exit 0
+
+# === 이하 historical 본문 (회귀 rollback 용 보존, 호출되지 않음) ===
+# 기존 7개 post-hook 을 단일 entry 로 묶어 다음 비용을 1회만 지불했다:
 #   1) stdin JSON 흡수
 #   2) Python resolver 부트스트랩
 #   3) extract-hook-json.py 호출 (file_path 추출)
 #   4) 정책 loader (.rein/policy/hooks.yaml) 1회 평가
 #
-# 결과는 다음 환경변수 / 파일로 sub-hook 에 전달된다:
+# 결과는 다음 환경변수 / 파일로 sub-hook 에 전달됐다:
 #   REIN_HOOK_INPUT_CACHE=1                — 캐시 활성 플래그
 #   REIN_HOOK_INPUT_FILE=<temp>            — 원본 JSON (env 가 아니라 파일 — 거대 payload 안전)
 #   REIN_HOOK_FILE_PATH, REIN_HOOK_FILE_PATHS — 추출된 경로

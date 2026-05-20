@@ -266,7 +266,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.3.2** (2026-05-19) — Adopts Claude Code v2.1.144 hook features: a PostToolUse review-trigger hook, routing recommendations gain security-tier / complexity hints, the feature-builder agent splits into fix / refactor variants, and the bash guard splits into an always-on safety guard + a test/commit gate (block behavior unchanged). ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.3.3** (2026-05-20) — Shrinks the per-turn / per-Bash rule body injection by ~91-92% (answer-only-mode 7 KB / background-jobs 6 KB → short summaries ≤600 B each) and limits the background-jobs advisory hook to a hot-path command whitelist (pytest / npm test / cargo build / playwright / make / tsc and similar — bare + args). Blocking guards (safety-guard, test-commit-gate, bootstrap check) remain always-on. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

@@ -24,7 +24,10 @@ SOURCE_RULE_DOC="plugins/rein-core/rules/$RULE_NAME"
 
 EXPECTED_EVENT="PostToolUse"
 EXPECTED_MATCHER="Edit|Write|MultiEdit"
-EXPECTED_BASENAME="post-edit-dispatcher.sh"
+# Phase 2b HK-4: post-edit-dispatcher.sh deprecated. design-plan-coverage rule
+# is now registered directly as a PostToolUse sub-hook (single-responsibility
+# split). hooks.json must contain the rule-specific sub-hook by basename.
+EXPECTED_BASENAME="post-edit-design-plan-coverage-rule.sh"
 
 fail() {
   echo "FAIL: $1" >&2

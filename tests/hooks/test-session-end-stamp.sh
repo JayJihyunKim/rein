@@ -35,10 +35,18 @@ except Exception as e:
 
 # Helper: copy hook + script into sandbox and run with PROJECT_DIR=$SANDBOX
 copy_hooks_into_sandbox() {
-  mkdir -p "$SANDBOX/.claude/hooks/lib" "$SANDBOX/scripts" "$SANDBOX/trail/incidents" "$SANDBOX/trail/dod"
-  cp "$REAL_PROJECT_DIR/.claude/hooks/stop-session-gate.sh" "$SANDBOX/.claude/hooks/"
-  cp "$REAL_PROJECT_DIR/.claude/hooks/session-start-load-trail.sh" "$SANDBOX/.claude/hooks/"
-  cp -R "$REAL_PROJECT_DIR/.claude/hooks/lib/." "$SANDBOX/.claude/hooks/lib/"
+  mkdir -p "$SANDBOX/.claude/hooks/lib" "$SANDBOX/scripts" "$SANDBOX/trail/incidents" "$SANDBOX/trail/dod" "$SANDBOX/.rein"
+  # Option C Phase 3 (2026-05-13): .claude/hooks/ overlay 폐기, plugin SSOT 가
+  # 단독. sandbox 내부 layout 은 hook 본체의 SCRIPT_DIR 기반 lib lookup 호환을
+  # 위해 .claude/hooks/ 유지, source 는 plugins/rein-core/hooks/ 에서 복사.
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/stop-session-gate.sh" "$SANDBOX/.claude/hooks/"
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/session-start-load-trail.sh" "$SANDBOX/.claude/hooks/"
+  cp -R "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/." "$SANDBOX/.claude/hooks/lib/"
+  # BG-D (stop-session-gate) / BG-1 (session-start-load-trail) bootstrap-check:
+  # both hooks early-exit unless `.rein/project.json` exists (BG-D also requires
+  # trail/ dir, BG-1 also requires trail/index.md). Seed marker so the gate
+  # logic is exercised, not bypassed.
+  printf '%s' '{"mode":"plugin","scope":"project","version":"1.3.3"}' > "$SANDBOX/.rein/project.json"
   cp "$REAL_PROJECT_DIR/scripts/rein-aggregate-incidents.py" "$SANDBOX/scripts/"
   cp "$REAL_PROJECT_DIR/scripts/rein-stop-emit-block.py" "$SANDBOX/scripts/" 2>/dev/null || true
   cp "$REAL_PROJECT_DIR/scripts/rein-heal-legacy-pending.py" "$SANDBOX/scripts/" 2>/dev/null || true

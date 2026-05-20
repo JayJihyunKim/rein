@@ -14,6 +14,10 @@ SPEC_REVIEWS_DIR="$DOD_DIR/.spec-reviews"
 
 # shellcheck source=./lib/python-runner.sh
 . "$SCRIPT_DIR/lib/python-runner.sh"
+# HK-4: 분할 후 dispatcher 가 처리하던 정책 평가를 각 sub-hook 이 자체 호출.
+# shellcheck source=./lib/post-edit-policy-gate.sh
+. "$SCRIPT_DIR/lib/post-edit-policy-gate.sh"
+post_edit_policy_gate "post-edit-spec-review-gate"
 
 # Plan A §2 (GI-path-policy-lib): shared path classifier. Fail-closed if
 # library is missing — silent degrade to "no matcher" would stop creating

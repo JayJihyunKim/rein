@@ -21,7 +21,7 @@ fi
 # Sentinel idiom — preserve trailing newlines (see rule-inject.sh for
 # rationale). The if-then-else inside the subshell makes the subshell rc
 # reflect rule_inject_body's rc instead of printf's success.
-if ! BODY=$(if rule_inject_body background-jobs; then printf x; else exit 1; fi); then
+if ! BODY=$(if rule_inject_body short/background-jobs-summary; then printf x; else exit 1; fi); then
   exit 0
 fi
 BODY="${BODY%x}"

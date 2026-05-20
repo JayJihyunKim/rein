@@ -31,6 +31,13 @@ if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   exit 0
 fi
 
+# HK-4: 분할 후 dispatcher 가 처리하던 정책 평가를 각 sub-hook 이 자체 호출.
+if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/post-edit-policy-gate.sh" ]; then
+  # shellcheck source=./lib/post-edit-policy-gate.sh
+  . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/post-edit-policy-gate.sh"
+  post_edit_policy_gate "post-edit-routing-procedure-rule"
+fi
+
 # Hook input on stdin (Claude Code JSON envelope). Extract file_path with
 # the same fallback chain used by post-edit-design-plan-coverage-rule.sh:
 #   tool_input.file_path  (primary)
@@ -90,5 +97,34 @@ fi
 BODY="${BODY%x}"
 [ -n "$BODY" ] || exit 0
 
-ESCAPED=$(printf '%s' "$BODY" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))')
-printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":%s}}\n' "$ESCAPED"
+ENVELOPE=$(printf '%s' "$BODY" | python3 -c '
+import sys, json
+ctx = sys.stdin.read()
+env = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": ctx}}
+sys.stdout.write(json.dumps(env, ensure_ascii=False, separators=(",", ":")))
+')
+
+# Phase 2c HK-5: aggregator merge 위해 output cache 에 write 시도. 성공 시
+# stdout skip — post-edit-aggregator (PostToolUse 마지막 entry) 가 자신의 entry
+# 에서 합쳐 emit. 실패 시 stdout fallback (기존 동작 — Claude Code 가 본 entry
+# 의 envelope 을 직접 surface).
+TOOL_USE_ID=$(printf '%s' "$INPUT" | python3 -c '
+import sys, json
+try:
+    d = json.loads(sys.stdin.read())
+except Exception:
+    sys.exit(0)
+if isinstance(d, dict):
+    sys.stdout.write(d.get("tool_use_id", "") or "")
+' 2>/dev/null || true)
+
+if [ -n "$TOOL_USE_ID" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/hook-output-cache.sh" ]; then
+  # shellcheck disable=SC1091
+  . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/hook-output-cache.sh"
+  if output_cache_write "$TOOL_USE_ID" "post-edit-routing-procedure-rule" "$ENVELOPE"; then
+    exit 0
+  fi
+fi
+
+# Fallback — direct stdout emit (cache 미가용 또는 write 실패).
+printf '%s\n' "$ENVELOPE"

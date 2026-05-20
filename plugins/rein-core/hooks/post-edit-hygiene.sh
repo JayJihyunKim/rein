@@ -9,6 +9,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/python-runner.sh"
 # shellcheck source=./lib/hook-input-cache.sh
 . "$SCRIPT_DIR/lib/hook-input-cache.sh"
+# HK-4: 분할 후 dispatcher 가 처리하던 정책 평가를 각 sub-hook 이 자체 호출.
+# shellcheck source=./lib/post-edit-policy-gate.sh
+. "$SCRIPT_DIR/lib/post-edit-policy-gate.sh"
+post_edit_policy_gate "post-edit-hygiene"
 
 hook_input_load   # 캐시 활성 시 stdin 안 읽음. 없으면 INPUT 만 채워짐.
 

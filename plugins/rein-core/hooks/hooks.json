@@ -124,6 +124,132 @@
           },
           {
             "type": "command",
+            "if": "Bash(pytest)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(pytest *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npm test)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npm test *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(yarn test)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(yarn test *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(pnpm test)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(pnpm test *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npm run test)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npm run test *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(cargo build)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(cargo build *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(docker build)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(docker build *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(playwright)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(playwright *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(make)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(make *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(tsc)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(tsc *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(python -m pytest)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(python -m pytest *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npx jest)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npx jest *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npx vitest)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npx vitest *)",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
           }
         ]
@@ -144,7 +270,79 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-dispatcher.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-hygiene.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-review-gate.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-index-sync-inbox.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-spec-review-gate.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-plan-coverage.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-dod-routing-check.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-design-plan-coverage-rule.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-routing-procedure-rule.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-aggregator.sh"
           }
         ]
       },

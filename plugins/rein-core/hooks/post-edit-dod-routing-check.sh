@@ -13,6 +13,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/project-dir.sh"
 # shellcheck source=./lib/hook-input-cache.sh
 . "$SCRIPT_DIR/lib/hook-input-cache.sh"
+# HK-4: 분할 후 dispatcher 가 처리하던 정책 평가를 각 sub-hook 이 자체 호출.
+# shellcheck source=./lib/post-edit-policy-gate.sh
+. "$SCRIPT_DIR/lib/post-edit-policy-gate.sh"
+post_edit_policy_gate "post-edit-dod-routing-check"
 
 # PROJECT_DIR resolution: see .claude/hooks/lib/project-dir.sh — 7-tier order
 # (REIN_PROJECT_DIR_OVERRIDE / REIN_PROJECT_DIR / CLAUDE_PLUGIN_ROOT-aware

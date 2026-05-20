@@ -47,6 +47,50 @@ hook_input_load() {
   INPUT=$(cat 2>/dev/null || true)
   FILE_PATHS=""
   FILE_PATH=""
+  # PERF-2: HK-4 분할 환경에서 dispatcher 가 fire 하지 않아 위 cache 가 비활성.
+  # PreToolUse(pre-edit-dod-gate) 가 dump 한 resolver-cache 를 tool_use_id 키로
+  # lookup 해 file_path 등을 복원한다. miss 시 sub-hook 은 자체 resolver fallback.
+  if [ -n "$INPUT" ]; then
+    local _hic_lib_dir
+    _hic_lib_dir="$(dirname "${BASH_SOURCE[0]}")"
+    if [ -f "${_hic_lib_dir}/hook-resolver-cache.sh" ]; then
+      # idempotent source — 이미 로드돼 있으면 no-op
+      # shellcheck source=./hook-resolver-cache.sh
+      . "${_hic_lib_dir}/hook-resolver-cache.sh"
+      local _hic_tool_use_id
+      _hic_tool_use_id=$(printf '%s' "$INPUT" | python3 -c 'import sys,json
+try:
+    d=json.loads(sys.stdin.read())
+    sys.stdout.write(d.get("tool_use_id","") if isinstance(d,dict) else "")
+except Exception:
+    pass' 2>/dev/null)
+      if [ -n "$_hic_tool_use_id" ]; then
+        local _hic_cached
+        if _hic_cached=$(resolver_cache_read "$_hic_tool_use_id" 2>/dev/null); then
+          FILE_PATH=$(printf '%s' "$_hic_cached" | python3 -c 'import sys,json
+try:
+    d=json.loads(sys.stdin.read())
+    sys.stdout.write(d.get("file_path","") if isinstance(d,dict) else "")
+except Exception:
+    pass' 2>/dev/null)
+          FILE_PATHS=$(printf '%s' "$_hic_cached" | python3 -c 'import sys,json
+try:
+    d=json.loads(sys.stdin.read())
+    paths=d.get("file_paths") if isinstance(d,dict) else None
+    if paths:
+        sys.stdout.write("\n".join(paths))
+    else:
+        sys.stdout.write(d.get("file_path","") if isinstance(d,dict) else "")
+except Exception:
+    pass' 2>/dev/null)
+          # cache hit — sub-hook 의 자체 resolver 호출 분기를 회피하도록 flag set
+          if [ -n "$FILE_PATH" ] || [ -n "$FILE_PATHS" ]; then
+            REIN_HOOK_INPUT_CACHE=1
+          fi
+        fi
+      fi
+    fi
+  fi
   return 0
 }
 

@@ -40,6 +40,10 @@ VALIDATOR=$(resolve_helper_script rein-validate-coverage-matrix.py 2>/dev/null |
 
 # shellcheck source=./lib/python-runner.sh
 . "$SCRIPT_DIR/lib/python-runner.sh"
+# HK-4: 분할 후 dispatcher 가 처리하던 정책 평가를 각 sub-hook 이 자체 호출.
+# shellcheck source=./lib/post-edit-policy-gate.sh
+. "$SCRIPT_DIR/lib/post-edit-policy-gate.sh"
+post_edit_policy_gate "post-edit-plan-coverage"
 
 # Plan A §2 (GI-path-policy-lib): path classification lives in a shared
 # library. If the library is missing, fail-closed rather than silently

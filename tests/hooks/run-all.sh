@@ -44,6 +44,11 @@ for test_file in \
   "$SCRIPT_DIR/test-project-dir-resolution.sh" \
   "$SCRIPT_DIR/test-post-edit-dispatcher.sh" \
   "$SCRIPT_DIR/test-post-edit-dispatcher-aggregator.sh" \
+  "$SCRIPT_DIR/test-post-edit-dispatcher-deprecated.sh" \
+  "$SCRIPT_DIR/test-post-edit-parallel-entries.sh" \
+  "$SCRIPT_DIR/test-post-edit-aggregator.sh" \
+  "$SCRIPT_DIR/test-post-edit-aggregator-merge.sh" \
+  "$SCRIPT_DIR/test-perf-2-resolver-cache.sh" \
   "$SCRIPT_DIR/test-action-mandate-existing-rules.sh" \
   "$SCRIPT_DIR/test-action-mandate-new-rules.sh" \
   "$SCRIPT_DIR/test-design-plan-coverage-plugin-size.sh" \

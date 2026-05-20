@@ -7,7 +7,8 @@
 #   (1) The 4 old post-write-* hook files must NOT exist under plugins/rein-core/hooks/.
 #   (2) The 4 new post-edit-* hook files MUST exist and be executable.
 #   (3) post-edit-dispatcher.sh must NOT contain any reference to the old names.
-#   (4) The dispatcher must invoke the 4 renamed hooks (end-to-end trace).
+#   (4) hooks.json must register the 4 renamed post-edit-* sub-hooks directly
+#       (Phase 2b HK-4 dispatcher split; replaced the prior dispatcher trace).
 #   (5) rein-policy-loader.py must NOT reference post-write-spec-review-gate
 #       or post-write-dod-routing-check as PROFILE_HOOK_DEFAULTS keys.
 #
@@ -57,59 +58,35 @@ if grep -q 'post-write-spec-review-gate\|post-write-dod-routing-check\|post-writ
 fi
 ok "(3) dispatcher contains no references to old post-write- hook names"
 
-# ── (4) End-to-end: dispatcher invokes the 4 renamed hooks ───────────────────
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+# ── (4) hooks.json registers the 4 renamed sub-hooks directly ────────────────
+# Phase 2b HK-4: post-edit-dispatcher.sh deprecated (단일 entry → sub-hook 직접
+# 등록 분할). 따라서 "dispatcher 가 sub-hook 들을 호출" 검증은 더 이상 의미가
+# 없고, "hooks.json 에 4 renamed sub-hook 이 PostToolUse Edit|Write|MultiEdit
+# matcher 로 직접 등록돼 있는가" 가 본 test (rename 완료) 의 정확한 의도.
+HOOKS_JSON="$HOOKS_DIR/hooks.json"
+[ -f "$HOOKS_JSON" ] || fail "hooks.json missing: $HOOKS_JSON"
 
-SB="$TMP/sb"
-mkdir -p "$SB/.claude/hooks/lib"
-cp "$HOOKS_DIR/lib/python-runner.sh"    "$SB/.claude/hooks/lib/"
-cp "$HOOKS_DIR/lib/hook-input-cache.sh" "$SB/.claude/hooks/lib/"
-cp "$HOOKS_DIR/lib/extract-hook-json.py" "$SB/.claude/hooks/lib/"
-cp "$HOOKS_DIR/lib/aggregator.sh"       "$SB/.claude/hooks/lib/"
-cp "$DISPATCHER"                         "$SB/.claude/hooks/post-edit-dispatcher.sh"
-chmod +x "$SB/.claude/hooks/post-edit-dispatcher.sh"
-
-TRACE="$TMP/trace"
-mkdir -p "$TRACE"
-
-write_shim() {
-  local p="$1" log="$2"
-  cat > "$p" <<EOF
-#!/usr/bin/env bash
-echo "called=\$0" >> "$log"
-EOF
-  chmod +x "$p"
+python3 - "$HOOKS_JSON" <<'PY' || fail "hooks.json registration check failed"
+import json, os, sys
+required = {
+    "post-edit-spec-review-gate.sh",
+    "post-edit-dod-routing-check.sh",
+    "post-edit-design-plan-coverage-rule.sh",
+    "post-edit-routing-procedure-rule.sh",
 }
-
-# Populate all 8 sub-hooks; only the 4 renamed ones are the focus.
-for sub in \
-  post-edit-hygiene.sh \
-  post-edit-review-gate.sh \
-  post-edit-index-sync-inbox.sh \
-  post-edit-spec-review-gate.sh \
-  post-edit-plan-coverage.sh \
-  post-edit-dod-routing-check.sh \
-  post-edit-design-plan-coverage-rule.sh \
-  post-edit-routing-procedure-rule.sh
-do
-  write_shim "$SB/.claude/hooks/$sub" "$TRACE/$sub.log"
-done
-
-PAYLOAD='{"tool_input":{"file_path":"/tmp/example.py"}}'
-echo "$PAYLOAD" | "$SB/.claude/hooks/post-edit-dispatcher.sh" \
-  || fail "dispatcher exited non-zero"
-
-for renamed in \
-  post-edit-spec-review-gate.sh \
-  post-edit-dod-routing-check.sh \
-  post-edit-design-plan-coverage-rule.sh \
-  post-edit-routing-procedure-rule.sh
-do
-  [ -f "$TRACE/$renamed.log" ] \
-    || fail "renamed hook was not called by dispatcher: $renamed"
-done
-ok "(4) dispatcher calls all 4 renamed post-edit-* hooks"
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+found = set()
+for group in data.get("hooks", {}).get("PostToolUse", []):
+    if group.get("matcher", "") != "Edit|Write|MultiEdit":
+        continue
+    for hook in group.get("hooks", []):
+        found.add(os.path.basename(hook.get("command", "")))
+missing = required - found
+if missing:
+    print(f"FAIL: renamed sub-hooks not registered in hooks.json: {sorted(missing)}", file=sys.stderr)
+    sys.exit(1)
+PY
+ok "(4) hooks.json registers all 4 renamed post-edit-* sub-hooks directly"
 
 # ── (5) rein-policy-loader.py must use post-edit- keys ───────────────────────
 LOADER="$PROJECT_DIR/plugins/rein-core/scripts/rein-policy-loader.py"

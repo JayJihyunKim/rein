@@ -25,7 +25,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-HOOK="$PROJECT_DIR/.claude/hooks/session-start-load-trail.sh"
+HOOK="$PROJECT_DIR/plugins/rein-core/hooks/session-start-load-trail.sh"
 
 PASS=0
 FAIL=0
@@ -43,12 +43,16 @@ if [ ! -f "$HOOK" ]; then
 fi
 
 # Helper: build sandbox with trail/dod/, trail/inbox/, trail/daily/, .claude/hooks/lib/.
+# BG-1 (v1.3.0) bootstrap-check: hook early-exits unless both `.rein/project.json`
+# and `trail/index.md` exist. Seed both so .active-dod cleanup logic is reached.
 _mksandbox() {
   local dir
   dir=$(mktemp -d)
   mkdir -p "$dir/trail/dod" "$dir/trail/inbox" "$dir/trail/daily" "$dir/trail/incidents"
-  mkdir -p "$dir/.claude/hooks/lib" "$dir/.claude/cache"
-  cp "$PROJECT_DIR/.claude/hooks/lib/portable.sh" "$dir/.claude/hooks/lib/" 2>/dev/null
+  mkdir -p "$dir/.claude/hooks/lib" "$dir/.claude/cache" "$dir/.rein"
+  cp "$PROJECT_DIR/plugins/rein-core/hooks/lib/portable.sh" "$dir/.claude/hooks/lib/" 2>/dev/null
+  printf '%s' '{"mode":"plugin","scope":"project","version":"1.3.3"}' > "$dir/.rein/project.json"
+  printf '# trail/index.md\n' > "$dir/trail/index.md"
   echo "$dir"
 }
 

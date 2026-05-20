@@ -155,6 +155,43 @@ if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
 
+# PERF-2: PostToolUse 분할 sub-hook 들이 같은 tool_use_id 키로 resolver 결과를
+# 재사용할 수 있도록 cache 에 dump. cache miss 는 sub-hook 자체 fallback 으로 처리.
+#
+# Cache leak 가능성 (advisory, 2026-05-20 Phase 2b): 본 write 가 모든 gate check
+# 통과 전에 발생 — DoD 부재 / routing 미승인 등으로 본 gate 가 exit 2 차단할 경우
+# PostToolUse 가 fire 되지 않아 aggregator cleanup 이 발생하지 않으며 cache 가
+# stale 로 남을 수 있음. 별 cycle 의 GC 후속 (SessionEnd hook 또는 cron) 으로
+# 24h+ stale entry 정리 검토. 본 cycle 에선 leak 가능성만 명시.
+if [ -f "$SCRIPT_DIR/lib/hook-resolver-cache.sh" ]; then
+  # shellcheck source=./lib/hook-resolver-cache.sh
+  . "$SCRIPT_DIR/lib/hook-resolver-cache.sh"
+  _perf2_tool_use_id=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" --field tool_use_id --default '' 2>/dev/null)
+  if [ -n "$_perf2_tool_use_id" ]; then
+    _perf2_payload=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" -c 'import sys,json
+try:
+    data = json.loads(sys.stdin.read())
+    if not isinstance(data, dict):
+        sys.exit(0)
+    out = {"file_path": (data.get("tool_input") or {}).get("file_path", "")}
+    # MultiEdit 의 경우 file_paths 도 같이 dump
+    edits = (data.get("tool_input") or {}).get("edits") or []
+    if isinstance(edits, list):
+        paths = []
+        for e in edits:
+            if isinstance(e, dict) and e.get("file_path"):
+                paths.append(e["file_path"])
+        if paths:
+            out["file_paths"] = paths
+    sys.stdout.write(json.dumps(out, ensure_ascii=False))
+except Exception:
+    pass' 2>/dev/null)
+    if [ -n "$_perf2_payload" ]; then
+      resolver_cache_write "$_perf2_tool_use_id" "$_perf2_payload" || true
+    fi
+  fi
+fi
+
 # Path normalize — 그룹 6 P4 (2026-04-25). 묶음 A 의 PYTHON_RUNNER
 # os.path.normpath 패턴 재사용 (.claude/hooks/post-edit-review-gate.sh).
 # URL-encoded / `//` / `/./` 세그먼트 포함 경로 edge case 보호. 정규화 전/후

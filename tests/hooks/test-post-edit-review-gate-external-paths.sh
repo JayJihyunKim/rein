@@ -28,7 +28,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-HOOK="$PROJECT_DIR/.claude/hooks/post-edit-review-gate.sh"
+HOOK="$PROJECT_DIR/plugins/rein-core/hooks/post-edit-review-gate.sh"
 PENDING="$PROJECT_DIR/trail/dod/.review-pending"
 
 [ -f "$HOOK" ] || { echo "FAIL: hook missing at $HOOK" >&2; exit 1; }

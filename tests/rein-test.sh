@@ -1,35 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# rein CLI surface 회귀 안전망.
+#
+# 본 runner 는 `scripts/rein.sh` 의 **현재 dispatch 표면** 만 검증한다.
+# v1.0.0 에서 제거된 `rein new` / scaffold 시대의 `rein merge` 산출물 검증은
+# 의도적으로 제외 — bootstrap 산출물 검증은 `tests/hooks/` + `tests/integration/`
+# suite 가 담당. 본 파일은 rein.sh 자체의 dispatch + version 보고 + plugin
+# redirect + job subcmd 분기만 책임진다.
+#
+# 갱신 회고: trail/dod/dod-2026-05-20-cycle-x1-scaffold-cleanup.md
+
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REIN_CLI="$SCRIPT_DIR/scripts/rein.sh"
-TEST_DIR="$(mktemp -d)"
 PASS=0
 FAIL=0
-
-cleanup() {
-  rm -rf "$TEST_DIR"
-}
-trap cleanup EXIT
 
 # ---------------------------------------------------------------------------
 # Assertion helpers
 # ---------------------------------------------------------------------------
-
-assert_eq() {
-  local description="$1"
-  local expected="$2"
-  local actual="$3"
-  if [[ "$expected" == "$actual" ]]; then
-    echo "  PASS: $description"
-    PASS=$((PASS + 1))
-  else
-    echo "  FAIL: $description"
-    echo "        expected: $expected"
-    echo "        actual:   $actual"
-    FAIL=$((FAIL + 1))
-  fi
-}
 
 assert_contains() {
   local description="$1"
@@ -42,45 +31,6 @@ assert_contains() {
     echo "  FAIL: $description"
     echo "        expected to contain: $needle"
     echo "        actual output:       $haystack"
-    FAIL=$((FAIL + 1))
-  fi
-}
-
-assert_file_exists() {
-  local description="$1"
-  local path="$2"
-  if [[ -f "$path" ]]; then
-    echo "  PASS: $description"
-    PASS=$((PASS + 1))
-  else
-    echo "  FAIL: $description"
-    echo "        file not found: $path"
-    FAIL=$((FAIL + 1))
-  fi
-}
-
-assert_dir_exists() {
-  local description="$1"
-  local path="$2"
-  if [[ -d "$path" ]]; then
-    echo "  PASS: $description"
-    PASS=$((PASS + 1))
-  else
-    echo "  FAIL: $description"
-    echo "        directory not found: $path"
-    FAIL=$((FAIL + 1))
-  fi
-}
-
-assert_file_missing() {
-  local description="$1"
-  local path="$2"
-  if [[ ! -e "$path" ]]; then
-    echo "  PASS: $description"
-    PASS=$((PASS + 1))
-  else
-    echo "  FAIL: $description"
-    echo "        expected to be absent but found: $path"
     FAIL=$((FAIL + 1))
   fi
 }
@@ -107,6 +57,8 @@ echo ""
 echo "Test: --help"
 help_output="$("$REIN_CLI" --help 2>&1 || true)"
 assert_contains "--help output contains 'Usage'" "Usage" "$help_output"
+assert_contains "--help advertises 'rein update'" "rein update" "$help_output"
+assert_contains "--help advertises 'rein job'"    "rein job"    "$help_output"
 
 # ---------------------------------------------------------------------------
 # Test: --version
@@ -117,99 +69,98 @@ version_output="$("$REIN_CLI" --version 2>&1 || true)"
 assert_contains "--version output contains 'rein'" "rein" "$version_output"
 
 # ---------------------------------------------------------------------------
-# Test: new command
+# Test: update redirects to plugin update message
 # ---------------------------------------------------------------------------
 echo ""
-echo "Test: new command"
-new_dir="$TEST_DIR/new-command-test"
-mkdir -p "$new_dir"
-# Run inside the temp dir so the project is created there
-(
-  cd "$new_dir"
-  "$REIN_CLI" new test-project > /dev/null 2>&1
-)
-project_dir="$new_dir/test-project"
-assert_file_exists  ".claude/CLAUDE.md exists"                          "$project_dir/.claude/CLAUDE.md"
-assert_file_exists  "AGENTS.md exists"                                  "$project_dir/AGENTS.md"
-assert_file_exists  ".claude/hooks/pre-edit-dod-gate.sh exists"        "$project_dir/.claude/hooks/pre-edit-dod-gate.sh"
-assert_dir_exists   ".claude/skills/ directory exists"                  "$project_dir/.claude/skills"
-assert_dir_exists   "trail/inbox/ directory exists"                       "$project_dir/trail/inbox"
-assert_file_exists  "trail/inbox/.gitkeep exists"                         "$project_dir/trail/inbox/.gitkeep"
-assert_file_missing ".claude/settings.local.json should not exist"      "$project_dir/.claude/settings.local.json"
-assert_file_missing ".claude/plans/ should not exist"                   "$project_dir/.claude/plans"
-
-# ---------------------------------------------------------------------------
-# Test: new command creates security layer files
-# ---------------------------------------------------------------------------
-echo ""
-echo "Test: new command creates security layer files"
-assert_file_exists  ".claude/security/profile.yaml exists"             "$project_dir/.claude/security/profile.yaml"
-assert_file_exists  ".claude/security/maturity.yaml exists"            "$project_dir/.claude/security/maturity.yaml"
-assert_file_exists  ".claude/security/rules/base.md exists"            "$project_dir/.claude/security/rules/base.md"
-assert_file_exists  ".claude/agents/security-reviewer.md exists"       "$project_dir/.claude/agents/security-reviewer.md"
-assert_file_missing ".claude/security/rules/standard.md should not exist" "$project_dir/.claude/security/rules/standard.md"
-assert_file_missing ".claude/security/rules/strict.md should not exist"   "$project_dir/.claude/security/rules/strict.md"
-
-# ---------------------------------------------------------------------------
-# Test: new fails if dir exists
-# ---------------------------------------------------------------------------
-echo ""
-echo "Test: new fails if dir exists"
-collision_dir="$TEST_DIR/collision-test"
-mkdir -p "$collision_dir"
-mkdir -p "$collision_dir/existing-project"
+echo "Test: update redirects to plugin update"
 set +e
-( cd "$collision_dir" && "$REIN_CLI" new existing-project > /dev/null 2>&1 )
-collision_exit=$?
+update_output="$("$REIN_CLI" update 2>&1)"
+update_exit=$?
 set -e
-assert_exit_code "exit code is 1 when target dir already exists" 1 "$collision_exit"
+assert_exit_code "update exits 0 (informational redirect)" 0 "$update_exit"
+assert_contains "update message points to 'claude plugin update rein'" "claude plugin update rein" "$update_output"
 
 # ---------------------------------------------------------------------------
-# Test: merge command
+# Test: merge is alias of update redirect
 # ---------------------------------------------------------------------------
 echo ""
-echo "Test: merge command"
-merge_dir="$TEST_DIR/merge-test"
-mkdir -p "$merge_dir"
-(
-  cd "$merge_dir"
-  git init -q
-  git config user.email "test@example.com"
-  git config user.name "Test"
-  "$REIN_CLI" merge > /dev/null 2>&1
-)
-assert_file_exists ".claude/CLAUDE.md exists after merge"               "$merge_dir/.claude/CLAUDE.md"
-assert_file_exists ".claude/hooks/pre-edit-dod-gate.sh exists"         "$merge_dir/.claude/hooks/pre-edit-dod-gate.sh"
-assert_dir_exists  "trail/inbox/ directory exists after merge"            "$merge_dir/trail/inbox"
-
-# ---------------------------------------------------------------------------
-# Test: merge fails outside git repo
-# ---------------------------------------------------------------------------
-echo ""
-echo "Test: merge fails outside git repo"
-no_git_dir="$TEST_DIR/no-git-test"
-mkdir -p "$no_git_dir"
+echo "Test: merge redirects to plugin update"
 set +e
-( cd "$no_git_dir" && "$REIN_CLI" merge > /dev/null 2>&1 )
+merge_output="$("$REIN_CLI" merge 2>&1)"
 merge_exit=$?
 set -e
-assert_exit_code "merge exits with code 1 outside a git repo" 1 "$merge_exit"
+assert_exit_code "merge exits 0 (informational redirect)" 0 "$merge_exit"
+assert_contains "merge message points to 'claude plugin update rein'" "claude plugin update rein" "$merge_output"
 
 # ---------------------------------------------------------------------------
-# Test: update is alias for merge
+# Test: unknown command exits 1
 # ---------------------------------------------------------------------------
 echo ""
-echo "Test: update is alias for merge"
-update_dir="$TEST_DIR/update-test"
-mkdir -p "$update_dir"
-(
-  cd "$update_dir"
-  git init -q
-  git config user.email "test@example.com"
-  git config user.name "Test"
-  "$REIN_CLI" update > /dev/null 2>&1
-)
-assert_file_exists ".claude/CLAUDE.md exists after update" "$update_dir/.claude/CLAUDE.md"
+echo "Test: unknown command exits 1"
+set +e
+( "$REIN_CLI" definitely-not-a-real-command > /dev/null 2>&1 )
+unknown_exit=$?
+set -e
+assert_exit_code "unknown command exit code is 1" 1 "$unknown_exit"
+
+# ---------------------------------------------------------------------------
+# Test: rein new is removed (scaffold era artifact)
+# ---------------------------------------------------------------------------
+# `rein new` was removed in v1.0.0 — plugin-install replaces local scaffolding.
+# This test pins the removal so a future regression that re-adds a `new` case
+# trips a CLI-surface review instead of silently shipping.
+echo ""
+echo "Test: rein new is no longer dispatched"
+set +e
+( "$REIN_CLI" new whatever > /dev/null 2>&1 )
+new_exit=$?
+set -e
+assert_exit_code "'new' is treated as unknown command (exit 1)" 1 "$new_exit"
+
+# ---------------------------------------------------------------------------
+# Test: job requires a subcommand
+# ---------------------------------------------------------------------------
+echo ""
+echo "Test: job requires a subcommand"
+set +e
+( "$REIN_CLI" job > /dev/null 2>&1 )
+job_no_sub_exit=$?
+set -e
+assert_exit_code "'job' with no subcommand exits 1" 1 "$job_no_sub_exit"
+
+# ---------------------------------------------------------------------------
+# Test: job rejects unknown subcommands
+# ---------------------------------------------------------------------------
+echo ""
+echo "Test: job rejects unknown subcommands"
+set +e
+( "$REIN_CLI" job not-a-subcmd > /dev/null 2>&1 )
+job_bad_sub_exit=$?
+set -e
+assert_exit_code "'job not-a-subcmd' exits 1" 1 "$job_bad_sub_exit"
+
+# ---------------------------------------------------------------------------
+# Test: job list is dispatchable (smoke — output may be empty in a clean env)
+# ---------------------------------------------------------------------------
+echo ""
+echo "Test: job list is dispatchable"
+set +e
+list_output="$("$REIN_CLI" job list 2>&1)"
+list_exit=$?
+set -e
+assert_exit_code "'job list' exits 0" 0 "$list_exit"
+
+# ---------------------------------------------------------------------------
+# Test: no-arg invocation prints usage and exits 1
+# ---------------------------------------------------------------------------
+echo ""
+echo "Test: no-arg invocation"
+set +e
+no_arg_output="$("$REIN_CLI" 2>&1)"
+no_arg_exit=$?
+set -e
+assert_exit_code "no-arg invocation exits 1" 1 "$no_arg_exit"
+assert_contains  "no-arg output contains 'Usage'" "Usage" "$no_arg_output"
 
 # ---------------------------------------------------------------------------
 # Summary

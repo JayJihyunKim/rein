@@ -12,6 +12,16 @@
 
 set -e
 
+# Phase 2b (2026-05-20): post-edit-dispatcher 가 deprecated — hooks.json 에서
+# 등록 해제됨. dispatcher 의 sub-hook 순차 호출 / cache export / aggregator 로직
+# 은 Claude Code 의 native entry-level 평가로 대체. 본 test (A~G fixture) 는
+# dispatcher 의 runtime 행동을 검증하던 회귀 test 였으나 deprecation 상태에서는
+# fixture 가 적용되지 않는다. 새 검증은 `test-post-edit-dispatcher-deprecated.sh`
+# (deprecation marker + early exit 0) + `test-post-edit-parallel-entries.sh`
+# (hooks.json 8 sub-hook 별개 entry) 가 담당.
+echo "test-post-edit-dispatcher: SKIPPED (Phase 2b — dispatcher deprecated; see test-post-edit-dispatcher-deprecated.sh + test-post-edit-parallel-entries.sh)"
+exit 0
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DISPATCHER="$PROJECT_DIR/plugins/rein-core/hooks/post-edit-dispatcher.sh"
