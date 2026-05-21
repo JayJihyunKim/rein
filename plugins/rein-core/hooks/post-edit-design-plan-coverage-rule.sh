@@ -35,6 +35,25 @@ if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/post-edit-policy-gate.sh" ]; then
   post_edit_policy_gate "post-edit-design-plan-coverage-rule"
 fi
 
+# X4.C.3 fast-path skip — design memo §8.4. effective_mode == answer 는
+# Stop 직후 PostToolUse(Edit) 가 fire 된 이상 신호 → envelope skip.
+# fail-soft gate: state.json 부재 (greenfield) / malformed JSON / unknown
+# schema_version / state-machine.sh 부재 / lock 실패 → legacy path (정상 inject).
+# state_is_valid 로 게이트해, read_state 가 corrupt/unknown-schema state 에도
+# echo 하는 default "answer" 를 envelope-skip 신호로 오인하지 않는다
+# (codex Round 1 HIGH = state 부재, Round 2 HIGH = malformed / unknown schema).
+if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/state-machine.sh" ]; then
+  if . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/state-machine.sh" 2>/dev/null; then
+    # read_effective_mode prints "answer" AND returns non-zero on lock-acquire
+    # failure → trust the captured mode only when the read succeeds (exit 0).
+    # A failed read falls through to legacy inject (codex Round 3 HIGH).
+    if state_is_valid && _fastpath_mode=$(read_effective_mode 2>/dev/null) \
+        && [ "$_fastpath_mode" = "answer" ]; then
+      exit 0
+    fi
+  fi
+fi
+
 # Hook input on stdin (Claude Code JSON envelope). Extract file_path with
 # the same fallback chain used by post-edit-plan-coverage.sh so both hooks
 # agree on the path they care about:

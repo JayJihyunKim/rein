@@ -1,10 +1,23 @@
-reviewed_at: 2026-05-20T09:43:29Z
-reviewer: light-tier-auto
-cycle: 2026-05-20-integrated-roadmap
-active_dod: trail/dod/dod-2026-05-20-integrated-roadmap.md
-security_tier: light
-approved_by_user: true
-scope: docs-only-master-plan-integration-no-secret-no-input-no-exec
-files_reviewed: 4
-findings: none
+reviewed_at: 2026-05-21T00:00:00Z
+reviewer: rein:security-reviewer
+cycle: x4-c-3-hook-fast-path-skip
+active_dod: trail/dod/dod-2026-05-21-cycle-x4-c-3-hook-fast-path-skip.md
+security_tier: standard
+security_level: base
+scope: state-machine.sh (state_is_valid + lock-timeout env) + 4 hook fast-path (pre-edit-dod-gate, post-edit-design-plan-coverage-rule, post-edit-routing-procedure-rule, post-edit-spec-review-gate) + rein-check-plugin-drift.py tempdir isolation + 2 test files
+files_reviewed: 7
+findings_critical: 0
+findings_high: 0
+findings_medium: 0
+findings_low: 0
+findings_info: 0
 resolution: passed
+notes: |
+  6-focus review (standard tier, surface = shell state-machine + filesystem markers + Python subprocess; secrets/SQLi/XSS/weak-hash base rules N/A).
+  (1) Injection/traversal: all Python invocations pass data via sys.argv / open(sys.argv[1]); no eval/exec/os.system; heredocs single-quoted (<<'PY') so no bash expansion of script body. dirty_files match is exact string equality (d.get("path")==target) on the already-normalized FILE_PATH — no path-resolve amplification, traversal string only matches a byte-identical (pre-validated) path. PROBE confirmed.
+  (2) Fast-path does NOT bypass blocking gates: in pre-edit-dod-gate.sh the skip sits at line 536, AFTER governance(286)/incident-pending(289-334)/spec-review-pending(380-409)/routing-approved_by_user(413-512) all run and exit 2. Skip target = coverage validator subprocess (Tier1 §4.2) only. The two envelope hooks never exit 2 (advisory additionalContext inject only) — routing approval enforcement lives in pre-edit gate, not the skipped post-edit hook.
+  (3) Test-seam env vars safe: REIN_STATE_LOCK_TIMEOUT_MS used in `[ -ge ]` (test builtin, NOT (( )) arith-eval) — PROBE with $(touch PWNED) payload did NOT execute (no command substitution in test operands; only "integer expression expected" + false). REIN_PROJECT_DIR_OVERRIDE is a path source, never eval'd. Default ceiling 10000 preserved.
+  (4) tempfile.TemporaryDirectory isolation: context-managed; early `return` inside with-block triggers __exit__ -> no leak. mkdtemp 0700 + unique prefix, env-pinned per-subprocess only (no symlink/race surface). Drift checker passes (exit 0).
+  (5) Fail-soft conservative: state absent/malformed/unknown-schema/lib-absent/lock-fail -> legacy path (gate/validator/envelope preserved). state_is_valid gates against read_state's default "answer" being mistaken for a real mode. 10/10 adversarial tests (T5-T10 cover every fall-through axis incl. both lock backends) PASS.
+  (6) Info-1 grep -qxF hardening verified: post-edit-spec-review-gate dedup uses `grep -qxF -- "path=$ABS"` (fixed-string + whole-line + end-of-options) replacing prior BRE `^path=$ABS$`, neutralizing regex metachars and leading-dash in $ABS. Body re-write avoided on dedup, NOTICE preserved, no new defect. T4 PASS.
+  Evidence: bash -n clean on 5 hooks; test-state-fast-path-skip.sh 10/10 PASS; rein-check-plugin-drift.py OK exit 0.

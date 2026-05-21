@@ -533,6 +533,42 @@ if [ "$DOD_FOUND" = true ]; then
     exit 0
   fi
 
+  # X4.C.3 fast-path skip — design memo §8.4 / §3.4. effective_mode ==
+  # source_edit + FILE_PATH 가 state.json.dirty_files 에 이미 등재되어 있으면
+  # validator subprocess (~500ms) 를 skip 하고 직전 marker 상태를 그대로 유지.
+  # 보수적 skip — design memo §6.2 R-7 risk mitigation (false-positive 잘못 skip
+  # 위험 인지). state.json 부재 (greenfield) / malformed JSON / unknown
+  # schema_version / state-machine.sh 부재 / lock 실패 → legacy validator path.
+  # state_is_valid 로 게이트해, corrupt/unknown-schema state 의 default mode 가
+  # fast-path 분기를 trigger 하지 않도록 한다 (design memo §2.3 legacy fallback).
+  if [ -f "$SCRIPT_DIR/lib/state-machine.sh" ]; then
+    if . "$SCRIPT_DIR/lib/state-machine.sh" 2>/dev/null; then
+      # read_effective_mode prints the mode but returns non-zero on lock-acquire
+      # failure → trust it only when the read succeeds (codex Round 3 HIGH);
+      # a failed read falls through to the legacy validator path.
+      if state_is_valid && _fp_mode=$(read_effective_mode 2>/dev/null) \
+          && [ "$_fp_mode" = "source_edit" ]; then
+        _fp_state=$(read_state 2>/dev/null || echo "{}")
+        _fp_match=$("${PYTHON_RUNNER[@]}" -c '
+import json, sys
+try:
+    state = json.loads(sys.argv[1])
+except Exception:
+    print("no"); sys.exit(0)
+target = sys.argv[2]
+for d in state.get("dirty_files", []) or []:
+    if isinstance(d, dict) and d.get("path") == target:
+        print("yes"); sys.exit(0)
+print("no")' "$_fp_state" "$FILE_PATH" 2>/dev/null || echo "no")
+        if [ "$_fp_match" = "yes" ]; then
+          echo "NOTICE: pre-edit-dod-gate state.fast-path skip — file=$FILE_PATH (mode=source_edit, dirty_files hit, validator subprocess skipped)" >&2
+          touch "$SRC_EDIT_MARKER" 2>/dev/null
+          exit 0
+        fi
+      fi
+    fi
+  fi
+
   # RES-1: lazy-resolve VALIDATOR_PATH via plugin-aware helper. The
   # resolver picks ${CLAUDE_PLUGIN_ROOT}/scripts/<name> first, then
   # ${PROJECT_DIR}/scripts/<name> as fallback. Without this, fresh

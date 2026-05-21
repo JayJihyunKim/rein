@@ -1,0 +1,96 @@
+[NON_INTERACTIVE] [EFFORT:high]
+
+Round 7 — pre-commit working-tree review for cycle X4.C.3.
+
+## 리뷰 대상 (pre-commit working-tree review)
+
+rein 은 코드 변경을 커밋 전에 리뷰한다 (stamp 없이 `git commit` 차단 → 변경은 이
+리뷰 PASS 까지 working tree 에만 존재). `diff_base..HEAD` 가 trail housekeeping 만
+담는 것은 정상. **working tree (`git diff`) 를 리뷰 대상으로, claim audit 도
+working tree 기준 (pre-commit)** 으로 평가해 달라.
+
+## Round 6 HIGH (class fix 완성 — design §2 contract 전수 검증)
+
+Round 6 finding: `state_is_valid` 가 absent `last_drain_seq`→0, absent
+`dirty_files`→[] 로 default 처리해 `{"schema_version":1,"mode":"answer"}` 같은
+**required 필드 누락** state 가 통과 → skip. design memo §2 가 이 필드들을 required
+로 명시.
+
+**Fix (state-machine.sh `state_is_valid`)** — design memo §2 schema-v1 contract 를
+전수 검증하도록 교체:
+- **required (present + well-typed)**: `schema_version`==1, `mode`∈enum(§3 4값),
+  `updated_at`:str, `dirty_files`:list, `last_drain_seq`:int(bool 제외)
+- **optional (present 시 type-check)**: `command_class_cache`:dict, `risk_score`:int
+
+design §2 가 required/optional 을 명시적으로 구분하므로, 본 검증은 그 경계와 1:1.
+required 중 하나라도 누락/오타입 → legacy. optional 은 없어도 OK, 있으면 검증.
+더 좁히거나(이미 §2 required 전부) 넓힐(optional 은 §2 가 명시적 optional) 여지 없음.
+
+**테스트 보강**:
+- `seed_state` 헬퍼가 완전한 §2 valid state (updated_at 포함) 생성 → T1/T2/T3/T9 의
+  fast-path 가 정상 engage.
+- T10 을 §2 contract 전수 케이스로 확장: bad last_drain_seq(R4), 비-array
+  dirty_files(R4), 비-enum mode(R5), missing mode/dirty_files/last_drain_seq/
+  updated_at(R6) → 각 케이스가 한 축만 깨뜨려 격리. 모두 두 envelope hook legacy emit.
+
+## "answer" fallback 부류 — 종결 논증 (Round 1~6 누적)
+
+read_effective_mode (fast-path 가 신뢰하는 유일 함수, 호출처 3 hook 모두
+`state_is_valid && read 성공 &&` 게이트) 가 "answer" 를 잘못 내던 모든 경로:
+
+| 경로 | 종결 |
+|---|---|
+| state 파일 부재 (R1) | state_is_valid: `[ -f STATE_FILE ]` |
+| malformed JSON (R2) | state_is_valid: json.load + dict |
+| unknown schema_version (R2) | state_is_valid: schema_version==1 |
+| lock 실패 → "answer"+rc2 (R3) | hook capture 가 exit status 신뢰 |
+| python 부재 → "answer"+rc0 | state_is_valid: `_state_machine_python` 실패→rc1 |
+| schema-v1 + 필드 타입 except (R4) | state_is_valid: last_drain_seq int / dirty_files list |
+| schema-v1 + 비-enum/whitespace mode word-split (R5) | state_is_valid: mode∈enum |
+| schema-v1 + required 필드 누락 (R6) | state_is_valid: §2 required 전수 present |
+
+§2-valid state 에서 read_effective_mode 는 (lock OK 시) 항상 단일-단어 enum mode 를
+clean parse 로 rc0 반환 → fast-path 는 genuine mode 일 때만 skip. read_effective_mode
+의 모든 fallback 진입점이 (a) state_is_valid 사전 차단 또는 (b) exit-status 신뢰로
+무력화됨. 남은 누출 경로가 있다면 그것은 §2 검증으로 막을 수 없는 종류 (= 접근법
+자체의 한계) 일 것이므로 명시 요청.
+
+## 변경 파일 (working tree)
+
+- `plugins/rein-core/hooks/lib/state-machine.sh` — `state_is_valid` = design §2
+  contract 전수 검증 + `REIN_STATE_LOCK_TIMEOUT_MS` test-seam (기본 10000)
+- `plugins/rein-core/hooks/post-edit-design-plan-coverage-rule.sh` /
+  `post-edit-routing-procedure-rule.sh` / `pre-edit-dod-gate.sh` — fast-path:
+  `state_is_valid && read 성공 && mode=<target>` 일 때만 skip
+- `plugins/rein-core/hooks/post-edit-spec-review-gate.sh` — marker dedup (state-independent)
+- `tests/hooks/test-state-fast-path-skip.sh` — T1~T10 (seed_state §2-complete, T10 전수)
+- `tests/hooks/run-all.sh` — test 등록
+- `tests/hooks/test-post-edit-design-plan-coverage-rule.sh`, `scripts/rein-check-plugin-drift.py`
+  — project-dir 격리 (live state.json 누출 방지)
+
+## 검증 결과 (working tree, 직접 재실행)
+
+- `bash tests/hooks/test-state-fast-path-skip.sh` → 10 passed, 0 failed
+- `bash tests/hooks/test-state-machine.sh` → 6 passed
+- `bash tests/hooks/test-state-machine-integration.sh` → 9 passed
+- `bash tests/hooks/run-all.sh` → ALL SUITES PASSED
+- `bash tests/rein-test.sh` → 15 passed
+- `python3 scripts/rein-check-plugin-drift.py` → rc=0
+- 수동 매트릭스: required 필드 누락(각각) / 필드 타입 깨짐 / 비-enum mode / optional
+  필드 깨짐 → 전부 EMIT(legacy). complete valid (optional 유무 무관) mode=answer → SKIP.
+
+## Verify focus (Round 7)
+
+1. **Round 6 HIGH 해소** — required 필드 누락 state 에서 두 envelope hook 이 legacy
+   emit (state_is_valid §2 required 전수). T10 검증.
+2. **남은 누출 경로** — §2-valid state 가 read_effective_mode 에서 wrong mode 를
+   내거나, 비-§2-valid state 가 state_is_valid 를 통과하는 경로가 있는가?
+3. **회귀 없음** — complete valid mode=answer → skip (T2/T3), R1~R6 legacy 경로 전부.
+
+## 검토 항목
+
+- (a) Code Defects — Round 6 HIGH 해소 + 잔존 누출 경로 + 회귀
+- (b) Design Alignment — state_is_valid 가 design memo §2 required/optional + §3 mode enum 과 일치
+- (c) Test Alignment — T10 이 §2 contract 위반 전수를 legacy 로 검증
+- (d) Claim Audit — working tree 기준 (pre-commit)
+- **FINAL_VERDICT: <PASS|NEEDS-FIX|REJECT>**

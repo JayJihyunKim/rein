@@ -27,7 +27,13 @@ PLUGIN_ROOT="$PROJECT_DIR/plugins/rein-core"
 [ -x "$HOOK" ] || { echo "FAIL: $HOOK not executable" >&2; exit 1; }
 
 OUT="$(mktemp)"
-trap 'rm -f "$OUT"' EXIT
+# X4.C.3: the hook fast-path-skips its envelope when the resolved project's
+# .rein/state.json reports mode=answer. Pin an isolated (state-absent) project
+# dir so these envelope-contract assertions exercise the legacy path
+# deterministically instead of inheriting the maintainer repo's live state.json.
+SANDBOX="$(mktemp -d)"
+export REIN_PROJECT_DIR_OVERRIDE="$SANDBOX"
+trap 'rm -rf "$OUT" "$SANDBOX"' EXIT
 
 invoke() {
   local input="$1"

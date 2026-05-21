@@ -51,206 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-bootstrap-gate.sh"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-safety-guard.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(git commit *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-test-commit-gate.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(pytest *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-test-commit-gate.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(jest *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-test-commit-gate.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(vitest *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-test-commit-gate.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(mocha *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-test-commit-gate.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(npm run test *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-test-commit-gate.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(npm test *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-test-commit-gate.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(yarn test *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-test-commit-gate.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(pnpm test *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-test-commit-gate.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(python -m pytest *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-test-commit-gate.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(npx jest *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-test-commit-gate.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(npx vitest *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-test-commit-gate.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(bash tests/*)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-test-commit-gate.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(pytest)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(pytest *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(npm test)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(npm test *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(yarn test)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(yarn test *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(pnpm test)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(pnpm test *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(npm run test)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(npm run test *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(cargo build)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(cargo build *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(docker build)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(docker build *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(playwright)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(playwright *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(make)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(make *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(tsc)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(tsc *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(python -m pytest)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(python -m pytest *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(npx jest)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(npx jest *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(npx vitest)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
-          },
-          {
-            "type": "command",
-            "if": "Bash(npx vitest *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-bash-rules.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-dispatcher.sh"
           }
         ]
       },
@@ -342,7 +143,25 @@
         "hooks": [
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-state-journal.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-aggregator.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-bash-state-journal.sh"
           }
         ]
       },
@@ -362,6 +181,14 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-session-gate.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-state-journal.sh"
           }
         ]
       }

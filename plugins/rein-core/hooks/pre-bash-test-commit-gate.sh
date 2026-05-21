@@ -350,11 +350,211 @@ revalidate_coverage_marker() {
   esac
 }
 
+# X3.B.2: Area B plan-coverage deferral — flush .plan-coverage-dirty *before*
+# the legacy BLOCK_MARKERS scan so dirty entries surface as the existing
+# .coverage-mismatch marker (which BLOCK_MARKERS then handles via the standard
+# P2 path). design ref: docs/specs/2026-05-20-area-b-post-edit-deferral.md §5.2
+# + §7 Scope ID 2 (commit-gate-flushes-plan-coverage-dirty-list-...).
+#
+# Returns:
+#   0 — all validated entries PASSed, .processing removed
+#   1 — at least one FAIL → .coverage-mismatch has the entry, .processing removed
+#       (caller falls through to BLOCK_MARKERS which fires the existing P2 deny)
+#   2 — cannot validate anything (deleted-only dirty list, or infra failure) →
+#       caller MUST block conservatively
+#
+# Atomic rename protocol (§5.1.r1):
+#   1. mv .plan-coverage-dirty → .plan-coverage-dirty.processing (atomic)
+#   2. New post-edit appends create a fresh .plan-coverage-dirty (disjoint)
+#   3. flush only reads .processing
+#   4. On PASS/FAIL terminal state, .processing is removed
+#   5. On crash mid-flush, .processing remains stale → next flush detects and
+#      retries (no age-based GC; stale data still needs processing)
+flush_plan_coverage_dirty() {
+  local dirty="$PROJECT_DIR/trail/dod/.plan-coverage-dirty"
+  local processing="$PROJECT_DIR/trail/dod/.plan-coverage-dirty.processing"
+  local marker="$PROJECT_DIR/trail/dod/.coverage-mismatch"
+  local lock_dir="$PROJECT_DIR/trail/dod/.plan-coverage-dirty.lock"
+  local lock_timeout_ms=2000
+  local lock_held=0
+
+  # codex Round 1 HIGH fix — acquire the same mkdir-based mutex the
+  # post-edit hook uses for its append. This serializes our `mv` with
+  # concurrent post-edit appends so a writer's open()→write() window
+  # cannot land in the just-renamed `.processing` inode and then be
+  # removed when flush completes.
+  local waited_ms=0
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    if [ "$waited_ms" -ge "$lock_timeout_ms" ]; then
+      # Lock contended beyond budget — fail-closed. A 2s window is far
+      # beyond any legitimate hook execution; persistent contention almost
+      # certainly means a stale lock dir from a crashed hook. Manual
+      # cleanup (rmdir "$lock_dir") is required.
+      echo "[rein] flush: dirty-list lock contended >${lock_timeout_ms}ms ($lock_dir). Possible stale lock from a crashed prior hook — rmdir manually if no other hook is running, then retry." >&2
+      return 2
+    fi
+    sleep 0.05
+    waited_ms=$((waited_ms + 50))
+  done
+  lock_held=1
+  # Lock-released-on-return helper — every path below MUST release before
+  # returning. We use explicit `rmdir "$lock_dir"` rather than a trap to
+  # keep this readable; the few return points are clearly visible.
+
+  # Step 1: stage everything that is currently dirty into `.processing` as a
+  # single set. codex Round 2 HIGH fix — a stale `.processing` (crashed
+  # prior flush) MUST NOT mask a fresh `.plan-coverage-dirty` from THIS
+  # commit's invocations. We hold the lock so no concurrent append can
+  # slip between the merge steps.
+  #
+  # Three input cases:
+  #   - dirty present, processing absent          → mv dirty → processing
+  #   - dirty absent,  processing present (stale) → use as-is
+  #   - both present                              → append dirty into
+  #     processing (preserving stale entries) then rm dirty
+  #
+  # In all three cases, the post-merge `.processing` is the complete set
+  # of dirty paths for this flush invocation, and `.plan-coverage-dirty`
+  # is absent so subsequent post-edit appends create a brand-new file.
+  if [ -f "$dirty" ]; then
+    if [ -f "$processing" ]; then
+      # Merge fresh dirty into stale processing. Order does not matter —
+      # awk dedup at Step 4 produces a unique set regardless.
+      if ! cat "$dirty" >> "$processing" 2>/dev/null; then
+        echo "[rein] flush: failed to merge .plan-coverage-dirty into .processing (filesystem error). Re-run after checking $DOD_DIR is writable." >&2
+        [ "$lock_held" = 1 ] && rmdir "$lock_dir" 2>/dev/null
+        return 2
+      fi
+      rm -f "$dirty"
+    else
+      if ! mv -f "$dirty" "$processing" 2>/dev/null; then
+        # [I-flush] infra failure — fs error. Fail-closed.
+        echo "[rein] flush: failed to rename .plan-coverage-dirty to .processing (filesystem error). Re-run after checking $DOD_DIR is writable." >&2
+        [ "$lock_held" = 1 ] && rmdir "$lock_dir" 2>/dev/null
+        return 2
+      fi
+    fi
+  fi
+  # Lock can be released as soon as the merge is complete — subsequent
+  # post-edit appends now hit the fresh (recreated) `.plan-coverage-dirty`
+  # and cannot interfere with our validator loop. The processing snapshot
+  # we hold is closed off from further mutation.
+  [ "$lock_held" = 1 ] && rmdir "$lock_dir" 2>/dev/null
+  lock_held=0
+
+  # Step 2: nothing to flush.
+  [ -f "$processing" ] || return 0
+
+  # Step 3: resolve validator (fail-closed if missing — same posture as the
+  # existing revalidate_coverage_marker path).
+  local validator=""
+  if command -v resolve_helper_script >/dev/null 2>&1; then
+    validator=$(resolve_helper_script rein-validate-coverage-matrix.py 2>/dev/null || true)
+  fi
+  if [ -z "$validator" ] || [ ! -f "$validator" ]; then
+    echo "[rein] flush: coverage validator not found — re-run 'rein update' or restore plugin installation." >&2
+    return 2
+  fi
+
+  # Step 4: read unique paths (dedup at flush time — §7 ID 2 set-equality
+  # contract: validated path set == unique dirty path set).
+  local unique_paths
+  unique_paths=$(awk 'NF && !seen[$0]++' "$processing" 2>/dev/null)
+
+  local first_fail=""
+  local validated_count=0
+  local fail_count=0
+  local runtime_err_count=0
+  local first_runtime_err=""
+  local first_runtime_rc=""
+  local plan_path
+  while IFS= read -r plan_path; do
+    [ -z "$plan_path" ] && continue
+    # Deleted plan → skip (no positive PASS evidence accrued for this entry).
+    [ -f "$plan_path" ] || continue
+    validated_count=$((validated_count + 1))
+    "${PYTHON_RUNNER[@]}" "$validator" "$plan_path" >/dev/null 2>&1
+    local v_rc=$?
+    # X3.B.5 — validator rc 의 두 부류 분리 (codex Round 1 Advisory 반영):
+    #   rc 0 → PASS (validator ran cleanly, matrix valid)
+    #   rc 2 → validation FAIL (validator ran cleanly, detected mismatch). 본
+    #          분기는 .coverage-mismatch 에 기록 → BLOCK_MARKERS 의 P2 deny.
+    #   rc != 0,2 → runtime error (Python import 실패, validator script crash,
+    #          OS-level fault). 본 분기는 infra integrity 문제 — flush 전체가
+    #          fail-closed (validation discipline 의 false-negative 위험).
+    # 동일 flush 내에서 두 부류가 섞이면 runtime error 가 우선 — 단, FAIL 기록은
+    # 다음 flush 시도를 위해 .coverage-mismatch 에 보존한다 (evidence 유지).
+    case "$v_rc" in
+      0)
+        :
+        ;;
+      2)
+        fail_count=$((fail_count + 1))
+        mkdir -p "$(dirname "$marker")"
+        if ! { [ -f "$marker" ] && grep -qxF "$plan_path" "$marker"; }; then
+          # Single-line append, O_APPEND atomic (consistent with the post-edit
+          # hook's append posture). The legacy revalidate path will then pick
+          # this entry up as the first failing target.
+          echo "$plan_path" >> "$marker"
+        fi
+        [ -z "$first_fail" ] && first_fail="$plan_path"
+        ;;
+      *)
+        runtime_err_count=$((runtime_err_count + 1))
+        if [ -z "$first_runtime_err" ]; then
+          first_runtime_err="$plan_path"
+          first_runtime_rc="$v_rc"
+        fi
+        ;;
+    esac
+  done <<< "$unique_paths"
+
+  # Step 5: decide terminal state.
+  if [ "$runtime_err_count" -gt 0 ]; then
+    # X3.B.5 — runtime error 가 발생하면 flush 전체가 infra-broken. .processing
+    # 은 retain (다음 commit 시 stale 로 재시도). FAIL 기록도 marker 에 이미
+    # 적재돼 evidence 보존. 본 분기는 [I-flush] infra integrity 분류와 일관.
+    echo "[rein] flush: validator runtime error (rc=$first_runtime_rc) on $first_runtime_err — validator subprocess failed to complete validation. Re-run 'rein update' or restore plugin installation; the dirty list ($processing) is retained for retry." >&2
+    return 2
+  fi
+  if [ "$fail_count" -gt 0 ]; then
+    # At least one FAIL recorded in .coverage-mismatch → terminal for this
+    # flush. Remove .processing; the legacy BLOCK_MARKERS scan will pick up
+    # .coverage-mismatch and emit P2 deny on the *first* failing target.
+    rm -f "$processing"
+    return 1
+  fi
+  if [ "$validated_count" -eq 0 ]; then
+    # Conservative block: no validator was actually invoked (all paths
+    # deleted). .processing retained so a future flush can retry once the
+    # paths exist again (e.g., user un-deletes or fixes path).
+    return 2
+  fi
+  # All PASS.
+  rm -f "$processing"
+  return 0
+}
+
 # Command patterns that gate test/commit checks. This SAME token set is
 # mirrored in hooks.json `if` entries (one entry per pattern) so the script
 # only spawns on these commands; here it also re-classifies for the in-script
 # coverage-marker scan. `git commit` is the hard gate (spec R6).
 if command_invokes "pytest|jest|vitest|mocha|npm run test|npm test|yarn test|pnpm test|python -m pytest|npx jest|npx vitest|git commit|bash tests/"; then
+  # X3.B.2: flush plan-coverage dirty list BEFORE legacy marker scan.
+  flush_plan_coverage_dirty
+  flush_rc=$?
+  if [ "$flush_rc" -eq 2 ]; then
+    # Conservative block (all-deleted dirty list, or infra failure).
+    # Cannot revalidate → fail-closed. Use the same I-class exit 2 posture
+    # the legacy "cannot revalidate" path uses below.
+    echo "[rein] flush: coverage dirty list could not be validated (all paths deleted, infra failure, or similar). Remove stale entries from $PROJECT_DIR/trail/dod/.plan-coverage-dirty.processing manually if no longer relevant." >&2
+    log_block "plan-coverage-dirty conservative block" "$COMMAND"
+    exit 2
+  fi
+  # flush_rc == 1 (FAIL) falls through — the BLOCK_MARKERS loop below picks
+  # up the newly-created .coverage-mismatch entry and emits P2 deny.
+  # flush_rc == 0 (all PASS) falls through — BLOCK_MARKERS finds no marker.
+
   for marker in "${BLOCK_MARKERS[@]}"; do
     if [ -f "$marker" ]; then
       heal_target=$(revalidate_coverage_marker "$marker" 2>/dev/null)

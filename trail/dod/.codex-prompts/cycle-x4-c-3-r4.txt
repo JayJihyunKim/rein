@@ -1,0 +1,75 @@
+[NON_INTERACTIVE] [EFFORT:high]
+
+Round 4 — pre-commit working-tree review for cycle X4.C.3.
+
+## 리뷰 대상 (IMPORTANT — pre-commit working-tree review)
+
+rein 워크플로는 코드 변경을 **커밋 전에** 리뷰한다 (`pre-bash-test-commit-gate.sh`
+가 `.codex-reviewed` + `.security-reviewed` stamp 없이는 `git commit` 을 차단 →
+변경은 이 리뷰가 PASS 할 때까지 의도적으로 working tree 에만 존재). 따라서
+`diff_base..HEAD` 가 trail housekeeping 만 담고 있는 것은 정상이며 코드 결함이
+아니다 (Round 3 의 첫 HIGH 는 이 pre-commit 특성에 대한 것이었음). **working
+tree 변경 (`git diff` / `git status`) 을 리뷰 대상으로 삼고, claim audit 도 working
+tree 기준으로 평가**해 달라. claim source = (pre-commit) working tree.
+
+## Round 3 finding 처리
+
+**HIGH (lock-acquire 실패 시 envelope skip — 실제 결함, FIXED)**:
+`read_effective_mode` 는 lock 획득 실패 시 stdout 에 "answer" 를 출력하고 non-zero
+로 종료한다. 두 envelope hook 의 capture 가 `$(read_effective_mode || echo "")`
+로 exit status 를 무시 → lock 실패에도 "answer" 를 신뢰해 envelope 를 skip
+(fail-soft 위반). **Fix**: 세 state-aware hook 모두 `if state_is_valid &&
+_mode=$(read_effective_mode 2>/dev/null) && [ "$_mode" = "<target>" ]` 패턴으로
+교체 — read 가 exit 0 일 때만 mode 를 신뢰, 실패 시 legacy path.
+
+**HIGH (committed diff 에 변경 없음 — pre-commit artifact)**:
+위 "리뷰 대상" 절 참고. working tree 에 변경이 모두 존재하며, 커밋은 이 리뷰
+PASS + security stamp 이후 단계다.
+
+## 이번 라운드 변경 (working tree)
+
+- `plugins/rein-core/hooks/lib/state-machine.sh`
+  - `state_is_valid` predicate (Round 3 추가) 유지 — STATE_FILE 존재 + JSON object
+    + schema_version==1 일 때만 0. malformed/unknown-schema 를 default "answer"
+    로 오인하지 않게 함.
+  - `acquire_state_lock` 에 `REIN_STATE_LOCK_TIMEOUT_MS` env 추가 (기본 10000) —
+    mkdir backend contention 타임아웃을 테스트에서 조정 (T9 가 lock 실패를
+    결정론적으로 유발). 기존 `REIN_PROJECT_DIR_OVERRIDE` 와 동일한 test-seam 패턴.
+- `plugins/rein-core/hooks/post-edit-design-plan-coverage-rule.sh` — fast-path gate
+  를 `state_is_valid && read_effective_mode 성공 && mode=answer` 로 교체.
+- `plugins/rein-core/hooks/post-edit-routing-procedure-rule.sh` — 동일.
+- `plugins/rein-core/hooks/pre-edit-dod-gate.sh` — 동일 패턴 (mode=source_edit).
+- `plugins/rein-core/hooks/post-edit-spec-review-gate.sh` — marker dedup (state-
+  independent, 이전 라운드 동일, MATCH).
+- `tests/hooks/test-state-fast-path-skip.sh` — T7(malformed)/T8(unknown schema)/
+  T9(lock 실패) 추가 → 총 9 test. 각각 두 envelope hook 이 legacy envelope
+  (`hookSpecificOutput`) 를 발행하는지 검증.
+- `tests/hooks/test-post-edit-design-plan-coverage-rule.sh`,
+  `scripts/rein-check-plugin-drift.py` — project-dir 격리 (live state.json 누출 방지).
+
+## 검증 결과 (working tree, 직접 재실행함)
+
+- `bash tests/hooks/test-state-fast-path-skip.sh` → 9 passed, 0 failed
+- `bash tests/hooks/test-state-machine.sh` → 6 passed (state_is_valid + timeout knob 회귀 0)
+- `bash tests/hooks/run-all.sh` → ALL SUITES PASSED
+- `bash tests/rein-test.sh` → 15 passed
+- `python3 scripts/rein-check-plugin-drift.py` → rc=0
+
+## Verify focus (Round 4)
+
+1. **Round 3 HIGH 해소** — lock 실패 시 두 envelope hook 이 legacy envelope 를
+   발행하는가 (capture 가 exit status 를 신뢰). T9 가 검증.
+2. **회귀 없음** — valid mode=answer → skip (T2/T3), state-absent (T6) / lib-absent
+   (T5) / malformed (T7) / unknown-schema (T8) → legacy.
+3. **`state_is_valid` 견고성** — empty/non-dict/missing schema/string schema/malformed
+   /schema 2 에서 non-zero (legacy), python 부재 → return 1.
+4. **`REIN_STATE_LOCK_TIMEOUT_MS` seam** — 기본값 보존 (10000), test-only override,
+   production 동작 불변.
+
+## 검토 항목
+
+- (a) Code Defects — Round 3 HIGH 해소 + 새 회귀 없는지 (capture 패턴, set -e 안전, 세 hook 일관성)
+- (b) Design Alignment — fast-path gate 가 design memo §2.3 / §8.4 legacy fallback 계약과 일치
+- (c) Test Alignment — T7/T8/T9 이 malformed/unknown-schema/lock-fail legacy 발행을 검증
+- (d) Claim Audit — working tree 기준 (pre-commit). 변경 파일/test 수가 working tree 와 일치하는가
+- **FINAL_VERDICT: <PASS|NEEDS-FIX|REJECT>**

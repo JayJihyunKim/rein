@@ -220,32 +220,41 @@ covers: [A2]
 MD
 }
 
-test_hook_creates_marker_on_invalid_plan() {
+test_hook_appends_dirty_on_invalid_plan_no_validator_call() {
+  # X3.B.1 (Area B deferral): post-edit no longer calls the validator. It
+  # only appends the dirty plan abs path to .plan-coverage-dirty. The actual
+  # validator + .coverage-mismatch management lives in commit-gate flush
+  # (test-plan-coverage-deferral.sh covers the flush path end-to-end).
   seed_design "docs/specs/foo.md" "A1 A2 A3"
-  # Plan only covers A1 A2 — A3 is missing from matrix.
-  # Use absolute design ref so validator can find the file from any cwd.
   _seed_plan_with_abs_ref "docs/plans/bar.md" "docs/specs/foo.md"
-  # Overwrite to add A3-missing situation (plan matrix is missing A3).
-  # _seed_plan_with_abs_ref already produces a valid A1+A2 plan.
-  # We need to add A3 to design but keep plan covering only A1+A2 → mismatch.
-  # (seed_design with A1 A2 A3 was already called; plan has A1+A2 only in matrix.)
 
   local input="{\"tool_input\":{\"file_path\":\"$SANDBOX/docs/plans/bar.md\"},\"tool_result\":{}}"
   run_hook "post-edit-plan-coverage.sh" "$input"
-  assert_exit 0 "hook returns 0 (marker creation, not block)"
-  assert_file_exists "trail/dod/.coverage-mismatch"
+  assert_exit 0 "hook returns 0 (deferral, not block)"
+  assert_file_exists "trail/dod/.plan-coverage-dirty"
+  assert_file_contains "trail/dod/.plan-coverage-dirty" "$SANDBOX/docs/plans/bar.md"
+  # Critically: post-edit must NOT create .coverage-mismatch — that is the
+  # commit-gate-flush's job now.
+  assert_file_missing "trail/dod/.coverage-mismatch"
 }
 
-test_hook_clears_marker_on_valid_plan() {
+test_hook_does_not_clear_marker_on_valid_plan() {
+  # X3.B.1 (Area B deferral): post-edit no longer manages the legacy
+  # .coverage-mismatch marker. Even a valid plan edit just appends a dirty
+  # entry; marker removal is the flush's responsibility. The legacy "post-
+  # edit clears marker on fix" behavior is now exercised via commit-gate
+  # flush in test-plan-coverage-deferral.sh (T6/T9).
   seed_design "docs/specs/foo.md" "A1 A2"
   _seed_plan_with_abs_ref "docs/plans/bar.md" "docs/specs/foo.md"
-  # Seed marker with the plan's abs path so marker_has_plan detects it.
   echo "$SANDBOX/docs/plans/bar.md" > "$SANDBOX/trail/dod/.coverage-mismatch"
 
   local input="{\"tool_input\":{\"file_path\":\"$SANDBOX/docs/plans/bar.md\"},\"tool_result\":{}}"
   run_hook "post-edit-plan-coverage.sh" "$input"
   assert_exit 0 "hook returns 0"
-  assert_file_missing "trail/dod/.coverage-mismatch"
+  # post-edit must not touch the legacy marker — it remains as-is.
+  assert_file_exists "trail/dod/.coverage-mismatch"
+  # And the dirty list now also has this plan recorded for the next flush.
+  assert_file_exists "trail/dod/.plan-coverage-dirty"
 }
 
 test_test_commit_gate_blocks_commit_on_marker() {
@@ -290,9 +299,11 @@ test_test_commit_gate_allows_commit_without_marker() {
     && fail "coverage gate should not fire without marker" || true
 }
 
-test_hook_marker_is_plan_specific() {
-  # Plan A is broken (A3 missing), plan B is clean.
-  # Editing plan B should NOT clear marker created by plan A.
+test_hook_appends_multiple_distinct_plans() {
+  # X3.B.1 (Area B deferral): post-edit appends each plan path to
+  # .plan-coverage-dirty. With multiple distinct plan edits we expect
+  # multiple lines (dedup is the flush's responsibility, not the
+  # append's — design memo §7 ID 2 set-equality contract).
   seed_design "docs/specs/fooA.md" "A1 A2 A3"
   seed_design "docs/specs/fooB.md" "B1 B2"
 
@@ -339,23 +350,29 @@ covers: [B1]
 covers: [B2]
 MD
 
-  # Edit A first → marker created with A in it
+  # Edit A first → dirty list has A
   local inputA="{\"tool_input\":{\"file_path\":\"$planA\"},\"tool_result\":{}}"
   run_hook "post-edit-plan-coverage.sh" "$inputA"
   assert_exit 0 "hook exit 0 after A"
-  assert_file_exists "trail/dod/.coverage-mismatch"
-  assert_file_contains "trail/dod/.coverage-mismatch" "$planA"
+  assert_file_exists "trail/dod/.plan-coverage-dirty"
+  assert_file_contains "trail/dod/.plan-coverage-dirty" "$planA"
 
-  # Edit B (valid) → marker should STILL exist because A is still broken
+  # Edit B → dirty list also has B (no validation triggered).
   local inputB="{\"tool_input\":{\"file_path\":\"$planB\"},\"tool_result\":{}}"
   run_hook "post-edit-plan-coverage.sh" "$inputB"
   assert_exit 0 "hook exit 0 after B"
-  assert_file_exists "trail/dod/.coverage-mismatch"
-  assert_file_contains "trail/dod/.coverage-mismatch" "$planA"
+  assert_file_contains "trail/dod/.plan-coverage-dirty" "$planA"
+  assert_file_contains "trail/dod/.plan-coverage-dirty" "$planB"
+  # No commit-gate-flush has run yet → no .coverage-mismatch marker.
+  assert_file_missing "trail/dod/.coverage-mismatch"
 }
 
-test_hook_removes_fixed_plan_keeps_others() {
-  # Seed marker with 2 failed plans (A and C), fix A, verify A removed but C stays.
+test_hook_does_not_mutate_existing_marker() {
+  # X3.B.1 (Area B deferral): post-edit no longer mutates the legacy
+  # .coverage-mismatch list. Even when a plan is re-edited to a now-valid
+  # state, the marker file remains untouched (commit-gate flush is the
+  # only authority that adds/removes marker entries — covered by
+  # test-plan-coverage-deferral.sh T7/T9).
   seed_design "docs/specs/fooA.md" "A1 A2"
   seed_design "docs/specs/fooC.md" "C1 C2"
 
@@ -391,13 +408,17 @@ MD
     echo "$planC"
   } > "$SANDBOX/trail/dod/.coverage-mismatch"
 
-  # Edit A (now valid) → hook removes A from marker, C stays
+  # Edit A (now valid) → hook appends A to dirty list, marker UNTOUCHED.
   local inputA="{\"tool_input\":{\"file_path\":\"$planA\"},\"tool_result\":{}}"
   run_hook "post-edit-plan-coverage.sh" "$inputA"
   assert_exit 0 "hook exit 0 after fixing A"
+  # Marker remains exactly as seeded — post-edit must not mutate it.
   assert_file_exists "trail/dod/.coverage-mismatch"
-  assert_file_not_contains "trail/dod/.coverage-mismatch" "$planA"
+  assert_file_contains "trail/dod/.coverage-mismatch" "$planA"
   assert_file_contains "trail/dod/.coverage-mismatch" "$planC"
+  # Dirty list now has the fixed plan recorded for the next flush.
+  assert_file_exists "trail/dod/.plan-coverage-dirty"
+  assert_file_contains "trail/dod/.plan-coverage-dirty" "$planA"
 }
 
 test_test_commit_gate_blocks_pytest_on_marker() {
@@ -430,17 +451,17 @@ run_test test_validator_detects_uncovered_implemented_id
 run_test test_validator_skips_legacy_plan
 run_test test_validator_allows_deferred_without_covers
 
-run_test test_hook_creates_marker_on_invalid_plan \
+run_test test_hook_appends_dirty_on_invalid_plan_no_validator_call \
   post-edit-plan-coverage.sh rein-validate-coverage-matrix.py
-run_test test_hook_clears_marker_on_valid_plan \
+run_test test_hook_does_not_clear_marker_on_valid_plan \
   post-edit-plan-coverage.sh rein-validate-coverage-matrix.py
 run_test test_test_commit_gate_blocks_commit_on_marker \
   pre-bash-test-commit-gate.sh
 run_test test_test_commit_gate_allows_commit_without_marker \
   pre-bash-test-commit-gate.sh
-run_test test_hook_marker_is_plan_specific \
+run_test test_hook_appends_multiple_distinct_plans \
   post-edit-plan-coverage.sh rein-validate-coverage-matrix.py
-run_test test_hook_removes_fixed_plan_keeps_others \
+run_test test_hook_does_not_mutate_existing_marker \
   post-edit-plan-coverage.sh rein-validate-coverage-matrix.py
 run_test test_test_commit_gate_blocks_pytest_on_marker \
   pre-bash-test-commit-gate.sh

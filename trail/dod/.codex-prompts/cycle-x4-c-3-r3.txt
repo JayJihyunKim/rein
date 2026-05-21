@@ -1,0 +1,81 @@
+[NON_INTERACTIVE] [EFFORT:high]
+
+Round 3 — applied the Round 2 NEEDS-FIX (HIGH) fix for cycle X4.C.3.
+
+## Round 2 HIGH (재인용)
+
+malformed JSON / unknown `schema_version` 인 state.json 이 두 envelope hook
+(post-edit-design-plan-coverage-rule.sh, post-edit-routing-procedure-rule.sh)
+에서 `answer` fast-path skip 을 trigger → legacy fallback contract 위반. 원인:
+fast-path gate 가 `[ -f "$STATE_FILE" ]` (파일 존재) 만 검사 → `read_effective_mode`
+→ `read_state` 가 corrupt/unknown-schema 에 default `mode=answer` 를 echo →
+envelope skip. design memo §2.3 / §8.4 + Scope ID
+`state-json-malformed-json-or-unknown-schema-version-triggers-stderr-notice-and-legacy-fallback-without-silent-drop`
+은 malformed/unknown-schema → legacy fallback (envelope 발행) 을 요구.
+
+## Fix applied (Round 3)
+
+1. **`plugins/rein-core/hooks/lib/state-machine.sh` — 신규 `state_is_valid` predicate**
+   (read_state 다음에 정의). 0 iff STATE_FILE 존재 + JSON object 로 parse +
+   `schema_version == 1`. "진짜 mode=answer 인 valid state" 와 "read_state 가
+   corrupt/unknown-schema 에 echo 하는 default answer" 를 구별. silent predicate
+   (user-facing NOTICE 는 dispatcher drain 의 read_state 가 담당).
+
+2. **3개 state-aware hook 의 fast-path gate 교체** — `[ -f "$STATE_FILE" ]`
+   (+ 중복 `_state_machine_paths`) → `state_is_valid`:
+   - `post-edit-design-plan-coverage-rule.sh`
+   - `post-edit-routing-procedure-rule.sh`
+   - `pre-edit-dod-gate.sh` (이미 source_edit 게이팅으로 안전했지만 design 의
+     uniform "malformed → legacy" 계약 + malformed+pending-journal edge 방어 위해
+     동일 적용. T1 valid source_edit / T6 state-absent 회귀 0 확인)
+
+3. **신규 T7 / T8** (`tests/hooks/test-state-fast-path-skip.sh`):
+   - T7: malformed state.json → 두 envelope hook 이 `hookSpecificOutput` 발행 (legacy)
+   - T8: `schema_version: 2` → 두 envelope hook 이 `hookSpecificOutput` 발행 (legacy)
+   각 hook 의 매칭 경로 사용 (design-plan-coverage = docs/specs, routing = trail/dod/dod-*)
+
+## 변경 파일 (Round 3 누적 — Round 2 대비 추가/수정)
+
+- `plugins/rein-core/hooks/lib/state-machine.sh` — `state_is_valid` 추가 (Round 2 의 pipe+heredoc fix 유지)
+- `plugins/rein-core/hooks/post-edit-design-plan-coverage-rule.sh` — gate → state_is_valid + 주석 갱신
+- `plugins/rein-core/hooks/post-edit-routing-procedure-rule.sh` — 동일
+- `plugins/rein-core/hooks/pre-edit-dod-gate.sh` — 동일
+- `plugins/rein-core/hooks/post-edit-spec-review-gate.sh` — Round 2 동일 (marker dedup, state-independent, MATCH)
+- `tests/hooks/test-state-fast-path-skip.sh` — T7/T8 추가 (6 → 8 test)
+- `tests/hooks/run-all.sh` — Round 2 동일 (test 등록)
+- `tests/hooks/test-post-edit-design-plan-coverage-rule.sh` — Round 2.5 isolation fix (동일)
+- `scripts/rein-check-plugin-drift.py` — Round 2.5 isolation fix (동일)
+
+## 검증 결과 (Round 3)
+
+- `bash tests/hooks/test-state-fast-path-skip.sh` 8/8 PASS
+- `bash tests/hooks/run-all.sh` ALL SUITES PASSED
+- `bash tests/rein-test.sh` 15/15 PASS
+- `python3 scripts/rein-check-plugin-drift.py` rc=0
+- 수동 재현: malformed + schema=2 → 두 envelope hook EMIT (legacy), valid mode=answer → SKIP (회귀 0)
+
+## Round 2 finding 별 처리
+
+- **HIGH (malformed/unknown-schema → wrong skip)**: state_is_valid 게이트로 FIXED.
+- **Test PARTIAL (T4 mode gating 미검증)**: spec-review-gate 의 marker dedup 은 의도적으로
+  state-independent (marker 존재 + path 일치만 검사, effective_mode 미참조). 그래서 mode
+  네거티브 케이스 불필요 — codex Round 2 의 "acceptable if intentionally mode-independent" 에 해당.
+- **Test MISSING (malformed/schema 미커버)**: T7/T8 로 두 envelope hook 모두 커버.
+
+## Verify focus (Round 3)
+
+1. **HIGH 회귀 해소** — malformed / unknown schema_version state.json 에서 두 envelope hook
+   이 legacy envelope 를 발행하는가 (state_is_valid 가 default-answer 오인을 차단).
+2. **valid-state 회귀 없음** — schema_version=1 + mode=answer 는 여전히 skip (T2/T3),
+   state-absent / lib-absent 는 legacy (T6/T5).
+3. **state_is_valid 견고성** — silent predicate, set -e 안전 (if 조건 내 호출), 락 불요
+   (write_state 의 atomic rename 으로 partial-write 노출 없음), python 부재 시 return 1 (legacy).
+4. **pre-edit 적용의 무해성** — T1(valid source_edit) skip 유지 + malformed→legacy validator.
+
+## 검토 항목
+
+- (a) Code Defects — Round 2 HIGH 해소 + 새 회귀 없는지 (특히 state_is_valid 의 edge: 빈 파일, 비-dict JSON, schema_version 누락/문자열)
+- (b) Design Alignment — state_is_valid 게이트가 design memo §2.3 forward-compat + legacy fallback 계약과 일치
+- (c) Test Alignment — T7/T8 이 malformed/unknown-schema legacy 발행을 적절히 검증
+- (d) Claim Audit — "3 hook gate", "8 test", suite 결과 claim 검증
+- **FINAL_VERDICT: <PASS|NEEDS-FIX|REJECT>**

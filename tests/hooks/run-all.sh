@@ -31,6 +31,7 @@ for test_file in \
   "$SCRIPT_DIR/test-session-start-line-stamp.sh" \
   "$SCRIPT_DIR/test-incident-advisory-check.sh" \
   "$SCRIPT_DIR/test-bash-guard-split.sh" \
+  "$SCRIPT_DIR/test-bash-dispatcher.sh" \
   "$SCRIPT_DIR/test-pre-bash-safety-guard.sh" \
   "$SCRIPT_DIR/test-pre-bash-test-commit-gate.sh" \
   "$SCRIPT_DIR/test-security-tier-gate.sh" \
@@ -65,7 +66,11 @@ for test_file in \
   "$SCRIPT_DIR/test-post-edit-dod-routing-check-no-orchestrator-ref.sh" \
   "$SCRIPT_DIR/test-rein-validate-plugin-rules.sh" \
   "$SCRIPT_DIR/test-rein-validate-plugin-rules-hardening.sh" \
-  "$SCRIPT_DIR/test-post-agent-review-trigger.sh"
+  "$SCRIPT_DIR/test-post-agent-review-trigger.sh" \
+  "$SCRIPT_DIR/test-plan-coverage-deferral.sh" \
+  "$SCRIPT_DIR/test-state-machine.sh" \
+  "$SCRIPT_DIR/test-state-machine-integration.sh" \
+  "$SCRIPT_DIR/test-state-fast-path-skip.sh"
 do
   echo ""
   echo "######## $(basename "$test_file") ########"

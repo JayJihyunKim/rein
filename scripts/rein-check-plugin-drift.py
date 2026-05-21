@@ -48,6 +48,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
@@ -388,74 +389,84 @@ def check_conditional_event_hook(repo_root: Path, errors: list[str]) -> None:
         return
     env = _minimal_hook_env(plugin_root)
 
-    # (a) Matching path → envelope expected.
-    try:
-        res = subprocess.run(
-            ["bash", str(hook_path)],
-            input='{"tool_input":{"file_path":"docs/specs/foo.md"}}',
-            capture_output=True,
-            text=True,
-            timeout=10,
-            env=env,
-        )
-    except subprocess.TimeoutExpired:
-        errors.append(f"VALIDATION: conditional hook timeout (matching path): {hook}")
-        return
-    if res.returncode != 0:
-        errors.append(
-            f"VALIDATION: conditional hook nonzero rc on matching path: "
-            f"{hook} rc={res.returncode}"
-        )
-        return
-    out = res.stdout.strip()
-    if not out:
-        errors.append(f"VALIDATION: conditional hook empty envelope on matching path: {hook}")
-        return
-    try:
-        data = json.loads(out)
-    except json.JSONDecodeError as e:
-        errors.append(f"VALIDATION: conditional hook invalid JSON on matching path: {hook} ({e})")
-        return
-    hso = data.get("hookSpecificOutput")
-    if not isinstance(hso, dict):
-        errors.append(
-            f"VALIDATION: conditional hook envelope missing hookSpecificOutput object "
-            f"on matching path: {hook}"
-        )
-    else:
-        expected_event = EXPECTED_EVENT.get(hook)
-        ev = hso.get("hookEventName")
-        if expected_event and ev != expected_event:
-            errors.append(
-                f"VALIDATION: conditional hook wrong hookEventName on matching path: "
-                f"{hook} got {ev!r} expected {expected_event!r}"
+    # X4.C.3: this hook fast-path-skips its envelope when the resolved project's
+    # .rein/state.json reports mode=answer. With no project dir pinned, the hook
+    # subprocess falls through to `git rev-parse --show-toplevel` and inherits the
+    # maintainer repo's live state.json — making this default-emission contract
+    # non-deterministic (green in CI's fresh checkout, red in a live session).
+    # Pin an isolated empty project dir so the check verifies the legacy /
+    # state-absent envelope contract.
+    with tempfile.TemporaryDirectory(prefix="rein-drift-iso-") as iso_dir:
+        env["CLAUDE_PROJECT_DIR"] = iso_dir
+
+        # (a) Matching path → envelope expected.
+        try:
+            res = subprocess.run(
+                ["bash", str(hook_path)],
+                input='{"tool_input":{"file_path":"docs/specs/foo.md"}}',
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=env,
             )
-        if not isinstance(hso.get("additionalContext"), str):
+        except subprocess.TimeoutExpired:
+            errors.append(f"VALIDATION: conditional hook timeout (matching path): {hook}")
+            return
+        if res.returncode != 0:
             errors.append(
-                f"VALIDATION: conditional hook additionalContext not a string "
+                f"VALIDATION: conditional hook nonzero rc on matching path: "
+                f"{hook} rc={res.returncode}"
+            )
+            return
+        out = res.stdout.strip()
+        if not out:
+            errors.append(f"VALIDATION: conditional hook empty envelope on matching path: {hook}")
+            return
+        try:
+            data = json.loads(out)
+        except json.JSONDecodeError as e:
+            errors.append(f"VALIDATION: conditional hook invalid JSON on matching path: {hook} ({e})")
+            return
+        hso = data.get("hookSpecificOutput")
+        if not isinstance(hso, dict):
+            errors.append(
+                f"VALIDATION: conditional hook envelope missing hookSpecificOutput object "
                 f"on matching path: {hook}"
             )
+        else:
+            expected_event = EXPECTED_EVENT.get(hook)
+            ev = hso.get("hookEventName")
+            if expected_event and ev != expected_event:
+                errors.append(
+                    f"VALIDATION: conditional hook wrong hookEventName on matching path: "
+                    f"{hook} got {ev!r} expected {expected_event!r}"
+                )
+            if not isinstance(hso.get("additionalContext"), str):
+                errors.append(
+                    f"VALIDATION: conditional hook additionalContext not a string "
+                    f"on matching path: {hook}"
+                )
 
-    # (b) Non-matching path → silent exit 0.
-    try:
-        res2 = subprocess.run(
-            ["bash", str(hook_path)],
-            input='{"tool_input":{"file_path":"src/foo.py"}}',
-            capture_output=True,
-            text=True,
-            timeout=10,
-            env=env,
-        )
-    except subprocess.TimeoutExpired:
-        errors.append(f"VALIDATION: conditional hook timeout (non-matching path): {hook}")
-        return
-    if res2.returncode != 0:
-        errors.append(
-            f"VALIDATION: conditional hook nonzero rc on non-matching path: "
-            f"{hook} rc={res2.returncode}"
-        )
-    if res2.stdout.strip():
-        errors.append(f"VALIDATION: conditional hook non-silent on non-matching path: {hook}")
+        # (b) Non-matching path → silent exit 0.
+        try:
+            res2 = subprocess.run(
+                ["bash", str(hook_path)],
+                input='{"tool_input":{"file_path":"src/foo.py"}}',
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            errors.append(f"VALIDATION: conditional hook timeout (non-matching path): {hook}")
+            return
+        if res2.returncode != 0:
+            errors.append(
+                f"VALIDATION: conditional hook nonzero rc on non-matching path: "
+                f"{hook} rc={res2.returncode}"
+            )
+        if res2.stdout.strip():
+            errors.append(f"VALIDATION: conditional hook non-silent on non-matching path: {hook}")
 
 
 def check_hooks_json_targets(repo_root: Path, errors: list[str]) -> None:

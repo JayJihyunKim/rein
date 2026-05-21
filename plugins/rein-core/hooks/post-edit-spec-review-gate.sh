@@ -122,10 +122,19 @@ while IFS= read -r FILE_PATH; do
   HASH=$(compute_hash "$ABS")
   MARKER="$SPEC_REVIEWS_DIR/${HASH}.pending"
 
-  {
-    echo "path=$ABS"
-    echo "created=$(date -u +%Y-%m-%dT%H:%M:%S)"
-  } > "$MARKER"
+  # X4.C.3 fast-path skip — design memo §8.4. 같은 spec 의 .pending marker 가 이미
+  # 존재하고 path 가 일치하면 mtime 만 touch (body re-write subprocess 회피).
+  # NOTICE 메시지는 그대로 유지 — 사용자에게 review 필요성 계속 알림.
+  # 고정 문자열 + 전체 줄 매칭 (-xF) — $ABS 의 정규식 메타문자 (. * 등) 가 BRE 로
+  # 해석되어 다른 path 와 느슨하게 매칭되는 것을 방지 (security review Info-1).
+  if [ -f "$MARKER" ] && grep -qxF -- "path=$ABS" "$MARKER" 2>/dev/null; then
+    touch "$MARKER" 2>/dev/null || true
+  else
+    {
+      echo "path=$ABS"
+      echo "created=$(date -u +%Y-%m-%dT%H:%M:%S)"
+    } > "$MARKER"
+  fi
 
   echo "NOTICE: spec review pending — $ABS" >&2
   echo "  리뷰 후: rein-mark-spec-reviewed.sh \"$ABS\" codex (plugin bundle 또는 repo scripts/)" >&2

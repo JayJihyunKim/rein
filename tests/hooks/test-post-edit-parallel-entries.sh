@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# HK-4 — hooks.json 의 PostToolUse(Edit|Write|MultiEdit) 가 8 sub-hook 별개 entry
-# + 마지막에 aggregator entry (총 9) 로 등록되어 있고, dispatcher 가 등록 해제
-# 됐는지 검증.
+# HK-4 + X4.C.2 — hooks.json 의 PostToolUse(Edit|Write|MultiEdit) 가 9 sub-hook
+# (8 HK-4 sub-hook + 1 X4.C.2 state-journal) 별개 entry + 마지막에 aggregator
+# entry (총 10) 로 등록되어 있고, dispatcher 가 등록 해제 됐는지 검증.
 #
 # Scope ID: HK-4-post-edit-dispatcher-dependency-free-subhooks-split-into-parallel-hook-entries-conditional-on-spike-1-confirming-exit2-deny-merge
 
@@ -22,18 +22,18 @@ else
   FAIL=$((FAIL+1))
 fi
 
-# === Edit|Write|MultiEdit matcher 의 PostToolUse entry 정확히 9개 (8 sub-hook + aggregator) ===
+# === Edit|Write|MultiEdit matcher 의 PostToolUse entry 정확히 10개 (9 sub-hook + aggregator) ===
 edit_entry_count=$(python3 -c "
 import json
 h=json.load(open('$HOOKS_JSON'))
 ents=[e for e in h['hooks']['PostToolUse'] if e.get('matcher')=='Edit|Write|MultiEdit']
 print(len(ents))
 ")
-if [ "$edit_entry_count" = "9" ]; then
-  echo "PASS: posttoolse_edit_entry_count_9 (8 sub-hook + aggregator)"
+if [ "$edit_entry_count" = "10" ]; then
+  echo "PASS: posttoolse_edit_entry_count_10 (9 sub-hook + aggregator)"
   PASS=$((PASS+1))
 else
-  echo "FAIL: posttoolse_edit_entry_count_9 — actual=$edit_entry_count"
+  echo "FAIL: posttoolse_edit_entry_count_10 — actual=$edit_entry_count"
   FAIL=$((FAIL+1))
 fi
 
@@ -57,7 +57,7 @@ else
 fi
 
 # === 8 sub-hook 이름 모두 존재 ===
-expected_subhooks=("post-edit-hygiene" "post-edit-review-gate" "post-edit-index-sync-inbox" "post-edit-spec-review-gate" "post-edit-plan-coverage" "post-edit-dod-routing-check" "post-edit-design-plan-coverage-rule" "post-edit-routing-procedure-rule")
+expected_subhooks=("post-edit-hygiene" "post-edit-review-gate" "post-edit-index-sync-inbox" "post-edit-spec-review-gate" "post-edit-plan-coverage" "post-edit-dod-routing-check" "post-edit-design-plan-coverage-rule" "post-edit-routing-procedure-rule" "post-edit-state-journal")
 for sub in "${expected_subhooks[@]}"; do
   found=$(python3 -c "
 import json
