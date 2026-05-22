@@ -178,6 +178,75 @@ else
 fi
 rm -rf "$S"
 
+# ---- Test 4c (GE-1): Tier 1 marker → EXTERNAL absolute path to a *valid* DoD
+# (has `## 범위 연결`) must be rejected. Without containment validation the
+# selector would grant Tier 1 blocking authority to a file outside the project.
+echo "### Test 4c: GE-1_marker_external_absolute_valid_dod_rejected"
+S=$(_mksandbox)
+EXT=$(mktemp -d)
+cat > "$EXT/evil-external-dod.md" <<'EOF'
+# evil external dod
+## 범위 연결
+plan ref: x
+covers: [E1]
+EOF
+# In-project fallback so a correct selector lands on Tier 2 (not Tier 0).
+cat > "$S/trail/dod/dod-2026-05-22-fallback.md" <<'EOF'
+# real fallback dod
+## 범위 연결
+plan ref: docs/plans/fallback.md
+covers: [FB1]
+EOF
+printf 'path=%s\n' "$EXT/evil-external-dod.md" > "$S/trail/dod/.active-dod"
+result=$(_run_select "$S")
+tier=$(printf '%s' "$result" | cut -f1)
+path=$(printf '%s' "$result" | cut -f2)
+if [ "$tier" = "2" ] && [ "$path" = "trail/dod/dod-2026-05-22-fallback.md" ]; then
+  _pass "external absolute valid-DoD marker → Tier 1 rejected, Tier 2 fallback (tier=$tier)"
+else
+  _fail "external valid-DoD marker should be rejected, got tier=$tier path=$path"
+fi
+log="$S/trail/incidents/invalid-active-dod-marker.log"
+if [ -f "$log" ] && grep -qi 'containment' "$log"; then
+  _pass "external marker logged with containment reason"
+else
+  _fail "external marker containment log missing: $log"
+fi
+rm -rf "$S" "$EXT"
+
+# ---- Test 4d (GE-1): Tier 1 marker → `..` traversal to a *valid* sibling DoD
+# must be rejected by the `..`-segment check.
+echo "### Test 4d: GE-1_marker_dotdot_traversal_valid_dod_rejected"
+S=$(_mksandbox)
+# Sibling valid DoD reachable from CWD=$S via `../<basename>-evil.md`.
+SIB="${S}-evil.md"
+cat > "$SIB" <<'EOF'
+# sibling evil dod
+## 범위 연결
+plan ref: x
+covers: [S1]
+EOF
+cat > "$S/trail/dod/dod-2026-05-22-fallback.md" <<'EOF'
+# real fallback dod
+## 범위 연결
+plan ref: docs/plans/fallback.md
+covers: [FB1]
+EOF
+printf 'path=../%s\n' "$(basename "$SIB")" > "$S/trail/dod/.active-dod"
+result=$(_run_select "$S")
+tier=$(printf '%s' "$result" | cut -f1)
+if [ "$tier" = "2" ]; then
+  _pass "dotdot-traversal valid-DoD marker → Tier 1 rejected, Tier 2 fallback (tier=$tier)"
+else
+  _fail "dotdot marker should be rejected → Tier 2, got tier=$tier"
+fi
+if grep -qi 'containment' "$S/trail/incidents/invalid-active-dod-marker.log" 2>/dev/null; then
+  _pass "dotdot marker logged with containment reason"
+else
+  _fail "dotdot marker containment log missing"
+fi
+rm -rf "$S" "$SIB"
+
 # ---- Test 5: Cache file regression — no dod-gate-validator* should be created.
 echo "### Test 5: cache파일_미생성"
 S=$(_mksandbox)

@@ -121,6 +121,16 @@ while IFS= read -r FILE_PATH; do
 
   HASH=$(compute_hash "$ABS")
   MARKER="$SPEC_REVIEWS_DIR/${HASH}.pending"
+  REVIEWED_MARKER="$SPEC_REVIEWS_DIR/${HASH}.reviewed"
+
+  # SR-1: a spec edit invalidates any prior review. Remove a stale .reviewed so
+  # the pre-edit spec gate forces a re-review of the just-edited document.
+  # Without this, editing an already-reviewed spec leaves (.pending + old
+  # .reviewed) coexisting and the gate's existence-only check passes on the
+  # stale .reviewed (review-bypass). Placed before the create/touch branches
+  # below so it covers both — any path through this loop means the canonical
+  # spec was just edited.
+  rm -f "$REVIEWED_MARKER" 2>/dev/null || true
 
   # X4.C.3 fast-path skip — design memo §8.4. 같은 spec 의 .pending marker 가 이미
   # 존재하고 path 가 일치하면 mtime 만 touch (body re-write subprocess 회피).

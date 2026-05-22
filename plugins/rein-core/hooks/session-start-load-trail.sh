@@ -23,6 +23,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib/portable.sh"
 # shellcheck source=./lib/project-dir.sh
 . "$SCRIPT_DIR/lib/project-dir.sh"
+# GE-1: shared path-containment validator for the `.active-dod` cleanup below
+# (was an inline 4-check; now one copy shared with select-active-dod.sh).
+# shellcheck source=./lib/path-containment.sh
+. "$SCRIPT_DIR/lib/path-containment.sh" 2>/dev/null || true
 
 # resolve_project_dir() 가 REIN_PROJECT_DIR_OVERRIDE / REIN_PROJECT_DIR /
 # git rev-parse / SCRIPT_DIR fallback / $PWD 순으로 결정.
@@ -92,19 +96,18 @@ ACTIVE_MARKER="$PROJECT_DIR/trail/dod/.active-dod"
 if [ -f "$ACTIVE_MARKER" ]; then
   TARGET_PATH=$(grep '^path=' "$ACTIVE_MARKER" 2>/dev/null | head -1 | sed 's/^path=//')
   REMOVE_REASON=""
-  if [ -z "$TARGET_PATH" ]; then
+  # GE-1: containment via shared helper (was an inline empty/metachar/../commonpath
+  # block). Reason strings are preserved by the helper (empty path / metachars /
+  # .. segment / outside PROJECT_DIR), so existing incident-log assertions hold.
+  # declare -F guard: a missing helper degrades to empty-path-only here; the
+  # selector re-validates at consumption time (GE-1 backstop).
+  if declare -F validate_repo_relative_path >/dev/null 2>&1; then
+    REMOVE_REASON=$(validate_repo_relative_path "$PROJECT_DIR" "$TARGET_PATH") || true
+  elif [ -z "$TARGET_PATH" ]; then
     REMOVE_REASON="empty path"
-  elif ! printf '%s' "$TARGET_PATH" | grep -qE '^[a-zA-Z0-9_./-]+$'; then
-    REMOVE_REASON="path contains disallowed metachars"
-  elif printf '%s' "$TARGET_PATH" | grep -qE '(^|/)\.\.(/|$)'; then
-    REMOVE_REASON="path contains .. segment"
-  elif ! python3 -c '
-import os,sys
-project=os.path.realpath(sys.argv[1])
-target=os.path.realpath(os.path.join(project, sys.argv[2]))
-sys.exit(0 if os.path.commonpath([project, target]) == project else 1)
-' "$PROJECT_DIR" "$TARGET_PATH" 2>/dev/null; then
-    REMOVE_REASON="path resolves outside PROJECT_DIR"
+  fi
+  if [ -n "$REMOVE_REASON" ]; then
+    :  # containment failed — REMOVE_REASON holds the reason
   elif [ ! -f "$PROJECT_DIR/$TARGET_PATH" ]; then
     REMOVE_REASON="target file missing"
   elif ! grep -qE '^## 범위 연결' "$PROJECT_DIR/$TARGET_PATH" 2>/dev/null; then

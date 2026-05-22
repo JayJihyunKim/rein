@@ -74,6 +74,10 @@ sandbox_setup() {
     return 1
   fi
   cp "$_sad_src" "$SANDBOX/.claude/hooks/lib/select-active-dod.sh"
+  # GE-1: select-active-dod.sh sources its sibling path-containment.sh; copy it
+  # too or the Tier 1 containment check fail-closes (rejects valid markers).
+  cp "$(dirname "$_sad_src")/path-containment.sh" \
+     "$SANDBOX/.claude/hooks/lib/path-containment.sh" 2>/dev/null || true
   cp "$REAL_PROJECT_DIR/scripts/rein-codex-review.sh" \
      "$SANDBOX/scripts/rein-codex-review.sh"
   chmod +x "$SANDBOX/scripts/rein-codex-review.sh"
@@ -872,6 +876,9 @@ test_wrapper_plugin_layout_user_repo_without_claude_dir_uses_bundled_lib() {
      "$plugin_root/scripts/rein-codex-review.sh"
   cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/select-active-dod.sh" \
      "$plugin_root/hooks/lib/select-active-dod.sh"
+  # GE-1: sibling path-containment.sh dependency of select-active-dod.sh.
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/path-containment.sh" \
+     "$plugin_root/hooks/lib/path-containment.sh" 2>/dev/null || true
   chmod +x "$plugin_root/scripts/rein-codex-review.sh"
 
   # User repo: NO .claude/ directory anywhere. Minimal git so diff_base works.

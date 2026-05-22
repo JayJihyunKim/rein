@@ -399,6 +399,29 @@ if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]; then
       UNRESOLVED_SPECS=true
       break
     fi
+
+    # SR-1: existence alone is not enough — a spec re-edited after its review
+    # re-creates .pending whose created= is newer than .reviewed's reviewed=,
+    # while the old .reviewed lingers (review-bypass). Compare the two rein-
+    # written timestamps (both `date -u +%Y-%m-%dT%H:%M:%S`, UTC, no offset). A
+    # trailing Z (legacy healer schema) is stripped first, then each value must
+    # match the strict ISO 8601 shape — a missing OR garbled timestamp (e.g.
+    # `created=0000`, which would sort below a valid reviewed= and slip past a
+    # bare lexical compare) cannot prove freshness → fail-closed. After shape
+    # validation both are fixed-width, so a digit-only numeric compare is
+    # locale-independent (avoids bash `[[ > ]]` collation). Backstops the
+    # post-edit gate's .reviewed removal and catches a stale state already on disk.
+    spec_iso_re='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$'
+    pending_created=$(grep -E '^created=' "$pending_marker" 2>/dev/null | head -1 | sed -e 's/^created=//' -e 's/Z$//')
+    reviewed_at=$(grep -E '^reviewed=' "$reviewed_marker" 2>/dev/null | head -1 | sed -e 's/^reviewed=//' -e 's/Z$//')
+    if ! [[ "$pending_created" =~ $spec_iso_re ]] || ! [[ "$reviewed_at" =~ $spec_iso_re ]]; then
+      UNRESOLVED_SPECS=true   # missing/garbled timestamp → fail-closed
+      break
+    fi
+    if [ "${pending_created//[!0-9]/}" -gt "${reviewed_at//[!0-9]/}" ]; then
+      UNRESOLVED_SPECS=true   # spec edited after review → stale review
+      break
+    fi
   done
 
   if [ "$UNRESOLVED_SPECS" = true ]; then

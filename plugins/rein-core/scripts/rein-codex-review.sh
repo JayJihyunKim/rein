@@ -195,7 +195,14 @@ except Exception:
       if [ "$rc" = "1" ]; then
         local base
         base=$(grep -E '^diff_base:' "$stamp" | head -1 | sed 's/^diff_base:[[:space:]]*//' || true)
-        if [ -n "$base" ]; then
+        # GE-2: a fresh stamp's stored diff_base must be a real commit reachable
+        # from HEAD. Verify object existence + commit type (rev-parse ^{commit})
+        # AND HEAD-ancestry (merge-base --is-ancestor). A forged / orphan /
+        # other-branch SHA fails one of these → fall through to HEAD~1 (same
+        # fail-safe as OQ-3) so it cannot be injected as the review diff base.
+        if [ -n "$base" ] \
+           && git -C "$PROJECT_DIR" rev-parse --verify --quiet "${base}^{commit}" >/dev/null 2>&1 \
+           && git -C "$PROJECT_DIR" merge-base --is-ancestor "$base" HEAD 2>/dev/null; then
           printf '%s' "$base"
           return 0
         fi

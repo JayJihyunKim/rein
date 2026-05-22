@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.3.4** (2026-05-22) — Tightens the security-review stamp skip to the explicitly-marked active DoD (Tier 1 only; the advisory mtime-fallback no longer authorizes skipping security review), extends the safety guard's secret-file read block (P8) to `grep` / `awk` / `sed` / `jq` / `cut`, and hardens the session-stop gate (stale resolver-cache GC, completed-DoD stale-warning exclusion, POSIX integer check). ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.3.5** (2026-05-22) — Closes three review-gate integrity gaps: re-editing an already-reviewed design/plan now forces a fresh review (the stale `.reviewed` no longer authorizes source edits), the active-DoD marker is path-validated at selection time too (not only session-start cleanup) so a polluted marker can't point outside the project, and `/codex-review` now verifies a stamp's recorded `diff_base` is a real commit reachable from HEAD (else falls back to HEAD~1). ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

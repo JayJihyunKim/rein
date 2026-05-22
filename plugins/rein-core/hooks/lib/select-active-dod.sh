@@ -42,6 +42,23 @@ if [ -n "${__REIN_SELECT_ACTIVE_DOD_LOADED:-}" ]; then
 fi
 __REIN_SELECT_ACTIVE_DOD_LOADED=1
 
+# GE-1: shared path-containment validator (sibling lib). The Tier 1 marker path
+# must pass the same containment check the session-start cleanup hook applies, so
+# a polluted `.active-dod` cannot grant blocking authority to a file outside the
+# project. Sourced fail-safe; the Tier 1 branch guards on declare -F and treats a
+# missing helper as fail-closed (rejects the marker rather than trusting it).
+# `${BASH_SOURCE[0]:-}` is nounset-safe: callers may source this under
+# `set -u` (e.g. rein-codex-review.sh `set -euo pipefail`), where a bare
+# ${BASH_SOURCE[0]} can trip "parameter not set" and abort the source.
+_sad_self="${BASH_SOURCE[0]:-}"
+if [ -n "$_sad_self" ]; then
+  _sad_lib_dir="$(cd "$(dirname "$_sad_self")" 2>/dev/null && pwd)"
+  if [ -n "$_sad_lib_dir" ] && [ -f "$_sad_lib_dir/path-containment.sh" ]; then
+    . "$_sad_lib_dir/path-containment.sh" 2>/dev/null || true
+  fi
+fi
+unset _sad_self _sad_lib_dir 2>/dev/null || true
+
 # _sad_dod_has_range_link: return 0 iff a DoD file contains `## 범위 연결`.
 _sad_dod_has_range_link() {
   local path="$1"
@@ -56,6 +73,20 @@ _sad_log_invalid_marker() {
   local log="trail/incidents/invalid-active-dod-marker.log"
   mkdir -p "$(dirname "$log")" 2>/dev/null || true
   printf '%s\t%s\n' "$(date -u +%FT%TZ)" "$reason" >> "$log" 2>/dev/null || true
+}
+
+# _sad_marker_contained: GE-1 containment gate for a Tier 1 marker path.
+# Echo the violation reason + return non-zero when the path is unsafe; echo
+# nothing + return 0 when safe. A missing shared helper is fail-closed (reject):
+# an unvalidated marker must not receive Tier 1 blocking authority.
+_sad_marker_contained() {
+  local p="$1"
+  if declare -F validate_repo_relative_path >/dev/null 2>&1; then
+    validate_repo_relative_path "$PWD" "$p"
+    return $?
+  fi
+  echo "path-containment helper unavailable"
+  return 1
 }
 
 # _sad_resolve_choice_log_path: resolve the active-dod-choice.log path
@@ -129,23 +160,27 @@ select_active_dod() {
   if [ -f "$marker" ]; then
     local marker_path
     marker_path=$(grep '^path=' "$marker" 2>/dev/null | head -1 | sed 's/^path=//')
-    if [ -n "$marker_path" ]; then
-      if [ -f "$marker_path" ]; then
-        if _sad_dod_has_range_link "$marker_path"; then
-          tier="1"
-          path="$marker_path"
-          reason="marker-blocking"
-        else
-          _sad_log_invalid_marker "marker target missing '## 범위 연결': $marker_path"
-          # fall through to Tier 2
-        fi
-      else
-        _sad_log_invalid_marker "marker target does not exist: $marker_path"
-        # fall through to Tier 2
-      fi
-    else
+    # GE-1: containment is checked BEFORE the -f / range-link checks so a marker
+    # pointing outside the project (absolute / .. / metachars / symlink escape)
+    # never reaches Tier 1 blocking authority. CWD == PROJECT_DIR (callers cd
+    # before invoking), so $PWD is the containment root.
+    local _sad_contain_reason=""
+    if [ -z "$marker_path" ]; then
       _sad_log_invalid_marker "marker file has no 'path=' line"
       # fall through to Tier 2
+    elif ! _sad_contain_reason=$(_sad_marker_contained "$marker_path"); then
+      _sad_log_invalid_marker "marker path failed containment ($_sad_contain_reason): $marker_path"
+      # fall through to Tier 2
+    elif [ ! -f "$marker_path" ]; then
+      _sad_log_invalid_marker "marker target does not exist: $marker_path"
+      # fall through to Tier 2
+    elif ! _sad_dod_has_range_link "$marker_path"; then
+      _sad_log_invalid_marker "marker target missing '## 범위 연결': $marker_path"
+      # fall through to Tier 2
+    else
+      tier="1"
+      path="$marker_path"
+      reason="marker-blocking"
     fi
   fi
 

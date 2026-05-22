@@ -459,6 +459,190 @@ test_helper_normalizes_relative_paths() {
 }
 
 # =================================================================
+# SR-1 STALE .reviewed BYPASS TESTS (6 tests)
+#
+# Bug: editing an already-reviewed spec re-creates .pending but leaves the
+# old .reviewed in place. The gate's existence-only check then passes on the
+# stale .reviewed, unlocking source edits with unreviewed spec changes.
+# Fix (b): post-edit gate removes a stale .reviewed when a spec is (re-)edited.
+# Fix (a): pre-edit gate compares .pending created= vs .reviewed reviewed=
+#          (fail-closed on stale / missing timestamps).
+# =================================================================
+
+test_post_edit_removes_stale_reviewed_on_respec() {
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# Spec v1" > "$spec_file"
+
+  # Reviewed state: .reviewed exists, .pending already cleaned (post-review).
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(printf '%s' "$spec_file" | shasum 2>/dev/null | cut -c1-16 || printf 'abc123def456')
+  {
+    echo "path=$spec_file"
+    echo "reviewer=codex"
+    echo "reviewed=2026-01-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  # Re-edit the reviewed spec → post-edit hook fires.
+  echo "# Spec v2 (edited after review)" > "$spec_file"
+  local input='{
+    "tool_input": {"file_path": "'$spec_file'"},
+    "tool_result": {}
+  }'
+  run_hook "post-edit-spec-review-gate.sh" "$input"
+  assert_exit 0 "post-edit should succeed on re-edit"
+
+  # Edit invalidates the prior review: stale .reviewed removed, fresh .pending created.
+  [ ! -f "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed" ] || fail "stale .reviewed should be removed on re-edit"
+  [ -f "$SANDBOX/trail/dod/.spec-reviews/${hash}.pending" ] || fail "fresh .pending should be created on re-edit"
+}
+
+test_gate_blocks_stale_reviewed_when_pending_newer() {
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/specs"
+  touch "$SANDBOX/specs/api-design.md"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(printf '%s' "$SANDBOX/specs/api-design.md" | shasum 2>/dev/null | cut -c1-16 || printf 'abc123def456')
+  # Coexisting bad state: old reviewed + newer pending (spec edited after review).
+  {
+    echo "path=$SANDBOX/specs/api-design.md"
+    echo "reviewer=codex"
+    echo "reviewed=2026-01-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+  {
+    echo "path=$SANDBOX/specs/api-design.md"
+    echo "created=2026-06-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.pending"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "should block when reviewed is stale (pending newer than reviewed)"
+}
+
+test_gate_allows_when_reviewed_fresher_than_pending() {
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/specs"
+  touch "$SANDBOX/specs/api-design.md"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(printf '%s' "$SANDBOX/specs/api-design.md" | shasum 2>/dev/null | cut -c1-16 || printf 'abc123def456')
+  # Pending older, reviewed newer (review happened after that edit) → fresh, allow.
+  {
+    echo "path=$SANDBOX/specs/api-design.md"
+    echo "created=2026-01-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.pending"
+  {
+    echo "path=$SANDBOX/specs/api-design.md"
+    echo "reviewer=codex"
+    echo "reviewed=2026-06-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "should allow when reviewed is fresher than pending"
+}
+
+test_gate_blocks_when_reviewed_timestamp_missing() {
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/specs"
+  touch "$SANDBOX/specs/api-design.md"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(printf '%s' "$SANDBOX/specs/api-design.md" | shasum 2>/dev/null | cut -c1-16 || printf 'abc123def456')
+  {
+    echo "path=$SANDBOX/specs/api-design.md"
+    echo "created=2026-06-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.pending"
+  # .reviewed without a reviewed= line → cannot verify freshness → fail-closed.
+  {
+    echo "path=$SANDBOX/specs/api-design.md"
+    echo "reviewer=codex"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "should block (fail-closed) when reviewed timestamp is missing"
+}
+
+test_gate_blocks_when_reviewed_timestamp_garbled() {
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/specs"
+  touch "$SANDBOX/specs/api-design.md"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(printf '%s' "$SANDBOX/specs/api-design.md" | shasum 2>/dev/null | cut -c1-16 || printf 'abc123def456')
+  # A garbled created= that sorts BELOW a valid reviewed= would slip past a pure
+  # lexical compare ("0000" < "2026-..."); strict shape validation must
+  # fail-closed instead of treating it as fresh.
+  {
+    echo "path=$SANDBOX/specs/api-design.md"
+    echo "created=0000"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.pending"
+  {
+    echo "path=$SANDBOX/specs/api-design.md"
+    echo "reviewer=codex"
+    echo "reviewed=2026-06-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "should block (fail-closed) when a timestamp is garbled / non-ISO"
+}
+
+test_respec_after_review_blocks_source_edit() {
+  # End-to-end: real post-edit hook + real mark-spec-reviewed.sh.
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# Spec v1" > "$spec_file"
+
+  local spec_input='{
+    "tool_input": {"file_path": "'$spec_file'"},
+    "tool_result": {}
+  }'
+
+  # 1) First spec edit → .pending created.
+  run_hook "post-edit-spec-review-gate.sh" "$spec_input"
+  assert_exit 0 "post-edit should create pending on first edit"
+
+  # 2) Review via the real helper → .reviewed created, .pending removed.
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/scripts/rein-mark-spec-reviewed.sh" "$spec_file" codex > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "mark-spec-reviewed should succeed"
+
+  # 3) Re-edit the reviewed spec → post-edit hook fires again.
+  echo "# Spec v2 (unreviewed change)" > "$spec_file"
+  run_hook "post-edit-spec-review-gate.sh" "$spec_input"
+  assert_exit 0 "post-edit should succeed on re-edit"
+
+  # 4) Source edit must be blocked — spec was re-edited but not re-reviewed.
+  local src_input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$src_input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "source edit must be blocked after spec is re-edited without re-review"
+}
+
+# =================================================================
 # RUN ALL TESTS
 # =================================================================
 
@@ -486,5 +670,12 @@ run_test test_multiedit_deduplicates_files post-edit-spec-review-gate.sh pre-edi
 
 run_test test_helper_marks_spec_reviewed post-edit-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
 run_test test_helper_normalizes_relative_paths post-edit-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
+
+run_test test_post_edit_removes_stale_reviewed_on_respec post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_gate_blocks_stale_reviewed_when_pending_newer post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_gate_allows_when_reviewed_fresher_than_pending post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_gate_blocks_when_reviewed_timestamp_missing post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_gate_blocks_when_reviewed_timestamp_garbled post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_respec_after_review_blocks_source_edit post-edit-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
 
 summary

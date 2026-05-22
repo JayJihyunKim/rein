@@ -51,6 +51,9 @@ _mksandbox() {
   mkdir -p "$dir/trail/dod"
   mkdir -p "$dir/.claude/hooks/lib"
   cp "$SELECTOR_LIB" "$dir/.claude/hooks/lib/"
+  # GE-1: select-active-dod.sh sources its sibling path-containment.sh — copy it
+  # too so sourcing the selector is clean in the sandbox.
+  cp "$(dirname "$SELECTOR_LIB")/path-containment.sh" "$dir/.claude/hooks/lib/" 2>/dev/null || true
   git -C "$dir" init -q -b main 2>/dev/null
   git -C "$dir" config user.email test@example.com
   git -C "$dir" config user.name Tester
@@ -70,11 +73,14 @@ _get_diff_base() {
   ' _ "$sandbox" "$WRAPPER"
 }
 
-# ---- Test 1: Fresh stamp → use stored diff_base.
-echo "### Test 1: wrapper_uses_stamp_diff_base_when_stamp_is_fresh"
+# ---- Test 1: Fresh stamp + valid ancestor diff_base → use stored diff_base.
+# GE-2: a fresh stamp's diff_base must now also be a real ancestor commit, so
+# this test uses HEAD~1 (real ancestor) instead of a fabricated SHA.
+echo "### Test 1: wrapper_uses_stamp_diff_base_when_stamp_is_fresh_and_valid_ancestor"
 S=$(_mksandbox)
 git -C "$S" commit --allow-empty -q -m "first commit"
 git -C "$S" commit --allow-empty -q -m "second commit"
+git -C "$S" commit --allow-empty -q -m "third commit"
 HEAD_ISO=$(git -C "$S" log -1 --format=%cI HEAD)
 # Fresh: stamp_iso > head_iso (e.g. 1 hour later)
 FRESH_ISO=$(python3 -c "
@@ -82,21 +88,21 @@ from datetime import datetime, timedelta
 h = datetime.fromisoformat('$HEAD_ISO')
 print((h + timedelta(hours=1)).isoformat())
 ")
-FAKE_BASE="deadbeef0000000000000000000000000000aaaa"
+REAL_BASE=$(git -C "$S" rev-parse HEAD~1)   # real ancestor of HEAD
 cat > "$S/trail/dod/.codex-reviewed" <<EOF
 reviewed_at: $FRESH_ISO
 reviewer: codex
-diff_base: $FAKE_BASE
+diff_base: $REAL_BASE
 verdict: PASS
 cycle: test
 scope: test
 active_dod: trail/dod/dod-foo.md
 EOF
 result=$(_get_diff_base "$S")
-if [ "$result" = "$FAKE_BASE" ]; then
-  _pass "fresh stamp → stored diff_base ($result)"
+if [ "$result" = "$REAL_BASE" ]; then
+  _pass "fresh stamp + valid ancestor → stored diff_base ($result)"
 else
-  _fail "expected fresh stamp.diff_base=$FAKE_BASE, got: $result"
+  _fail "expected fresh valid-ancestor diff_base=$REAL_BASE, got: $result"
 fi
 rm -rf "$S"
 
@@ -175,6 +181,97 @@ HEAD_TILDE_1=$(git -C "$S" rev-parse HEAD~1)
 result=$(_get_diff_base "$S")
 if [ "$result" = "$HEAD_TILDE_1" ]; then
   _pass "no stamp → HEAD~1 ($result)"
+else
+  _fail "expected HEAD~1=$HEAD_TILDE_1, got: $result"
+fi
+rm -rf "$S"
+
+# ---- Test 6 (GE-2): Fresh stamp + NON-EXISTENT SHA → fall back to HEAD~1.
+echo "### Test 6: GE2_fresh_stamp_nonexistent_sha_falls_back_to_head_tilde_1"
+S=$(_mksandbox)
+git -C "$S" commit --allow-empty -q -m "first commit"
+git -C "$S" commit --allow-empty -q -m "second commit"
+HEAD_TILDE_1=$(git -C "$S" rev-parse HEAD~1)
+HEAD_ISO=$(git -C "$S" log -1 --format=%cI HEAD)
+FRESH_ISO=$(python3 -c "
+from datetime import datetime, timedelta
+print((datetime.fromisoformat('$HEAD_ISO') + timedelta(hours=1)).isoformat())
+")
+FORGED="deadbeef0000000000000000000000000000aaaa"   # not a real object
+cat > "$S/trail/dod/.codex-reviewed" <<EOF
+reviewed_at: $FRESH_ISO
+reviewer: codex
+diff_base: $FORGED
+verdict: PASS
+EOF
+result=$(_get_diff_base "$S")
+if [ "$result" = "$HEAD_TILDE_1" ]; then
+  _pass "fresh + non-existent SHA → HEAD~1 ($result)"
+elif [ "$result" = "$FORGED" ]; then
+  _fail "non-existent SHA accepted unverified ($FORGED)"
+else
+  _fail "expected HEAD~1=$HEAD_TILDE_1, got: $result"
+fi
+rm -rf "$S"
+
+# ---- Test 7 (GE-2): Fresh stamp + OTHER-BRANCH SHA (not ancestor of HEAD) → HEAD~1.
+echo "### Test 7: GE2_fresh_stamp_other_branch_sha_falls_back_to_head_tilde_1"
+S=$(_mksandbox)
+git -C "$S" commit --allow-empty -q -m "first commit"
+git -C "$S" commit --allow-empty -q -m "second commit (main)"
+HEAD_TILDE_1=$(git -C "$S" rev-parse HEAD~1)
+# Create a sibling branch commit that is NOT an ancestor of HEAD.
+git -C "$S" checkout -q -b sidebranch HEAD~1
+git -C "$S" commit --allow-empty -q -m "side commit"
+OTHER_BRANCH_SHA=$(git -C "$S" rev-parse HEAD)
+git -C "$S" checkout -q main
+HEAD_ISO=$(git -C "$S" log -1 --format=%cI HEAD)
+FRESH_ISO=$(python3 -c "
+from datetime import datetime, timedelta
+print((datetime.fromisoformat('$HEAD_ISO') + timedelta(hours=1)).isoformat())
+")
+cat > "$S/trail/dod/.codex-reviewed" <<EOF
+reviewed_at: $FRESH_ISO
+reviewer: codex
+diff_base: $OTHER_BRANCH_SHA
+verdict: PASS
+EOF
+result=$(_get_diff_base "$S")
+if [ "$result" = "$HEAD_TILDE_1" ]; then
+  _pass "fresh + other-branch SHA (non-ancestor) → HEAD~1 ($result)"
+elif [ "$result" = "$OTHER_BRANCH_SHA" ]; then
+  _fail "other-branch non-ancestor SHA accepted ($OTHER_BRANCH_SHA)"
+else
+  _fail "expected HEAD~1=$HEAD_TILDE_1, got: $result"
+fi
+rm -rf "$S"
+
+# ---- Test 8 (GE-2): Fresh stamp + ORPHAN commit SHA (no shared history) → HEAD~1.
+echo "### Test 8: GE2_fresh_stamp_orphan_commit_sha_falls_back_to_head_tilde_1"
+S=$(_mksandbox)
+git -C "$S" commit --allow-empty -q -m "first commit"
+git -C "$S" commit --allow-empty -q -m "second commit"
+HEAD_TILDE_1=$(git -C "$S" rev-parse HEAD~1)
+git -C "$S" checkout -q --orphan orphanbranch
+git -C "$S" commit --allow-empty -q -m "orphan root"
+ORPHAN_SHA=$(git -C "$S" rev-parse HEAD)
+git -C "$S" checkout -q main
+HEAD_ISO=$(git -C "$S" log -1 --format=%cI HEAD)
+FRESH_ISO=$(python3 -c "
+from datetime import datetime, timedelta
+print((datetime.fromisoformat('$HEAD_ISO') + timedelta(hours=1)).isoformat())
+")
+cat > "$S/trail/dod/.codex-reviewed" <<EOF
+reviewed_at: $FRESH_ISO
+reviewer: codex
+diff_base: $ORPHAN_SHA
+verdict: PASS
+EOF
+result=$(_get_diff_base "$S")
+if [ "$result" = "$HEAD_TILDE_1" ]; then
+  _pass "fresh + orphan SHA (no shared history) → HEAD~1 ($result)"
+elif [ "$result" = "$ORPHAN_SHA" ]; then
+  _fail "orphan SHA accepted ($ORPHAN_SHA)"
 else
   _fail "expected HEAD~1=$HEAD_TILDE_1, got: $result"
 fi
