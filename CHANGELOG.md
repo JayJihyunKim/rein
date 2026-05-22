@@ -2,6 +2,19 @@
 
 > **Versioning policy**: 버전 bump 는 `.claude/rules/versioning.md` 의 Rule A/B/C 를 따른다.
 
+## v1.3.4 — 2026-05-22 (보안 게이트 정합성 + 세션 종료 게이트 안정성)
+
+`rein update` 후 사용자 세션에서 바뀌는 것:
+
+- **보안 리뷰 stamp 면제가 더 엄격해집니다** — 이전엔 commit 게이트의 보안 stamp 면제(`security_tier: light`)가 `.active-dod` marker 가 명시적으로 가리키는 DoD(Tier 1)뿐 아니라, marker 부재 시 mtime 으로 추정한 fallback DoD(Tier 2)까지 수용했습니다. fallback 은 advisory(non-blocking) 권위라 "보안 리뷰 없이 commit 허용" 같은 차단 결정의 근거로 부적절했습니다. 이제 이 면제는 `.active-dod` 가 명시적으로 가리키는 Tier 1 DoD 에서만 적용됩니다. codex 리뷰 stamp(`.codex-reviewed`)는 tier 와 무관하게 항상 필요합니다(불변).
+- **비밀파일 읽기 차단이 더 넓어집니다** — safety guard 의 비밀값 읽기 차단(P8)이 이전엔 `cat` / `head` / `tail` / `less` / `more` / `python` / `node` 만 탐지했습니다. 이제 `grep` / `awk` / `sed` / `jq` / `cut` 으로 비밀파일을 읽는 경로도 차단합니다. 안전 템플릿(예시 키만 담긴 파일)은 그대로 통과하며, 따옴표로 모호해진 패턴은 보안 우선으로 보수적 차단(deny-by-default)합니다.
+- **세션 종료 게이트가 더 안정적입니다** — (1) 차단된 편집이 남긴 stale resolver 캐시(`.rein/cache/hook-resolver/`)를 세션 종료 시 24시간 기준으로 정리합니다(시각 불명 항목은 보존). (2) stale DoD 경고에서 이미 완료된(inbox 기록이 매칭되는) DoD 는 제외해 불필요한 경고가 사라집니다. (3) POSIX 호환성 수정 — 미해결 incident 카운트의 정수 검사를 bash 전용 문법에서 POSIX `case` 로 교체.
+
+내부 변경 (사용자 영향 없음):
+
+- scaffold-mode 용어를 제거하고 테스트/주석을 plugin-mode fixture 로 일원화.
+- 문서 추가 — README 에 "How Rein differs from Claude Code workflows" 비교 섹션, `docs/architecture.md`(hook lifecycle 맵 + 게이트별 enforcement 표), `docs/policy-model.md`(governance 모델, 선언형 정책 방향은 roadmap 으로 표기).
+
 ## v1.3.3 — 2026-05-20 (rule injection 경량화 + background-jobs advisory cold-path skip)
 
 `rein update` 후 사용자 세션에서 바뀌는 것:

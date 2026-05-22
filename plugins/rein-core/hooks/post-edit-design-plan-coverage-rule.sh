@@ -12,7 +12,7 @@
 # to (not replacement for) post-edit-plan-coverage.sh's validator gate.
 #
 # Silent exit 0 when:
-#   - CLAUDE_PLUGIN_ROOT unset (scaffold mode — rule body lives elsewhere)
+#   - CLAUDE_PLUGIN_ROOT unset (non-plugin runtime — rule body lives elsewhere)
 #   - stdin empty / malformed JSON
 #   - file path does not match the watched globs
 #   - rule body unresolvable
@@ -42,13 +42,19 @@ fi
 # state_is_valid 로 게이트해, read_state 가 corrupt/unknown-schema state 에도
 # echo 하는 default "answer" 를 envelope-skip 신호로 오인하지 않는다
 # (codex Round 1 HIGH = state 부재, Round 2 HIGH = malformed / unknown schema).
+# X4.C.5: read_fast_path_state folds validate + effective-mode into one python
+# call under one lock (was state_is_valid + read_effective_mode = 3 python +
+# 1 lock). Non-zero return = lock/python/parse failure → fall through to legacy
+# inject (codex Round 3 HIGH preserved). The leading "valid" field is "1" only
+# for a well-typed schema-v1 doc, so a corrupt/unknown-schema state never trips
+# the answer-skip (codex Round 1/2 HIGH preserved).
 if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/state-machine.sh" ]; then
   if . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/state-machine.sh" 2>/dev/null; then
-    # read_effective_mode prints "answer" AND returns non-zero on lock-acquire
-    # failure → trust the captured mode only when the read succeeds (exit 0).
-    # A failed read falls through to legacy inject (codex Round 3 HIGH).
-    if state_is_valid && _fastpath_mode=$(read_effective_mode 2>/dev/null) \
-        && [ "$_fastpath_mode" = "answer" ]; then
+    # Third field (dirty_match) is unused here — no match_path passed, so it is
+    # always "0". `_` is the conventional throwaway (shellcheck-recognised).
+    if _fp_line=$(read_fast_path_state 2>/dev/null) \
+        && IFS=$'\t' read -r _fp_valid _fastpath_mode _ <<<"$_fp_line" \
+        && [ "$_fp_valid" = "1" ] && [ "$_fastpath_mode" = "answer" ]; then
       exit 0
     fi
   fi

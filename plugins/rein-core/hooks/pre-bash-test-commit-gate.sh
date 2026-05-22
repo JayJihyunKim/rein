@@ -36,7 +36,7 @@
 # `{ <hook-name>: { enabled: false } }`. The loader also honours the legacy
 # umbrella key `pre-bash-guard` (rein-policy-loader.py UMBRELLA_KEYS) so a
 # project that disabled the old single hook keeps both halves disabled.
-# Plugin mode: ${CLAUDE_PLUGIN_ROOT} is set. Scaffold mode: env unset, skip.
+# Requires plugin mode (${CLAUDE_PLUGIN_ROOT} set). Skipped otherwise.
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" ]; then
   if ! python3 "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" "pre-bash-test-commit-gate"; then
     exit 0  # disabled by user policy
@@ -173,10 +173,16 @@ check_review_stamp() {
       _sad=$(cd "$PROJECT_DIR" && select_active_dod 2>/dev/null) || _sad=""
       _sad_tier=$(printf '%s' "$_sad" | cut -f1)
       _sad_path=$(printf '%s' "$_sad" | cut -f2)
-      # Only accept Tier 1 or Tier 2 with a non-empty, existing path.
-      # Tier 0 (no candidate), empty path, or missing file → fail-closed.
-      if { [ "$_sad_tier" = "1" ] || [ "$_sad_tier" = "2" ]; } \
-          && [ -n "$_sad_path" ]; then
+      # B1 (v1.3.4): accept ONLY Tier 1 (explicit .active-dod marker —
+      # "blocking authority" per lib/select-active-dod.sh). Tier 2 is the
+      # advisory mtime-latest fallback ("non-blocking authority") and must
+      # NOT authorise skipping the security stamp, which is itself a blocking
+      # decision. This aligns with the coverage-marker self-heal path below,
+      # which already trusts ONLY Tier 1. A real approved DoD always carries an
+      # .active-dod marker (auto-written by post-edit-dod-routing-check), so
+      # the legitimate light-tier skip stays Tier 1. Tier 0/2, empty path, or
+      # missing file → fail-closed (require stamp).
+      if [ "$_sad_tier" = "1" ] && [ -n "$_sad_path" ]; then
         # select_active_dod returns repo-relative path; anchor to PROJECT_DIR.
         _sad_abs="$PROJECT_DIR/$_sad_path"
         [ -f "$_sad_abs" ] && _active_dod="$_sad_abs"

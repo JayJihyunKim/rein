@@ -105,6 +105,22 @@ In an AI-assisted workflow, every fix is a re-prompt. In an AI-native workflow, 
 
 ---
 
+## How Rein differs from Claude Code workflows
+
+Claude Code workflows help agents perform tasks. Rein constrains *when* those tasks are allowed to proceed.
+
+| Layer | Claude Code | Rein |
+|---|---|---|
+| Commands | Ask the agent to do work | Force the work to follow a process |
+| Hooks | Run automation at lifecycle points | Enforce gates across lifecycle points |
+| Reviews | Optional command or habit | Required stamp before commit |
+| Context | Prompt / session memory | Repo-local evidence trail |
+| Team rules | Instructions | Executable policy |
+
+Claude Code gives agents tools. Rein gives teams control. See [docs/architecture.md](docs/architecture.md) for the hook lifecycle and [docs/policy-model.md](docs/policy-model.md) for the governance model.
+
+---
+
 ## What you get
 
 1. **Tasks must be defined before code is edited.** A Definition-of-Done file is required before any source edit.
@@ -266,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.3.3** (2026-05-20) — Shrinks the per-turn / per-Bash rule body injection by ~91-92% (answer-only-mode 7 KB / background-jobs 6 KB → short summaries ≤600 B each) and limits the background-jobs advisory hook to a hot-path command whitelist (pytest / npm test / cargo build / playwright / make / tsc and similar — bare + args). Blocking guards (safety-guard, test-commit-gate, bootstrap check) remain always-on. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.3.4** (2026-05-22) — Tightens the security-review stamp skip to the explicitly-marked active DoD (Tier 1 only; the advisory mtime-fallback no longer authorizes skipping security review), extends the safety guard's secret-file read block (P8) to `grep` / `awk` / `sed` / `jq` / `cut`, and hardens the session-stop gate (stale resolver-cache GC, completed-DoD stale-warning exclusion, POSIX integer check). ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

@@ -182,6 +182,83 @@ test_cat_env_local_is_blocked() {
   assert_json_deny "ENV_READ_BLOCKED" "cat .env.local 은 시크릿 파일 — 차단되어야 함"
 }
 
+# ------------------------------------------------------------
+# B2 (v1.3.4): search-verb extension (grep/awk/sed/jq/cut) + quote precision
+# ------------------------------------------------------------
+
+# true-positive: grep 으로 .env 시크릿 읽기 — 차단.
+test_grep_secret_in_env_is_blocked() {
+  local input='{"tool_input":{"command":"grep API_KEY .env"},"tool_result":{}}'
+  run_hook "pre-bash-safety-guard.sh" "$input"
+  assert_json_deny "ENV_READ_BLOCKED" "grep API_KEY .env 는 시크릿 읽기 — 차단되어야 함"
+}
+
+# true-positive: awk 으로 .env.local 읽기 — 차단.
+test_awk_env_local_is_blocked() {
+  local input='{"tool_input":{"command":"awk \"{print}\" .env.local"},"tool_result":{}}'
+  run_hook "pre-bash-safety-guard.sh" "$input"
+  assert_json_deny "ENV_READ_BLOCKED" "awk .env.local 은 시크릿 읽기 — 차단되어야 함"
+}
+
+# true-positive: sed 으로 .env 읽기 — 차단.
+test_sed_env_is_blocked() {
+  local input='{"tool_input":{"command":"sed -n p .env"},"tool_result":{}}'
+  run_hook "pre-bash-safety-guard.sh" "$input"
+  assert_json_deny "ENV_READ_BLOCKED" "sed -n p .env 는 시크릿 읽기 — 차단되어야 함"
+}
+
+# true-positive: jq 로 .env 읽기 — 차단.
+test_jq_env_is_blocked() {
+  local input='{"tool_input":{"command":"jq . .env"},"tool_result":{}}'
+  run_hook "pre-bash-safety-guard.sh" "$input"
+  assert_json_deny "ENV_READ_BLOCKED" "jq . .env 는 시크릿 읽기 — 차단되어야 함"
+}
+
+# true-positive: cut 으로 .env 읽기 — 차단.
+test_cut_env_is_blocked() {
+  local input='{"tool_input":{"command":"cut -d= -f2 .env"},"tool_result":{}}'
+  run_hook "pre-bash-safety-guard.sh" "$input"
+  assert_json_deny "ENV_READ_BLOCKED" "cut .env 는 시크릿 읽기 — 차단되어야 함"
+}
+
+# true-positive: quoted path 는 여전히 차단.
+test_cat_quoted_env_path_is_blocked() {
+  local input='{"tool_input":{"command":"cat \"$HOME/.env\""},"tool_result":{}}'
+  run_hook "pre-bash-safety-guard.sh" "$input"
+  assert_json_deny "ENV_READ_BLOCKED" "cat \"\$HOME/.env\" 은 quoted path — 차단되어야 함"
+}
+
+# true-positive (fail-closed): quoted bare filename 도 차단 — 따옴표는 우회 수단이
+# 아니다 (codex review 2026-05-22: quote-aware 면제는 시크릿 read 우회를 열었음).
+test_cat_quoted_env_is_blocked() {
+  local input='{"tool_input":{"command":"cat \".env\""},"tool_result":{}}'
+  run_hook "pre-bash-safety-guard.sh" "$input"
+  assert_json_deny "ENV_READ_BLOCKED" "cat \".env\" (quoted filename) 은 시크릿 read — 차단되어야 함"
+}
+
+# true-positive (fail-closed): grep 의 따옴표 파일 인자도 차단.
+test_grep_quoted_env_file_is_blocked() {
+  local input='{"tool_input":{"command":"grep API_KEY \".env\""},"tool_result":{}}'
+  run_hook "pre-bash-safety-guard.sh" "$input"
+  assert_json_deny "ENV_READ_BLOCKED" "grep API_KEY \".env\" (quoted file) 은 시크릿 read — 차단되어야 함"
+}
+
+# fail-closed 비용: 따옴표 검색 패턴 ".env" 도 보수적으로 차단된다. 시크릿 파일
+# 인자와 검색 패턴을 regex 로 구분하려면 shell 파싱이 필요하므로, deny-by-default
+# 로 둔다 (false-positive 대신 fail-open 회피 — codex review 2026-05-22).
+test_grep_quoted_env_pattern_blocked_fail_closed() {
+  local input='{"tool_input":{"command":"grep \".env\" README.md"},"tool_result":{}}'
+  run_hook "pre-bash-safety-guard.sh" "$input"
+  assert_json_deny "ENV_READ_BLOCKED" "grep \".env\" README.md — fail-closed 로 보수적 차단"
+}
+
+# false-positive 방지: 안전 템플릿 .env.example 은 search verb 로도 차단 금지.
+test_grep_env_example_not_blocked() {
+  local input='{"tool_input":{"command":"grep API_KEY .env.example"},"tool_result":{}}'
+  run_hook "pre-bash-safety-guard.sh" "$input"
+  assert_not_blocked "grep .env.example 은 안전 템플릿 — 차단 금지"
+}
+
 # ============================================================
 # Suite D: 파괴적 git 분류기 [P11]
 # ============================================================
@@ -262,6 +339,16 @@ main() {
   run_test test_echo_mentioning_env_read_is_not_blocked                pre-bash-safety-guard.sh
   run_test test_cat_env_is_blocked                                     pre-bash-safety-guard.sh
   run_test test_cat_env_local_is_blocked                               pre-bash-safety-guard.sh
+  run_test test_grep_secret_in_env_is_blocked                          pre-bash-safety-guard.sh
+  run_test test_awk_env_local_is_blocked                               pre-bash-safety-guard.sh
+  run_test test_sed_env_is_blocked                                     pre-bash-safety-guard.sh
+  run_test test_jq_env_is_blocked                                      pre-bash-safety-guard.sh
+  run_test test_cut_env_is_blocked                                     pre-bash-safety-guard.sh
+  run_test test_cat_quoted_env_path_is_blocked                         pre-bash-safety-guard.sh
+  run_test test_cat_quoted_env_is_blocked                              pre-bash-safety-guard.sh
+  run_test test_grep_quoted_env_file_is_blocked                        pre-bash-safety-guard.sh
+  run_test test_grep_quoted_env_pattern_blocked_fail_closed            pre-bash-safety-guard.sh
+  run_test test_grep_env_example_not_blocked                           pre-bash-safety-guard.sh
   # Suite D — 파괴적 git 분류기 (→ safety-guard)
   run_test test_echo_mentioning_destructive_git_is_not_blocked         pre-bash-safety-guard.sh
   run_test test_git_reset_hard_is_blocked                              pre-bash-safety-guard.sh

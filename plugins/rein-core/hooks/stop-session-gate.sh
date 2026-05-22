@@ -28,7 +28,7 @@ PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 # from 4 sites below (trap stamp, advisory_check, main aggregate, count-
 # pending query). All call sites must guard on non-empty because the
 # resolver returns empty when the helper is absent on either side
-# (e.g. legacy scaffold install without the plugin bundle).
+# (e.g. a non-plugin runtime without the plugin bundle).
 if ! . "$SCRIPT_DIR/lib/plugin-script-path.sh" 2>/dev/null; then
   echo "[rein] The session gate cannot run because a required library is missing (lib/plugin-script-path.sh). Run 'rein update' to restore it." >&2
   exit 2
@@ -118,6 +118,32 @@ fi
 # ---- QA 세션 감지: 소스 편집이 없었으면 inbox/index 요구 면제 ----
 # incident advisory 는 소스 편집 여부와 무관하게 항상 실행
 incident_advisory_check
+
+# B3 (v1.3.4): resolver-cache GC. PERF-2 cache entries
+# (.rein/cache/hook-resolver/<tool_use_id>.json) are written by
+# pre-edit-dod-gate BEFORE its gate checks; a blocked edit skips the
+# PostToolUse aggregator cleanup, leaving the entry stale. Sweep entries older
+# than 24h here — placed BEFORE the no-src-edit early exit below, so
+# blocked-edit leaks (which never set SRC_EDIT_MARKER) are also reclaimed.
+# Best-effort: never blocks session stop. Fail-closed on deletion — an unknown
+# or non-positive mtime is SKIPPED, never deleted (no fail-open wipe).
+_rein_gc_resolver_cache() {
+  _gc_dir="${CLAUDE_PROJECT_DIR:-$PROJECT_DIR}/.rein/cache/hook-resolver"
+  [ -d "$_gc_dir" ] || return 0
+  _gc_now=$(date +%s 2>/dev/null) || return 0
+  case "$_gc_now" in *[!0-9]*|'') return 0 ;; esac
+  for _gc_f in "$_gc_dir"/*.json; do
+    [ -f "$_gc_f" ] || continue
+    _gc_mtime=$(portable_mtime_epoch "$_gc_f" 2>/dev/null || echo 0)
+    # Unknown / non-numeric / zero mtime → skip (never fail-open delete).
+    case "$_gc_mtime" in *[!0-9]*|'') continue ;; esac
+    [ "$_gc_mtime" -gt 0 ] || continue
+    [ "$(( _gc_now - _gc_mtime ))" -gt 86400 ] && rm -f "$_gc_f" 2>/dev/null || true
+  done
+  return 0
+}
+_rein_gc_resolver_cache || true
+
 if [ ! -f "$SRC_EDIT_MARKER" ]; then
   exit 0
 fi
@@ -241,6 +267,25 @@ if [ -d "$DOD_DIR" ]; then
     FILE_EPOCH=$(portable_date_ymd_to_epoch "$FILE_DATE")
     [ -z "$FILE_EPOCH" ] && continue
 
+    # B7 (v1.3.4): skip DoDs already completed — i.e. a trail/inbox/ entry
+    # shares the DoD slug. Mirrors the active-DoD filter in
+    # pre-edit-dod-gate.sh (slug = filename minus dod-YYYY-MM-DD- prefix and
+    # .md suffix; inbox slug = filename minus YYYY-MM-DD- prefix). A completed
+    # DoD is not "stale unfinished work", so it must not warn.
+    DOD_SLUG=$(basename "$f" .md | sed 's/^dod-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-//')
+    IS_COMPLETED=false
+    if [ -d "$INBOX_DIR" ]; then
+      for inbox_f in "$INBOX_DIR"/[0-9]*.md; do
+        [ -f "$inbox_f" ] || continue
+        INBOX_SLUG=$(basename "$inbox_f" .md | sed 's/^[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-//')
+        if [ "$INBOX_SLUG" = "$DOD_SLUG" ]; then
+          IS_COMPLETED=true
+          break
+        fi
+      done
+    fi
+    [ "$IS_COMPLETED" = true ] && continue
+
     AGE_DAYS=$(( (NOW_EPOCH - FILE_EPOCH) / 86400 ))
     if [ "$AGE_DAYS" -ge "$STALE_DAYS" ]; then
       echo "WARNING: 다음 DoD가 ${AGE_DAYS}일 이상 미완료 상태입니다:" >&2
@@ -304,8 +349,8 @@ if [ "$PENDING_COUNT" -gt 0 ]; then
     echo "$CURRENT_HASHES" > "$HASHES_FILE"
 
     COUNT=$(head -1 "$BLOCK_COUNTER_FILE" 2>/dev/null || echo 0)
-    # 비정수 방어
-    [[ "$COUNT" =~ ^[0-9]+$ ]] || COUNT=0
+    # 비정수 방어 (B6 v1.3.4: POSIX-compatible — portable.sh 일관성, bash [[ ]] 제거)
+    case "$COUNT" in *[!0-9]*|'') COUNT=0 ;; esac
     COUNT=$((COUNT + 1))
     echo "$COUNT" > "$BLOCK_COUNTER_FILE"
 

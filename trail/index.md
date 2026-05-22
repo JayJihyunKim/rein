@@ -5,9 +5,9 @@
 ## 현재 상태
 
 - **프로젝트**: Rein (AI Native Development Framework)
-- **다음 세션 진입점**: **통합 master plan 활성 — `docs/plans/2026-05-20-integrated-roadmap.md` 우선 read**. **다음 권장 cycle = 영역 D (release gate 분리 + v1.3.3 main 머지)** — 본 plan 마지막 영역. ✅ X1 + ✅ v1.3.3 + ✅ X2 + ✅ X3.E.3 + ✅ X3.B.0/B.1+B.2/B.5 + ✅ X4.C.0/C.1/C.2 + ✅ X4.C.3 (4 hook fast-path) + ✅ **X4.C.4 (SPIKE + Q-1 + (b) + (c), 2026-05-21)**. **X4.C.4 결과 PARTIAL — 영역 C 일시 close**: M2 answer-skip 32ms 절약, M1 +59~77ms / M2 source_edit +66~68ms common-case net regression, M3 neutral. Q-1 → 두 dirty layer 분리 유지. (b) TOCTOU → 단일 writer 모델 하 실질 누출 0 + atomic 결합 후속 후보 (M1 net -1~+21ms = break-even/약 회귀). (c) security profile → base→standard upgrade 적용. report: `docs/reports/2026-05-21-area-c-state-machine-spike.md`. 잔존: 영역 D (다음), X4.C.5 atomic 결합 (선택, 영역 D 와 병렬 가능), X3.B.3 (선택). main = origin/main = **`0f7e3ef`** (v1.3.3, 불변).
-- **이전 완료**: 2026-05-20 **v1.3.3 릴리즈** (main `0f7e3ef`, annotated tag, public mirror + 마켓플레이스 publish workflow 트리거됨 — Phase 4 short rule injection ~92% / cold-path skip). / 2026-05-19 v1.3.2. / 2026-05-18 v1.3.1. / 2026-05-15 v1.3.0. / 2026-04-30 v1.0.0 OSS launch.
-- **버전**: dev VERSION = **1.3.3** (X2 미bump — internal hook 인프라 refactor, user-facing CLI 표면 변화 없음). main = origin/main = **1.3.3** (annotated tag `v1.3.3` → `0f7e3ef`, 불변). 다음 bump 후보: X3/X4/X5 누적 후 평가 — X2 의 hooks.json structure 변화는 plugin internal 이라 minor 미해당 가능성.
+- **다음 세션 진입점**: **v1.3.4 릴리스 완료 (2026-05-22)**. dev 커밋 `d61aea8`(release 5파일: plugin.json+rein.sh 버전 동기화, CHANGELOG, README KR/EN) + trail 커밋. codex Round 1 NEEDS-FIX(버전 parity broken — rein.sh 미동기화) → 수정 → Round 2 PASS. v1.3.4 hook 테스트 PASS. main 선별 체크아웃 + tag `v1.3.4` + push + 배포 진행. 후속 후보: B2 verb allowlist 한계(rg/xxd 등), S3 state-paths mode 결정, need-to-confirm.md 미해결(G8-3 1순위·GE-1/2·SR-1).
+- **이전 완료**: 2026-05-22 **v1.3.4 구현** (B1/B2/B3/B6/B7+S+D, dev, codex+security 통과). / 2026-05-22 X4.C.5 atomic state fast-path (영역 C close). / 2026-05-22 영역 D 기각. / 2026-05-20 **v1.3.3 릴리즈** (main `0f7e3ef`, tag `a4995c3`). / 2026-04-30 v1.0.0 OSS launch.
+- **버전**: dev plugin.json = **1.3.4** = scripts/rein.sh VERSION (parity OK). v1.3.4 = patch (버그·위생·문서, 확정안 §0.5). main/tag 최종 sha 는 머지·태그 후 갱신.
 
 ## 주의사항
 

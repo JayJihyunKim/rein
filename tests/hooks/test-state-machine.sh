@@ -211,6 +211,213 @@ JSON
   rm_sandbox
 }
 
+# --- X4.C.5 read_fast_path_state behavioral-contract tests ---
+# The combined function must return the SAME (valid, effective-mode, dirty-match)
+# decisions the X4.C.3 fast-path computed across separate state_is_valid +
+# read_effective_mode + read_state-based-match calls. These tests assert the
+# combined output's exact values (not just != legacy), per Testing rules.
+
+# Helper: parse "valid<TAB>mode<TAB>match" from read_fast_path_state.
+# Sets FP_VALID / FP_MODE / FP_MATCH globals in the caller's shell.
+_fp_run() {
+  local line
+  line=$(source "$LIB"; read_fast_path_state "$@")
+  IFS=$'\t' read -r FP_VALID FP_MODE FP_MATCH <<<"$line"
+}
+
+# T7 — valid source_edit + dirty hit → (1, source_edit, 1).
+t7_fast_path_source_edit_dirty_hit() {
+  start_test "T7: read_fast_path_state source_edit + dirty hit → valid=1 mode=source_edit match=1"
+  mk_sandbox
+  mkdir -p "$SANDBOX/.rein"
+  cat > "$SANDBOX/.rein/state.json" <<'JSON'
+{"schema_version":1,"mode":"source_edit","updated_at":"2026-05-21T00:00:00Z","dirty_files":[{"path":"/x/foo.py","kind":"source"}],"last_drain_seq":0}
+JSON
+  _fp_run "/x/foo.py"
+  assert_eq "valid" "1" "$FP_VALID"
+  assert_eq "mode" "source_edit" "$FP_MODE"
+  assert_eq "dirty_match_hit" "1" "$FP_MATCH"
+  end_test
+  rm_sandbox
+}
+
+# T8 — valid source_edit + dirty MISS → match=0 (mode/valid still report state).
+t8_fast_path_dirty_miss() {
+  start_test "T8: read_fast_path_state source_edit + dirty MISS → valid=1 mode=source_edit match=0"
+  mk_sandbox
+  mkdir -p "$SANDBOX/.rein"
+  cat > "$SANDBOX/.rein/state.json" <<'JSON'
+{"schema_version":1,"mode":"source_edit","updated_at":"2026-05-21T00:00:00Z","dirty_files":[{"path":"/x/foo.py","kind":"source"}],"last_drain_seq":0}
+JSON
+  _fp_run "/x/other.py"
+  assert_eq "valid" "1" "$FP_VALID"
+  assert_eq "mode" "source_edit" "$FP_MODE"
+  assert_eq "dirty_match_miss" "0" "$FP_MATCH"
+  end_test
+  rm_sandbox
+}
+
+# T9 — effective-mode equivalence: state.mode=answer + edit journal → source_edit
+#      (same merge read_effective_mode performs). No match_path → match=0.
+t9_fast_path_effective_mode_journal_merge() {
+  start_test "T9: read_fast_path_state answer + edit journal → valid=1 mode=source_edit match=0"
+  mk_sandbox
+  mkdir -p "$SANDBOX/.rein"
+  cat > "$SANDBOX/.rein/state.json" <<'JSON'
+{"schema_version":1,"mode":"answer","updated_at":"2026-05-21T00:00:00Z","dirty_files":[],"command_class_cache":{},"risk_score":0,"last_drain_seq":0}
+JSON
+  printf '1\t2026-05-21T10:00:00Z\tedit\t/x/a.py\tsource\n' > "$SANDBOX/.rein/state-pending-edits.log"
+  _fp_run
+  assert_eq "valid" "1" "$FP_VALID"
+  assert_eq "merged_mode" "source_edit" "$FP_MODE"
+  assert_eq "no_match_path" "0" "$FP_MATCH"
+  end_test
+  rm_sandbox
+}
+
+# T10 — strict seq order parity with read_effective_mode T6: stop(1)+edit(2) →
+#       source_edit (fixed-file-order concat would wrongly yield answer).
+t10_fast_path_strict_seq_order() {
+  start_test "T10: read_fast_path_state stop(seq=1)+edit(seq=2) → mode=source_edit (strict seq order)"
+  mk_sandbox
+  mkdir -p "$SANDBOX/.rein"
+  cat > "$SANDBOX/.rein/state.json" <<'JSON'
+{"schema_version":1,"mode":"source_edit","updated_at":"2026-05-21T00:00:00Z","dirty_files":[],"command_class_cache":{},"risk_score":0,"last_drain_seq":0}
+JSON
+  printf '1\t2026-05-21T10:00:00Z\tturn-end\n' > "$SANDBOX/.rein/state-pending-stop.log"
+  printf '2\t2026-05-21T10:00:01Z\tedit\t/x/a.py\tsource\n' > "$SANDBOX/.rein/state-pending-edits.log"
+  _fp_run
+  assert_eq "seq_ordered_mode" "source_edit" "$FP_MODE"
+  assert_eq "valid" "1" "$FP_VALID"
+  end_test
+  rm_sandbox
+}
+
+# T11 — last_drain_seq skip: an entry already drained (seq <= lds) must NOT be
+#       re-applied. state.mode=answer + lds=5 + edit(seq=3) → still answer.
+t11_fast_path_skips_drained_entries() {
+  start_test "T11: read_fast_path_state edit(seq=3) with last_drain_seq=5 → mode stays answer"
+  mk_sandbox
+  mkdir -p "$SANDBOX/.rein"
+  cat > "$SANDBOX/.rein/state.json" <<'JSON'
+{"schema_version":1,"mode":"answer","updated_at":"2026-05-21T00:00:00Z","dirty_files":[],"command_class_cache":{},"risk_score":0,"last_drain_seq":5}
+JSON
+  printf '3\t2026-05-21T10:00:00Z\tedit\t/x/a.py\tsource\n' > "$SANDBOX/.rein/state-pending-edits.log"
+  _fp_run
+  assert_eq "drained_entry_ignored" "answer" "$FP_MODE"
+  assert_eq "valid" "1" "$FP_VALID"
+  end_test
+  rm_sandbox
+}
+
+# T12 — malformed JSON → legacy fallback (valid=0, mode=answer, match=0) with
+#       rc=0 (query ran, reports "not valid"), identical to state_is_valid
+#       returning false. The verdict rides in the valid field, not the rc.
+t12_fast_path_malformed_fallback() {
+  start_test "T12: read_fast_path_state malformed JSON → valid=0 mode=answer match=0 + rc=0"
+  mk_sandbox
+  mkdir -p "$SANDBOX/.rein"
+  echo 'NOT JSON {{{' > "$SANDBOX/.rein/state.json"
+  local line rc
+  line=$(source "$LIB"; read_fast_path_state "/x/foo.py"); rc=$?
+  IFS=$'\t' read -r FP_VALID FP_MODE FP_MATCH <<<"$line"
+  assert_eq "valid_zero" "0" "$FP_VALID"
+  assert_eq "mode_answer_fallback" "answer" "$FP_MODE"
+  assert_eq "match_zero" "0" "$FP_MATCH"
+  # malformed parses successfully as "not valid" → rc=0 with valid=0 (gate via
+  # the valid field, mirroring state_is_valid returning 1/false not a hard error).
+  assert_eq "rc_success_with_valid_zero" "0" "$rc"
+  end_test
+  rm_sandbox
+}
+
+# T13 — unknown schema_version → valid=0 (legacy fallback), parity with
+#       state_is_valid rejecting non-v1 documents.
+t13_fast_path_unknown_schema_fallback() {
+  start_test "T13: read_fast_path_state schema_version=2 → valid=0 mode=answer"
+  mk_sandbox
+  mkdir -p "$SANDBOX/.rein"
+  cat > "$SANDBOX/.rein/state.json" <<'JSON'
+{"schema_version":2,"mode":"source_edit","updated_at":"2026-05-21T00:00:00Z","dirty_files":[{"path":"/x/foo.py","kind":"source"}],"last_drain_seq":0}
+JSON
+  _fp_run "/x/foo.py"
+  assert_eq "valid_zero_unknown_schema" "0" "$FP_VALID"
+  assert_eq "mode_answer_fallback" "answer" "$FP_MODE"
+  assert_eq "match_suppressed" "0" "$FP_MATCH"
+  end_test
+  rm_sandbox
+}
+
+# T14 — corrupt schema-v1 field (mode not in enum) → valid=0, mirroring
+#       state_is_valid's R5 enum check. Guards against "answer bogus" leaking.
+t14_fast_path_corrupt_field_fallback() {
+  start_test "T14: read_fast_path_state schema-v1 with non-enum mode → valid=0"
+  mk_sandbox
+  mkdir -p "$SANDBOX/.rein"
+  cat > "$SANDBOX/.rein/state.json" <<'JSON'
+{"schema_version":1,"mode":"answer bogus","updated_at":"","dirty_files":[],"last_drain_seq":0}
+JSON
+  _fp_run
+  assert_eq "valid_zero_corrupt_mode" "0" "$FP_VALID"
+  assert_eq "mode_answer_fallback" "answer" "$FP_MODE"
+  end_test
+  rm_sandbox
+}
+
+# T15 — absent state.json → valid=0 fallback (greenfield), parity with the
+#       state_is_valid `[ -f "$STATE_FILE" ] || return 1` gate.
+t15_fast_path_absent_state_fallback() {
+  start_test "T15: read_fast_path_state absent state.json → valid=0 mode=answer match=0"
+  mk_sandbox
+  _fp_run "/x/foo.py"
+  assert_eq "valid_zero_absent" "0" "$FP_VALID"
+  assert_eq "mode_answer_fallback" "answer" "$FP_MODE"
+  assert_eq "match_zero" "0" "$FP_MATCH"
+  end_test
+  rm_sandbox
+}
+
+# T16 — direct equivalence vs the legacy 3-call sequence (state_is_valid +
+#       read_effective_mode + read_state match). Asserts the combined output
+#       equals the EXACT values the legacy callers would have computed, for a
+#       representative valid source_edit + dirty-hit state.
+t16_fast_path_equivalent_to_legacy_calls() {
+  start_test "T16: read_fast_path_state == legacy (state_is_valid + read_effective_mode + match)"
+  mk_sandbox
+  mkdir -p "$SANDBOX/.rein"
+  cat > "$SANDBOX/.rein/state.json" <<'JSON'
+{"schema_version":1,"mode":"source_edit","updated_at":"2026-05-21T00:00:00Z","dirty_files":[{"path":"/x/foo.py","kind":"source"}],"last_drain_seq":0}
+JSON
+  local target="/x/foo.py"
+  # Legacy 3-call results.
+  local legacy_valid legacy_mode legacy_state legacy_match
+  legacy_valid=$(source "$LIB"; if state_is_valid; then echo 1; else echo 0; fi)
+  legacy_mode=$(source "$LIB"; read_effective_mode 2>/dev/null)
+  legacy_state=$(source "$LIB"; read_state 2>/dev/null)
+  legacy_match=$(python3 -c '
+import json, sys
+try:
+    s = json.loads(sys.argv[1])
+except Exception:
+    print("0"); sys.exit(0)
+t = sys.argv[2]
+for d in s.get("dirty_files", []) or []:
+    if isinstance(d, dict) and d.get("path") == t:
+        print("1"); sys.exit(0)
+print("0")' "$legacy_state" "$target")
+  # Combined.
+  _fp_run "$target"
+  assert_eq "valid_equiv" "$legacy_valid" "$FP_VALID"
+  assert_eq "mode_equiv" "$legacy_mode" "$FP_MODE"
+  assert_eq "match_equiv" "$legacy_match" "$FP_MATCH"
+  # Anchor the expected concrete values too (not just self-consistency).
+  assert_eq "valid_concrete" "1" "$FP_VALID"
+  assert_eq "mode_concrete" "source_edit" "$FP_MODE"
+  assert_eq "match_concrete" "1" "$FP_MATCH"
+  end_test
+  rm_sandbox
+}
+
 run_all() {
   t1_state_absent_returns_default
   t2_malformed_json_stderr_and_default
@@ -218,6 +425,16 @@ run_all() {
   t4_journal_append_no_lost_updates
   t5_effective_mode_merges_state_and_journal
   t6_effective_mode_applies_strict_seq_order
+  t7_fast_path_source_edit_dirty_hit
+  t8_fast_path_dirty_miss
+  t9_fast_path_effective_mode_journal_merge
+  t10_fast_path_strict_seq_order
+  t11_fast_path_skips_drained_entries
+  t12_fast_path_malformed_fallback
+  t13_fast_path_unknown_schema_fallback
+  t14_fast_path_corrupt_field_fallback
+  t15_fast_path_absent_state_fallback
+  t16_fast_path_equivalent_to_legacy_calls
 }
 
 run_all

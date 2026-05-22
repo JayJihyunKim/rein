@@ -9,7 +9,7 @@
 # .rein/policy/hooks.yaml can disable a hook via `<hook-name>: false`
 # or `{ <hook-name>: { enabled: false } }`.
 # Plugin mode: ${CLAUDE_PLUGIN_ROOT} is set, loader is invoked.
-# Scaffold mode: env unset, check is skipped (preserves pre-policy behavior).
+# Non-plugin runtime: env unset, check is skipped (preserves pre-policy behavior).
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" ]; then
   if ! python3 "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" "pre-edit-dod-gate"; then
     exit 0  # disabled by user policy
@@ -543,28 +543,22 @@ if [ "$DOD_FOUND" = true ]; then
   # fast-path 분기를 trigger 하지 않도록 한다 (design memo §2.3 legacy fallback).
   if [ -f "$SCRIPT_DIR/lib/state-machine.sh" ]; then
     if . "$SCRIPT_DIR/lib/state-machine.sh" 2>/dev/null; then
-      # read_effective_mode prints the mode but returns non-zero on lock-acquire
-      # failure → trust it only when the read succeeds (codex Round 3 HIGH);
-      # a failed read falls through to the legacy validator path.
-      if state_is_valid && _fp_mode=$(read_effective_mode 2>/dev/null) \
-          && [ "$_fp_mode" = "source_edit" ]; then
-        _fp_state=$(read_state 2>/dev/null || echo "{}")
-        _fp_match=$("${PYTHON_RUNNER[@]}" -c '
-import json, sys
-try:
-    state = json.loads(sys.argv[1])
-except Exception:
-    print("no"); sys.exit(0)
-target = sys.argv[2]
-for d in state.get("dirty_files", []) or []:
-    if isinstance(d, dict) and d.get("path") == target:
-        print("yes"); sys.exit(0)
-print("no")' "$_fp_state" "$FILE_PATH" 2>/dev/null || echo "no")
-        if [ "$_fp_match" = "yes" ]; then
-          echo "NOTICE: pre-edit-dod-gate state.fast-path skip — file=$FILE_PATH (mode=source_edit, dirty_files hit, validator subprocess skipped)" >&2
-          touch "$SRC_EDIT_MARKER" 2>/dev/null
-          exit 0
-        fi
+      # X4.C.5: read_fast_path_state folds validate + effective-mode + the
+      # dirty_files match into one python call under one lock (was state_is_valid
+      # + read_effective_mode + read_state + a separate match = 5 python + 1
+      # lock). Non-zero return = lock/python/parse failure → fall through to the
+      # legacy validator path (codex Round 3 HIGH preserved). The leading "valid"
+      # field is "1" only for a well-typed schema-v1 doc, so a corrupt/unknown-
+      # schema state never trips the skip (codex Round 2/4 HIGH preserved). The
+      # dirty match is against the on-disk dirty_files snapshot — same target as
+      # the prior read_state-based match.
+      if _fp_line=$(read_fast_path_state "$FILE_PATH" 2>/dev/null) \
+          && IFS=$'\t' read -r _fp_valid _fp_mode _fp_match <<<"$_fp_line" \
+          && [ "$_fp_valid" = "1" ] && [ "$_fp_mode" = "source_edit" ] \
+          && [ "$_fp_match" = "1" ]; then
+        echo "NOTICE: pre-edit-dod-gate state.fast-path skip — file=$FILE_PATH (mode=source_edit, dirty_files hit, validator subprocess skipped)" >&2
+        touch "$SRC_EDIT_MARKER" 2>/dev/null
+        exit 0
       fi
     fi
   fi

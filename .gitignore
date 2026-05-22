@@ -40,6 +40,16 @@ data/processed/
 .rein-remove-backup-*/
 /.claude/cache/jobs/
 
+# rein hook runtime cache + state machine runtime (영역 A/C, 2026-05-22).
+# .rein/project.json 만 ship (branch-strategy 포함 대상). cache/state.json 은
+# hook 실행 중 생성되는 휘발성 산출물 — commit 배제.
+/.rein/cache/
+/.rein/state.json
+/.rein/state-pending-*.log
+
+# rein incident aggregate lock (휘발성 — 매 세션 hook 이 갱신하는 commit noise)
+/trail/incidents/.aggregate.lock
+
 # Git worktrees (로컬 작업 분리용)
 .worktrees/
 worktrees/

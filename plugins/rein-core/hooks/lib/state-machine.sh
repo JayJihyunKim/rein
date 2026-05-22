@@ -576,3 +576,164 @@ PY
   [ "$owned_lock" = 1 ] && release_state_lock
   return 0
 }
+
+# --- read_fast_path_state [match_path]: atomic combined fast-path query ---
+# Cycle X4.C.5 (design memo §9 Q-5, spike §5). Folds the three reads that
+# X4.C.3's fast-path performed across separate python invocations —
+# state_is_valid (validate), read_effective_mode (mode), and the M1 dirty
+# match — into ONE python process under ONE shared lock. The cold-start of
+# each extra `python3` (~25ms) was what tipped the fast-path into a net
+# latency regression (spike §3); collapsing 3-5 invocations to 1 removes that
+# tax while preserving the exact decisions of the legacy callers.
+#
+# Read-only: state.json is never mutated (single-writer = dispatcher, memo §4.1).
+# A shared lock is held for the whole snapshot so the validate + mode +
+# dirty-match observe one consistent view (same posture as read_effective_mode).
+#
+# Output: one tab-separated line "<valid>\t<mode>\t<dirty_match>" where
+#   valid       = "1" iff the file is a complete well-typed schema-v1 document
+#                 (mirrors state_is_valid). "0" otherwise.
+#   mode        = effective mode = state.mode merged with seq-ordered pending
+#                 journal entries (mirrors read_effective_mode). "answer" when
+#                 valid="0" so callers gating on `valid="1"` never act on it.
+#   dirty_match = "1" iff match_path is present in the ON-DISK state.dirty_files
+#                 (mirrors the M1 read_state-based match, NOT journal-merged).
+#                 "0" when no match_path arg is given or no entry matches.
+#
+# Fallback contract (memo §2.3 / §8.4) — two tiers, BOTH safe because every
+# caller acts only on valid="1":
+#   - python-missing OR lock-acquire failure → return NON-ZERO (1 / 2) plus a
+#     safe "0\tanswer\t0" line. The query could not run at all (execution error).
+#   - absent / malformed / unknown-schema / parse-error state → return 0 with
+#     valid="0". The query ran and authoritatively reports "no trustworthy
+#     state" — this mirrors state_is_valid returning false (a normal answer),
+#     not a hard error, so rc stays 0 and the verdict rides in the valid field.
+# Either tier makes valid-gated callers fall through to the legacy path, exactly
+# as a failed state_is_valid / read_effective_mode did before.
+read_fast_path_state() {
+  _state_machine_paths
+  local match_path="${1:-}"
+  local py
+  if ! py=$(_state_machine_python); then
+    printf '%s\t%s\t%s\n' "0" "answer" "0"
+    return 1
+  fi
+  local owned_lock=0
+  if [ -z "${REIN_STATE_LOCK_BACKEND:-}" ]; then
+    acquire_state_lock s || { printf '%s\t%s\t%s\n' "0" "answer" "0"; return 2; }
+    owned_lock=1
+  fi
+  local out rc
+  out=$("$py" - "$STATE_FILE" "$STATE_DIR" "$match_path" <<'PY' 2>/dev/null
+import json, os, sys
+
+state_file = sys.argv[1]
+state_dir = sys.argv[2]
+match_path = sys.argv[3] if len(sys.argv) > 3 else ""
+
+def emit(valid, mode, dirty):
+    sys.stdout.write("%s\t%s\t%s\n" % (valid, mode, dirty))
+
+def is_int(x):
+    return isinstance(x, int) and not isinstance(x, bool)
+
+# --- Step 1: validate (mirror of state_is_valid). The fast-path trusts a
+# state's mode only when the file is a complete, well-typed schema-v1 document
+# (design memo §2). Anything short of that → not-valid → legacy fallback. ---
+if not os.path.isfile(state_file):
+    emit("0", "answer", "0"); sys.exit(0)
+try:
+    with open(state_file) as f:
+        data = json.load(f)
+except Exception:
+    emit("0", "answer", "0"); sys.exit(0)
+if not isinstance(data, dict):
+    emit("0", "answer", "0"); sys.exit(0)
+
+valid_modes = ("answer", "explore", "source_edit", "commit")
+required_ok = (
+    data.get("schema_version") == 1
+    and data.get("mode") in valid_modes
+    and isinstance(data.get("updated_at"), str)
+    and isinstance(data.get("dirty_files"), list)
+    and is_int(data.get("last_drain_seq"))
+)
+optional_ok = (
+    ("command_class_cache" not in data or isinstance(data["command_class_cache"], dict))
+    and ("risk_score" not in data or is_int(data["risk_score"]))
+)
+if not (required_ok and optional_ok):
+    emit("0", "answer", "0"); sys.exit(0)
+
+# --- Step 2: effective mode (mirror of read_effective_mode). state.mode merged
+# with all pending journal entries (active + .processing), applied in strict
+# numeric-seq order, skipping entries already drained (seq <= last_drain_seq).
+# Same transition table as read_effective_mode's awk + drain_state's python. ---
+mode = data.get("mode", "answer")
+lds = int(data.get("last_drain_seq", 0))
+
+entries = []
+for fname in (
+    "state-pending-edits.log",
+    "state-pending-bash.log",
+    "state-pending-stop.log",
+    "state-pending-edits.log.processing",
+    "state-pending-bash.log.processing",
+    "state-pending-stop.log.processing",
+):
+    p = os.path.join(state_dir, fname)
+    if not os.path.isfile(p):
+        continue
+    try:
+        with open(p) as f:
+            for line in f:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 3:
+                    continue
+                try:
+                    seq = int(parts[0])
+                except Exception:
+                    continue
+                entries.append((seq, parts))
+    except OSError:
+        pass
+
+entries.sort(key=lambda x: x[0])
+for seq, parts in entries:
+    if seq <= lds:
+        continue
+    kind = parts[2]
+    if kind == "edit":
+        mode = "source_edit"
+    elif kind == "bash-result" and len(parts) >= 5:
+        exit_code = parts[3]
+        cls = parts[4]
+        if cls == "commit":
+            mode = "answer" if exit_code == "0" else "source_edit"
+        elif cls == "test":
+            mode = "source_edit"
+    elif kind == "turn-end":
+        mode = "answer"
+
+# --- Step 3: dirty match (mirror of M1's read_state-based match). The match is
+# against the ON-DISK state.dirty_files snapshot — NOT the journal-merged set —
+# to stay byte-for-byte equivalent with the legacy M1 read_state path. ---
+dirty = "0"
+if match_path:
+    for d in data.get("dirty_files", []) or []:
+        if isinstance(d, dict) and d.get("path") == match_path:
+            dirty = "1"
+            break
+
+emit("1", mode, dirty)
+PY
+)
+  rc=$?
+  [ "$owned_lock" = 1 ] && release_state_lock
+  if [ "$rc" -ne 0 ] || [ -z "$out" ]; then
+    printf '%s\t%s\t%s\n' "0" "answer" "0"
+    return 1
+  fi
+  printf '%s\n' "$out"
+  return 0
+}

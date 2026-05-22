@@ -32,7 +32,7 @@ source "$SCRIPT_DIR/lib/test-harness.sh"
 seed_project_json() {
   mkdir -p "$SANDBOX/.rein"
   cat > "$SANDBOX/.rein/project.json" <<'JSON'
-{"mode":"scaffold","scope":"project","version":"test"}
+{"mode":"plugin","scope":"project","version":"test"}
 JSON
 }
 

@@ -26,7 +26,7 @@
 # `{ <hook-name>: { enabled: false } }`. The loader also honours the legacy
 # umbrella key `pre-bash-guard` (rein-policy-loader.py UMBRELLA_KEYS) so a
 # project that disabled the old single hook keeps both halves disabled.
-# Plugin mode: ${CLAUDE_PLUGIN_ROOT} is set. Scaffold mode: env unset, skip.
+# Requires plugin mode (${CLAUDE_PLUGIN_ROOT} set). Skipped otherwise.
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" ]; then
   if ! python3 "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" "pre-bash-safety-guard"; then
     exit 0  # disabled by user policy
@@ -99,8 +99,17 @@ fi
 # strip 은 안전 접미사 **뒤에 token 경계** (`[^[:alnum:]._-]` 또는 행 끝) 를
 # 요구한다 (codex R2): `.env.example.secret`·`.env.examples`·`.env.dist.bak`
 # 처럼 안전 토큰을 prefix 로만 가진 더 긴 파일명은 제거되지 않아 차단된다.
-if command_invokes "(cat|head|tail|less|more|python[23]?|node)[[:space:]]+[^;&|]*(\.envrc|\.env([^[:alnum:]._-]|\$|\.))"; then
+if command_invokes "(cat|head|tail|less|more|python[23]?|node|grep|awk|sed|jq|cut)[[:space:]]+[^;&|]*(\.envrc|\.env([^[:alnum:]._-]|\$|\.))"; then
   ENV_RESIDUAL=$(printf '%s' "$COMMAND" | sed -E 's/\.env\.(example|sample|template|dist)([^[:alnum:]._-]|$)/\2/g')
+  # B2 (v1.3.4): search-verb extension (grep/awk/sed/jq/cut added to the verb
+  # list above). The residual check stays deny-by-default — ANY .env reference
+  # that survives the safe-template strip blocks, INCLUDING quoted forms
+  # (`cat ".env"`, `grep KEY ".env"`). Quoting must not be a bypass:
+  # distinguishing a quoted search pattern (`grep ".env" README.md`, allowed in
+  # spirit) from a quoted file argument (`grep KEY ".env"`, a real secret read)
+  # needs positional shell parsing, which this regex classifier deliberately
+  # does not do — so we fail closed. A quote-aware exemption was tried and
+  # reverted: it opened a real secret-read bypass (codex review 2026-05-22).
   if printf '%s' "$ENV_RESIDUAL" | grep -qE '\.envrc|\.env([^[:alnum:]._-]|$|\.)'; then
     # [P8] policy block — JSON deny
     deny_emit "Reading a .env file with a shell command was blocked to prevent secrets from leaking into the session. Access environment variables through your application's config loader instead." "ENV_READ_BLOCKED" "$COMMAND"; rc=$?

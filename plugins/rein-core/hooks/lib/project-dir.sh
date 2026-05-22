@@ -18,7 +18,7 @@
 #         b) $PWD as last resort
 #      Reason: in plugin mode SCRIPT_DIR points at ~/.claude/plugins/...,
 #      not the user's project. The user's project is the cwd.
-#   4. Scaffold install: walk up from SCRIPT_DIR until a directory with a
+#   4. Walk-up fallback (no CLAUDE_PLUGIN_ROOT, e.g. CI): walk up from SCRIPT_DIR until a directory with a
 #      trail/ subdirectory is found. The nearest trail/ ancestor is the
 #      rein project that owns this invocation. (PD-1, 2026-05-19: the old
 #      code assumed a fixed SCRIPT_DIR/../.. depth — correct for hooks at

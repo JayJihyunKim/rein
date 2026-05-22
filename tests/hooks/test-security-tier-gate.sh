@@ -15,6 +15,10 @@
 #
 # P5 (.codex-reviewed) is ALWAYS required regardless of security_tier.
 #
+# B1 (v1.3.4): the light-tier skip honours ONLY Tier 1 (explicit .active-dod
+# marker — blocking authority). A Tier 2 mtime-latest fallback (no marker) is
+# advisory authority and must NOT skip the security stamp — see case (l).
+#
 # Block-point reference (pre-bash-test-commit-gate.sh):
 #   [P5]  codex review stamp missing   — never skipped
 #   [P6]  security review stamp missing — skipped only for light+approved
@@ -115,6 +119,13 @@ _seed_fixture() {
   local content
   content="$(_dod_content_with_routing "$tier_val" "$approved")"
   seed_dod "dod-2026-05-19-security-tier-test.md" "$content"
+  # B1 (v1.3.4): write the explicit .active-dod marker so select_active_dod
+  # resolves this DoD as Tier 1 (blocking authority). The security-stamp skip
+  # honours ONLY Tier 1; the marker-less Tier 2 path is covered separately by
+  # test_l_tier2_light_still_requires_security_stamp. A real approved DoD
+  # always carries this marker (auto-written by post-edit-dod-routing-check).
+  printf 'path=trail/dod/dod-2026-05-19-security-tier-test.md\n' \
+    > "$SANDBOX/trail/dod/.active-dod"
   # Codex stamp always present — we're only testing security tier behavior.
   touch "$SANDBOX/trail/dod/.codex-reviewed"
   # Deliberately NO .security-reviewed
@@ -347,6 +358,30 @@ DOD
     "RT-1(k) out-of-section security_tier:light must NOT count — routing section is standard → P6 must BLOCK"
 }
 
+# ============================================================
+# Case (l): B1 REGRESSION (v1.3.4) — Tier 2 (no .active-dod marker)
+#   light+approved must STILL require the security stamp.
+#
+# A single light+approved DoD with ## 범위 연결 but NO .active-dod marker
+# resolves via select_active_dod Tier 2 (advisory mtime-latest fallback).
+# Tier 2 is non-blocking authority and must NOT authorise skipping the
+# security stamp (codex B1 finding).
+#
+#   Expected (post-B1): Tier 2 → fail-closed → DENY SECURITY_STAMP_MISSING.
+#   Pre-B1 (buggy): Tier 2 accepted → P6 skipped → PASS (fail-open).
+# ============================================================
+test_l_tier2_light_still_requires_security_stamp() {
+  local content
+  content="$(_dod_content_with_routing "light" "true")"
+  seed_dod "dod-2026-05-19-tier2-light-test.md" "$content"
+  touch "$SANDBOX/trail/dod/.codex-reviewed"
+  # Deliberately NO .active-dod marker → Tier 2 resolution.
+  # Deliberately NO .security-reviewed.
+  run_hook "$HOOK" "$COMMIT_INPUT"
+  assert_json_deny "SECURITY_STAMP_MISSING" \
+    "B1(l) Tier 2 (no marker) light+approved → P6 must still BLOCK (Tier 2 is advisory, not blocking authority)"
+}
+
 main() {
   run_test test_a_light_approved_passes_without_security_stamp     "$HOOK"
   run_test test_b_standard_still_requires_security_stamp           "$HOOK"
@@ -359,6 +394,7 @@ main() {
   run_test test_i_no_dod_skips_all_stamp_checks                    "$HOOK"
   run_test test_j_stale_dod_bypass_regression                      "$HOOK"
   run_test test_k_out_of_section_tier_does_not_count               "$HOOK"
+  run_test test_l_tier2_light_still_requires_security_stamp        "$HOOK"
   summary
 }
 
