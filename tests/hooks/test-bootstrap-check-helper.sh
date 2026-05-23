@@ -16,6 +16,7 @@
 #   H      — monorepo subdir walk-up to git root → exit 0
 #   I      — nested git boundary (no marker)     → exit 10
 #   J      — env hygiene (GIT_DIR/GIT_WORK_TREE) → exit 0
+#   J2     — cold-path env hygiene (no stdin)    → no decoy latch (BC-INFO1)
 #   K      — partial: trail/ only                → exit 10 (PARTIAL guidance)
 #   L      — partial: .rein/project.json only     → exit 10 (PARTIAL guidance)
 #   M      — partial CRASH: marker+trail/ no index → exit 10 (PARTIAL guidance)
@@ -527,6 +528,68 @@ fixture_j() {
 }
 
 # ---------------------------------------------------------------------------
+# Fixture J2 — COLD-PATH env hygiene (BC-INFO1). Same threat model as J, but
+# exercises the *cold path*: NO stdin envelope (direct CLI invocation), so
+# resolution falls through to the bare `git rev-parse --show-toplevel` from
+# $PWD (source=git). The v1.1.2 hotfix sanitized the stdin.cwd walk-up
+# (fixture J) but the cold fallback `git rev-parse` stayed UNSANITIZED — a
+# polluted GIT_DIR / GIT_WORK_TREE pointing at a decoy repo could make the
+# cold path latch the decoy as project_dir.
+#
+# Setup: cd into a NON-git scratch dir (so the only repo git can "discover"
+# is whatever the polluted env points at). Export GIT_DIR/GIT_WORK_TREE at a
+# decoy git repo that has NO trail/ marker. Run the helper with </dev/null
+# (no stdin → cold path). With sanitation, git discovery from $PWD finds no
+# enclosing repo → falls back to $PWD (source=pwd) → the decoy is NEVER
+# adopted. Without sanitation, git rev-parse honors GIT_WORK_TREE → resolves
+# to the decoy → source=git, project_dir=<decoy>.
+#
+# Assertions (fail-closed on decoy latch):
+#   (1) the exit-10 diagnostic project_dir is NOT the decoy
+#   (2) source label is NOT "git" (i.e. the bare cold git rev-parse did not
+#       latch the polluted target)
+# ---------------------------------------------------------------------------
+fixture_j2() {
+  if ! command -v git >/dev/null 2>&1; then
+    record_skip "J2 (cold-path env hygiene) — git not installed"
+    return
+  fi
+  # Non-git working dir: no trail/, no marker, no enclosing .git. We bound
+  # git discovery with GIT_CEILING_DIRECTORIES so a real ancestor repo (e.g.
+  # the test checkout) cannot be discovered and confuse the assertion.
+  local work
+  work="$(mktemp -d "$SCRATCH_ROOT/J2-work-XXXXXX")"
+  # Decoy repo the polluted env points at — has NO trail/ marker.
+  local decoy
+  decoy="$(mktemp -d "$SCRATCH_ROOT/J2-decoy-XXXXXX")"
+  (cd "$decoy" && git init -q)
+  local decoy_real
+  decoy_real="$(cd "$decoy" && pwd -P)"
+  local out err rc
+  # No stdin (</dev/null) → cold path. Polluted GIT_DIR/GIT_WORK_TREE point
+  # at the decoy. GIT_CEILING_DIRECTORIES bounds normal discovery to $work's
+  # parent so only the polluted env (if honored) could reach the decoy.
+  out=$( ( cd "$work" \
+    && env -u CLAUDE_PLUGIN_ROOT \
+         GIT_DIR="$decoy/.git" GIT_WORK_TREE="$decoy" \
+         GIT_CEILING_DIRECTORIES="$(dirname "$work")" \
+         bash "$HELPER" </dev/null ) 2>"$SCRATCH_ROOT/bc-err-J2" )
+  rc=$?
+  err=$(cat "$SCRATCH_ROOT/bc-err-J2")
+  # (1) Must NOT latch the decoy as project_dir.
+  if printf '%s' "$err" | grep -qF "project_dir=$decoy_real"; then
+    record_fail "J2: cold path latched decoy repo as project_dir (BC-INFO1 unsanitized) — got: $err"
+    return
+  fi
+  # (2) Must NOT report source=git (the bare cold rev-parse honoring polluted env).
+  if printf '%s' "$err" | grep -q "source=git\b"; then
+    record_fail "J2: cold path resolved via polluted git env (source=git) instead of \$PWD — got: $err"
+    return
+  fi
+  record_pass "J2 (cold-path env hygiene: polluted GIT_DIR/GIT_WORK_TREE ignored)"
+}
+
+# ---------------------------------------------------------------------------
 # Fixture K — partial-bootstrap: trail/ alone is not "bootstrapped".
 # Regression for 2026-05-14 BG-1 spec — overlay residue or unrelated processes
 # can drop a trail/ into a project. Pre-BG-1 the helper exited 0 here, silently
@@ -758,6 +821,7 @@ fixture_g
 fixture_h
 fixture_i
 fixture_j
+fixture_j2
 fixture_k
 fixture_l
 fixture_m

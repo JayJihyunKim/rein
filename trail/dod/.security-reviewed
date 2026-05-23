@@ -1,23 +1,32 @@
-reviewed_at: 2026-05-21T00:00:00Z
+reviewed_at: 2026-05-23T22:17:00Z
 reviewer: rein:security-reviewer
-cycle: x4-c-3-hook-fast-path-skip
-active_dod: trail/dod/dod-2026-05-21-cycle-x4-c-3-hook-fast-path-skip.md
+cycle: bc-info1-jobstop-g8-3
+active_dod: trail/dod/dod-2026-05-23-bc-info1-coldpath-sanitize.md
 security_tier: standard
-security_level: base
-scope: state-machine.sh (state_is_valid + lock-timeout env) + 4 hook fast-path (pre-edit-dod-gate, post-edit-design-plan-coverage-rule, post-edit-routing-procedure-rule, post-edit-spec-review-gate) + rein-check-plugin-drift.py tempdir isolation + 2 test files
-files_reviewed: 7
+security_level: standard
+scope: bootstrap-check.sh cold-path git-env sanitization (BC-INFO1) + rein.sh job-stop terminal-state recorder + compare-and-set guard (job-stop) + rein-codex-review.sh x2 spec-review diff_base/changed_files scoping + active-DoD Tier-2 disable (G8-3) + 3 test files
+files_reviewed: 6
 findings_critical: 0
 findings_high: 0
 findings_medium: 0
 findings_low: 0
-findings_info: 0
+findings_info: 2
 resolution: passed
 notes: |
-  6-focus review (standard tier, surface = shell state-machine + filesystem markers + Python subprocess; secrets/SQLi/XSS/weak-hash base rules N/A).
-  (1) Injection/traversal: all Python invocations pass data via sys.argv / open(sys.argv[1]); no eval/exec/os.system; heredocs single-quoted (<<'PY') so no bash expansion of script body. dirty_files match is exact string equality (d.get("path")==target) on the already-normalized FILE_PATH — no path-resolve amplification, traversal string only matches a byte-identical (pre-validated) path. PROBE confirmed.
-  (2) Fast-path does NOT bypass blocking gates: in pre-edit-dod-gate.sh the skip sits at line 536, AFTER governance(286)/incident-pending(289-334)/spec-review-pending(380-409)/routing-approved_by_user(413-512) all run and exit 2. Skip target = coverage validator subprocess (Tier1 §4.2) only. The two envelope hooks never exit 2 (advisory additionalContext inject only) — routing approval enforcement lives in pre-edit gate, not the skipped post-edit hook.
-  (3) Test-seam env vars safe: REIN_STATE_LOCK_TIMEOUT_MS used in `[ -ge ]` (test builtin, NOT (( )) arith-eval) — PROBE with $(touch PWNED) payload did NOT execute (no command substitution in test operands; only "integer expression expected" + false). REIN_PROJECT_DIR_OVERRIDE is a path source, never eval'd. Default ceiling 10000 preserved.
-  (4) tempfile.TemporaryDirectory isolation: context-managed; early `return` inside with-block triggers __exit__ -> no leak. mkdtemp 0700 + unique prefix, env-pinned per-subprocess only (no symlink/race surface). Drift checker passes (exit 0).
-  (5) Fail-soft conservative: state absent/malformed/unknown-schema/lib-absent/lock-fail -> legacy path (gate/validator/envelope preserved). state_is_valid gates against read_state's default "answer" being mistaken for a real mode. 10/10 adversarial tests (T5-T10 cover every fall-through axis incl. both lock backends) PASS.
-  (6) Info-1 grep -qxF hardening verified: post-edit-spec-review-gate dedup uses `grep -qxF -- "path=$ABS"` (fixed-string + whole-line + end-of-options) replacing prior BRE `^path=$ABS$`, neutralizing regex metachars and leading-dash in $ABS. Body re-write avoided on dedup, NOTICE preserved, no new defect. T4 PASS.
-  Evidence: bash -n clean on 5 hooks; test-state-fast-path-skip.sh 10/10 PASS; rein-check-plugin-drift.py OK exit 0.
+  Standard-tier review. Focus: env-var trust boundary (BC-INFO1), command injection, path traversal, unsafe deserialization, hard-coded creds, and whether any change weakens an existing rein security gate. Codex Round 2 = PASS. Tests: bootstrap-check 21/21, job-stop OK, codex-review-wrapper 28/28; bash -n clean on all 4 changed shell files.
+
+  (1) BC-INFO1 (bootstrap-check.sh) — env-var trust boundary, PASS. Both git-discovery calls are now sanitized identically: stdin.cwd walk-up (L163-164) and cold path (L185-186) both run under `env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE`. grep confirms these are the ONLY two `git rev-parse --show-toplevel` invocations in the file and both are wrapped — no residual unsanitized discovery in the resolution function. GIT_CEILING_DIRECTORIES preservation is safe: ceiling can only *narrow* (bound) discovery upward, never redirect to a decoy repo, so leaving it intact does not reopen the latch-a-decoy vector. Fail-closed verified: cold path falls through git -> $PWD -> `return 11` (resolution failure) so a poisoned env cannot silently latch a wrong project_dir.
+
+  (2) job-stop (rein.sh) — command injection / atomic writes / TOCTOU, PASS. No injection: `jid` is the operator-supplied CLI arg used only in deterministic path construction ($jd/$jid.status|.exit|.json|.pid); `pid` is read from rein's own .pid file and used only in `kill`/`kill -0`/arithmetic; no eval, no word-split-vulnerable expansion of job metadata. The python3 meta patch uses a single-quoted heredoc (<<'PY') so no bash expansion of the script body, receives args via sys.argv (int(sys.argv[2]) for rc), parses meta with json.load (data-only, NOT unsafe deserialization — JSON cannot execute code), and writes via temp+os.replace (atomic). State files written via write_atomic (temp + mv -f). Signal handling targets only the resolved pid/pgid. The documented sub-ms TOCTOU has NO security impact: it cannot redirect a write to an unintended path, execute code, or escalate privilege — worst case is a benign status overwrite, now further narrowed by the compare-and-set guard.
+
+  (3) job-stop compare-and-set guard (unstaged delta, rein.sh) — hardening, PASS. Adds a read-before-write check (cur_status == "running" AND .pid present) that early-returns to avoid clobbering a natural wrapper settlement. This tightens behavior; no security regression. Regression tests (e)/(e2) added.
+
+  (4) G8-3 (rein-codex-review.sh x2, byte-identical) — injection / path traversal / gate integrity, PASS. SPEC_REVIEW_SUBJECT is sed-extracted from the marker's first line and flows ONLY into CHANGED_FILES, which is interpolated into a quoted heredoc (<<CTX) sent to codex as text — no file-read, no git command, no eval on the value, so no path traversal or injection surface. In spec-review mode SAD_PATH is set empty and ALL downstream parsing (_parse_dod_plan_ref, head -1 "$SAD_PATH", _parse_dod_covers, plan_ref/design_ref/covers) is guarded by `[ -n "$SAD_PATH" ]`, so no file read occurs on the empty/sentinel path. Gate integrity NOT weakened: write_code_review_stamp (.codex-reviewed) remains reachable ONLY when REIN_REVIEW_MODE = "code-review" AND verdict = PASS (L949-952); spec-review mode still writes no stamp and never touches .review-pending (L954-959). The G8-3 changes do not touch the mode-decision regex or the stamping branch — no bypass introduced.
+
+  (5) Cross-cutting: no hard-coded credentials, no SSRF/HTTP-downgrade, no weak hashing, no XSS surface in any changed file (shell + JSON state only).
+
+  Info findings (non-blocking, OUT OF SCOPE of this changeset — pre-existing):
+  - INFO-1: project-dir.sh (L57/L83/L92), state-machine.sh (L36), test-oracle-log.sh (L57) contain unsanitized `git rev-parse --show-toplevel` calls. These are NOT in this changeset and were not part of the documented BC-INFO1 surface (which scoped only bootstrap-check.sh). Recommend a follow-up to apply the same `env -u` sanitization to project-dir.sh's resolver (the primary hook project-dir resolver) for defense-in-depth consistency with bootstrap-check.sh.
+  - INFO-2: residual sub-ms TOCTOU in _rein_job_settle_terminal is documented and accepted; a jobs-dir lock would close it but is out of scope for this best-effort recorder. No security impact (correctness edge only).
+
+  Evidence: profile.yaml security_level=standard user_level=auto; standard.md rules loaded from plugin path; bash -n clean (4 files); test suites green (21/21, OK, 28/28); two codex-review copies byte-identical (verified via diff of staged blobs).

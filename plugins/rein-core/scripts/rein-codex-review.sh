@@ -156,10 +156,20 @@ SPEC_REVIEW_PLAN_RE='^\[NON_INTERACTIVE\][[:space:]]+spec review for plan:'
 SPEC_REVIEW_DESIGN_RE='^\[NON_INTERACTIVE\][[:space:]]+spec review for design:'
 
 REIN_REVIEW_MODE="code-review"  # default
+# SPEC_REVIEW_SUBJECT — the reviewed document path parsed from the marker.
+# Used in spec-review mode to scope changed_files to the document itself
+# (G8-3, 2026-05-23) instead of letting `git diff` infer unrelated files.
+SPEC_REVIEW_SUBJECT=""
 if printf '%s' "$PROMPT_BODY" | head -1 | grep -qE "$SPEC_REVIEW_PLAN_RE"; then
   REIN_REVIEW_MODE="spec-review"
+  SPEC_REVIEW_SUBJECT=$(printf '%s' "$PROMPT_BODY" | head -1 \
+    | sed -E 's/^\[NON_INTERACTIVE\][[:space:]]+spec review for plan:[[:space:]]*//' \
+    | sed -E 's/[[:space:]]+$//')
 elif printf '%s' "$PROMPT_BODY" | head -1 | grep -qE "$SPEC_REVIEW_DESIGN_RE"; then
   REIN_REVIEW_MODE="spec-review"
+  SPEC_REVIEW_SUBJECT=$(printf '%s' "$PROMPT_BODY" | head -1 \
+    | sed -E 's/^\[NON_INTERACTIVE\][[:space:]]+spec review for design:[[:space:]]*//' \
+    | sed -E 's/[[:space:]]+$//')
 fi
 
 # ---- Context assembly (Task 6.1 Step 4). ------------------------------
@@ -221,6 +231,14 @@ except Exception:
 
 DIFF_BASE=$(_resolve_diff_base)
 
+# G8-3 (2026-05-23): a fresh spec review has no code diff to anchor on. Force
+# diff_base = N/A so the envelope does not invite codex to diff an unrelated
+# commit range (which previously surfaced unrelated changed files + a stale
+# active DoD). The reviewed document itself is the only "changed file".
+if [ "$REIN_REVIEW_MODE" = "spec-review" ]; then
+  DIFF_BASE="N/A"
+fi
+
 # 4a.1 Timestamp metadata for Claim Audit evidence-freshness rule.
 #   diff_base_iso = commit time of DIFF_BASE (ISO-8601 %cI).
 #   head_iso      = commit time of HEAD.
@@ -257,11 +275,45 @@ _changed_files() {
 }
 CHANGED_FILES=$(_changed_files)
 
+# G8-3 (2026-05-23): in spec-review mode the reviewed document is the only
+# subject of the review. Scope changed_files to it (parsed from the marker)
+# instead of whatever `git diff` infers from an unrelated commit range.
+if [ "$REIN_REVIEW_MODE" = "spec-review" ]; then
+  if [ -n "$SPEC_REVIEW_SUBJECT" ]; then
+    CHANGED_FILES="$SPEC_REVIEW_SUBJECT"
+  else
+    CHANGED_FILES=""
+  fi
+fi
+
 # 4c. Active DoD via shared selector.
-SAD_LINE=$(select_active_dod)
-SAD_TIER=$(printf '%s' "$SAD_LINE" | cut -f1)
-SAD_PATH=$(printf '%s' "$SAD_LINE" | cut -f2)
-SAD_REASON=$(printf '%s' "$SAD_LINE" | cut -f3)
+#
+# G8-3 (2026-05-23): in spec-review mode the active-DoD Tier-2 fallback is
+# DISABLED. A fresh design/plan review has no related DoD yet; the latest-mtime
+# DoD belongs to an unrelated in-flight task. Adopting it as Tier-2 context
+# made the Design Alignment slot report the unrelated Scope IDs as MISSING →
+# a recurring (5+) false NEEDS-FIX. We therefore represent the active DoD as
+# an explicit N/A sentinel and skip the selector entirely. The reviewed
+# document itself is the subject (see SPEC_REVIEW_SUBJECT below). This only
+# affects spec-review mode; code-review keeps the Tier-1/Tier-2 selection.
+# SAD_PATH stays empty in spec-review mode so the downstream plan_ref /
+# design_ref / covers parsing (all guarded on `[ -n "$SAD_PATH" ]`) correctly
+# skips — there is no related DoD to derive them from. SAD_PATH_DISPLAY is the
+# value shown in the envelope context block; it carries the N/A sentinel so
+# the reviewer sees an explicit "no active DoD" signal rather than a blank.
+SPEC_REVIEW_NA="(N/A for fresh spec review)"
+if [ "$REIN_REVIEW_MODE" = "spec-review" ]; then
+  SAD_TIER="$SPEC_REVIEW_NA"
+  SAD_PATH=""
+  SAD_PATH_DISPLAY="$SPEC_REVIEW_NA"
+  SAD_REASON="$SPEC_REVIEW_NA"
+else
+  SAD_LINE=$(select_active_dod)
+  SAD_TIER=$(printf '%s' "$SAD_LINE" | cut -f1)
+  SAD_PATH=$(printf '%s' "$SAD_LINE" | cut -f2)
+  SAD_PATH_DISPLAY="$SAD_PATH"
+  SAD_REASON=$(printf '%s' "$SAD_LINE" | cut -f3)
+fi
 
 # ---- Shared path resolver (H1, 2026-04-22 retro-review-sweep). --------
 #
@@ -751,7 +803,7 @@ diff_base: ${DIFF_BASE}
 diff_base_iso: ${DIFF_BASE_ISO}
 head_iso: ${HEAD_ISO}
 active_dod_tier: ${SAD_TIER}
-active_dod_path: ${SAD_PATH}
+active_dod_path: ${SAD_PATH_DISPLAY}
 active_dod_reason: ${SAD_REASON}
 plan_ref: ${PLAN_REF:-(none)}
 design_ref: ${DESIGN_REF:-(none)}

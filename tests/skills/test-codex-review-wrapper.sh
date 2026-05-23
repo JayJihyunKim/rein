@@ -1031,6 +1031,89 @@ test_pd2_sanity_accepts_valid_project_dir() {
 }
 
 # ------------------------------------------------------------
+# Verification 9 (G8-3, 2026-05-23): fresh spec review must NOT adopt an
+# unrelated active DoD as a Tier-2 fallback context.
+#
+# Reproduction of the recurring (5+) false NEEDS-FIX: on the FIRST
+# /codex-review of a brand-new design/plan there is no related DoD yet, only
+# an UNRELATED active DoD from some other in-flight task. The wrapper used to
+# call select_active_dod() unconditionally and inject that unrelated DoD as
+# `active_dod_tier: 2` / `active_dod_path: <unrelated>`, then the Design
+# Alignment slot reported the unrelated Scope IDs as MISSING → false verdict.
+#
+# Fix (option a from need-to-confirm G8-3): in spec-review mode, disable the
+# active-DoD fallback entirely. Represent it as `(N/A for fresh spec review)`,
+# force diff_base = N/A, and scope changed_files to the reviewed document.
+# Incident: trail/incidents/2026-04-24-wrapper-fresh-spec-review-stale-active-dod.md
+# ------------------------------------------------------------
+test_g8_3_fresh_spec_review_ignores_unrelated_active_dod() {
+  # Arrange: a brand-new design under review, but the ONLY DoD in the repo is
+  # an UNRELATED one (different task). No marker points at it; it is the
+  # latest-mtime DoD so the old Tier-2 fallback would have grabbed it.
+  seed_design "docs/specs/2026-05-23-fresh-design.md" "F1 F2"
+  seed_dod "trail/dod/dod-2026-01-01-unrelated.md" \
+           "docs/plans/unrelated-plan.md" "U1 U2"
+  # Deliberately NO .active-dod marker (fresh spec review has no related DoD).
+
+  # Act: fresh spec review of the new design document.
+  run_wrapper "[NON_INTERACTIVE] spec review for design: docs/specs/2026-05-23-fresh-design.md" \
+              --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  [ -f "$RUN_WRAPPER_PROMPT_FILE" ] || fail "fake-codex did not capture prompt"
+
+  # CRITICAL: the unrelated DoD must NOT be adopted as the active context.
+  grep -qF "dod-2026-01-01-unrelated.md" "$RUN_WRAPPER_PROMPT_FILE" \
+    && fail "unrelated active DoD leaked into fresh spec-review envelope (Tier-2 fallback not disabled)"
+
+  # active_dod_tier must be the explicit N/A sentinel, not '2'.
+  grep -qF "active_dod_tier: (N/A for fresh spec review)" "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "active_dod_tier not represented as '(N/A for fresh spec review)'"
+  grep -qE "^active_dod_tier: 2$" "$RUN_WRAPPER_PROMPT_FILE" \
+    && fail "active_dod_tier: 2 still present in fresh spec review (unrelated DoD adopted)"
+
+  # active_dod_path must be the N/A sentinel, not the unrelated DoD path.
+  grep -qF "active_dod_path: (N/A for fresh spec review)" "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "active_dod_path not represented as '(N/A for fresh spec review)'"
+
+  # diff_base must be N/A for a fresh spec review (no code diff to anchor on).
+  grep -qF "diff_base: N/A" "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "diff_base not forced to N/A in spec-review mode"
+
+  # changed_files must scope to the reviewed document itself only.
+  grep -qF "docs/specs/2026-05-23-fresh-design.md" "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "reviewed document not present as the changed file in spec review"
+
+  return 0
+}
+
+# ------------------------------------------------------------
+# Verification 9b (G8-3 negative-side): the CODE-review branch must keep
+# adopting the unrelated active DoD via the Tier-2 fallback. The fix must be
+# scoped to spec-review only and must not regress code-review behavior.
+# ------------------------------------------------------------
+test_g8_3_code_review_still_uses_tier2_fallback() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  # Only one DoD, no marker → Tier-2 fallback should still pick it up.
+  seed_dod "trail/dod/dod-2026-05-23-cr-fallback.md" "docs/plans/foo-plan.md" "A1"
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  [ -f "$RUN_WRAPPER_PROMPT_FILE" ] || fail "fake-codex did not capture prompt"
+
+  # Code-review mode must still adopt the Tier-2 DoD (no spec-review N/A).
+  grep -qF "dod-2026-05-23-cr-fallback.md" "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "code-review Tier-2 fallback regressed (DoD not adopted)"
+  grep -qE "^active_dod_tier: 2$" "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "code-review active_dod_tier no longer reports Tier 2"
+  grep -qF "(N/A for fresh spec review)" "$RUN_WRAPPER_PROMPT_FILE" \
+    && fail "spec-review N/A sentinel leaked into code-review envelope"
+  return 0
+}
+
+# ------------------------------------------------------------
 # Main
 # ------------------------------------------------------------
 
@@ -1065,6 +1148,9 @@ main() {
   run_test test_pd2_sanity_rejects_project_dir_without_trail
   run_test test_pd2_sanity_rejects_project_dir_not_git_toplevel
   run_test test_pd2_sanity_accepts_valid_project_dir
+  # Fresh spec-review unrelated active-DoD fallback (G8-3, 2026-05-23)
+  run_test test_g8_3_fresh_spec_review_ignores_unrelated_active_dod
+  run_test test_g8_3_code_review_still_uses_tier2_fallback
   summary
 }
 

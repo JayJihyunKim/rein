@@ -176,7 +176,14 @@ bootstrap_check() {
       source="stdin"
     else
       local git_root=""
-      git_root="$(git rev-parse --show-toplevel 2>/dev/null)" || git_root=""
+      # Cold path (no stdin envelope, direct CLI invocation): same env
+      # sanitization as the stdin.cwd walk-up above (BC-INFO1). Without it a
+      # polluted GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE
+      # could redirect this bare discovery onto a decoy repo and latch it as
+      # project_dir. GIT_CEILING_DIRECTORIES is deliberately preserved (caller
+      # may have set it intentionally to bound discovery).
+      git_root="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+        git rev-parse --show-toplevel 2>/dev/null)" || git_root=""
       if [ -n "$git_root" ]; then
         resolved="$git_root"
         source="git"

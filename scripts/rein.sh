@@ -17,7 +17,7 @@ warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 fatal() { echo -e "${RED}Fatal: $*${NC}" >&2; exit 1; }
 
-VERSION="1.3.5"
+VERSION="1.3.6"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
@@ -147,6 +147,67 @@ with open(tmp, "w") as f:
     json.dump(m, f)
 os.replace(tmp, meta_path)
 PY
+  rm -f "$pidf"
+}
+
+# ---------------------------------------------------------------------------
+# _rein_job_settle_terminal <jid> <status> <exit_code> — settle a job's state
+# files to a terminal state from outside the wrapper.
+#
+# Mirrors the wrapper's settle path (step 3-4 of rein_job_wrapper /
+# rein-job-wrapper.sh): atomically writes <status> + <exit_code> and patches
+# the meta JSON with {finished_at, exit_code}, then drops the .pid liveness
+# marker. Used by cmd_job_stop so the stop command itself records the
+# terminal state — critical for the setsid-absent path where only the wrapper
+# PID is killed and the wrapper never runs its own settle (BG-job-stop-record-
+# terminal-status). Compare-and-set: only settles a job that is still
+# observably running (.status == "running" AND .pid present), so it never
+# clobbers a natural wrapper settlement (codex review 2026-05-23).
+# ---------------------------------------------------------------------------
+_rein_job_settle_terminal() {
+  local jid="$1" status="$2" rc="$3"
+  local jd; jd="$(rein_jobs_dir)"
+  local statf="$jd/$jid.status"
+  local exitf="$jd/$jid.exit"
+  local metaf="$jd/$jid.json"
+  local pidf="$jd/$jid.pid"
+  # Compare-and-set guard (codex review 2026-05-23 — double-settle race): the
+  # wrapper writes .exit, then .status=success|failed, then removes .pid as its
+  # final step. If the job settled naturally in the window between
+  # cmd_job_stop's .pid read and this call, overwriting would corrupt the real
+  # exit_code / finished_at. Only settle when the job is still observably
+  # running: .status == "running" AND .pid still present. Never overwrite an
+  # already-terminal success|failed|killed|unknown_dead. Residual sub-ms TOCTOU
+  # between this read and the writes below is accepted — a jobs-dir lock would
+  # close it fully but is out of scope for this best-effort recorder; the
+  # wrapper remains the authority for natural exits.
+  local cur_status=""
+  [ -f "$statf" ] && cur_status=$(cat "$statf" 2>/dev/null || echo "")
+  if [ "$cur_status" != "running" ] || [ ! -f "$pidf" ]; then
+    return 0
+  fi
+  write_atomic "$exitf" "$rc"
+  write_atomic "$statf" "$status"
+  # Best-effort meta patch — same contract as the wrapper. python3 absence
+  # degrades gracefully (status + .exit already reflect the outcome and
+  # cmd_job_status falls back to the .exit file when meta lacks exit_code).
+  python3 - "$metaf" "$rc" <<'PY' 2>/dev/null || true
+import json, os, sys, time
+meta_path, rc = sys.argv[1], int(sys.argv[2])
+try:
+    with open(meta_path) as f:
+        m = json.load(f)
+except Exception:
+    m = {}
+m["finished_at"] = int(time.time())
+m["exit_code"] = rc
+tmp = meta_path + ".tmp." + str(os.getpid())
+with open(tmp, "w") as f:
+    json.dump(m, f)
+os.replace(tmp, meta_path)
+PY
+  # Drop the liveness marker so status probes / list / gc treat the job as
+  # settled (matches wrapper step 5).
   rm -f "$pidf"
 }
 
@@ -422,9 +483,15 @@ PY
 # pgroup signal fails (job started without setsid — pid is not a pgid),
 # falls back to single-pid kill and warns once on stderr.
 # ---------------------------------------------------------------------------
+# Module-level: signal number that actually terminated the job, set by the
+# platform stop helpers and consumed by cmd_job_stop to derive the conventional
+# (128 + signal) exit code recorded by _rein_job_settle_terminal. Defaults to
+# SIGTERM (15) when the graceful path succeeds; escalation paths bump it.
+_REIN_JOB_STOP_SIGNAL=15
 cmd_job_stop_posix() {
   local pid="$1"
   local target
+  _REIN_JOB_STOP_SIGNAL=15
   if kill -TERM "-$pid" 2>/dev/null; then
     echo "sent SIGTERM to process group $pid"
     target="-$pid"
@@ -446,6 +513,7 @@ cmd_job_stop_posix() {
   # Escalate.
   if kill -KILL "$target" 2>/dev/null; then
     echo "escalated to SIGKILL"
+    _REIN_JOB_STOP_SIGNAL=9
   else
     # Target gone on its own between the wait and the escalate — still OK.
     :
@@ -466,6 +534,7 @@ cmd_job_stop_posix() {
 # ---------------------------------------------------------------------------
 cmd_job_stop_mingw() {
   local pid="$1"
+  _REIN_JOB_STOP_SIGNAL=15
   kill -TERM "$pid" 2>/dev/null || true
   local i
   for i in 1 2 3 4 5 6 7 8; do
@@ -477,6 +546,7 @@ cmd_job_stop_mingw() {
   done
   if MSYS2_ARG_CONV_EXCL="*" taskkill /F /T /PID "$pid" >/dev/null 2>&1; then
     echo "escalated to taskkill /F /T"
+    _REIN_JOB_STOP_SIGNAL=9
   fi
   for i in 1 2 3 4; do
     _probe_pid_alive "$pid" || return 0
@@ -507,11 +577,26 @@ cmd_job_stop() {
 
   local platform
   platform=$(detect_platform) || return 2
+  local stop_rc=0
   case "$platform" in
-    posix)           cmd_job_stop_posix "$pid" ;;
-    windows_git_bash) cmd_job_stop_mingw "$pid" ;;
+    posix)           cmd_job_stop_posix "$pid" || stop_rc=$? ;;
+    windows_git_bash) cmd_job_stop_mingw "$pid" || stop_rc=$? ;;
     *) echo "unsupported platform for stop" >&2; return 2 ;;
   esac
+
+  # State-machine contract (BG-job-stop-record-terminal-status): once the
+  # process is terminated, the stop command records the terminal state itself.
+  # This is essential for the setsid-absent path — there only the wrapper PID
+  # is killed, so the wrapper never runs its own settle and .status would stay
+  # stale "running" forever. We do this even on stop_rc!=0 (target survived
+  # SIGKILL) only when the pid is actually gone; a still-alive target keeps the
+  # running state so the operator sees the stop did not take effect.
+  if [ "$stop_rc" -eq 0 ] || ! _probe_pid_alive "$pid"; then
+    # Conventional shell exit code for a signal-terminated process: 128 + sig.
+    local term_exit=$(( 128 + ${_REIN_JOB_STOP_SIGNAL:-15} ))
+    _rein_job_settle_terminal "$jid" "killed" "$term_exit"
+  fi
+  return "$stop_rc"
 }
 
 # ---------------------------------------------------------------------------
