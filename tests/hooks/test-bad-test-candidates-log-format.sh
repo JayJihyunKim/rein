@@ -64,6 +64,42 @@ fi
 
 rm -rf "$SANDBOX"
 
+# ---- Test 3: BC-INFO1-siblings — poisoned git env must NOT redirect the -----
+# ---- PROJECT_DIR git fallback onto a decoy repo ----------------------------
+# When PROJECT_DIR is unset/empty, bad_test_log_append falls back to
+# `git rev-parse --show-toplevel`. A caller exporting GIT_DIR/GIT_WORK_TREE at an
+# attacker-controlled decoy could redirect that discovery and write the incident
+# log into the decoy's trail/. The fix wraps the git invocation with
+# `env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE`. With
+# sanitation, discovery from a non-git cwd finds nothing → falls back to `pwd`
+# (the non-git work dir) → NO log is written into the decoy.
+if command -v git >/dev/null 2>&1; then
+  POISON_BASE=$(mktemp -d)
+  WORK="$POISON_BASE/work"      # non-git cwd
+  DECOY="$POISON_BASE/decoy"    # poisoned-env target
+  mkdir -p "$WORK" "$DECOY"
+  ( cd "$DECOY" && git init -q )
+  DECOY_REAL="$(cd "$DECOY" && pwd -P)"
+  (
+    cd "$WORK"
+    unset PROJECT_DIR
+    export GIT_DIR="$DECOY_REAL/.git" GIT_WORK_TREE="$DECOY_REAL"
+    export GIT_CEILING_DIRECTORIES="$POISON_BASE"
+    source "$WRITER_LIB"
+    bad_test_log_append "pr=999" "test=test_poison" "status=CONTRADICTS" \
+      "would_be_high=true" "confirmed=unknown"
+  )
+  decoy_log="$DECOY_REAL/trail/incidents/bad-test-candidates.log"
+  if [ -f "$decoy_log" ]; then
+    _fail "BC-INFO1: poisoned GIT env latched decoy — log written into $decoy_log"
+  else
+    _pass "BC-INFO1: poisoned GIT_DIR/GIT_WORK_TREE did not write log into decoy"
+  fi
+  rm -rf "$POISON_BASE"
+else
+  echo "  SKIP: Test 3 (BC-INFO1 env hygiene) — git not installed"
+fi
+
 echo ""
 echo "## Summary: $PASS pass, $FAIL fail"
 [ "$FAIL" -eq 0 ] || exit 2

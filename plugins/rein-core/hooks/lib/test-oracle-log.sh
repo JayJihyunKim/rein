@@ -54,7 +54,12 @@ bad_test_log_append() {
   local project
   project="${PROJECT_DIR:-}"
   if [ -z "$project" ]; then
-    project=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    # Sanitize inherited git env vars (BC-INFO1) so a polluted GIT_DIR /
+    # GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE cannot redirect this cwd
+    # discovery onto a decoy repo and write the incident log into it.
+    # GIT_CEILING_DIRECTORIES is preserved.
+    project=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+      git rev-parse --show-toplevel 2>/dev/null || pwd)
   fi
   local log_path="$project/trail/incidents/bad-test-candidates.log"
   mkdir -p "$(dirname "$log_path")"

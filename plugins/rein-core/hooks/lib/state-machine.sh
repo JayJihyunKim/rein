@@ -33,7 +33,13 @@ _state_machine_project_dir() {
     echo "$CLAUDE_PROJECT_DIR"
     return 0
   fi
-  git rev-parse --show-toplevel 2>/dev/null || pwd
+  # Sanitize inherited git env vars (BC-INFO1) so a polluted GIT_DIR /
+  # GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE cannot redirect this cwd
+  # discovery onto a decoy repo and latch it as the state-machine project dir.
+  # GIT_CEILING_DIRECTORIES is preserved. Pure env-wrap — control flow (the
+  # `|| pwd` fallback) is unchanged.
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+    git rev-parse --show-toplevel 2>/dev/null || pwd
 }
 
 # Resolve python runner (used for JSON parse). Tests may pre-export PYTHON_RUNNER.

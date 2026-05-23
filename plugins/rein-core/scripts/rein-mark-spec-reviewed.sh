@@ -41,7 +41,9 @@ else
   elif [ -n "${REIN_PROJECT_DIR:-}" ]; then
     PROJECT_DIR="$REIN_PROJECT_DIR"
   else
-    PROJECT_DIR="$(git rev-parse --show-toplevel 2>/dev/null)" || PROJECT_DIR=""
+    # Sanitize inherited git env (BC-INFO1-siblings-2) — match resolver libs.
+    PROJECT_DIR="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+      git rev-parse --show-toplevel 2>/dev/null)" || PROJECT_DIR=""
     [ -n "$PROJECT_DIR" ] || PROJECT_DIR="$PWD"
   fi
 fi

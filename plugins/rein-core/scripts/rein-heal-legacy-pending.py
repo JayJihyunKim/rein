@@ -24,12 +24,21 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 
 def run_git(args: list[str], cwd: Path) -> tuple[int, str]:
+    # Scrub inherited git env (BC-INFO1-siblings-3) so every git call anchors to
+    # `cwd`, not a poisoned GIT_DIR/GIT_WORK_TREE that could redirect discovery
+    # to a decoy repo. GIT_CEILING_DIRECTORIES and the rest of the env are kept.
+    git_env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
+    }
     try:
         result = subprocess.run(
             ["git", *args],
@@ -37,6 +46,7 @@ def run_git(args: list[str], cwd: Path) -> tuple[int, str]:
             capture_output=True,
             text=True,
             timeout=10,
+            env=git_env,
         )
         return result.returncode, result.stdout.strip()
     except (subprocess.SubprocessError, FileNotFoundError):

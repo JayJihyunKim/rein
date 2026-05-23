@@ -549,6 +549,41 @@ fixture_n() {
   record_pass "N (trail/ + .rein/project.json + trail/index.md + in-scope file_path → exit 0 via bootstrap_check rc=0)"
 }
 
+# ---------------------------------------------------------------------------
+# Fixture O — BC-INFO1-siblings-2: poisoned git env must not redirect the
+# no-stdin marker-root resolution to a decoy. The marker root feeds
+# rein_is_degraded(); without the env -u sanitize on the no-stdin fallback,
+# a poisoned GIT_DIR/GIT_WORK_TREE makes PROJECT_DIR_HINT resolve to a decoy
+# whose degraded marker pass-throughs this gate (BYPASS). With the fix the
+# resolution falls back to the real (non-degraded, trail-absent) project and
+# the in-scope trail/ edit is correctly blocked (exit 2).
+# ---------------------------------------------------------------------------
+fixture_o() {
+  local realdir decoy out err rc
+  realdir="$(mktemp -d "$SCRATCH_ROOT/O-real-XXXXXX")"   # trail absent, NOT degraded
+  decoy="$(mktemp -d "$SCRATCH_ROOT/O-decoy-XXXXXX")"
+  git -C "$decoy" init -q >/dev/null 2>&1
+  mkdir -p "$decoy/.claude/cache"
+  : > "$decoy/.claude/cache/.rein-session-degraded"      # decoy is degraded
+  local payload='{"tool_input":{"file_path":"trail/inbox/foo.md"}}'
+  out=$(
+    cd "$realdir" \
+    && env -u GIT_CEILING_DIRECTORIES CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" \
+       GIT_CEILING_DIRECTORIES="$(dirname "$realdir")" \
+       GIT_DIR="$decoy/.git" GIT_WORK_TREE="$decoy" \
+       bash "$HOOK" <<<"$payload" 2>"$SCRATCH_ROOT/O.err"
+  )
+  rc=$?
+  err=$(cat "$SCRATCH_ROOT/O.err")
+
+  if [ "$rc" -ne 2 ]; then
+    record_fail "O: poisoned GIT_DIR latched decoy → gate bypassed (expected exit 2 BLOCK, got $rc) [BC-INFO1-siblings-2]"
+    echo "  stderr: $err" >&2
+    return
+  fi
+  record_pass "O (poisoned git env does not redirect marker-root to decoy → in-scope trail edit still blocked)"
+}
+
 fixture_a
 fixture_b
 fixture_c
@@ -563,6 +598,7 @@ fixture_k
 fixture_l
 fixture_m
 fixture_n
+fixture_o
 
 echo
 echo "test-pre-edit-trail-bootstrap-gate: pass=$PASS_COUNT fail=$FAIL_COUNT"

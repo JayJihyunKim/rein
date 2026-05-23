@@ -54,6 +54,7 @@ for test_file in \
   "$SCRIPT_DIR/test-version-parity.sh" \
   "$SCRIPT_DIR/test-rules-prompt-bundle-drift.sh" \
   "$SCRIPT_DIR/test-plugin-drift-detection.sh" \
+  "$SCRIPT_DIR/test-heal-legacy-git-env.sh" \
   "$SCRIPT_DIR/../integration/test-slash-command-namespace.sh"
 do
   echo ""

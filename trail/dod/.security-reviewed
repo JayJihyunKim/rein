@@ -1,32 +1,83 @@
-reviewed_at: 2026-05-23T22:17:00Z
+reviewed_at: 2026-05-23T00:00:00Z
 reviewer: rein:security-reviewer
-cycle: bc-info1-jobstop-g8-3
-active_dod: trail/dod/dod-2026-05-23-bc-info1-coldpath-sanitize.md
+cycle: bc-info1-siblings-3
+active_dod: trail/dod/dod-2026-05-23-bc-info1-siblings-3.md
 security_tier: standard
 security_level: standard
-scope: bootstrap-check.sh cold-path git-env sanitization (BC-INFO1) + rein.sh job-stop terminal-state recorder + compare-and-set guard (job-stop) + rein-codex-review.sh x2 spec-review diff_base/changed_files scoping + active-DoD Tier-2 disable (G8-3) + 3 test files
-files_reviewed: 6
+scope: BC-INFO1-siblings-3 — env scrub on rein-heal-legacy-pending.py run_git() (the FINAL/Python member of the BC-INFO1 git-env trust-boundary class, named INFO-1 by the siblings-2 stamp). subprocess.run now receives env=os.environ minus GIT_DIR/GIT_WORK_TREE/GIT_COMMON_DIR/GIT_INDEX_FILE (GIT_CEILING_DIRECTORIES + rest preserved). 2 byte-identical copies (plugins/rein-core/scripts/ + scripts/). New reproduction test tests/scripts/test-heal-legacy-git-env.sh, registered in run-all.sh.
+files_reviewed: 3
 findings_critical: 0
 findings_high: 0
 findings_medium: 0
 findings_low: 0
-findings_info: 2
+findings_info: 0
 resolution: passed
+class_status: BC-INFO1 git-env trust-boundary class FULLY CLOSED
 notes: |
-  Standard-tier review. Focus: env-var trust boundary (BC-INFO1), command injection, path traversal, unsafe deserialization, hard-coded creds, and whether any change weakens an existing rein security gate. Codex Round 2 = PASS. Tests: bootstrap-check 21/21, job-stop OK, codex-review-wrapper 28/28; bash -n clean on all 4 changed shell files.
+  Standard-tier review. Codex code review = PASS (R2, prior). 0 blocking findings.
+  This is the follow-up that closes INFO-1 — the single residual member named
+  verbatim by the siblings-2 stamp ("This is the LAST residual member of the
+  BC-INFO1 trust-boundary class").
 
-  (1) BC-INFO1 (bootstrap-check.sh) — env-var trust boundary, PASS. Both git-discovery calls are now sanitized identically: stdin.cwd walk-up (L163-164) and cold path (L185-186) both run under `env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE`. grep confirms these are the ONLY two `git rev-parse --show-toplevel` invocations in the file and both are wrapped — no residual unsanitized discovery in the resolution function. GIT_CEILING_DIRECTORIES preservation is safe: ceiling can only *narrow* (bound) discovery upward, never redirect to a decoy repo, so leaving it intact does not reopen the latch-a-decoy vector. Fail-closed verified: cold path falls through git -> $PWD -> `return 11` (resolution failure) so a poisoned env cannot silently latch a wrong project_dir.
+  (1) Verify #1 — class fully closed, PASS. Enumerated and classified EVERY git
+  repo-discovery / repo-anchored call across the entire plugins/rein-core (shell
+  AND python):
+    DISCOVERY-FALLBACK that LATCHES a resolved root (the BC-INFO1 class) — all
+    sanitized:
+      SHELL (env -u, prior cycles): pre-edit-trail-bootstrap-gate L100/L114;
+        project-dir L63/L93/L106; bootstrap-check L164/L186; test-oracle-log L62;
+        state-machine L42; rein-mark-spec-reviewed L46.
+      PYTHON (THIS changeset): rein-heal-legacy-pending.py run_git (L33-53),
+        feeding the L267 --show-toplevel deep fallback — now env-scrubbed.
+    NON-LATCHING / fail-closed (consume an already-resolved PROJECT_DIR via -C,
+    NOT discovery; out of class by construction — confirmed each is fail-safe):
+      session-start-bootstrap L104 (boolean repo check; result discarded;
+        downstream bootstrap re-resolves with equality + path-safety guards);
+      rein-codex-review L80 (comparison-only; mismatch => exit 2 fail-closed;
+        git output never latched as PROJECT_DIR);
+      rein-bootstrap-project.py L123 git_root_for (result used as write root BUT
+        guarded by `git_root != project_dir => fail` + _refuse_sensitive_or_unsafe
+        + is_plugin_storage; decoy that differs from requested dir fails closed);
+      stop-session-gate L199-214 (boolean activity probes; set HAS_GIT_ACTIVITY
+        only; PROJECT_DIR never replaced);
+      rein-codex-review L214/L223/L224 (diff-base resolution, guarded by GE-2:
+        rev-parse --verify ^{commit} + merge-base --is-ancestor, falls through to
+        HEAD~1 / empty-tree fail-safe on any anomaly).
+  => Confirmed: ZERO unsanitized discovery-fallback latch sites remain. The
+  BC-INFO1 git-env trust-boundary class (poisoned GIT_DIR/GIT_WORK_TREE redirects
+  repo discovery to a decoy that gets latched as the project/write root) is now
+  FULLY CLOSED across both shell and python.
 
-  (2) job-stop (rein.sh) — command injection / atomic writes / TOCTOU, PASS. No injection: `jid` is the operator-supplied CLI arg used only in deterministic path construction ($jd/$jid.status|.exit|.json|.pid); `pid` is read from rein's own .pid file and used only in `kill`/`kill -0`/arithmetic; no eval, no word-split-vulnerable expansion of job metadata. The python3 meta patch uses a single-quoted heredoc (<<'PY') so no bash expansion of the script body, receives args via sys.argv (int(sys.argv[2]) for rc), parses meta with json.load (data-only, NOT unsafe deserialization — JSON cannot execute code), and writes via temp+os.replace (atomic). State files written via write_atomic (temp + mv -f). Signal handling targets only the resolved pid/pgid. The documented sub-ms TOCTOU has NO security impact: it cannot redirect a write to an unintended path, execute code, or escalate privilege — worst case is a benign status overwrite, now further narrowed by the compare-and-set guard.
+  (2) Verify #2 — env scrub correctness, PASS. Verified the comprehension removes
+  EXACTLY the 4 vars (GIT_DIR/GIT_WORK_TREE/GIT_COMMON_DIR/GIT_INDEX_FILE; count
+  delta = 4) and preserves GIT_CEILING_DIRECTORIES, PATH, and all else (parity
+  with the shell `env -u` siblings). Applying the scrub to ALL run_git callers is
+  safe: all 6 callers (tag, cat-file, log x2, the L267 fallback) pass an explicit
+  cwd; none rely on inherited GIT_DIR/GIT_WORK_TREE for correctness. A full env
+  dict (not a minimal one) is passed, so PATH / git config discovery is intact.
 
-  (3) job-stop compare-and-set guard (unstaged delta, rein.sh) — hardening, PASS. Adds a read-before-write check (cur_status == "running" AND .pid present) that early-returns to avoid clobbering a natural wrapper settlement. This tightens behavior; no security regression. Regression tests (e)/(e2) added.
+  (3) Verify #3 — no new injection / traversal surface, PASS. argv list form
+  (["git", *args]); no shell=True anywhere in the file; timeout=10 intact. `args`
+  is supplied only as hardcoded literal git subcommand lists by each internal
+  caller — no user-controlled token reaches argv (unchanged by this diff). No
+  deserialization. No new path/eval surface.
 
-  (4) G8-3 (rein-codex-review.sh x2, byte-identical) — injection / path traversal / gate integrity, PASS. SPEC_REVIEW_SUBJECT is sed-extracted from the marker's first line and flows ONLY into CHANGED_FILES, which is interpolated into a quoted heredoc (<<CTX) sent to codex as text — no file-read, no git command, no eval on the value, so no path traversal or injection surface. In spec-review mode SAD_PATH is set empty and ALL downstream parsing (_parse_dod_plan_ref, head -1 "$SAD_PATH", _parse_dod_covers, plan_ref/design_ref/covers) is guarded by `[ -n "$SAD_PATH" ]`, so no file read occurs on the empty/sentinel path. Gate integrity NOT weakened: write_code_review_stamp (.codex-reviewed) remains reachable ONLY when REIN_REVIEW_MODE = "code-review" AND verdict = PASS (L949-952); spec-review mode still writes no stamp and never touches .review-pending (L954-959). The G8-3 changes do not touch the mode-decision regex or the stamping branch — no bypass introduced.
+  (4) Verify #4 — reproduction test genuinely covers the poisoned-env scenario,
+  PASS (non-vacuous, proven). test-heal-legacy-git-env.sh imports run_git directly
+  and invokes it from a non-git cwd ($nongit) with poisoned GIT_DIR/GIT_WORK_TREE
+  pointing at a decoy repo, asserting the decoy is NOT latched. Independently
+  proven RED/GREEN: with `env=git_env` stripped the test FAILS ("run_git latched
+  the decoy under poisoned GIT_DIR", exit 1); with the fix it PASSES exit 0. Fix
+  restored byte-identically post-test. Registered in run-all.sh; full scripts
+  suite = ALL SUITES PASSED.
 
-  (5) Cross-cutting: no hard-coded credentials, no SSRF/HTTP-downgrade, no weak hashing, no XSS surface in any changed file (shell + JSON state only).
+  Conclusion: 0 blocking / 0 high / 0 medium / 0 low / 0 info. The declared scope
+  is verified complete and correct, and this closes the final (Python) member of
+  the BC-INFO1 class. The BC-INFO1 git-env trust-boundary class is FULLY CLOSED.
 
-  Info findings (non-blocking, OUT OF SCOPE of this changeset — pre-existing):
-  - INFO-1: project-dir.sh (L57/L83/L92), state-machine.sh (L36), test-oracle-log.sh (L57) contain unsanitized `git rev-parse --show-toplevel` calls. These are NOT in this changeset and were not part of the documented BC-INFO1 surface (which scoped only bootstrap-check.sh). Recommend a follow-up to apply the same `env -u` sanitization to project-dir.sh's resolver (the primary hook project-dir resolver) for defense-in-depth consistency with bootstrap-check.sh.
-  - INFO-2: residual sub-ms TOCTOU in _rein_job_settle_terminal is documented and accepted; a jobs-dir lock would close it but is out of scope for this best-effort recorder. No security impact (correctness edge only).
-
-  Evidence: profile.yaml security_level=standard user_level=auto; standard.md rules loaded from plugin path; bash -n clean (4 files); test suites green (21/21, OK, 28/28); two codex-review copies byte-identical (verified via diff of staged blobs).
+  Evidence: profile.yaml security_level=standard user_level=auto; standard.md
+  rules from plugin path (plugins/rein-core/security/rules/standard.md); full
+  per-call git enumeration + classification across plugins/rein-core (shell +
+  python); GIT_DIR-precedence-over-`git -C` demonstrated empirically; 2 copies
+  sha256-identical (9d14e0c5...); py_compile clean on both; RED/GREEN swap on the
+  reproduction test; full scripts run-all.sh = ALL SUITES PASSED.

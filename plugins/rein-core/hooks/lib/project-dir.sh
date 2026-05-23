@@ -54,7 +54,13 @@ resolve_project_dir() {
   fi
 
   if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-    candidate="$(git rev-parse --show-toplevel 2>/dev/null)" || candidate=""
+    # Sanitize inherited git env vars (BC-INFO1) so cwd discovery cannot be
+    # redirected onto a decoy repo. GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR /
+    # GIT_INDEX_FILE could latch an unrelated worktree as project_dir.
+    # GIT_CEILING_DIRECTORIES is deliberately preserved (it can only narrow
+    # discovery, never redirect it to a decoy).
+    candidate="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+      git rev-parse --show-toplevel 2>/dev/null)" || candidate=""
     if [ -n "$candidate" ] && [ -d "$candidate" ]; then
       printf '%s\n' "$candidate"
       return 0
@@ -78,9 +84,13 @@ resolve_project_dir() {
   fi
 
   # Step 5 — no trail/ ancestor: anchor git rev-parse at SCRIPT_DIR (not cwd)
-  # so the script resolves to the repo it physically belongs to.
+  # so the script resolves to the repo it physically belongs to. Sanitize
+  # inherited git env vars (BC-INFO1) so a polluted GIT_DIR / GIT_WORK_TREE /
+  # GIT_COMMON_DIR / GIT_INDEX_FILE cannot override the SCRIPT_DIR anchoring and
+  # redirect discovery onto a decoy. GIT_CEILING_DIRECTORIES is preserved.
   if [ -n "$script_dir" ]; then
-    candidate="$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null)" \
+    candidate="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+      git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null)" \
       || candidate=""
     if [ -n "$candidate" ] && [ -d "$candidate" ]; then
       printf '%s\n' "$candidate"
@@ -88,8 +98,12 @@ resolve_project_dir() {
     fi
   fi
 
-  # Step 6 — git rev-parse from cwd.
-  candidate="$(git rev-parse --show-toplevel 2>/dev/null)" || candidate=""
+  # Step 6 — git rev-parse from cwd. Sanitize inherited git env vars (BC-INFO1)
+  # so a polluted GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE
+  # cannot redirect this bare cwd discovery onto a decoy repo.
+  # GIT_CEILING_DIRECTORIES is preserved.
+  candidate="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+    git rev-parse --show-toplevel 2>/dev/null)" || candidate=""
   if [ -n "$candidate" ] && [ -d "$candidate" ]; then
     printf '%s\n' "$candidate"
     return 0

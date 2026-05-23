@@ -357,6 +357,101 @@ _invoke_index_hook "$SANDBOX_A_REAL" "/tmp/some-other/trail/index.md"
 COUNT_A=$(ls "$INBOX_DIR_A"/*-session.md 2>/dev/null | wc -l | tr -d ' ')
 assert_equal "abs path outside PROJECT_DIR: no inbox written" "0" "$COUNT_A"
 
+# --- Suite J: BC-INFO1-siblings — git env-pollution must NOT latch a decoy ----
+# Regression for INFO-1 (security review of v1.3.6 BC-INFO1). The cwd-git
+# resolution paths (Step 3a plugin-mode + Step 6 final cwd-git) invoke
+# `git rev-parse --show-toplevel`. A caller that exports a poisoned
+# GIT_DIR / GIT_WORK_TREE pointing at an attacker-controlled decoy repo could
+# redirect git discovery onto the decoy and make resolve_project_dir adopt it
+# as the project root. The fix wraps each git invocation with
+# `env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE` (mirrors
+# bootstrap-check.sh Fixture J2). With sanitation, discovery from $PWD finds no
+# enclosing repo → falls back to $PWD; the decoy is NEVER adopted.
+echo "Suite J — BC-INFO1: poisoned GIT_DIR/GIT_WORK_TREE must not latch a decoy"
+if command -v git >/dev/null 2>&1; then
+  # Non-git working dir: no trail/, no enclosing .git. Bound discovery with
+  # GIT_CEILING_DIRECTORIES so a real ancestor repo (e.g. the test checkout)
+  # cannot be discovered and confuse the assertion.
+  SANDBOX_J=$(mktemp -d "/tmp/proj-dir-J-XXXXXX")
+  TMP_DIRS+=("$SANDBOX_J")
+  SANDBOX_J_REAL="$(_realpath "$SANDBOX_J")"
+  WORK_J="$SANDBOX_J_REAL/work"          # non-git cwd
+  DECOY_J="$SANDBOX_J_REAL/decoy"        # the poisoned-env target
+  mkdir -p "$WORK_J" "$DECOY_J"
+  ( cd "$DECOY_J" && git init -q )
+  DECOY_J_REAL="$(_realpath "$DECOY_J")"
+
+  # Run resolve_project_dir from a non-git cwd with poisoned GIT_DIR/GIT_WORK_TREE
+  # pointing at the decoy. Without sanitation git rev-parse honors GIT_WORK_TREE
+  # → returns the decoy. With sanitation → discovery from $PWD finds nothing →
+  # falls through to $PWD ($WORK_J). The decoy must NEVER be the answer.
+  _invoke_poisoned() {
+    local cwd="$1" script_dir="$2" plugin_root="${3:-}"
+    (
+      cd "$cwd"
+      unset REIN_PROJECT_DIR REIN_PROJECT_DIR_OVERRIDE CLAUDE_PLUGIN_ROOT
+      export GIT_DIR="$DECOY_J_REAL/.git" GIT_WORK_TREE="$DECOY_J_REAL"
+      export GIT_CEILING_DIRECTORIES="$SANDBOX_J_REAL"
+      if [ -n "$plugin_root" ]; then export CLAUDE_PLUGIN_ROOT="$plugin_root"; fi
+      # shellcheck disable=SC1090
+      . "$HELPER"
+      resolve_project_dir "$script_dir"
+    )
+  }
+
+  # Step 6 path (no CLAUDE_PLUGIN_ROOT, no trail/ ancestor, script_dir not a
+  # git repo): must fall through to $PWD, NOT the poisoned decoy.
+  out=$(_invoke_poisoned "$WORK_J" "$WORK_J")
+  if [ "$out" = "$DECOY_J_REAL" ]; then
+    FAIL=$((FAIL + 1))
+    printf '  FAIL %s\n    latched poisoned decoy=%s\n' \
+      "Step 6 cwd-git: poisoned GIT env latched decoy (BC-INFO1 unsanitized)" "$out"
+  else
+    PASS=$((PASS + 1))
+    printf '  ok  %s\n' "Step 6 cwd-git: poisoned GIT_DIR/GIT_WORK_TREE ignored (-> \$PWD)"
+  fi
+
+  # Step 3a path (plugin mode: CLAUDE_PLUGIN_ROOT set → cwd-git, then $PWD):
+  # must use the real cwd discovery (sanitized) and fall back to $PWD, NOT the
+  # poisoned decoy.
+  out=$(_invoke_poisoned "$WORK_J" "$WORK_J" "$WORK_J")
+  if [ "$out" = "$DECOY_J_REAL" ]; then
+    FAIL=$((FAIL + 1))
+    printf '  FAIL %s\n    latched poisoned decoy=%s\n' \
+      "Step 3a plugin-mode cwd-git: poisoned GIT env latched decoy (BC-INFO1 unsanitized)" "$out"
+  else
+    PASS=$((PASS + 1))
+    printf '  ok  %s\n' "Step 3a plugin-mode: poisoned GIT_DIR/GIT_WORK_TREE ignored (-> \$PWD)"
+  fi
+
+  # Step 5 path (no plugin root, no trail/ ancestor, but script_dir IS inside a
+  # git repo): SCRIPT_DIR-anchored `git -C "$script_dir" rev-parse` must resolve
+  # to the script_dir's OWN repo, NOT the poisoned decoy.
+  SANDBOX_J5=$(mktemp -d "/tmp/proj-dir-J5-XXXXXX")
+  TMP_DIRS+=("$SANDBOX_J5")
+  SANDBOX_J5_REAL="$(_realpath "$SANDBOX_J5")"
+  mkdir -p "$SANDBOX_J5_REAL/gitrepo/scripts"
+  ( cd "$SANDBOX_J5_REAL/gitrepo" && git init -q \
+      && git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init )
+  GITREPO_J5_REAL="$(_realpath "$SANDBOX_J5_REAL/gitrepo")"
+  # cwd is the non-git WORK_J; script_dir is inside gitrepo. Step 5 anchors at
+  # script_dir. Poisoned env points at the decoy → without sanitation, even the
+  # `git -C "$script_dir"` form honors GIT_DIR/GIT_WORK_TREE and returns the
+  # decoy. With sanitation → returns gitrepo root.
+  out=$(_invoke_poisoned "$WORK_J" "$GITREPO_J5_REAL/scripts")
+  if [ "$out" = "$GITREPO_J5_REAL" ]; then
+    PASS=$((PASS + 1))
+    printf '  ok  %s\n' "Step 5 script_dir-anchored: poisoned GIT env ignored (-> script_dir repo)"
+  else
+    FAIL=$((FAIL + 1))
+    printf '  FAIL %s\n    expected=%s actual=%s\n' \
+      "Step 5 script_dir-anchored: poisoned GIT env redirected resolution (BC-INFO1)" \
+      "$GITREPO_J5_REAL" "$out"
+  fi
+else
+  printf '  skip Suite J (BC-INFO1 env hygiene) — git not installed\n'
+fi
+
 echo ""
 if [ "$FAIL" -eq 0 ]; then
   echo "test-project-dir-resolution: $PASS PASS"

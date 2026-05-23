@@ -107,7 +107,11 @@ _pe_resolve_marker_root() {
     return 0
   fi
   # No stdin.cwd → fall back to git-root walkup from PWD, then PWD raw.
-  candidate=$(git rev-parse --show-toplevel 2>/dev/null) || candidate=""
+  # Sanitize inherited git env (BC-INFO1-siblings-2) so a poisoned
+  # GIT_DIR/GIT_WORK_TREE can't redirect discovery to a decoy repo whose
+  # degraded marker would pass-through this trail-protection gate.
+  candidate=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+    git rev-parse --show-toplevel 2>/dev/null) || candidate=""
   if [ -n "$candidate" ]; then
     printf '%s\n' "$candidate"
     return 0

@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.3.6** (2026-05-23) — Three bug fixes: a fresh design/plan review no longer pulls in an unrelated active DoD (which caused false NEEDS-FIX), `rein job stop` now records the terminal status (`killed` + exit code) instead of leaving a stopped job stuck at `running`, and project-root detection now strips polluted git env vars on the direct-CLI path too. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.3.7** (2026-05-24) — Security hardening: extends the v1.3.6 git-env protection to every project-root detection path (the active-task resolver, session state, the trail-protection gate, review-stamp writing, and the legacy-cleanup tool), so a poisoned `GIT_DIR` can no longer make rein latch a decoy repo as the project root — closing a path where the trail gate could be bypassed. No effect on normal use. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

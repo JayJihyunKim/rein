@@ -843,6 +843,23 @@ FINAL_VERDICT: PASS"
   return 0
 }
 
+test_parse_verdict_multiple_final_verdict_lines_first_match_wins() {
+  # A-LowPrio (2026-05-23): codex 응답에 FINAL_VERDICT 라인이 둘 이상이면
+  # parser 는 첫 매치만 채택한다 (Stage 1 의 `grep ... | head -1` 계약).
+  # 순서: 'FINAL_VERDICT: PASS' 가 먼저, 'FINAL_VERDICT: REJECT' 가 나중.
+  # 기대: 첫 매치 PASS 채택 → wrapper exit 0 (REJECT 의 exit 2 가 아님).
+  # 회귀 방지 — first-match 계약이 깨지면 두 번째 REJECT 가 verdict 를
+  # 뒤집어 exit 2 가 되어 본 테스트가 즉시 실패한다.
+  _run_wrapper_with_verdict "Detailed analysis follows.
+FINAL_VERDICT: PASS
+Addendum reviewer note below.
+FINAL_VERDICT: REJECT"
+
+  [ "$RUN_WRAPPER_RC" = "0" ] \
+    || fail "복수 FINAL_VERDICT 라인에서 첫 매치 PASS 가 채택되지 않음 (rc=$RUN_WRAPPER_RC, 두 번째 REJECT 가 우선됐을 수 있음)"
+  return 0
+}
+
 test_parse_verdict_no_keyword_returns_needs_fix() {
   # 본문에 PASS/NEEDS-FIX/REJECT 가 첫 컬럼에도 FINAL_VERDICT 라인에도
   # 없으면 → chain Stage 3 conservative fallback NEEDS-FIX → wrapper exit 1.
@@ -1141,6 +1158,7 @@ main() {
   run_test test_parse_verdict_recognizes_final_verdict_line_in_body
   run_test test_parse_verdict_falls_back_to_first_line_keyword_when_no_final_verdict
   run_test test_parse_verdict_final_verdict_line_overrides_first_line_keyword
+  run_test test_parse_verdict_multiple_final_verdict_lines_first_match_wins
   run_test test_parse_verdict_no_keyword_returns_needs_fix
   # Plugin self-containment hotfix (2026-05-12)
   run_test test_wrapper_plugin_layout_user_repo_without_claude_dir_uses_bundled_lib

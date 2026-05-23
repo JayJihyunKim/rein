@@ -418,6 +418,48 @@ print("0")' "$legacy_state" "$target")
   rm_sandbox
 }
 
+# T17 — BC-INFO1-siblings: poisoned git env must NOT redirect the cwd fallback
+# in _state_machine_project_dir onto a decoy repo. The function falls back to
+# `git rev-parse --show-toplevel` only when neither REIN_PROJECT_DIR_OVERRIDE nor
+# CLAUDE_PROJECT_DIR is set. A caller exporting GIT_DIR/GIT_WORK_TREE at an
+# attacker-controlled decoy could make the state machine adopt the decoy's .rein
+# as the state root. The fix wraps the git invocation with
+# `env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE`. With
+# sanitation, discovery from a non-git cwd finds nothing → falls back to `pwd`
+# (the non-git work dir), NEVER the decoy.
+t17_project_dir_ignores_poisoned_git_env() {
+  start_test "T17: _state_machine_project_dir ignores poisoned GIT_DIR/GIT_WORK_TREE (BC-INFO1)"
+  if ! command -v git >/dev/null 2>&1; then
+    echo "  SKIP: git not installed"
+    PASS_COUNT=$((PASS_COUNT + 1))   # treat skip as non-failing
+    return
+  fi
+  local base work decoy decoy_real out
+  base=$(mktemp -d "/tmp/sm-poison-XXXXXX")
+  work="$base/work"      # non-git cwd
+  decoy="$base/decoy"    # poisoned-env target
+  mkdir -p "$work" "$decoy"
+  ( cd "$decoy" && git init -q )
+  decoy_real="$(cd "$decoy" && pwd -P)"
+  out=$(
+    cd "$work"
+    unset REIN_PROJECT_DIR_OVERRIDE CLAUDE_PROJECT_DIR
+    export GIT_DIR="$decoy_real/.git" GIT_WORK_TREE="$decoy_real"
+    export GIT_CEILING_DIRECTORIES="$base"
+    source "$LIB"
+    _state_machine_project_dir
+  )
+  # Resolve symlinks for the comparison (macOS /tmp -> /private/tmp).
+  local out_real
+  out_real="$(cd "$out" 2>/dev/null && pwd -P || printf '%s' "$out")"
+  if [ "$out_real" = "$decoy_real" ]; then
+    echo "  FAIL [poison_latch]: cwd fallback latched decoy=$out_real (BC-INFO1 unsanitized)" >&2
+    CURRENT_FAILS=$((CURRENT_FAILS + 1))
+  fi
+  rm -rf "$base"
+  end_test
+}
+
 run_all() {
   t1_state_absent_returns_default
   t2_malformed_json_stderr_and_default
@@ -435,6 +477,7 @@ run_all() {
   t14_fast_path_corrupt_field_fallback
   t15_fast_path_absent_state_fallback
   t16_fast_path_equivalent_to_legacy_calls
+  t17_project_dir_ignores_poisoned_git_env
 }
 
 run_all
