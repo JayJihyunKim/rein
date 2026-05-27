@@ -11,6 +11,10 @@ description: 신규 기능 구현 및 새 모듈·서비스 초기 스캐폴딩 
 - 새 기능 구현 (add-feature)
 - 새 모듈·서비스 초기 스캐폴딩 (build-from-scratch)
 
+## DoD 작성 시
+
+DoD 작성 시 `## 변경 파일` 섹션을 필수로 포함. repo-relative literal path 를 1개 이상 bullet list (`- <path>`) 로 나열. glob / regex 미지원 (첫 cycle).
+
 ## 담당하지 않는 것
 - 버그 수정 → `feature-builder-fix`
 - 기존 코드 리팩토링 (기능 변경 없는 구조 개선) → `feature-builder-refactor`

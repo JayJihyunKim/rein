@@ -1,0 +1,24 @@
+# G3 execution-mode-advisor — brainstorm + spec + plan 사이클
+
+- 날짜: 2026-05-27
+- 유형: design (docs-only)
+- 변경 파일:
+  - `docs/brainstorms/2026-05-27-g3-execution-mode-advisor.md` (신규)
+  - `docs/specs/2026-05-27-g3-execution-mode-advisor.md` (신규. plan-writer agent 가 validator 통과를 위해 heading numeric prefix 8곳 editorial 제거 — `SCOPE_ITEMS_HEADING = "## Scope Items"` exact-match 호환. system-reminder 가 사용자 의도적 변경 명시)
+  - `docs/plans/2026-05-27-g3-execution-mode-advisor.md` (신규)
+  - `trail/dod/.spec-reviews/<spec hash>.reviewed` (신규, reviewer=codex-gpt-5.5-medium-r4)
+  - `trail/dod/.spec-reviews/<plan hash>.reviewed` (신규, reviewer=codex-gpt-5.5-medium)
+  - `need-to-confirm.md` (사용자가 IDE 에서 직접 TONE-1 항목 추가 — "응답 톤 규칙 UserPromptSubmit 매 turn 인젝션, 옵션 C 채택". 본 turn 내 사용자가 반복적으로 "쉽게 풀어달라" 피드백을 준 결과를 사용자 본인이 백로그에 등재)
+  - `trail/index.md` (다음 진입점 + 회고 갱신)
+  - `trail/dod/dod-2026-05-27-g3-cycle-completion.md` (commit gate 용 light-tier DoD)
+- 요약:
+  - **brainstorm**: brownfield, Step 0 codex-ask sanity check (pre-question validation) + Step 1~6 converge. Chosen Direction = **Option A** (route-time SessionStart routing-map + run-time PostToolUse meta-check advisory + `.rein/policy/meta-check.yaml` opt-in)
+  - **spec**: 9 Scope ID + 8-step dataflow + lifecycle A (`.jsonl`, append-only, 매 evaluated check 1 line, mismatch=0 포함). R1 NEEDS-FIX 6 → R2 NEEDS-FIX 3 → R3 PASS → R4 editorial verify PASS
+  - **plan**: 4 Phase 직렬, 신규 3 + 수정 9 plugin file + 신규 5 test, `parallelizable: false` (PLN-1/AG-2 still planned-not-built). R1 NEEDS-FIX 4 → R2 NEEDS-FIX 2 → R3 NEEDS-FIX 1 → R4 PASS
+  - 사용자 결정 3건: (1) anchor 정책 = DoD template `## 변경 파일` 의무화 (B), (2) inbox format = `.jsonl`, (3) lifecycle = A (append-only, 다음 PostToolUse mismatch=0 자동 수렴)
+  - stale verification: `need-to-confirm.md` cross-refs 의 drift 1 (gate 메시지 vs 실제 inject 불일치) + drift 2 (DoD 파일 16/17 task count) 모두 STALE 확인 (gate 메시지/실제 inject 일치, DoD 파일 부재)
+- 라우팅 피드백 (`.rein/policy/router/feedback-log.yaml` 추후 반영):
+  - rein:brainstorming → brownfield Step 0 sanity check 가 질문 4건의 전제 교정 (특히 PostToolUse reach + Stop hook 부적합) → spec 단계의 잘못된 전제 오염 방지
+  - rein:codex-ask → spec NEEDS-FIX 9건 중 6건이 substantive (anchor zero-utility / loader 미지원 / latency 비현실 / lifecycle 자기모순 등) — codex-ask Step 0 sanity check 가 의미 있는 ROI
+  - rein:plan-writer → spec heading numeric prefix 직접 수정은 권한 침범 경계. subagent-review rule 의 "reviewer 직접 수정 금지" 가 plan-writer 의 author 권한 침범도 동일 원칙으로 적용 가능 — 후속 plan-writer instruction 보강 후보
+- 다음 단계: Phase 1 (route-time) 구현 새 세션에서. routing-map.md 작성 + session-start-rules.sh emit list 1 line + test-routing-map-emit.sh

@@ -2,6 +2,22 @@
 
 > **Versioning policy**: 버전 bump 는 `.claude/rules/versioning.md` 의 Rule A/B/C 를 따른다.
 
+## v1.3.8 — 2026-05-27 (plugin install hotfix + 작업 라우팅 안내 + 변경 파일 추적 advisory + 응답 톤 + 자동모드 marker)
+
+`rein update` 후 사용자 세션에서 바뀌는 것:
+
+- **`/plugin install rein@rein` 이 다시 됩니다** — 최신 Claude Code 가 rein plugin 의 manifest(`plugin.json`) 에 공식 스키마에 없는 키 하나를 발견하면 install 자체를 거부하던 문제를 수정했습니다. 기존 install 사용자에게는 영향 없습니다. (사용자 보고에 따른 hotfix — v1.0.0 이래 잠재해 있었으나 메인테이너 환경에서는 통과되어 미탐지)
+
+- **세션 시작 직후 작업 유형 → agent/skill 빠른 안내가 나옵니다** — 새 `routing-map` 규칙이 매 세션 시작 컨텍스트에 자동 포함되어, DoD 작성 직후 어떤 에이전트와 스킬을 쓸지 7행 표로 한눈에 확인할 수 있습니다. 상세 매칭 절차는 기존 routing-procedure 규칙 그대로 (동작 변경 없음).
+
+- **DoD 작성 후 편집 중 "예상 외 파일" 안내가 나옵니다** — 새 `post-edit-meta-check` advisory 가 DoD 의 `## 변경 파일` 섹션(있으면)을 현재 작업 폴더의 dirty diff 와 비교해, 목록에 없는 파일이 편집되면 다음 turn 의 advisory 본문에 알려줍니다. 모든 평가는 차단이 아니라 안내이며, 결과는 `trail/inbox/<날짜>-meta-check.jsonl` 에 누적되어 사후 회고가 가능합니다. 기본 모드는 `auto` — DoD 에 `## 변경 파일` 섹션이 없으면 자동으로 건너뜁니다 (기존 DoD 무영향). `.rein/policy/meta-check.yaml` 의 `enabled: true|false|auto` 로 동작 조정 가능.
+
+- **신규 DoD 에 `## 변경 파일` 섹션을 권장합니다** — 5 종 DoD 작성 에이전트 (feature-builder / feature-builder-fix / feature-builder-refactor / plan-writer / researcher) 의 안내에 의무 항목으로 추가됐고, operating-sequence Step 2 의 의무 섹션 명단에도 등재됐습니다. 기존 DoD 는 위 advisory 가 silent 처리하므로 영향 없습니다.
+
+- **어시스턴트 답변이 평이한 문장으로 출력됩니다** — 새 `response-tone` 규칙이 매 사용자 turn 직후 컨텍스트에 자동 포함되어, 답변 첫 줄에 "지금 무엇을 묻는지 / 제가 무엇을 하려는지" 평문 1줄, 끝 줄에 "다음에 무엇을 할지" 1줄, rein 내부 약어 첫 등장 시 괄호 풀이, `MEMORY.md` / `trail/index.md` / `trail/inbox/` 원본 인용 대신 평문 재진술을 따르도록 합니다. 이전 "비서톤" 작업은 hook 차단 메시지 4 표면 한정이었지만 본 변경은 어시스턴트 응답 톤 자체에 적용됩니다.
+
+- **자동모드 marker 로 incident 알림을 한시적으로 끌 수 있습니다** — 새 토글 스킬 `/rein:auto-mode-on` (또는 직접 `mkdir -p .rein && touch .rein/auto-mode.flag`) 로 marker 를 켜면, 자율 진행 (`/loop`, multi-step autonomous cycle) 중 매 turn 발화하던 `incidents-to-rule` 권고 / pending incident 안내 / session-end block 이 모두 silent 처리됩니다. block 우회 이력은 `trail/incidents/auto-mode-bypass.log` 에 timestamp + 이유 1줄씩 누적되어 사후 추적 가능합니다. 종료 시 `/rein:auto-mode-off` 또는 `rm -f .rein/auto-mode.flag`.
+
 ## v1.3.7 — 2026-05-24 (프로젝트 위치 탐지 보안 하드닝 — git 환경 오염 차단 전면화)
 
 `rein update` 후 사용자 세션에서 바뀌는 것:

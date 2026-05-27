@@ -17,6 +17,10 @@ description: design 문서를 읽어 rein 의 coverage 매트릭스 + covers 메
 - 자동 codex-review 호출 후 verdict 분기 (PASS → spec-review stamp 자동 생성, NEEDS-FIX/REJECT → handoff)
 - 최종 산출물 반환 — plan 경로 + verdict + stamp 결과 (또는 handoff 메시지)
 
+## DoD 작성 시
+
+후속 구현 작업의 DoD 를 추천·생성하는 경우, 그 DoD 에 `## 변경 파일` 섹션을 필수로 포함하도록 안내한다. repo-relative literal path 를 1개 이상 bullet list (`- <path>`) 로 나열. glob / regex 미지원 (첫 cycle).
+
 ## 담당 아님 (경계)
 
 - self-fix loop (Codex spec review 피드백 자동 반영): 사용자 개입 필요

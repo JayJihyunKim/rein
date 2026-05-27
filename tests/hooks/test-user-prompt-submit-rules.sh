@@ -30,6 +30,10 @@ if hso.get("hookEventName") != "UserPromptSubmit":
 ctx = hso.get("additionalContext", "")
 if "행동 강령" not in ctx:
     print("FAIL: additionalContext missing '행동 강령' header", file=sys.stderr); sys.exit(1)
+# TONE-1 (2026-05-27): response-tone rule body must also appear in the envelope
+# so the assistant gets the plain-language tone mandate every user turn.
+if "# Response Tone" not in ctx:
+    print("FAIL: additionalContext missing '# Response Tone' header (TONE-1)", file=sys.stderr); sys.exit(1)
 PY
 
 # ---------- (b) graceful degrade ---------------------------------------------

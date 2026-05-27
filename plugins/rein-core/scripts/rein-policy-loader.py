@@ -24,11 +24,12 @@ try:
     import yaml
 except ImportError:
     # PyYAML not installed -> fail-open (Plan Task 2.10).
-    # Without yaml we cannot parse the policy; default to enabled / no-override.
-    # We still want CLI dispatch to exit 0 cleanly so the caller treats us as
-    # "no change". `sys.exit(0)` here is a final fail-open; the rest of the
-    # module never executes.
-    sys.exit(0)
+    # Set yaml=None so each function can return its own fail-open default
+    # (enabled / no-override / 'auto'). Previously this branch did
+    # sys.exit(0) at module level, which made --meta-check-policy emit
+    # empty stdout instead of the contractually required 'auto'. The
+    # explicit yaml=None sentinel lets callers see a well-typed answer.
+    yaml = None
 
 
 # Phase 4 운영 프로파일 — profile 키가 set 됐을 때 각 hook 의 기본값을 매핑.
@@ -87,6 +88,8 @@ def _normalize_enabled(raw):
 
 def _load_policy_data():
     """Return parsed yaml dict or None. Warn-only on parse failure."""
+    if yaml is None:
+        return None
     policy_path = Path(".rein/policy/hooks.yaml")
     if not policy_path.exists():
         return None
@@ -176,6 +179,8 @@ def get_rule_override(rule_name: str):
     all yield None, signalling "use default body" upstream.
     Only a string value at `<rule_name>.override` is returned.
     """
+    if yaml is None:
+        return None
     policy_path = Path(".rein/policy/rules.yaml")
     if not policy_path.exists():
         return None
@@ -200,6 +205,43 @@ def get_rule_override(rule_name: str):
     return override
 
 
+def get_meta_check_policy() -> str:
+    """Return effective meta-check policy: 'true' | 'false' | 'auto'.
+
+    Reads .rein/policy/meta-check.yaml's top-level `enabled` field.
+    Fail-open at every error path: missing file, PyYAML absent, parse
+    error, non-dict top-level, missing `enabled`, or value outside
+    {'true', 'false', 'auto'} all yield 'auto'.
+
+    Scope ID: G3-MC-POLICY
+    """
+    if yaml is None:
+        return "auto"
+    policy_path = Path(".rein/policy/meta-check.yaml")
+    if not policy_path.exists():
+        return "auto"
+    try:
+        data = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    except Exception:
+        print(
+            f"warning: failed to parse {policy_path} - using default 'auto'",
+            file=sys.stderr,
+        )
+        return "auto"
+    if not isinstance(data, dict):
+        return "auto"
+    enabled = data.get("enabled")
+    if enabled is True:
+        return "true"
+    if enabled is False:
+        return "false"
+    if isinstance(enabled, str):
+        normalized = enabled.strip().lower()
+        if normalized in ("true", "false", "auto"):
+            return normalized
+    return "auto"
+
+
 def get_all_rule_overrides() -> dict:
     """Return all rule overrides as {rule_name: override_body}.
 
@@ -216,7 +258,7 @@ def get_all_rule_overrides() -> dict:
 def main() -> int:
     if len(sys.argv) < 2:
         print(
-            "usage: rein-policy-loader.py <hook-name> | --rule-override <rule-name>",
+            "usage: rein-policy-loader.py <hook-name> | --rule-override <rule-name> | --meta-check-policy",
             file=sys.stderr,
         )
         return 0  # fail-open - never block a hook due to internal usage error
@@ -229,6 +271,12 @@ def main() -> int:
         override = get_rule_override(rule_name)
         if override is not None:
             sys.stdout.write(override)
+        return 0
+
+    if sys.argv[1] == "--meta-check-policy":
+        # G3 Phase 2 Task 2.1: print effective meta-check policy
+        # ('true' | 'false' | 'auto') to stdout, always exit 0.
+        sys.stdout.write(get_meta_check_policy())
         return 0
 
     # Default mode: hook toggle query (Task 2.7).

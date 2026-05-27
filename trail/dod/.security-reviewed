@@ -1,83 +1,39 @@
-reviewed_at: 2026-05-23T00:00:00Z
+reviewed_at: 2026-05-27T07:09:58Z
 reviewer: rein:security-reviewer
-cycle: bc-info1-siblings-3
-active_dod: trail/dod/dod-2026-05-23-bc-info1-siblings-3.md
+cycle: 2026-05-27-g3-phase2-4-implementation
+active_dod: trail/dod/dod-2026-05-27-g3-phase2-4-implementation.md
 security_tier: standard
 security_level: standard
-scope: BC-INFO1-siblings-3 — env scrub on rein-heal-legacy-pending.py run_git() (the FINAL/Python member of the BC-INFO1 git-env trust-boundary class, named INFO-1 by the siblings-2 stamp). subprocess.run now receives env=os.environ minus GIT_DIR/GIT_WORK_TREE/GIT_COMMON_DIR/GIT_INDEX_FILE (GIT_CEILING_DIRECTORIES + rest preserved). 2 byte-identical copies (plugins/rein-core/scripts/ + scripts/). New reproduction test tests/scripts/test-heal-legacy-git-env.sh, registered in run-all.sh.
-files_reviewed: 3
+scope: G3 Phase 2-4 — run-time meta-check (post-edit-meta-check.sh ~270 line + rein-policy-loader.py get_meta_check_policy + policy-meta-check.md + hooks.json) + DoD anchor obligation (5 agent + operating-sequence) + 회귀 4 테스트. 14 파일 중 보안 surface 있는 source 4 건 검토 + 정적 markdown 6 건 + 테스트 4 건은 user-facing 표면 0 으로 skip.
+files_reviewed: 4
 findings_critical: 0
 findings_high: 0
 findings_medium: 0
-findings_low: 0
+findings_low: 2
 findings_info: 0
 resolution: passed
-class_status: BC-INFO1 git-env trust-boundary class FULLY CLOSED
 notes: |
-  Standard-tier review. Codex code review = PASS (R2, prior). 0 blocking findings.
-  This is the follow-up that closes INFO-1 — the single residual member named
-  verbatim by the siblings-2 stamp ("This is the LAST residual member of the
-  BC-INFO1 trust-boundary class").
+  Standard-tier review. 9 검사 항목 (시크릿 / SQL / XSS / 해싱 / env-credential /
+  deserialization / path-traversal / log-sensitive-data / TLS) 모두 PASS.
 
-  (1) Verify #1 — class fully closed, PASS. Enumerated and classified EVERY git
-  repo-discovery / repo-anchored call across the entire plugins/rein-core (shell
-  AND python):
-    DISCOVERY-FALLBACK that LATCHES a resolved root (the BC-INFO1 class) — all
-    sanitized:
-      SHELL (env -u, prior cycles): pre-edit-trail-bootstrap-gate L100/L114;
-        project-dir L63/L93/L106; bootstrap-check L164/L186; test-oracle-log L62;
-        state-machine L42; rein-mark-spec-reviewed L46.
-      PYTHON (THIS changeset): rein-heal-legacy-pending.py run_git (L33-53),
-        feeding the L267 --show-toplevel deep fallback — now env-scrubbed.
-    NON-LATCHING / fail-closed (consume an already-resolved PROJECT_DIR via -C,
-    NOT discovery; out of class by construction — confirmed each is fail-safe):
-      session-start-bootstrap L104 (boolean repo check; result discarded;
-        downstream bootstrap re-resolves with equality + path-safety guards);
-      rein-codex-review L80 (comparison-only; mismatch => exit 2 fail-closed;
-        git output never latched as PROJECT_DIR);
-      rein-bootstrap-project.py L123 git_root_for (result used as write root BUT
-        guarded by `git_root != project_dir => fail` + _refuse_sensitive_or_unsafe
-        + is_plugin_storage; decoy that differs from requested dir fails closed);
-      stop-session-gate L199-214 (boolean activity probes; set HAS_GIT_ACTIVITY
-        only; PROJECT_DIR never replaced);
-      rein-codex-review L214/L223/L224 (diff-base resolution, guarded by GE-2:
-        rev-parse --verify ^{commit} + merge-base --is-ancestor, falls through to
-        HEAD~1 / empty-tree fail-safe on any anomaly).
-  => Confirmed: ZERO unsanitized discovery-fallback latch sites remain. The
-  BC-INFO1 git-env trust-boundary class (poisoned GIT_DIR/GIT_WORK_TREE redirects
-  repo discovery to a decoy that gets latched as the project/write root) is now
-  FULLY CLOSED across both shell and python.
+  Trust boundary 6 surface 자가 점검 모두 별도 발견 없음:
+  (1) stdin JSON parse — json.loads + dict 검증 + malformed silent exit
+  (2) DoD path resolve — GE-1 validate_repo_relative_path 통과 후만 사용
+  (3) git invocation — BC-INFO1 v1.3.7 env-scrub 패턴 그대로 (GIT_DIR /
+      GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE)
+  (4) yaml read — yaml.safe_load (yaml.load 아님) + 모든 분기 fail-open auto
+  (5) inbox jsonl write — deterministic path + python json.dumps + silent fail
+  (6) python heredoc — <<'PY' quoted + env-var (META_*) 전달, shell interp 0
 
-  (2) Verify #2 — env scrub correctness, PASS. Verified the comprehension removes
-  EXACTLY the 4 vars (GIT_DIR/GIT_WORK_TREE/GIT_COMMON_DIR/GIT_INDEX_FILE; count
-  delta = 4) and preserves GIT_CEILING_DIRECTORIES, PATH, and all else (parity
-  with the shell `env -u` siblings). Applying the scrub to ALL run_git callers is
-  safe: all 6 callers (tag, cat-file, log x2, the L267 fallback) pass an explicit
-  cwd; none rely on inherited GIT_DIR/GIT_WORK_TREE for correctness. A full env
-  dict (not a minimal one) is passed, so PATH / git config discovery is intact.
-
-  (3) Verify #3 — no new injection / traversal surface, PASS. argv list form
-  (["git", *args]); no shell=True anywhere in the file; timeout=10 intact. `args`
-  is supplied only as hardcoded literal git subcommand lists by each internal
-  caller — no user-controlled token reaches argv (unchanged by this diff). No
-  deserialization. No new path/eval surface.
-
-  (4) Verify #4 — reproduction test genuinely covers the poisoned-env scenario,
-  PASS (non-vacuous, proven). test-heal-legacy-git-env.sh imports run_git directly
-  and invokes it from a non-git cwd ($nongit) with poisoned GIT_DIR/GIT_WORK_TREE
-  pointing at a decoy repo, asserting the decoy is NOT latched. Independently
-  proven RED/GREEN: with `env=git_env` stripped the test FAILS ("run_git latched
-  the decoy under poisoned GIT_DIR", exit 1); with the fix it PASSES exit 0. Fix
-  restored byte-identically post-test. Registered in run-all.sh; full scripts
-  suite = ALL SUITES PASSED.
-
-  Conclusion: 0 blocking / 0 high / 0 medium / 0 low / 0 info. The declared scope
-  is verified complete and correct, and this closes the final (Python) member of
-  the BC-INFO1 class. The BC-INFO1 git-env trust-boundary class is FULLY CLOSED.
-
-  Evidence: profile.yaml security_level=standard user_level=auto; standard.md
-  rules from plugin path (plugins/rein-core/security/rules/standard.md); full
-  per-call git enumeration + classification across plugins/rein-core (shell +
-  python); GIT_DIR-precedence-over-`git -C` demonstrated empirically; 2 copies
-  sha256-identical (9d14e0c5...); py_compile clean on both; RED/GREEN swap on the
-  reproduction test; full scripts run-all.sh = ALL SUITES PASSED.
+  Low advisory (follow-up, non-blocking):
+    A-LOW1: META_DIFF_RAW 환경변수 크기 상한 — exec(2) ARG_MAX 초과 시 silent
+            실패 (현 fail-open 으로 사용자 영향 0). 별 cycle 에서 cap 또는
+            stdin pipe 패턴 검토.
+    A-LOW2: jsonl symlink race — trail/inbox/ 가 symlink 으로 변조되면 다른
+            위치 append. trust model 외부 (attacker 가 이미 FS 권한 보유)
+            이지만 follow-up 시 realpath 또는 O_NOFOLLOW 동등 패턴.
+prior_review:
+  codex_round_1: NEEDS-FIX (High claim-audit + 3 Medium)
+  codex_round_2: NEEDS-FIX (3 Medium)
+  self_review_round_3: PASS (Fix A~H applied, prior_reviewer=codex)
+class_status: G3 Phase 2-4 standard tier review passed

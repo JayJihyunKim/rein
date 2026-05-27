@@ -110,10 +110,22 @@ except OSError:
     pass
 print(n)
 " "$reason" "$BLOCKS_LOG_JSONL" 2>/dev/null || echo 0)
-  if [ "$count" -ge 3 ]; then
-    echo "WARNING: 동일 위반 (${reason}) ${count}회 누적. incidents-to-agent 실행을 권장합니다." >&2
-  elif [ "$count" -ge 2 ]; then
-    echo "WARNING: 동일 위반 (${reason}) ${count}회 누적. incidents-to-rule 실행을 권장합니다." >&2
+  # Auto mode: silence repeat-violation WARNING (the marker file presence
+  # means the user is running a long autonomous cycle).
+  local _auto_silent=0
+  if [ -f "${CLAUDE_PLUGIN_ROOT:-}/hooks/lib/auto-mode.sh" ]; then
+    # shellcheck disable=SC1091
+    . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/auto-mode.sh" 2>/dev/null || true
+    if declare -F is_auto_mode >/dev/null 2>&1 && is_auto_mode; then
+      _auto_silent=1
+    fi
+  fi
+  if [ "$_auto_silent" = "0" ]; then
+    if [ "$count" -ge 3 ]; then
+      echo "WARNING: 동일 위반 (${reason}) ${count}회 누적. incidents-to-agent 실행을 권장합니다." >&2
+    elif [ "$count" -ge 2 ]; then
+      echo "WARNING: 동일 위반 (${reason}) ${count}회 누적. incidents-to-rule 실행을 권장합니다." >&2
+    fi
   fi
 }
 
@@ -320,6 +332,14 @@ if [ -f "$INCIDENT_STAMP" ]; then
     echo "WARNING: incident gate 1회성 바이패스 — reason: $REASON" >&2
     log_block "incident gate bypass" "$FILE_PATH"
     rm -f "$INCIDENT_BYPASS"
+  elif [ -f "${CLAUDE_PLUGIN_ROOT:-}/hooks/lib/auto-mode.sh" ] && \
+       { . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/auto-mode.sh" 2>/dev/null || true; } && \
+       declare -F is_auto_mode >/dev/null 2>&1 && is_auto_mode; then
+    # Auto mode: silence the pending-incident block + skip stderr noise.
+    # The user opted in via the marker file; block bypass is audit-logged.
+    if declare -F auto_mode_log_bypass >/dev/null 2>&1; then
+      auto_mode_log_bypass "pre-edit-dod-gate: skip pending-incident block (LIVE_COUNT=$LIVE_COUNT)"
+    fi
   else
     echo "[rein] There are $LIVE_COUNT unresolved incidents that need a decision before source files can be edited. To proceed:" >&2
     echo "  1) Run /incidents-to-rule to review and resolve them." >&2

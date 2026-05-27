@@ -25,3 +25,12 @@ DoD → routing → implement → codex-review → security-review → fix → t
 1. hook 차단 (exit 2) 시 작업 중단 금지 — stderr 의 차단 이유 확인 후 원인 수정·즉시 재시도.
 2. 같은 위반 2회 누적 시 `incidents-to-rule` 실행 권장 (반복 패턴 → 규칙화).
 3. 같은 위반 3회 누적 시 `incidents-to-agent` 실행 권장 (반복 패턴 → 에이전트 후보화).
+
+## DoD 의무 섹션 (Step 2)
+
+신규 DoD 작성 시 다음 섹션을 반드시 포함:
+
+- `## 범위` — IN/OUT 명시
+- `## 변경 파일` — repo-relative literal path 를 1개 이상 bullet list (`- <path>`) 로 나열. glob / regex 미지원 (G3-DOD-TEMPLATE-CHANGED-FILES-SECTION, 첫 cycle). `post-edit-meta-check.sh` sub-hook 가 본 섹션을 dirty git diff 와 비교해 advisory 발화
+- `## 검증 기준` — 완료 판정 가능한 측정값 / 실행 명령
+- `## 라우팅 추천` — agent / skills / mcps / security_tier / approved_by_user (pre-edit-dod-gate 가 누락 시 source 편집 차단)

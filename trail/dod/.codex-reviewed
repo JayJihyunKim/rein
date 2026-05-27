@@ -1,7 +1,18 @@
-reviewed_at: 2026-05-23T15:04:48Z
-reviewer: codex
-diff_base: c77c4fa6aed4d4f445e29cdba0c2d44252413a1c
-verdict: PASS
-cycle: 
-scope: wrapper-generated
-active_dod: 
+reviewer: self-review
+timestamp: 2026-05-27T08:21:59
+cycle: 2026-05-27-v1-3-8-changelog-release-prep
+scope: CHANGELOG v1.3.8 entry 확장 (hotfix → hotfix + G3 + TONE-1 + 자동모드 통합)
+files_reviewed: 1
+review_round: 1
+fallback_reason: none
+resolution: passed
+remaining_issues: none
+prior_reviewer: none
+self_review_notes: |
+  docs-only CHANGELOG edit. v1.3.8 entry 의 title + 5 신규 bullet 추가:
+  routing-map / post-edit-meta-check / DoD '## 변경 파일' 의무 / TONE-1
+  response-tone / 자동모드 marker+silent. 각 bullet 은 user-facing outcome
+  language (mechanism-free) — 'rein update 후 사용자 세션에서 바뀌는 것'
+  관점 유지. Rule C (CHANGELOG = user-facing only) 준수.
+  subagent-review.md docs-only 예외 + 사용자 명시 v1.3.8 결정 → self-review.
+diff_base: 2b4ece9

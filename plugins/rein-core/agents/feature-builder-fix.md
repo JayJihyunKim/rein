@@ -18,6 +18,10 @@ description: 버그 수정 전담. DoD 키워드에 "bug"/"fix"/"버그"/"수정
 - 코드 리뷰 → `reviewer`
 - 문서 작성 → `docs-writer`
 
+## DoD 작성 시
+
+DoD 작성 시 `## 변경 파일` 섹션을 필수로 포함. repo-relative literal path 를 1개 이상 bullet list (`- <path>`) 로 나열. glob / regex 미지원 (첫 cycle).
+
 ## 핵심 전략 — Reproduction-First
 
 버그를 고치기 전에 반드시 재현부터 한다.

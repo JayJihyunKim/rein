@@ -312,12 +312,31 @@ except Exception:
   fi
 
   if [ "$PENDING" -gt 0 ]; then
-    echo "### 미처리 incident: ${PENDING}건"
-    echo
-    echo "편집을 시작하기 전에 미처리 incident 를 처리해 주세요 — \`incidents-to-rule\` 스킬을 호출하고 사용자에게 처리 방법을 확인하세요."
-    echo
-    mkdir -p "$(dirname "$STAMP_FILE")"
-    touch "$STAMP_FILE"
+    # Auto mode: silence the user-visible incident advisory + skip stamp
+    # creation so pre-edit-dod-gate also doesn't surface it. The stamp file
+    # is the marker pre-edit-dod-gate uses to gate source edits. Removing
+    # it in auto mode keeps edits unblocked; the user opted in.
+    _auto_silent=0
+    if [ -f "${CLAUDE_PLUGIN_ROOT:-}/hooks/lib/auto-mode.sh" ]; then
+      # shellcheck disable=SC1091
+      . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/auto-mode.sh" 2>/dev/null || true
+      if declare -F is_auto_mode >/dev/null 2>&1 && is_auto_mode; then
+        _auto_silent=1
+        if declare -F auto_mode_log_bypass >/dev/null 2>&1; then
+          auto_mode_log_bypass "session-start-load-trail: skip incident notice (PENDING=$PENDING)"
+        fi
+      fi
+    fi
+    if [ "$_auto_silent" = "0" ]; then
+      echo "### 미처리 incident: ${PENDING}건"
+      echo
+      echo "편집을 시작하기 전에 미처리 incident 를 처리해 주세요 — \`incidents-to-rule\` 스킬을 호출하고 사용자에게 처리 방법을 확인하세요."
+      echo
+      mkdir -p "$(dirname "$STAMP_FILE")"
+      touch "$STAMP_FILE"
+    else
+      rm -f "$STAMP_FILE"
+    fi
   else
     rm -f "$STAMP_FILE"
   fi

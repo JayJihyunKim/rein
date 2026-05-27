@@ -14,6 +14,10 @@ description: 기술 조사 및 문서 수집 전담. 라이브러리 비교, 아
 - 기술 트렌드 및 모범 사례 수집
 - 조사 결과 → `trail/decisions/DEC-NNN.md` 기록
 
+## DoD 작성 시
+
+조사 결과를 받아 후속 구현 DoD 를 생성·추천하는 경우, 그 DoD 에 `## 변경 파일` 섹션을 필수로 포함하도록 안내한다. repo-relative literal path 를 1개 이상 bullet list (`- <path>`) 로 나열. glob / regex 미지원 (첫 cycle).
+
 ## 조사 원칙
 1. **공식 문서 우선**: 블로그보다 공식 문서 먼저
 2. **최신성 확인**: 버전/날짜 반드시 기재

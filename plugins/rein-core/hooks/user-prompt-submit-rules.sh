@@ -54,6 +54,15 @@ fi
 BODY="${BODY%x}"
 [ -n "$BODY" ] || exit 0
 
+# ---- Response-tone rule (TONE-1, 2026-05-27) -------------------------------
+# Inject response-tone body every turn so assistant chat output stays
+# plain-language (rein internal jargon expanded on first use, trail/MEMORY
+# verbatim quotes avoided, first/last lines as plain English intent/next-step).
+# Fail-open: body resolution failure leaves TONE_BODY empty and the hook
+# emits the existing answer-only summary unchanged.
+TONE_BODY=$(if rule_inject_body response-tone; then printf x; else exit 1; fi) || TONE_BODY=""
+TONE_BODY="${TONE_BODY%x}"
+
 # ---- Combine + emit --------------------------------------------------------
 if [ -n "$BOOTSTRAP_GUIDANCE" ]; then
   COMBINED="${BOOTSTRAP_GUIDANCE}
@@ -62,6 +71,14 @@ if [ -n "$BOOTSTRAP_GUIDANCE" ]; then
 ${BODY}"
 else
   COMBINED="$BODY"
+fi
+
+if [ -n "$TONE_BODY" ]; then
+  COMBINED="${COMBINED}
+
+---
+
+${TONE_BODY}"
 fi
 
 ESCAPED=$(printf '%s' "$COMBINED" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))')
