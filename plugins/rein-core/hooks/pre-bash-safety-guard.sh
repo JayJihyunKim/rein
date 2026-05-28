@@ -131,12 +131,33 @@ if echo "$COMMAND" | grep -qE "git add"; then
 fi
 
 # --- [P10] git commit -am ---
-if echo "$COMMAND" | grep -qE "git commit.*-[a-z]*a[a-z]*m"; then
-  if [ -f "$PROJECT_DIR/.env" ] || ls "$PROJECT_DIR"/.env.* 1>/dev/null 2>&1; then
-    # [P10] policy block — JSON deny
-    deny_emit "A .env file exists in the repo root and git commit -am would include it. Use git add <files> to stage only the files you intend to commit." "ENV_COMMIT_AM_BLOCKED" "$COMMAND"; rc=$?
-    log_block ".env 포함 commit -am" "$COMMAND"
-    exit "$rc"
+# Detect the `-am` short-option bundle (also `-ma`, `-Sam`, `-amS` …) — when `-a`
+# and `-m` are combined in one token, git auto-stages ALL tracked files including
+# a tracked .env. Anchor strictly to the FLAG position so message body substrings
+# like `-statement`, `-program`, `-stream` inside `-m "..."` (or inside a here-doc
+# body) don't false-match — two such regressions happened 2026-05-28 (see
+# trail/incidents/auto-pre-bash-safety-guard-4b338b708ef0a7b3.md). The original
+# `git commit.*-[a-z]*a[a-z]*m` regex backtracked across the whole command and
+# matched any `-…am[anything]` substring anywhere, including inside quoted strings.
+#
+# Precision strategy:
+#   (1) Extract only the line that invokes `git commit` (skip here-doc body lines
+#       and any preceding shell statements — they don't start with `git commit`).
+#   (2) Strip `"..."` and `'...'` from that line — removes message bodies that
+#       could contain accidental dash-words.
+#   (3) Match a SINGLE-dash short-option token whose letters contain both `a` and
+#       `m` (in either order). `--long-opts` (e.g. `--amend`) are excluded because
+#       their second `-` isn't preceded by a space/start-of-line.
+GIT_COMMIT_LINE=$(printf '%s\n' "$COMMAND" | grep -m1 -E '^[[:space:]]*git[[:space:]]+commit([[:space:]]|$)' || true)
+if [ -n "$GIT_COMMIT_LINE" ]; then
+  STRIPPED=$(printf '%s' "$GIT_COMMIT_LINE" | sed -E "s/\"[^\"]*\"//g; s/'[^']*'//g")
+  if echo "$STRIPPED" | grep -qE '(^|[[:space:]])-[A-Za-z]*(am|ma)[A-Za-z]*([[:space:]]|$)'; then
+    if [ -f "$PROJECT_DIR/.env" ] || ls "$PROJECT_DIR"/.env.* 1>/dev/null 2>&1; then
+      # [P10] policy block — JSON deny
+      deny_emit "A .env file exists in the repo root and git commit -am would include it. Use git add <files> to stage only the files you intend to commit." "ENV_COMMIT_AM_BLOCKED" "$COMMAND"; rc=$?
+      log_block ".env 포함 commit -am" "$COMMAND"
+      exit "$rc"
+    fi
   fi
 fi
 
