@@ -1,39 +1,37 @@
-reviewed_at: 2026-05-27T07:09:58Z
+reviewed_at: 2026-05-28T09:08:00Z
 reviewer: rein:security-reviewer
-cycle: 2026-05-27-g3-phase2-4-implementation
-active_dod: trail/dod/dod-2026-05-27-g3-phase2-4-implementation.md
-security_tier: standard
+cycle: 2026-05-28-v1-4-0-release
+active_dod: trail/dod/dod-2026-05-28-v1-4-0-release.md
+security_tier: light
 security_level: standard
-scope: G3 Phase 2-4 — run-time meta-check (post-edit-meta-check.sh ~270 line + rein-policy-loader.py get_meta_check_policy + policy-meta-check.md + hooks.json) + DoD anchor obligation (5 agent + operating-sequence) + 회귀 4 테스트. 14 파일 중 보안 surface 있는 source 4 건 검토 + 정적 markdown 6 건 + 테스트 4 건은 user-facing 표면 0 으로 skip.
-files_reviewed: 4
+scope: |
+  v1.4.0 release prep — CHANGELOG entry (7 user-facing bullets) +
+  scripts/rein.sh VERSION bump (1.3.8 → 1.4.0) + plugin.json version
+  bump (1.3.8 → 1.4.0). 3 파일.
+files_reviewed: 3
 findings_critical: 0
 findings_high: 0
 findings_medium: 0
-findings_low: 2
+findings_low: 0
 findings_info: 0
 resolution: passed
+light_exemption: true
+light_exemption_rationale: |
+  DoD 의 라우팅 추천에서 security_tier: light + approved_by_user: true
+  로 명시 — pre-bash-test-commit-gate.sh 가 .security-reviewed 요구를
+  면제하지만, 운영 기록을 위해 명시적 stamp 작성.
+
+  Light 면제 사유:
+   - 변경 3 파일 모두 markdown / 텍스트 / 정적 metadata (실행 코드 변경
+     없음, 외부 입력 처리 경로 없음)
+   - auth / crypto / .env / secrets/ 무관
+   - 기존 패턴 반복 (직전 v1.3.7/v1.3.8 release prep 과 동일 — VERSION
+     bump 표현 + CHANGELOG entry 추가 형태)
+   - 본 release 가 묶는 dev 의 20 commits 는 각 cycle 에서 이미 codex
+     review + security review PASS 통과 (개별 stamp 가 commit 히스토리
+     에 분산 존재)
+
 notes: |
-  Standard-tier review. 9 검사 항목 (시크릿 / SQL / XSS / 해싱 / env-credential /
-  deserialization / path-traversal / log-sensitive-data / TLS) 모두 PASS.
-
-  Trust boundary 6 surface 자가 점검 모두 별도 발견 없음:
-  (1) stdin JSON parse — json.loads + dict 검증 + malformed silent exit
-  (2) DoD path resolve — GE-1 validate_repo_relative_path 통과 후만 사용
-  (3) git invocation — BC-INFO1 v1.3.7 env-scrub 패턴 그대로 (GIT_DIR /
-      GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE)
-  (4) yaml read — yaml.safe_load (yaml.load 아님) + 모든 분기 fail-open auto
-  (5) inbox jsonl write — deterministic path + python json.dumps + silent fail
-  (6) python heredoc — <<'PY' quoted + env-var (META_*) 전달, shell interp 0
-
-  Low advisory (follow-up, non-blocking):
-    A-LOW1: META_DIFF_RAW 환경변수 크기 상한 — exec(2) ARG_MAX 초과 시 silent
-            실패 (현 fail-open 으로 사용자 영향 0). 별 cycle 에서 cap 또는
-            stdin pipe 패턴 검토.
-    A-LOW2: jsonl symlink race — trail/inbox/ 가 symlink 으로 변조되면 다른
-            위치 append. trust model 외부 (attacker 가 이미 FS 권한 보유)
-            이지만 follow-up 시 realpath 또는 O_NOFOLLOW 동등 패턴.
-prior_review:
-  codex_round_1: NEEDS-FIX (High claim-audit + 3 Medium)
-  codex_round_2: NEEDS-FIX (3 Medium)
-  self_review_round_3: PASS (Fix A~H applied, prior_reviewer=codex)
-class_status: G3 Phase 2-4 standard tier review passed
+  release prep 자체의 보안 표면이 0 이므로 light 면제 적합. 실제 변경
+  내용 (CHANGELOG entry 본문, version 문자열) 도 외부 입력 없음 +
+  hardcoded literal 만.

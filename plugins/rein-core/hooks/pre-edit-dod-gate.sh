@@ -401,6 +401,11 @@ SPEC_REVIEWS_DIR="$PROJECT_DIR/trail/dod/.spec-reviews"
 
 if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]; then
   UNRESOLVED_SPECS=false
+  # Strict ISO 8601 shape shared by SR-1 (.pending vs .reviewed compare) and
+  # SR-1.b (orphan .reviewed vs spec mtime compare). Both rein writers use
+  # `date -u +%Y-%m-%dT%H:%M:%S` (UTC, no offset); the legacy healer's
+  # trailing `Z` is stripped before matching.
+  spec_iso_re='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$'
   for pending_marker in "$SPEC_REVIEWS_DIR"/*.pending; do
     [ -f "$pending_marker" ] || continue
 
@@ -423,15 +428,13 @@ if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]; then
     # SR-1: existence alone is not enough — a spec re-edited after its review
     # re-creates .pending whose created= is newer than .reviewed's reviewed=,
     # while the old .reviewed lingers (review-bypass). Compare the two rein-
-    # written timestamps (both `date -u +%Y-%m-%dT%H:%M:%S`, UTC, no offset). A
-    # trailing Z (legacy healer schema) is stripped first, then each value must
-    # match the strict ISO 8601 shape — a missing OR garbled timestamp (e.g.
-    # `created=0000`, which would sort below a valid reviewed= and slip past a
-    # bare lexical compare) cannot prove freshness → fail-closed. After shape
-    # validation both are fixed-width, so a digit-only numeric compare is
-    # locale-independent (avoids bash `[[ > ]]` collation). Backstops the
-    # post-edit gate's .reviewed removal and catches a stale state already on disk.
-    spec_iso_re='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$'
+    # written timestamps. Strict ISO 8601 shape — a missing OR garbled
+    # timestamp (e.g. `created=0000`, which would sort below a valid reviewed=
+    # and slip past a bare lexical compare) cannot prove freshness →
+    # fail-closed. After shape validation both are fixed-width, so a
+    # digit-only numeric compare is locale-independent (avoids bash `[[ > ]]`
+    # collation). Backstops the post-edit gate's .reviewed removal and
+    # catches a stale state already on disk.
     pending_created=$(grep -E '^created=' "$pending_marker" 2>/dev/null | head -1 | sed -e 's/^created=//' -e 's/Z$//')
     reviewed_at=$(grep -E '^reviewed=' "$reviewed_marker" 2>/dev/null | head -1 | sed -e 's/^reviewed=//' -e 's/Z$//')
     if ! [[ "$pending_created" =~ $spec_iso_re ]] || ! [[ "$reviewed_at" =~ $spec_iso_re ]]; then
@@ -443,6 +446,81 @@ if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]; then
       break
     fi
   done
+
+  # SR-1.b: orphan .reviewed backstop. SR-1's freshness check only fires
+  # when a .pending sibling exists. If the post-edit hook fails to fire
+  # (hooks disabled, external IDE write, `git checkout` restoring the spec,
+  # MultiEdit JSON parse failure → exit 0) the new .pending is never
+  # created. The old .reviewed lingers as an orphan and the loop above
+  # never runs for that hash → source edits proceed with unreviewed spec
+  # changes. Pre-existing trust boundary (.pending-keyed), not a new gap
+  # from SR-1. Mitigation: iterate orphan .reviewed markers (no matching
+  # .pending) and compare the spec file's mtime against reviewed=. Spec
+  # mtime > reviewed → stale → block. The R1 risk (git checkout setting
+  # mtime to checkout time rather than commit time, producing
+  # false-positives) is accepted: orphan .reviewed is itself abnormal
+  # (normal flow leaves .pending+.reviewed together until mark-spec-
+  # reviewed.sh clears .pending), so the safer side is to block and let
+  # the user re-review or set `.skip-spec-gate`.
+  if [ "$UNRESOLVED_SPECS" = false ]; then
+    for reviewed_marker in "$SPEC_REVIEWS_DIR"/*.reviewed; do
+      [ -f "$reviewed_marker" ] || continue
+
+      hash_val=$(basename "$reviewed_marker" .reviewed)
+      # Skip if a matching .pending exists — that path is handled by the
+      # SR-1 branch above and we must not double-count or apply mtime
+      # semantics (which would override SR-1's content-timestamp logic).
+      if [ -f "$SPEC_REVIEWS_DIR/${hash_val}.pending" ]; then
+        continue
+      fi
+
+      spec_path=$(grep -E '^path=' "$reviewed_marker" 2>/dev/null | head -1 | sed 's/^path=//')
+      [ -z "$spec_path" ] && continue
+
+      # Deleted spec → skip (matches existing test_gate_ignores_deleted_spec).
+      [ -f "$spec_path" ] || continue
+
+      reviewed_at=$(grep -E '^reviewed=' "$reviewed_marker" 2>/dev/null | head -1 | sed -e 's/^reviewed=//' -e 's/Z$//')
+      if ! [[ "$reviewed_at" =~ $spec_iso_re ]]; then
+        UNRESOLVED_SPECS=true    # missing/garbled timestamp → fail-closed
+        break
+      fi
+
+      # Convert spec mtime + reviewed_at into epoch seconds via Python
+      # (avoids GNU vs BSD `stat` divergence and `date -d` portability
+      # issues). PYTHON_RUNNER is already populated at the top of this
+      # hook; any failure here is fail-closed.
+      spec_mtime_epoch=$("${PYTHON_RUNNER[@]}" -c '
+import os, sys
+try:
+    print(int(os.path.getmtime(sys.argv[1])))
+except Exception:
+    sys.exit(1)
+' "$spec_path" 2>/dev/null) || {
+        UNRESOLVED_SPECS=true   # unreadable mtime → fail-closed
+        break
+      }
+      reviewed_epoch=$("${PYTHON_RUNNER[@]}" -c '
+import sys
+from datetime import datetime, timezone
+try:
+    # SR-1 strips trailing Z and validates shape upstream; fromisoformat
+    # parses naive ISO 8601 (no offset). Anchor to UTC since the writer
+    # uses `date -u`.
+    dt = datetime.fromisoformat(sys.argv[1]).replace(tzinfo=timezone.utc)
+    print(int(dt.timestamp()))
+except Exception:
+    sys.exit(1)
+' "$reviewed_at" 2>/dev/null) || {
+        UNRESOLVED_SPECS=true   # malformed reviewed= despite regex pass → fail-closed
+        break
+      }
+      if [ "$spec_mtime_epoch" -gt "$reviewed_epoch" ]; then
+        UNRESOLVED_SPECS=true   # spec edited after review (orphan path) → stale
+        break
+      fi
+    done
+  fi
 
   if [ "$UNRESOLVED_SPECS" = true ]; then
     echo "[rein] There is a design document that has not been reviewed yet. Complete the review, then mark it done:" >&2
@@ -555,6 +633,71 @@ if [ -n "$ROUTING_VIOLATIONS" ]; then
 fi
 
 # END routing-gate
+
+# === PLN-1: parallelizable enforcement (ACTIVE since 2026-05-28-worker-contract-plus-pln1-enforce cycle) ===
+#
+# rule: plugins/rein-core/rules/design-plan-coverage.md §2A
+# spec: docs/specs/2026-05-27-pln1-ag2-parallel-execution.md
+# activation: trail/dod/dod-2026-05-28-worker-contract-plus-pln1-enforce.md
+#
+# Detection + enforcement: parallelizable: true plan + source edit attempt
+# from outside a worker worktree (i.e. .rein/worker-marker.json absent at
+# $PROJECT_DIR) → exit 2 block. Worker-internal edits bypass the gate.
+#
+# Worker-marker bypass rationale: feature-builder-worker agent creates
+# .rein/worker-marker.json in its own worktree root. The marker's presence
+# at $PROJECT_DIR signals that the current hook invocation is inside a
+# worker dispatch — the worker is editing its own scope which IS the
+# legitimate path for parallelizable plans.
+#
+# Backward-compat: legacy plans without `## 실행 전략` section, or with
+# `parallelizable: false`, never enter the inner regex branch. Zero impact.
+if [ -d "$DOD_DIR" ]; then
+  for _pln1_dod_file in "$DOD_DIR"/dod-[0-9]*.md; do
+    [ -f "$_pln1_dod_file" ] || continue
+    _pln1_fname=$(basename "$_pln1_dod_file")
+    echo "$_pln1_fname" | grep -q '^dod-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-' || continue
+    # Skip DoDs already matched in inbox (= completed)
+    _pln1_slug=$(echo "$_pln1_fname" | sed 's/^dod-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-//' | sed 's/\.md$//')
+    _pln1_matched=false
+    if [ -d "$INBOX_DIR" ]; then
+      for _pln1_inbox in "$INBOX_DIR"/[0-9]*.md; do
+        [ -f "$_pln1_inbox" ] || continue
+        _pln1_inbox_slug=$(basename "$_pln1_inbox" .md | sed 's/^[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-//')
+        if [ "$_pln1_inbox_slug" = "$_pln1_slug" ]; then
+          _pln1_matched=true
+          break
+        fi
+      done
+    fi
+    [ "$_pln1_matched" = true ] && continue
+
+    # Extract plan ref from DoD's ## 범위 연결 section
+    _pln1_plan_ref=$(awk '/^## 범위 연결/{flag=1; next} /^## /{flag=0} flag && /^plan ref:/{sub(/^plan ref:[ \t]*/, ""); gsub(/[ \t]+\([^)]*\)[ \t]*$/, ""); print; exit}' "$_pln1_dod_file" 2>/dev/null)
+    [ -z "$_pln1_plan_ref" ] && continue
+
+    # Resolve plan path relative to PROJECT_DIR
+    _pln1_plan_path="$PROJECT_DIR/$_pln1_plan_ref"
+    [ -f "$_pln1_plan_path" ] || continue
+
+    # Detect `parallelizable: true` literal in plan's ## 실행 전략 section
+    # awk extracts the section body, then grep for the literal value (case-insensitive,
+    # whitespace tolerant). Only stderr advisory; no block.
+    if awk '/^## 실행 전략/{flag=1; next} /^## /{flag=0} flag' "$_pln1_plan_path" 2>/dev/null | grep -qiE '^[[:space:]]*parallelizable[[:space:]]*:[[:space:]]*true[[:space:]]*$'; then
+      # Worker-marker bypass: hook invocation inside a worker worktree is
+      # legitimate (worker editing its declared scope). $PROJECT_DIR resolves
+      # to the current worktree root for worker dispatches.
+      if [ -f "$PROJECT_DIR/.rein/worker-marker.json" ]; then
+        echo "[rein] NOTICE: parallelizable: true plan + worker-marker present — enforcement skip (legitimate worker edit)." >&2
+        continue
+      fi
+      # PLN1-GATE-ENFORCEMENT-ACTIVE (2026-05-28)
+      echo "[rein] BLOCKED: parallelizable plan without AG-2 worker dispatch — plan='$_pln1_plan_ref', file='$FILE_PATH'. Either dispatch via feature-builder-worker agent or set parallelizable: false in the plan." >&2
+      log_block "parallelizable plan without AG-2 worker" "$FILE_PATH"
+      exit 2
+    fi
+  done
+fi
 
 if [ "$DOD_FOUND" = true ]; then
   # Plan A Phase 4 Task 4.2 (GI-dod-gate-validator-call):

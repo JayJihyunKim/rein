@@ -11,6 +11,39 @@ Single top-level field:
 enabled: auto    # or true | false
 ```
 
+### Supported subset (PERF-YAML-SUBSET-CONTRACT)
+
+본 파일의 supported schema 는 **단일 top-level `enabled:` 키** 1개. 값은 다음 셋 중 하나:
+
+- `true` — meta-check 강제 활성 (DoD 의 `meta_check:` field 가 없어도)
+- `false` — meta-check 강제 비활성
+- `auto` — DoD 의 `meta_check:` field 가 결정 (없으면 활성으로 간주)
+
+값은 **unquoted YAML bool (`true`/`false`) 또는 unquoted string (`auto`)**, case-insensitive. **Top-level only — leading whitespace 가 있으면 nested mapping 보호로 `auto` 로 fallback**.
+
+### Unsupported inputs — shell vs Python deviation 표
+
+G3-perf-NFR cycle (2026-05-27) 이후 `.rein/policy/meta-check.yaml` 는 두 entry point 로 read 됨:
+- `plugins/rein-core/hooks/post-edit-meta-check.sh` 내부의 shell helper `meta_check_policy_shell` (`plugins/rein-core/hooks/lib/meta-check-policy.sh`)
+- `plugins/rein-core/scripts/rein-policy-loader.py::get_meta_check_policy()` (legacy Python entry, backward-compat 보존)
+
+Supported subset 밖 입력은 두 entry point 가 다른 결과 반환 — `tests/hooks/test-meta-check-policy-parity.sh` 가 회귀 검증:
+
+| 입력 | shell | python | 비고 |
+|---|---|---|---|
+| `enabled: "true"` (quoted string) | `auto` | `true` | shell awk 은 quoted character 미인식 |
+| `enabled: yes` | `auto` | `true` | PyYAML bool alias, shell 은 literal string 매칭 |
+| `enabled: no` | `auto` | `false` | 동상 |
+| `enabled: on` | `auto` | `true` | 동상 |
+| `enabled: off` | `auto` | `false` | 동상 |
+| `enabled: &x true` (anchor) | `auto` | `true` | PyYAML anchor 해결 |
+| `---\nenabled: true\n---` (multi-doc) | `true` | `auto` | shell 은 `---` 무시 + 첫 `enabled:` 매칭, PyYAML safe_load parse 실패 |
+| `meta:\n  enabled: true` (nested) | `auto` | `auto` | 양쪽 모두 top-level 매칭 안 됨 |
+| `version: 1` (enabled 키 부재) | `auto` | `auto` | 양쪽 모두 fail-open |
+| (malformed yaml) | `auto` | `auto` | 양쪽 모두 fail-open |
+
+**권고**: supported subset 안 (단일 top-level `enabled: true|false|auto`) 에서 작성 — 양쪽 entry point 동일 결과 보장.
+
 ## Effective policy precedence
 
 Higher precedence wins:
@@ -59,11 +92,13 @@ enabled: false
 오류로 인해 차단되지 않는다):
 
 - 파일 부재
-- PyYAML 미설치
+- 파일 read 권한 오류
+- PyYAML 미설치 (legacy Python entry only)
 - yaml parse 실패 (stderr 1줄 warning + `auto`)
 - `enabled` field 누락
-- `enabled` 값이 `true` / `false` / `auto` 외 (예: `yes`, `1`)
-- top-level 가 dict 가 아님
+- `enabled` 값이 `true` / `false` / `auto` 외 (예: `maybe`)
+- top-level 가 dict 가 아님 (Python entry)
+- leading whitespace 있는 `enabled:` (shell entry — nested mapping 보호)
 
 ## DoD override 예시
 

@@ -17,7 +17,7 @@ warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 fatal() { echo -e "${RED}Fatal: $*${NC}" >&2; exit 1; }
 
-VERSION="1.3.8"
+VERSION="1.4.0"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
@@ -722,6 +722,7 @@ main() {
 
   case "$1" in
     merge|update)
+      echo 'rein is in plugin mode — use the plugin manager: `claude plugin update rein`.'
       echo 'plugin 모드는 `claude plugin update rein` 를 사용하세요. 자세한 내용: https://github.com/JayJihyunKim/rein'
       exit 0
       ;;

@@ -54,13 +54,16 @@ fi
 BODY="${BODY%x}"
 [ -n "$BODY" ] || exit 0
 
-# ---- Response-tone rule (TONE-1, 2026-05-27) -------------------------------
-# Inject response-tone body every turn so assistant chat output stays
-# plain-language (rein internal jargon expanded on first use, trail/MEMORY
-# verbatim quotes avoided, first/last lines as plain English intent/next-step).
+# ---- Response-tone rule (TONE-1, 2026-05-27; communication-improve, 2026-05-28)
+# Inject the SHORT response-tone summary every turn so assistant chat output
+# stays plain-language (rein internal IDs/paths translated, 3-step reporting
+# structure, trail/MEMORY verbatim quotes avoided). The full body lives in
+# `rules/response-tone.md` and is delivered by `session-start-rules.sh`
+# at session boundary; per-turn we ship the compact reminder to keep token
+# cost flat (~80 tokens vs ~250 for full).
 # Fail-open: body resolution failure leaves TONE_BODY empty and the hook
 # emits the existing answer-only summary unchanged.
-TONE_BODY=$(if rule_inject_body response-tone; then printf x; else exit 1; fi) || TONE_BODY=""
+TONE_BODY=$(if rule_inject_body short/response-tone-summary; then printf x; else exit 1; fi) || TONE_BODY=""
 TONE_BODY="${TONE_BODY%x}"
 
 # ---- Combine + emit --------------------------------------------------------

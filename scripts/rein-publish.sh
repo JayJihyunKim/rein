@@ -96,10 +96,46 @@ fi
 # Validate plugin rules + rule-inject hooks BEFORE any side effects (tarball
 # build, manifest update, Anthropic POST). Fail-fast so a malformed rule
 # body or missing hook never reaches the marketplace.
-python3 "$SCRIPT_DIR/rein-validate-plugin-rules.py" || {
-  echo "publish aborted: plugin rule validation failed" >&2
-  exit 1
-}
+#
+# Tests that exercise publish flow with a minimal plugin layout (only
+# .claude-plugin/plugin.json + hooks/sample.sh) cannot satisfy the drift
+# checker's full validation matrix. Such fixtures set
+# REIN_PUBLISH_SKIP_VALIDATE=1 to bypass the validator without forking the
+# script. Real publish flows (CI, manual `rein publish`) leave it unset and
+# the validator runs as before.
+#
+# Production guard: refuse the bypass in CI environments. GitHub Actions and
+# most CI providers set $CI=true. A future bug or attacker setting
+# SKIP_VALIDATE on a real publish would be caught here. Local development /
+# fixtures may set it freely; an audible stderr warning makes the bypass
+# visible in logs either way.
+if [ "${REIN_PUBLISH_SKIP_VALIDATE:-0}" = "1" ]; then
+  # Multi-provider CI marker allowlist (security review F1, 2026-05-28).
+  # `$CI=true` alone was insufficient — Jenkins, TeamCity, and some
+  # self-hosted runners do not set $CI. The union below covers the major
+  # providers without requiring per-workflow opt-in. Test fixtures unset
+  # these markers in their own subshell (see tests/scripts/test-rein-
+  # publish-*.sh) so the bypass remains available for legitimate fixtures.
+  if [ "${CI:-}" = "true" ] \
+     || [ -n "${GITHUB_ACTIONS:-}" ] \
+     || [ -n "${GITLAB_CI:-}" ] \
+     || [ -n "${JENKINS_URL:-}" ] \
+     || [ -n "${BUILDKITE:-}" ] \
+     || [ -n "${CIRCLECI:-}" ] \
+     || [ -n "${TF_BUILD:-}" ]; then
+    echo "BLOCKED: REIN_PUBLISH_SKIP_VALIDATE is forbidden in CI environments." >&2
+    echo "  Detected via one of: \$CI, \$GITHUB_ACTIONS, \$GITLAB_CI, \$JENKINS_URL, \$BUILDKITE, \$CIRCLECI, \$TF_BUILD." >&2
+    echo "  This bypass is for local test fixtures only. Real publish must run plugin rule validation." >&2
+    exit 2
+  fi
+  echo "WARNING: REIN_PUBLISH_SKIP_VALIDATE=1 — plugin rule validation + version parity check skipped." >&2
+  echo "  This is a test-fixture escape hatch. Do NOT set this for real publish." >&2
+else
+  python3 "$SCRIPT_DIR/rein-validate-plugin-rules.py" || {
+    echo "publish aborted: plugin rule validation failed" >&2
+    exit 1
+  }
+fi
 
 # --- Pre-publish version parity check (VER-1, v1.2.0 cycle) ---------------
 #
@@ -109,14 +145,21 @@ python3 "$SCRIPT_DIR/rein-validate-plugin-rules.py" || {
 # installed CLI shim claims another, which silently breaks `rein --version`
 # parity after `/plugin install`. Fail-fast BEFORE any tarball / manifest /
 # Anthropic side effect.
-PLUGIN_JSON_VERSION="$(python3 -c "import json,sys; print(json.load(open('plugins/rein-core/.claude-plugin/plugin.json'))['version'])")"
-REIN_SH_VERSION="$(grep '^VERSION=' scripts/rein.sh | head -1 | cut -d'"' -f2)"
-if [ "$PLUGIN_JSON_VERSION" != "$REIN_SH_VERSION" ]; then
-  echo "BLOCKED: plugin.json version ($PLUGIN_JSON_VERSION) != scripts/rein.sh VERSION ($REIN_SH_VERSION)" >&2
-  echo "  fix: update both to the same value before publish" >&2
-  exit 2
+#
+# Test fixtures that ship a minimal plugin layout (no scripts/rein.sh in
+# fixture root) set REIN_PUBLISH_SKIP_VALIDATE=1 alongside the rule
+# validation skip — both pre-publish gates share the same opt-out so
+# fixtures don't have to enumerate maintainer-side files individually.
+if [ "${REIN_PUBLISH_SKIP_VALIDATE:-0}" != "1" ]; then
+  PLUGIN_JSON_VERSION="$(python3 -c "import json,sys; print(json.load(open('plugins/rein-core/.claude-plugin/plugin.json'))['version'])")"
+  REIN_SH_VERSION="$(grep '^VERSION=' scripts/rein.sh | head -1 | cut -d'"' -f2)"
+  if [ "$PLUGIN_JSON_VERSION" != "$REIN_SH_VERSION" ]; then
+    echo "BLOCKED: plugin.json version ($PLUGIN_JSON_VERSION) != scripts/rein.sh VERSION ($REIN_SH_VERSION)" >&2
+    echo "  fix: update both to the same value before publish" >&2
+    exit 2
+  fi
+  echo "version-parity OK: $PLUGIN_JSON_VERSION"
 fi
-echo "version-parity OK: $PLUGIN_JSON_VERSION"
 
 # --- Fail-fast on Anthropic env vars (BEFORE any side effects) -------------
 #

@@ -236,6 +236,193 @@ def parse_plan_work_unit_covers(plan_path: Path, work_unit: str) -> set[str] | N
     return None
 
 
+# ---------- Execution strategy parser (PLN-1, 2026-05-27) -------------
+#
+# Plan 의 `## 실행 전략` 섹션 파싱 + parallelizable=true 의 literal-path-only
+# fail-closed 조건 검증. 섹션 부재 plan 은 parallelizable=false 로 처리
+# (backward-compat — legacy plan 회귀 없음).
+#
+# rule: plugins/rein-core/rules/design-plan-coverage.md §2A
+#   섹션 schema:
+#     ## 실행 전략
+#     parallelizable: <true|false>
+#     workers:
+#       - name: <worker-name>
+#         scope:
+#           - <literal-file-path>
+#     merge_gate: <description>
+#
+# Fail-closed 조건 (parallelizable=true 일 때만 검증):
+#   (a) workers list 비어있거나 누락
+#   (b) 임의 worker 의 scope 누락·빈 list·non-list shape
+#   (c) scope 원소 중 비-string
+#   (d) scope 원소가 glob 메타문자 (*, ?, [, ]) 포함
+#   (e) scope 원소가 디렉토리 (/ 로 끝남)
+
+EXEC_STRATEGY_HEADING = "## 실행 전략"
+PARALLELIZABLE_RE = re.compile(r"^\s*parallelizable\s*:\s*(?P<value>\S+)\s*$", re.IGNORECASE)
+WORKERS_HEADER_RE = re.compile(r"^\s*workers\s*:\s*$", re.IGNORECASE)
+WORKER_ITEM_RE = re.compile(r"^\s*-\s+name\s*:\s*(?P<name>.+?)\s*$", re.IGNORECASE)
+SCOPE_HEADER_RE = re.compile(r"^\s{2,}scope\s*:\s*$", re.IGNORECASE)
+SCOPE_ITEM_RE = re.compile(r"^\s{4,}-\s+(?P<value>.+?)\s*$")
+SCOPE_INLINE_RE = re.compile(r"^\s{2,}scope\s*:\s*(?P<value>.+?)\s*$", re.IGNORECASE)
+MERGE_GATE_RE = re.compile(r"^\s*merge_gate\s*:\s*(?P<value>.+?)\s*$", re.IGNORECASE)
+
+# Glob meta-chars (subset of POSIX glob — first-cycle conservative).
+GLOB_META_RE = re.compile(r"[\*\?\[\]]")
+
+
+def parse_execution_strategy(plan_path: Path) -> dict:
+    """Return execution-strategy dict for a plan.
+
+    Shape: ``{"parallelizable": bool, "workers": list[dict], "merge_gate": str|None,
+              "errors": list[str]}``.
+
+    ``errors`` is empty for a valid section or an absent section. Populated
+    only when ``parallelizable: true`` and a fail-closed condition triggers.
+
+    Backward-compat: absent section returns ``parallelizable=False`` with empty
+    workers + no errors. validate_plan caller treats empty ``errors`` as pass.
+    """
+    out: dict = {
+        "parallelizable": False,
+        "workers": [],
+        "merge_gate": None,
+        "errors": [],
+    }
+    if not plan_path.exists():
+        return out
+    try:
+        text = plan_path.read_text(encoding="utf-8")
+    except Exception:
+        return out
+    lines = text.splitlines()
+
+    # Locate section.
+    sec_start = None
+    for i, line in enumerate(lines):
+        if line.strip() == EXEC_STRATEGY_HEADING:
+            sec_start = i
+            break
+    if sec_start is None:
+        return out  # backward-compat: absent section = parallelizable=false
+
+    # Walk until next "## " heading.
+    in_workers = False
+    current_worker: dict | None = None
+    in_scope = False
+    for raw in lines[sec_start + 1 :]:
+        if raw.startswith("## "):
+            break
+
+        # parallelizable: <value>
+        m = PARALLELIZABLE_RE.match(raw)
+        if m and not in_workers:
+            val = m.group("value").lower().rstrip(",")
+            out["parallelizable"] = val == "true"
+            continue
+
+        # merge_gate: <value>
+        m = MERGE_GATE_RE.match(raw)
+        if m:
+            out["merge_gate"] = m.group("value")
+            in_workers = False
+            current_worker = None
+            in_scope = False
+            continue
+
+        # workers:
+        if WORKERS_HEADER_RE.match(raw):
+            in_workers = True
+            current_worker = None
+            in_scope = False
+            continue
+
+        if not in_workers:
+            continue
+
+        # - name: <name>
+        m = WORKER_ITEM_RE.match(raw)
+        if m:
+            current_worker = {"name": m.group("name"), "scope": [], "_has_scope_key": False}
+            out["workers"].append(current_worker)
+            in_scope = False
+            continue
+
+        if current_worker is None:
+            continue
+
+        # scope: (inline) — `scope: foo` not a list → record as fail-closed marker
+        m = SCOPE_INLINE_RE.match(raw)
+        if m:
+            current_worker["_has_scope_key"] = True
+            inline_val = m.group("value").strip()
+            # Anything other than the empty-list literal "[]" is treated as
+            # non-list shape (single string). Empty list "[]" registers a
+            # scope key with no items, which is fail-closed (b2).
+            if inline_val == "[]":
+                in_scope = False
+            else:
+                current_worker["_inline_scope"] = inline_val
+                in_scope = False
+            continue
+
+        # scope:  (block form)
+        if SCOPE_HEADER_RE.match(raw):
+            current_worker["_has_scope_key"] = True
+            in_scope = True
+            continue
+
+        # - <scope item>
+        if in_scope:
+            m = SCOPE_ITEM_RE.match(raw)
+            if m:
+                current_worker["scope"].append(m.group("value"))
+
+    # ---- Fail-closed validation (only when parallelizable=true) ----
+    if not out["parallelizable"]:
+        return out  # no further checks
+
+    if not out["workers"]:
+        out["errors"].append("parallelizable=true but workers list is empty or missing (PLN-1 fail-closed a)")
+        return out
+
+    for w in out["workers"]:
+        name = w.get("name", "<unnamed>")
+        if not w.get("_has_scope_key"):
+            out["errors"].append(f"worker '{name}': scope key missing (PLN-1 fail-closed b1)")
+            continue
+        if "_inline_scope" in w:
+            # Inline non-list scope (e.g. `scope: foo`).
+            out["errors"].append(f"worker '{name}': scope is not a list — inline value '{w['_inline_scope']}' (PLN-1 fail-closed b3)")
+            continue
+        scope = w.get("scope") or []
+        if not scope:
+            out["errors"].append(f"worker '{name}': scope is empty list (PLN-1 fail-closed b2)")
+            continue
+        for item in scope:
+            if not isinstance(item, str):
+                out["errors"].append(f"worker '{name}': scope contains non-string item {item!r} (PLN-1 fail-closed c1)")
+                continue
+            # PLN-1 fail-closed c: markdown parser yields every list item as a
+            # plain string, so the isinstance branch above is unreachable for
+            # markdown-derived plans. Explicitly reject tokens that lack any
+            # alpha char or path separator (e.g. `- 123`, `- 0`, `- ---`) —
+            # these cannot denote a literal file path and would otherwise slip
+            # past the d/e checks (no glob meta-char, no trailing slash).
+            if not re.search(r'[A-Za-z/]', item):
+                out["errors"].append(f"worker '{name}': scope item '{item}' is not a valid file path token — needs alpha char or '/' (PLN-1 fail-closed c)")
+                continue
+            if GLOB_META_RE.search(item):
+                out["errors"].append(f"worker '{name}': scope contains glob meta-char in '{item}' (PLN-1 fail-closed d)")
+                continue
+            if item.endswith("/"):
+                out["errors"].append(f"worker '{name}': scope contains directory path '{item}' — literal file path required (PLN-1 fail-closed e)")
+                continue
+
+    return out
+
+
 # ---------- Plan parser (v1 behavior preserved) ----------
 
 
@@ -393,6 +580,12 @@ def validate_plan(plan_path: Path) -> int:
             f"matrix rows marked 'implemented' but no covers: references them: "
             f"{sorted(uncovered)}"
         )
+
+    # PLN-1 (2026-05-27): execution-strategy fail-closed validation.
+    # Absent section → parallelizable=false → no errors (backward-compat).
+    exec_strategy = parse_execution_strategy(plan_path)
+    for e in exec_strategy.get("errors", []):
+        failures.append(e)
 
     if failures:
         err(f"validation failed for {plan_path}:")

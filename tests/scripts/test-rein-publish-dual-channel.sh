@@ -45,6 +45,19 @@ mkdir -p "$tmp/scripts" "$tmp/plugins/rein-core/.claude-plugin" "$tmp/plugins/re
 
 cp "$PUBLISH_SH" "$tmp/scripts/rein-publish.sh"
 cp "$UPDATE_PY" "$tmp/scripts/rein-marketplace-update.py"
+# This test exercises publish env-var assertions with a minimal plugin
+# layout. The full drift validator (rein-validate-plugin-rules.py →
+# rein-check-plugin-drift.py) requires the complete plugins/rein-core/
+# tree (rules/, hooks/session-start-rules.sh, hooks.json, etc.) which the
+# fixture intentionally omits. Bypass via documented env var so the
+# assertions reach the real fail-fast checks under test.
+#
+# Production guard in rein-publish.sh refuses SKIP_VALIDATE in CI ($CI=true
+# or $GITHUB_ACTIONS set). Test fixtures running inside CI must unset those
+# markers in their own subshell so the bypass is allowed for the fixture
+# while real publish in the same CI run still hits the guard.
+unset CI GITHUB_ACTIONS GITLAB_CI JENKINS_URL BUILDKITE CIRCLECI TF_BUILD
+export REIN_PUBLISH_SKIP_VALIDATE=1
 
 cat > "$tmp/plugins/rein-core/.claude-plugin/plugin.json" <<'EOF'
 { "name": "rein-core", "version": "1.0.0", "description": "fixture" }

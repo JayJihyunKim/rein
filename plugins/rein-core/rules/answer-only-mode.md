@@ -122,6 +122,9 @@ Answer-only turn 으로 시작했어도 다음 중 하나가 발생하는 즉시
 
 - [ ] 답변에 release / version / branch / tag / 파일 존재 류 volatile claim 이 있는가? → 있으면 §3.1 명령 재검증
 - [ ] 답변에 추측이 사실로 적힌 곳이 있는가? → 있으면 "미확인" 표시 또는 검증
+- [ ] 답변 본문에 rein 내부 식별자·약어·파일 경로 해시 (`stamp`, `verdict`, `.codex-reviewed`, `approved_by_user`, `security_tier`, Scope ID 등) 가 평문으로 번역되지 않은 채 노출됐는가? → 있으면 `plugins/rein-core/rules/response-tone.md` 의 번역 테이블 적용 (단 변경한 파일 경로·명령어·코드 블록은 검증 가능성을 위해 원형 보존)
+- [ ] 완료·진행 보고가 "방금 한 것 → 결과 → 다음 단계" 흐름을 따르는가? → 어긋나면 재작성. 답변 길이는 결과 1-2문장 + 다음 단계 1문장이 기본
+- [ ] `MEMORY.md` / `trail/index.md` / `trail/inbox/` / `trail/dod/` 본문을 원본 그대로 인용했는가? → 했으면 평문으로 재진술
 
 ---
 

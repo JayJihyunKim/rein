@@ -96,9 +96,18 @@ if [ -n "$DOD_META_LINE" ]; then
   esac
 fi
 
-# Step b: .rein/policy/meta-check.yaml fallback
+# Step b: .rein/policy/meta-check.yaml fallback (shell helper — PERF-SHELL-POLICY-LOADER)
+# G3-perf-NFR: replaces python3 rein-policy-loader.py --meta-check-policy (~43ms cold)
+# with shell awk (~5ms). Python rein-policy-loader.py::get_meta_check_policy() and
+# --meta-check-policy CLI remain unchanged (PERF-PYTHON-API-BACKCOMPAT).
 if [ -z "$EFFECTIVE" ]; then
-  EFFECTIVE=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" --meta-check-policy 2>/dev/null || true)
+  if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/meta-check-policy.sh" ]; then
+    # shellcheck source=./lib/meta-check-policy.sh
+    . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/meta-check-policy.sh"
+    if declare -F meta_check_policy_shell >/dev/null 2>&1; then
+      EFFECTIVE=$(meta_check_policy_shell 2>/dev/null || true)
+    fi
+  fi
 fi
 
 # Step c: built-in default
@@ -130,12 +139,25 @@ if [ -z "$DIFF_RAW" ]; then
   exit 0
 fi
 
-# (8)-(10) Combined parse + mismatch + envelope/inbox synthesis (single python call)
+# (8)-(10) Combined parse + mismatch + envelope/inbox + tool_use_id synthesis
+# (single python call — PERF-HEREDOC-TOOL-USE-ID-MERGE).
 # Data is passed via environment variables (NOT via pipe-stdin) because
 # `python3 - <<'PY'` consumes stdin for the script source — a pipe on the
 # left of `python3 -` is overridden by the heredoc and never reaches the
 # script. Env-var passing keeps script + data cleanly separated.
-PY_RESULT=$(META_DOD_PATH="$DOD_PATH" META_EFFECTIVE="$EFFECTIVE" META_DOD_SLUG="$DOD_SLUG" META_DIFF_RAW="$DIFF_RAW" python3 - <<'PY' 2>/dev/null || true
+#
+# Phase 2 (G3-perf-NFR): META_INPUT is passed via env-var so the heredoc can
+# extract tool_use_id inline, eliminating the separate line ~264 python3 -c
+# invocation. Falls back to that separate call when INPUT > 16KB (Windows Git
+# Bash total env block safety — spec §3.2.1).
+META_INPUT_THRESHOLD=16384
+INPUT_LEN=${#INPUT}
+META_INPUT_PASS=""
+if [ "$INPUT_LEN" -le "$META_INPUT_THRESHOLD" ]; then
+  META_INPUT_PASS="$INPUT"
+fi
+
+PY_RESULT=$(META_DOD_PATH="$DOD_PATH" META_EFFECTIVE="$EFFECTIVE" META_DOD_SLUG="$DOD_SLUG" META_DIFF_RAW="$DIFF_RAW" META_INPUT="$META_INPUT_PASS" python3 - <<'PY' 2>/dev/null || true
 import os
 import sys
 import json
@@ -145,6 +167,7 @@ dod_path = os.environ.get("META_DOD_PATH", "")
 effective = os.environ.get("META_EFFECTIVE", "auto")
 dod_slug = os.environ.get("META_DOD_SLUG", "")
 diff_blob = os.environ.get("META_DIFF_RAW", "")
+input_blob = os.environ.get("META_INPUT", "")
 
 D = {line.strip() for line in diff_blob.splitlines() if line.strip()}
 diff_count = len(D)
@@ -245,13 +268,142 @@ if action != "SKIP_NO_HINT_AUTO":
         separators=(",", ":"),
     )
 
-sys.stdout.write(f"{action}\n{envelope_json}\n{inbox_json}\n")
+# Phase 2: tool_use_id extracted in-heredoc when META_INPUT is non-empty
+# (fast path). On oversized INPUT (>16KB) META_INPUT is empty -> tool_use_id
+# stays "" here and is extracted later via the legacy python3 -c fallback.
+tool_use_id = ""
+if input_blob:
+    try:
+        d = json.loads(input_blob)
+        if isinstance(d, dict):
+            tool_use_id = d.get("tool_use_id", "") or ""
+    except Exception:
+        pass
+
+sys.stdout.write(f"{action}\n{envelope_json}\n{inbox_json}\n{tool_use_id}\n")
 PY
 )
 
 ACTION=$(printf '%s\n' "$PY_RESULT" | sed -n '1p')
 ENVELOPE=$(printf '%s\n' "$PY_RESULT" | sed -n '2p')
 INBOX_LINE=$(printf '%s\n' "$PY_RESULT" | sed -n '3p')
+TOOL_USE_ID=$(printf '%s\n' "$PY_RESULT" | sed -n '4p')
+
+# ARG_MAX defensive retry: if heredoc exec failed (PY_RESULT empty AND we used
+# env-var pass), the env block may have exceeded the OS limit despite our
+# 16KB precheck (cumulative env+argv can exceed even when INPUT alone is small).
+# Retry without META_INPUT to at least preserve advisory/inbox output —
+# tool_use_id is recovered later via the legacy python3 -c fallback path.
+if [ -z "$ACTION" ] && [ -n "$META_INPUT_PASS" ]; then
+  PY_RESULT=$(META_DOD_PATH="$DOD_PATH" META_EFFECTIVE="$EFFECTIVE" META_DOD_SLUG="$DOD_SLUG" META_DIFF_RAW="$DIFF_RAW" python3 - <<'PY' 2>/dev/null || true
+import os
+import sys
+import json
+import datetime
+
+dod_path = os.environ.get("META_DOD_PATH", "")
+effective = os.environ.get("META_EFFECTIVE", "auto")
+dod_slug = os.environ.get("META_DOD_SLUG", "")
+diff_blob = os.environ.get("META_DIFF_RAW", "")
+
+D = {line.strip() for line in diff_blob.splitlines() if line.strip()}
+diff_count = len(D)
+BT = chr(96)
+hint_files = []
+section_present = False
+try:
+    with open(dod_path, "r", encoding="utf-8") as fh:
+        in_section = False
+        for raw_line in fh:
+            line = raw_line.rstrip("\n")
+            if line.startswith("## 변경 파일"):
+                in_section = True
+                section_present = True
+                continue
+            if in_section and line.startswith("## "):
+                in_section = False
+                continue
+            if not in_section:
+                continue
+            stripped = line.strip()
+            if not stripped.startswith("- "):
+                continue
+            item = stripped[2:].strip()
+            if item.startswith(BT):
+                end = item.find(BT, 1)
+                if end > 0:
+                    item = item[1:end]
+                else:
+                    item = item.strip(BT)
+            else:
+                tokens = item.split(None, 1)
+                first = tokens[0] if tokens else ""
+                if "/" in first or "." in first:
+                    item = first
+            item = item.strip()
+            if item:
+                hint_files.append(item)
+except Exception:
+    pass
+
+H = set(hint_files)
+hint_count = len(H)
+mismatch_set = sorted(D - H)
+mismatch_count = len(mismatch_set)
+
+if not section_present and effective == "auto":
+    action = "SKIP_NO_HINT_AUTO"
+elif mismatch_count > 0:
+    action = "EMIT"
+else:
+    action = "INBOX_ONLY"
+
+envelope_json = ""
+if action == "EMIT":
+    top5 = mismatch_set[:5]
+    sample = ", ".join(top5)
+    suffix = "" if mismatch_count <= 5 else f" ... (+{mismatch_count - 5} more)"
+    body = (
+        f"[meta-check] DoD '{dod_slug}' '## 변경 파일' (hint={hint_count}) vs "
+        f"diff (D={diff_count}) 불일치. 예상 외 {mismatch_count}개: {sample}{suffix}"
+    )
+    body_bytes = body.encode("utf-8")
+    if len(body_bytes) > 500:
+        body = body_bytes[:497].decode("utf-8", errors="ignore") + "..."
+    envelope_json = json.dumps(
+        {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": body}},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+inbox_json = ""
+if action != "SKIP_NO_HINT_AUTO":
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    inbox_json = json.dumps(
+        {
+            "ts": ts,
+            "dod_slug": dod_slug,
+            "diff_files_count": diff_count,
+            "mismatch_count": mismatch_count,
+            "hint_files_count": hint_count,
+            "sample_missing_files": mismatch_set[:5],
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+# No tool_use_id here — recovered via legacy python3 -c fallback below
+sys.stdout.write(f"{action}\n{envelope_json}\n{inbox_json}\n\n")
+PY
+)
+  ACTION=$(printf '%s\n' "$PY_RESULT" | sed -n '1p')
+  ENVELOPE=$(printf '%s\n' "$PY_RESULT" | sed -n '2p')
+  INBOX_LINE=$(printf '%s\n' "$PY_RESULT" | sed -n '3p')
+  TOOL_USE_ID=""  # force fallback extraction below
+  # Mark as if oversized path so the fallback python3 -c at the cache write
+  # branch knows to extract tool_use_id from $INPUT.
+  INPUT_LEN=$((META_INPUT_THRESHOLD + 1))
+fi
 
 # G3-MC-DOD-MISSING-HINT (a) — auto + no hint → NOTICE + silent skip
 if [ "$ACTION" = "SKIP_NO_HINT_AUTO" ]; then
@@ -261,7 +413,10 @@ fi
 
 # G3-MC-ADVISORY — emit envelope only on mismatch
 if [ -n "$ENVELOPE" ]; then
-  TOOL_USE_ID=$(printf '%s' "$INPUT" | python3 -c '
+  # Phase 2 fast path: TOOL_USE_ID already extracted inside heredoc.
+  # Fallback path: oversized INPUT (>16KB) skipped env-var pass — extract here.
+  if [ -z "$TOOL_USE_ID" ] && [ "$INPUT_LEN" -gt "$META_INPUT_THRESHOLD" ]; then
+    TOOL_USE_ID=$(printf '%s' "$INPUT" | python3 -c '
 import sys, json
 try:
     d = json.loads(sys.stdin.read())
@@ -270,6 +425,7 @@ except Exception:
 if isinstance(d, dict):
     sys.stdout.write(d.get("tool_use_id", "") or "")
 ' 2>/dev/null || true)
+  fi
 
   CACHE_OK=0
   if [ -n "$TOOL_USE_ID" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/hook-output-cache.sh" ]; then

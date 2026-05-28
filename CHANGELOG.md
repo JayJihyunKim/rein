@@ -2,6 +2,24 @@
 
 > **Versioning policy**: 버전 bump 는 `.claude/rules/versioning.md` 의 Rule A/B/C 를 따른다.
 
+## v1.4.0 — 2026-05-28 (응답 톤 강화 + 병렬 worker 메커니즘 + 검토 게이트 정확도 + 응답 속도)
+
+`rein update` 후 사용자 세션에서 바뀌는 것:
+
+- **어시스턴트 답변이 한층 평문화됩니다 — 내부 식별자가 사용자 대화에서 사라집니다.** 새 응답 톤 규칙이 `stamp`, `verdict`, `.codex-reviewed`, `approved_by_user`, `security_tier`, Scope ID 같은 내부 ID 를 채팅 본문에 노출하지 못하게 하고, 일관된 평문 번역 테이블을 적용합니다 (예: "검토 완료 표시를 남겼습니다", "통과 / 수정 필요 / 반려", "보안 검토 강도: 가벼움 / 표준 / 깊음"). 완료·진행 보고는 "방금 한 것 → 결과 → 다음 단계" 흐름으로 정형화되고, 사용자 확인 질문에서도 내부 식별자가 빠집니다. `trail/index.md` / `trail/inbox/` / `MEMORY.md` 본문을 원본 그대로 인용하지 않고 평문으로 풀어쓰는 규칙도 명시됩니다. v1.3.8 의 "응답 톤" 변경이 톤 가이드의 첫 도입이었다면, 이번은 그것을 "허용+풀이" 에서 "절대 금지+평문 번역" 으로 강화한 단계입니다.
+
+- **에이전트 보고 메시지가 평문으로 통일됩니다.** plan-writer / feature-builder / feature-builder-fix / feature-builder-refactor / feature-builder-worker / security-reviewer 모든 에이전트에 `## 사용자 보고 방식` 섹션이 추가되어, 작업 착수 / 완료 / 차단 / 발견 사항을 평문 템플릿으로 안내합니다. plan-writer 의 기존 영문 handoff 메시지 (`Plan complete: ...`, `Spec review: PASS ...`, `Stamp created: ...`) 는 내부 운영 기록 전용으로 분리되어 채팅 본문에는 더 이상 노출되지 않습니다. 작업 진행 차단 시 hook 안내도 marker 파일 경로에 평문 설명을 병기하는 형태로 다듬어졌습니다.
+
+- **라우팅 추천이 두 층 채팅 표현으로 바뀝니다.** 작업 시작 시 사용자에게 보여지는 라우팅 추천이 평문 한 줄 ("[작업명] 을 진행하겠습니다. 계획: [한 문장 요약]. 이 방향으로 진행할까요?") 다음에 상세 라우팅 정보 (담당 에이전트 / 보조 스킬 / 외부 자료 / 근거) 가 따라오는 두 층 구조로 정리됩니다. 어떤 에이전트가 선택됐는지 사용자가 승인 전에 명확히 볼 수 있도록 상세 정보는 유지되며, DoD 파일의 저장 형식 (`agent:` / `skills:` / `approved_by_user:`) 자체는 변경 없습니다.
+
+- **병렬 worker 실행 메커니즘이 정착됩니다 — `parallelizable: true` plan + worktree 격리 worker 에이전트 정식 도입.** plan 작성 시 `## 실행 전략` 섹션과 `parallelizable: true` 플래그를 명시하면, plan-writer 가 파일 소유권 기반으로 worker scope 를 자동 분할하고, 새 `feature-builder-worker` 에이전트 (`isolation: worktree` frontmatter) 가 격리된 git worktree 에서 동시에 코딩합니다. worker 가 종료할 때 `.rein/worker-result.json` 으로 `scope_status: completed` 또는 `blocked_<reason>` (architectural_contract_conflict / missing_dependency_file / test_contract_stale / scope_mismatch / context_exhaustion 5 종) 을 보고하면 parent 가 cherry-pick / fallback / split / scope-expand 로 분기합니다. `parallelizable: true` 인 plan 의 소스 편집은 worker dispatch 안에서만 허용되도록 편집 게이트가 강제됩니다 — 일반 (`parallelizable` 미지정 또는 `false`) plan 에는 영향 없습니다.
+
+- **검토 누락이 사라집니다 — orphan 검토 표시 백스톱.** spec-review 게이트가 종전에는 검토 대기 표시(`.pending`) 가 있을 때만 stale 여부를 검사했지만, 이제 검토 대기 표시 없이 `.reviewed` 만 남은 경우에도 스펙 본문의 수정 시각과 검토 시각을 비교해 stale 판정 → 차단합니다. 회고 stamp (`reviewer: retrospective-shipped-<tag>`) 는 예외로 통과되어 v1.0.0 이전 legacy 문서 워크플로는 그대로입니다.
+
+- **응답 속도가 빨라집니다 — 정책 로더 shell rewrite.** 매 편집 직후 발화되던 변경 파일 advisory (post-edit-meta-check) 의 p95 가 ~210-230ms (목표 150ms 대비 초과) 였던 것을, 정책 로더를 shell + heredoc 으로 재작성해 Python cold-start 횟수를 줄였습니다. 사용자 체감으로는 편집 후 advisory 출력 사이 지연이 줄어듭니다. 동작 자체는 동일합니다.
+
+- **`rein update` 의 plugin-mode 안내가 영문으로 추가됩니다.** v1.0.4 의 plugin-first 재구조화 이후 `rein update` 가 일부 시나리오에서 어디로 가야 하는지를 한국어로만 안내하던 부분에 영문 redirect notice 가 같이 출력됩니다. 비한국어권 사용자가 잘못된 경로로 갈 가능성이 줄어듭니다.
+
 ## v1.3.8 — 2026-05-27 (plugin install hotfix + 작업 라우팅 안내 + 변경 파일 추적 advisory + 응답 톤 + 자동모드 marker)
 
 `rein update` 후 사용자 세션에서 바뀌는 것:

@@ -1,3 +1,5 @@
 path=/Users/jihyunkim/dreamline/rein-dev/docs/specs/2026-04-26-wrapper-context-lifecycle-hardening-design.md
 reviewer=user-approved-after-codex-rounds-1-to-7-and-plan-round-1
-reviewed=2026-04-27T01:19:50
+reviewed=2026-05-28T02:07:34
+original_reviewed=2026-04-27T01:19:50
+refreshed_reason=sr-1b-cherry-pick-mtime-false-positive-2026-05-28

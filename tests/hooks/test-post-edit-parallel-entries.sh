@@ -22,18 +22,19 @@ else
   FAIL=$((FAIL+1))
 fi
 
-# === Edit|Write|MultiEdit matcher 의 PostToolUse entry 정확히 10개 (9 sub-hook + aggregator) ===
+# === Edit|Write|MultiEdit matcher 의 PostToolUse entry 정확히 11개 (10 sub-hook + aggregator) ===
+# G3 cycle (2026-05-27) added post-edit-meta-check.sh as 10th sub-hook.
 edit_entry_count=$(python3 -c "
 import json
 h=json.load(open('$HOOKS_JSON'))
 ents=[e for e in h['hooks']['PostToolUse'] if e.get('matcher')=='Edit|Write|MultiEdit']
 print(len(ents))
 ")
-if [ "$edit_entry_count" = "10" ]; then
-  echo "PASS: posttoolse_edit_entry_count_10 (9 sub-hook + aggregator)"
+if [ "$edit_entry_count" = "11" ]; then
+  echo "PASS: posttoolse_edit_entry_count_11 (10 sub-hook + aggregator)"
   PASS=$((PASS+1))
 else
-  echo "FAIL: posttoolse_edit_entry_count_10 — actual=$edit_entry_count"
+  echo "FAIL: posttoolse_edit_entry_count_11 — actual=$edit_entry_count"
   FAIL=$((FAIL+1))
 fi
 
@@ -56,8 +57,8 @@ else
   FAIL=$((FAIL+1))
 fi
 
-# === 8 sub-hook 이름 모두 존재 ===
-expected_subhooks=("post-edit-hygiene" "post-edit-review-gate" "post-edit-index-sync-inbox" "post-edit-spec-review-gate" "post-edit-plan-coverage" "post-edit-dod-routing-check" "post-edit-design-plan-coverage-rule" "post-edit-routing-procedure-rule" "post-edit-state-journal")
+# === 10 sub-hook 이름 모두 존재 (G3 cycle 추가 post-edit-meta-check 포함) ===
+expected_subhooks=("post-edit-hygiene" "post-edit-review-gate" "post-edit-index-sync-inbox" "post-edit-spec-review-gate" "post-edit-plan-coverage" "post-edit-dod-routing-check" "post-edit-design-plan-coverage-rule" "post-edit-routing-procedure-rule" "post-edit-meta-check" "post-edit-state-journal")
 for sub in "${expected_subhooks[@]}"; do
   found=$(python3 -c "
 import json

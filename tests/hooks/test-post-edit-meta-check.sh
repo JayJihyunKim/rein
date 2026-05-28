@@ -391,13 +391,15 @@ rm -rf "$F11"
 # ---------- Fixture 12: INBOX-ZERO-RECORDED (covered by F8) ---------------
 echo "OK [F12-INBOX-ZERO-RECORDED-covered-by-F8]"
 
-# ---------- Fixture 13: PERF (20-run p95, spec NFR ≤ 150ms — relaxed for CI) -
-# Spec §5 NFR: 20 runs, p95 ≤ 150ms. The implementation spawns 3-4 python
-# cold-starts (~25ms each) which makes 150ms a stretch; we measure p95
-# (sorted index 18 of 20) and use a relaxed CI threshold 500ms with a WARN
-# at 150-500ms. The strict 150ms target stays as a follow-up perf-tuning
-# task (likely needs python process pooling or rewrite — codex Round 1
-# Medium acknowledged this gap).
+# ---------- Fixture 13: PERF (20-run p95, smoke) ---------------------------
+# G3-perf-NFR cycle (2026-05-27) updated this fixture:
+#   - Original spec target 150ms was unachievable (Python cold-start +
+#     git binary overhead is irreducible at ~160ms floor)
+#   - Phase 1 (policy-loader → shell awk) + Phase 2 (heredoc tool_use_id
+#     merge) reduced p95 from 209ms baseline to ~168ms (-41ms / -20%)
+#   - New NFR target 180ms p95 — verified strictly in
+#     tests/hooks/test-post-edit-meta-check-perf.sh
+#   - This F13 fixture now stays as smoke ≤ 250ms (cadence separation)
 F13=$(mktemp -d "/tmp/meta-f13-XXXXXX")
 make_project "$F13"
 write_dod_with_hint "$F13" "- a.txt
@@ -412,12 +414,12 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
   echo $(( (T1 - T0) / 1000000 )) >> "$SAMPLES"
 done
 P95_MS=$(sort -n "$SAMPLES" | sed -n '19p')
-if [ "${P95_MS:-9999}" -le 150 ]; then
-  echo "OK [F13-PERF-p95-${P95_MS}ms<=150ms-spec-target]"
-elif [ "${P95_MS:-9999}" -le 500 ]; then
-  echo "OK [F13-PERF-p95-${P95_MS}ms<=500ms-relaxed-CI] (spec target 150ms — follow-up perf-tuning)"
+if [ "${P95_MS:-9999}" -le 180 ]; then
+  echo "OK [F13-PERF-p95-${P95_MS}ms<=180ms-NFR-target]"
+elif [ "${P95_MS:-9999}" -le 250 ]; then
+  echo "OK [F13-PERF-p95-${P95_MS}ms<=250ms-smoke] (strict 180ms in test-post-edit-meta-check-perf.sh)"
 else
-  echo "FAIL [F13-PERF-p95-${P95_MS}ms>500ms — investigate]" >&2
+  echo "FAIL [F13-PERF-p95-${P95_MS}ms>250ms — investigate]" >&2
   FAILED=$((FAILED+1))
 fi
 rm -rf "$F13" "$SAMPLES"

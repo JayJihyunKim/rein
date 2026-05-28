@@ -38,6 +38,16 @@ mkdir -p "$tmp/marketplace"
 
 cp "$PUBLISH_SH" "$tmp/scripts/rein-publish.sh"
 cp "$UPDATE_PY" "$tmp/scripts/rein-marketplace-update.py"
+# Minimal plugin layout (only .claude-plugin/plugin.json + hooks/sample.sh).
+# The drift validator requires the complete plugin tree which is out of
+# scope for this test; bypass via documented env var.
+#
+# Production guard in rein-publish.sh refuses SKIP_VALIDATE in CI ($CI=true
+# or $GITHUB_ACTIONS set). Test fixtures running inside CI must unset those
+# markers in their own subshell so the bypass is allowed for the fixture
+# while real publish in the same CI run still hits the guard.
+unset CI GITHUB_ACTIONS GITLAB_CI JENKINS_URL BUILDKITE CIRCLECI TF_BUILD
+export REIN_PUBLISH_SKIP_VALIDATE=1
 
 cat > "$tmp/plugins/rein-core/.claude-plugin/plugin.json" <<'EOF'
 {

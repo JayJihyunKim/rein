@@ -21,6 +21,62 @@ description: design 문서를 읽어 rein 의 coverage 매트릭스 + covers 메
 
 후속 구현 작업의 DoD 를 추천·생성하는 경우, 그 DoD 에 `## 변경 파일` 섹션을 필수로 포함하도록 안내한다. repo-relative literal path 를 1개 이상 bullet list (`- <path>`) 로 나열. glob / regex 미지원 (첫 cycle).
 
+## 실행 전략 결정 (PLN-1, v2 추가)
+
+plan 작성 시 `## 실행 전략` 섹션을 **항상 첨부** 한다. 본 섹션은 plan 의 work units 를 병렬 worker 로 분할할 수 있는지 명시. 기본값은 `parallelizable: false` — **3 axis 모두 충족** 할 때만 true.
+
+### 3 axis 판정 기준
+
+| Axis | parallelizable: true 조건 | parallelizable: false 조건 |
+|------|--------------------------|---------------------------|
+| 파일 분산도 | 변경 파일 ≥ 4개 (1 worker 당 ≥2 파일) | 변경 파일 ≤ 3개 (분할 의미 없음) |
+| 파일 소유권 충돌 | worker 별 disjoint file set | 동일 파일 다중 worker 편집 |
+| 실행 순서 의존 | acceptance 순서만 의존 (각 worker 독립 verify) | implementation 의존 (A 가 B 의 산출물 사용) |
+
+3 axis 중 **하나라도** false → `parallelizable: false`. 보수적 기본.
+
+### worker scope 분할 알고리즘
+
+`parallelizable: true` 인 경우 worker 별 scope 결정:
+
+1. **domain boundary 우선** — 자연스러운 디렉토리/모듈 boundary (예: `hooks/` / `rules/` / `agents/` / `tests/`) 로 분할 시도. 한 worker = 한 domain.
+2. **충돌 시 manual ownership fallback** — domain 안에 cross-cut 파일이 있으면, plan-writer 가 파일별로 owner worker 를 명시 지정.
+
+### scope 표기 규칙
+
+- `workers[].scope` 는 **literal repo-relative file path** 만 (예: `plugins/rein-core/hooks/foo.sh`)
+- **glob/regex 미지원** (첫 cycle) — `*`, `?`, `[`, `]` 포함 시 validator fail-closed (exit 2)
+- 디렉토리 경로 (예: `plugins/`) 금지 — 명시적 파일만 허용
+
+### 예시 (parallelizable=true)
+
+```markdown
+## 실행 전략
+
+parallelizable: true
+workers:
+  - name: rules-worker
+    scope:
+      - plugins/rein-core/rules/foo.md
+      - plugins/rein-core/rules/bar.md
+  - name: agents-worker
+    scope:
+      - plugins/rein-core/agents/baz.md
+merge_gate: 각 worker 의 codex-review PASS + 메인에서 통합 테스트 실행
+```
+
+### 예시 (parallelizable=false — 기본)
+
+```markdown
+## 실행 전략
+
+parallelizable: false
+workers: []
+merge_gate: N/A (단일 worker, 본 worktree 에서 sequential 실행)
+```
+
+worker dispatch 는 **manual** (첫 cycle) — 사용자가 `Agent` tool 호출 시 `feature-builder-worker` 지정 + 위 `workers[].scope` 를 prompt 로 전달. cleanup 절차는 `plugins/rein-core/docs/worktree-cleanup.md` 참조.
+
 ## 담당 아님 (경계)
 
 - self-fix loop (Codex spec review 피드백 자동 반영): 사용자 개입 필요
@@ -102,7 +158,24 @@ codex CLI 실행 실패 (에러/타임아웃) 시 codex-review skill 의 Sonnet 
 
 **Fallback 경로도 stamp 분리 유지**: code-reviewer skill 이 `.codex-reviewed` stamp 를 만들지 않도록 prompt 에 `[NON_INTERACTIVE] spec review for plan:` prefix 를 보존해 전달. plan-writer 가 PASS 시 spec-review stamp 만 직접 생성 (fallback reviewer 문자열 suffix `-sonnet-fallback` 포함). 코드리뷰 게이트 (`.codex-reviewed`) 는 어떤 경로에서도 건드리지 않음.
 
-## Handoff 메시지
+## 사용자 보고 방식
+
+사용자에게 답변하는 채팅 본문에는 내부 식별자 (`stamp`, `verdict`, `.codex-reviewed`, `.spec-reviews/*.pending`, hash 값) 를 노출하지 않는다. 평문으로 다음 흐름을 따른다.
+
+- **완료 (설계 검토 통과)**:
+  > "plan 작성을 마쳤습니다. 설계 검토도 통과했으니 구현을 시작할 수 있습니다."
+- **완료 (수정 필요)**:
+  > "plan 을 작성했지만 설계 검토에서 [이슈 N개 평문 요약] 가 발견됐습니다. 검토 의견 반영 후 다시 확인하거나, 직접 수정 방향을 알려주시면 반영하겠습니다."
+- **완료 (검토 반려)**:
+  > "plan 작성은 마쳤지만 설계 검토가 반려됐습니다. 핵심 사유는 [평문 1~2 문장]. 어떻게 진행할지 알려주세요."
+- **차단 발생**:
+  > "[이유 평문 1문장] 으로 plan 작성을 중단했습니다. [무엇이 필요한지]."
+
+변경한 plan 파일 경로 같이 사용자가 직접 열어볼 자료는 채팅 본문에 그대로 둔다 (검증 가능성 보존). 단 `trail/dod/.spec-reviews/<hash>.reviewed` 같은 운영 marker 경로는 본문에 쓰지 않는다.
+
+## 내부 로깅 (trail/inbox 전용 — 사용자 채팅 본문 금지)
+
+아래 형식은 `trail/inbox/YYYY-MM-DD-<작업명>.md` 와 운영 로그용. 사용자에게 보이는 채팅 메시지에는 절대 그대로 출력하지 않는다.
 
 **자동 경로 (PASS 시)**:
 ```

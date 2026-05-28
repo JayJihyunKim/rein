@@ -60,10 +60,17 @@ import json
 import sys
 
 reason = (
-    "A feature-builder-family subagent has just finished, and source-code changes "
-    "are awaiting code review (trail/dod/.review-pending exists). "
-    "Your next step is to run /codex-review on the changed files. "
-    "Do not proceed to commit or further edits until the review stamp is in place."
+    "A feature-builder-family subagent just finished, and the source-code "
+    "changes are now waiting for code review. "
+    "(A pending-review marker file `trail/dod/.review-pending` was created.) "
+    "Run `/codex-review` on the changed files next. "
+    "Do not commit or make further edits until the code-review-complete "
+    "marker file (`trail/dod/.codex-reviewed`) is in place. "
+    "When you relay this state to the user in chat, translate the marker "
+    "file names into plain language (\"a review-pending marker\" / "
+    "\"the code-review-complete marker\") and avoid raw internal "
+    "identifiers like `stamp` or `.review-pending` — see "
+    "`plugins/rein-core/rules/response-tone.md`."
 )
 
 envelope = {

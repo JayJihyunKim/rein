@@ -30,10 +30,15 @@ if hso.get("hookEventName") != "UserPromptSubmit":
 ctx = hso.get("additionalContext", "")
 if "행동 강령" not in ctx:
     print("FAIL: additionalContext missing '행동 강령' header", file=sys.stderr); sys.exit(1)
-# TONE-1 (2026-05-27): response-tone rule body must also appear in the envelope
-# so the assistant gets the plain-language tone mandate every user turn.
-if "# Response Tone" not in ctx:
-    print("FAIL: additionalContext missing '# Response Tone' header (TONE-1)", file=sys.stderr); sys.exit(1)
+# TONE-1 (2026-05-27) + communication-improve (2026-05-28):
+# Per-turn envelope ships the SHORT response-tone summary, not the full body.
+# Header text: "# Response Tone — 턴별 빠른 규칙".
+if "Response Tone" not in ctx:
+    print("FAIL: additionalContext missing 'Response Tone' (short summary)", file=sys.stderr); sys.exit(1)
+# Sanity — the per-turn injection must NOT carry the full body's translation
+# table (delivered once via session-start instead, to keep per-turn cost flat).
+if "| 내부 표현 | 사용자 언어 |" in ctx:
+    print("FAIL: per-turn envelope unexpectedly contains full body's translation table — should be short summary only", file=sys.stderr); sys.exit(1)
 PY
 
 # ---------- (b) graceful degrade ---------------------------------------------
