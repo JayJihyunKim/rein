@@ -95,11 +95,23 @@ cd "$PROJECT_DIR"
 
 # ---- Inject the shared DoD selector (Phase 4.1 library). --------------
 
-# Fail-closed if library missing (same pattern as pre-edit-dod-gate.sh).
-if ! . "$_select_active_dod_lib" 2>/dev/null; then
-  echo "ERROR: [codex-review] missing select-active-dod library at $_select_active_dod_lib" >&2
+# Fail-closed if library missing, unreadable, or broken (BUG-WRAP-SOURCE,
+# 2026-05-29). The earlier `if ! . <lib> 2>/dev/null` form did NOT fail
+# closed under `set -e`: the `source` builtin's "cannot read source file"
+# error path interacts with errexit so the script exits BEFORE reaching the
+# then-block — yielding a silent exit 1 with no diagnostic, instead of the
+# intended ERROR + exit 2. (codex 실측: `set +e` 통과, `set -e` 차단.)
+# Robust fix (codex-recommended): an `[ ! -r ]` readability precheck PLUS a
+# subshell that both sources the lib and verifies the core function is
+# defined. `[ ! -f ]` alone leaves unreadable / syntax-error / internal-fail
+# holes; the subshell check closes them. The real `. <lib>` then runs at top
+# level so the function is available to the rest of the wrapper.
+if [ ! -r "$_select_active_dod_lib" ] || \
+   ! ( . "$_select_active_dod_lib"; declare -F select_active_dod >/dev/null ) 2>/dev/null; then
+  echo "ERROR: [codex-review] missing or invalid select-active-dod library at $_select_active_dod_lib" >&2
   exit 2
 fi
+. "$_select_active_dod_lib"
 
 # ---- Parse CLI options + read stdin prompt. ---------------------------
 

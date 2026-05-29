@@ -643,6 +643,267 @@ test_respec_after_review_blocks_source_edit() {
 }
 
 # =================================================================
+# WRITER content_sha anchor (rein-mark-spec-reviewed.sh)
+# =================================================================
+
+test_helper_writes_content_sha() {
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/test.md"
+  echo "# Reviewed body" > "$spec_file"
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/scripts/rein-mark-spec-reviewed.sh" "$spec_file" codex > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "mark-spec-reviewed should succeed on existing spec"
+  local marker; marker=$(ls -1 "$SANDBOX/trail/dod/.spec-reviews"/*.reviewed 2>/dev/null | head -1)
+  [ -n "$marker" ] || { fail "reviewed marker should exist"; return; }
+  local expected; expected=$(_sr1b_sha "$spec_file")
+  grep -qF "content_sha=$expected" "$marker" || fail "marker must record content_sha matching spec content"
+}
+
+test_helper_fails_on_unhashable_spec() {
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  # spec path does not exist → content cannot be hashed → fail-closed (no stamp).
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/scripts/rein-mark-spec-reviewed.sh" "$SANDBOX/specs/missing.md" codex > /dev/null 2>&1
+  [ $? -ne 0 ] || fail "mark-spec-reviewed must fail-closed when spec content cannot be hashed"
+  [ "$(ls -1 "$SANDBOX/trail/dod/.spec-reviews"/*.reviewed 2>/dev/null | wc -l)" -eq 0 ] || fail "no marker should be written on hash failure"
+}
+
+# =================================================================
+# SR-1.b ORPHAN BACKSTOP — content-based staleness (mtime FP fix)
+#
+# Bug (SR-1.b-MTIME-FP): the orphan .reviewed backstop compared the spec's
+# filesystem mtime against reviewed=. git checkout / cherry-pick / rotation
+# bump mtime without changing content → false "stale" → unrelated source
+# edits chain-blocked (2026-05-29 incident: 25 dev-only docs).
+#
+# Fix (codex Mode B "tightened A"): content_sha anchor first (TIER 1),
+# constrained git committer-time fallback for retrospective/healer markers
+# only (TIER 2), mtime fallback preserved for non-retro / non-git (TIER 3).
+# =================================================================
+
+# Compute the byte-level content sha256 the writer/gate use (NOT the path hash).
+_sr1b_sha() {
+  python3 -c 'import hashlib,sys
+with open(sys.argv[1],"rb") as f:
+    print(hashlib.sha256(f.read()).hexdigest())' "$1" 2>/dev/null
+}
+
+# Initialize the sandbox as a git repo (TIER 2 tests). Commit date controllable
+# via GIT_COMMITTER_DATE / GIT_AUTHOR_DATE by the caller.
+_sr1b_git_init() {
+  git -C "$SANDBOX" init -q 2>/dev/null
+  git -C "$SANDBOX" config user.email "t@example.com"
+  git -C "$SANDBOX" config user.name "test"
+}
+
+_sr1b_orphan_hash() {
+  # mirror the gate's path-hash convention (only needs uniqueness + no .pending sibling)
+  printf '%s' "$1" | shasum 2>/dev/null | cut -c1-16 || printf 'orphanhash01'
+}
+
+# --- TIER 1: content_sha anchor ---
+
+test_orphan_content_sha_match_allows_despite_mtime() {
+  # FP REGRESSION: content unchanged since review (matching content_sha) but
+  # mtime bumped (checkout/cherry-pick). Old mtime>reviewed logic blocked;
+  # content_sha match must ALLOW.
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# Reviewed content" > "$spec_file"
+  local sha; sha=$(_sr1b_sha "$spec_file")
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash; hash=$(_sr1b_orphan_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=codex"
+    echo "reviewed=2026-01-01T00:00:00"
+    echo "content_sha=$sha"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+  set_file_mtime "specs/api-design.md" "2026-05-01"   # mtime > reviewed
+
+  local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "content_sha match must allow despite bumped mtime (FP regression)"
+}
+
+test_orphan_content_sha_mismatch_blocks() {
+  # content changed after review (stored sha != current) → stale → BLOCK,
+  # even when mtime would let it pass under the old logic (reviewed in future).
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# v1 reviewed" > "$spec_file"
+  local sha; sha=$(_sr1b_sha "$spec_file")
+  echo "# v2 unreviewed change" > "$spec_file"   # content now differs from stored sha
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash; hash=$(_sr1b_orphan_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=codex"
+    echo "reviewed=2027-01-01T00:00:00"   # future → old mtime logic would ALLOW
+    echo "content_sha=$sha"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+  set_file_mtime "specs/api-design.md" "2026-05-01"
+
+  local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "content_sha mismatch must block (content changed after review)"
+}
+
+# --- TIER 2: retrospective/healer marker git committer-time fallback ---
+
+test_orphan_retro_clean_checkout_allows() {
+  # retro marker, no content_sha, spec committed BEFORE review, clean tree,
+  # mtime bumped > reviewed. Old logic blocked; commit_epoch <= reviewed allows.
+  seed_dod "dod-2026-04-13-test.md"
+  _sr1b_git_init
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# shipped content" > "$spec_file"
+  git -C "$SANDBOX" add specs/api-design.md
+  GIT_AUTHOR_DATE="2025-06-01 00:00:00 +0000" GIT_COMMITTER_DATE="2025-06-01 00:00:00 +0000" \
+    git -C "$SANDBOX" commit -q -m "ship spec" 2>/dev/null
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash; hash=$(_sr1b_orphan_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=retrospective-shipped-v1.0.0"
+    echo "reviewed=2026-01-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+  set_file_mtime "specs/api-design.md" "2026-05-01"   # mtime > reviewed (old logic would block)
+
+  local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "retro marker + clean checkout (commit<=reviewed) must allow"
+}
+
+test_orphan_retro_dirty_blocks() {
+  # retro marker, spec has uncommitted working-tree change → can't prove
+  # freshness → BLOCK (FN guard). reviewed in future so old mtime logic allows.
+  seed_dod "dod-2026-04-13-test.md"
+  _sr1b_git_init
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# shipped content" > "$spec_file"
+  git -C "$SANDBOX" add specs/api-design.md
+  GIT_AUTHOR_DATE="2025-06-01 00:00:00 +0000" GIT_COMMITTER_DATE="2025-06-01 00:00:00 +0000" \
+    git -C "$SANDBOX" commit -q -m "ship spec" 2>/dev/null
+  echo "# uncommitted edit" >> "$spec_file"   # dirty
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash; hash=$(_sr1b_orphan_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=retrospective-shipped-v1.0.0"
+    echo "reviewed=2027-01-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+  set_file_mtime "specs/api-design.md" "2026-05-01"
+
+  local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "retro marker + dirty working tree must block"
+}
+
+test_orphan_retro_commit_after_review_blocks() {
+  # retro marker, clean, but spec committed AFTER review → genuine stale → BLOCK.
+  # mtime set below reviewed so old logic would allow.
+  seed_dod "dod-2026-04-13-test.md"
+  _sr1b_git_init
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# edited then committed after review" > "$spec_file"
+  git -C "$SANDBOX" add specs/api-design.md
+  GIT_AUTHOR_DATE="2026-06-01 00:00:00 +0000" GIT_COMMITTER_DATE="2026-06-01 00:00:00 +0000" \
+    git -C "$SANDBOX" commit -q -m "post-review edit" 2>/dev/null
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash; hash=$(_sr1b_orphan_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=retrospective-shipped-v1.0.0"
+    echo "reviewed=2026-05-15T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+  set_file_mtime "specs/api-design.md" "2026-05-10"   # mtime < reviewed (old logic would allow)
+
+  local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "retro marker + commit after review must block"
+}
+
+test_orphan_retro_untracked_blocks() {
+  # retro marker but spec is untracked in the repo → can't verify via git → fail-closed BLOCK.
+  seed_dod "dod-2026-04-13-test.md"
+  _sr1b_git_init
+  echo "seed" > "$SANDBOX/README.md"
+  git -C "$SANDBOX" add README.md
+  GIT_AUTHOR_DATE="2025-06-01 00:00:00 +0000" GIT_COMMITTER_DATE="2025-06-01 00:00:00 +0000" \
+    git -C "$SANDBOX" commit -q -m "init" 2>/dev/null   # HEAD exists
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# untracked spec" > "$spec_file"   # NOT git-added
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash; hash=$(_sr1b_orphan_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=retrospective-shipped-v1.0.0"
+    echo "reviewed=2027-01-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+  set_file_mtime "specs/api-design.md" "2026-05-01"
+
+  local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "retro marker + untracked spec must fail-closed (block)"
+}
+
+# --- TIER 3: mtime fallback preserved (non-retro / non-git) ---
+
+test_orphan_non_retro_mtime_block_preserved() {
+  # non-retro marker, non-git sandbox, content_sha absent, mtime > reviewed → BLOCK (current behavior).
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# spec" > "$spec_file"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash; hash=$(_sr1b_orphan_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=codex"
+    echo "reviewed=2026-01-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+  set_file_mtime "specs/api-design.md" "2026-05-01"   # mtime > reviewed
+
+  local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "non-retro contentless orphan must keep mtime-block behavior"
+}
+
+test_orphan_non_retro_mtime_allow_preserved() {
+  # non-retro marker, non-git, content_sha absent, mtime <= reviewed → ALLOW (current behavior).
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# spec" > "$spec_file"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash; hash=$(_sr1b_orphan_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=codex"
+    echo "reviewed=2027-01-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+  set_file_mtime "specs/api-design.md" "2026-05-01"   # mtime < reviewed
+
+  local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "non-retro contentless orphan must keep mtime-allow behavior"
+}
+
+# =================================================================
 # RUN ALL TESTS
 # =================================================================
 
@@ -677,5 +938,19 @@ run_test test_gate_allows_when_reviewed_fresher_than_pending post-edit-spec-revi
 run_test test_gate_blocks_when_reviewed_timestamp_missing post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
 run_test test_gate_blocks_when_reviewed_timestamp_garbled post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
 run_test test_respec_after_review_blocks_source_edit post-edit-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
+
+# Writer content_sha anchor
+run_test test_helper_writes_content_sha post-edit-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
+run_test test_helper_fails_on_unhashable_spec post-edit-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
+
+# SR-1.b orphan backstop — content-based staleness (mtime FP fix)
+run_test test_orphan_content_sha_match_allows_despite_mtime post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_orphan_content_sha_mismatch_blocks post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_orphan_retro_clean_checkout_allows post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_orphan_retro_dirty_blocks post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_orphan_retro_commit_after_review_blocks post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_orphan_retro_untracked_blocks post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_orphan_non_retro_mtime_block_preserved post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_orphan_non_retro_mtime_allow_preserved post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
 
 summary

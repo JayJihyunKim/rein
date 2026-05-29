@@ -64,6 +64,23 @@ SPEC_REVIEWS_DIR="$PROJECT_DIR/trail/dod/.spec-reviews"
 ABS_SPEC=$(python3 -c "import os,sys; print(os.path.abspath(sys.argv[1]))" "$SPEC_PATH" 2>/dev/null)
 [ -z "$ABS_SPEC" ] && { echo "ERROR: invalid spec path: $SPEC_PATH" >&2; exit 1; }
 
+# SR-1.b content anchor: hash the reviewed spec's bytes so the spec-review gate
+# detects post-review content changes WITHOUT relying on filesystem mtime
+# (checkout/cherry-pick/rotation bump mtime without changing content). A stamp
+# without this anchor is exactly the weak state being retired, so a hashing
+# failure FAILS the mark — no content-less stamp (codex Mode B, 2026-05-29).
+CONTENT_SHA=$(python3 -c 'import hashlib,sys
+try:
+    with open(sys.argv[1],"rb") as f:
+        sys.stdout.write(hashlib.sha256(f.read()).hexdigest())
+except Exception:
+    sys.exit(1)' "$ABS_SPEC" 2>/dev/null)
+if [ -z "$CONTENT_SHA" ]; then
+  echo "ERROR: [mark-spec-reviewed] cannot hash spec content (missing or unreadable?): $ABS_SPEC" >&2
+  echo "ERROR: [mark-spec-reviewed] refusing to write a content-less .reviewed stamp the gate cannot anchor." >&2
+  exit 1
+fi
+
 # 해시 계산 (post-edit-spec-review-gate.sh와 동일)
 compute_hash() {
   local input="$1"
@@ -100,6 +117,7 @@ if ! {
   echo "path=$ABS_SPEC"
   echo "reviewer=$REVIEWER"
   echo "reviewed=$(date -u +%Y-%m-%dT%H:%M:%S)"
+  echo "content_sha=$CONTENT_SHA"
 } > "$REVIEWED_TMP"; then
   echo "ERROR: [mark-spec-reviewed] failed to write the .reviewed marker (temp write failed)" >&2
   rm -f "$REVIEWED_TMP" "$REVIEWED_MARKER"

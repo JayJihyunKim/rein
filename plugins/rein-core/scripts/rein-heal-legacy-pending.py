@@ -231,11 +231,25 @@ def heal_marker(
 
     # reviewed stamp 생성 — rein-mark-spec-reviewed.sh 와 schema 일치 (reviewed= 필드명)
     reviewer = f"retrospective-shipped-{shipped_tag}"
+    # SR-1.b content anchor (codex Mode B, 2026-05-29): record the shipped doc's
+    # byte hash so the spec-review gate detects post-stamp content changes via
+    # content (TIER 1) rather than filesystem mtime. The healer is best-effort
+    # session-start automation — a hashing failure degrades to the gate's
+    # retrospective git fallback (TIER 2) instead of aborting the heal.
+    content_sha_line = ""
+    try:
+        import hashlib
+
+        digest = hashlib.sha256((project_dir / rel_path).read_bytes()).hexdigest()
+        content_sha_line = f"content_sha={digest}\n"
+    except OSError:
+        content_sha_line = ""
     content = (
         f"path={abs_path}\n"
         f"reviewer={reviewer}\n"
         f"reviewed={iso8601_utc()}\n"
         f"mechanism=rein-heal-legacy-pending\n"
+        f"{content_sha_line}"
     )
 
     if dry_run:

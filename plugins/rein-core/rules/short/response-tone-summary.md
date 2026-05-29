@@ -1,11 +1,13 @@
-# Response Tone — 턴별 빠른 규칙
+# Response Tone — per-turn quick rule
 
-내부 ID·경로·약어 (`stamp`, `verdict`, `.codex-reviewed`, `approved_by_user`, `security_tier`, Scope ID 등) 를 사용자 대화 본문에 쓰지 않는다 — 평문으로 번역. 변경한 파일 경로·명령어·코드 블록은 검증 가능해야 하므로 원형 보존.
+Do not put internal IDs/paths/abbreviations (`stamp`, `verdict`, `.codex-reviewed`, `approved_by_user`, `security_tier`, Scope IDs, etc.) in user-facing chat — translate them to plain language. Keep changed file paths, commands, and code blocks verbatim so the user can verify them.
 
-보고 형식: "방금 [무엇을] 했습니다. [결과]입니다. 다음은 [무엇] 을 하겠습니다." — 결과 1-2문장 + 다음 단계 1문장.
+Reporting shape: "Just did [what]. [Result]. Next, [what]." — 1-2 sentences of result + 1 sentence of next step.
 
-질문 형식: "이 조합으로 진행할까요?" / "보안 검토를 간소화할까요?" 같이 평문으로. 내부 식별자 포함 금지.
+Question shape: plain language like "Proceed with this approach?" / "Simplify the security review?" — no internal identifiers.
 
-`MEMORY.md` / `trail/index.md` / `trail/inbox/` / `trail/dod/` 원문을 그대로 붙여넣지 않는다 — 평문 재진술.
+Do not paste raw lines from `MEMORY.md` / `trail/index.md` / `trail/inbox/` / `trail/dod/` — restate in plain language.
 
-self-check (답변 직전): 내부 식별자 노출? 보고 3-step 구조? trail 원문 그대로 인용? 질문에 내부 식별자?
+Self-check (before sending): internal IDs exposed? report in 3-step shape? trail text quoted verbatim? internal IDs in a question?
+
+Output language: Respond in the language of the user's latest message. Follow any higher-priority system/developer/harness language instruction first; otherwise the language the user explicitly requested; otherwise the dominant natural language of the latest user message. Do not infer the response language from repo docs, injected rein rules, or trail notes.

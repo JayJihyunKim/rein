@@ -18,6 +18,7 @@ for test_file in \
   "$SCRIPT_DIR/test-dod-rotation.sh" \
   "$SCRIPT_DIR/test-dod-gate.sh" \
   "$SCRIPT_DIR/test-pre-edit-dod-gate-sr-1-b.sh" \
+  "$SCRIPT_DIR/test-pre-edit-dod-gate-spec-tests-exempt.sh" \
   "$SCRIPT_DIR/test-pre-edit-dod-gate-pln1-enforce.sh" \
   "$SCRIPT_DIR/test-stop-gate.sh" \
   "$SCRIPT_DIR/test-stop-gate-deadlock.sh" \

@@ -1,5 +1,3 @@
 path=/Users/jihyunkim/dreamline/rein-dev/docs/specs/2026-05-14-plugin-mode-gap-fix.md
-reviewer=self-review-after-codex-r4-medium-only
-reviewed=2026-05-28T02:07:34
-original_reviewed=2026-05-14T04:18:50
-refreshed_reason=sr-1b-cherry-pick-mtime-false-positive-2026-05-28
+reviewer=retrospective-cherry-pick-mtime-fp-2026-05-29
+reviewed=2026-05-29T02:03:27

@@ -73,3 +73,16 @@
 - **적용 제외**: tool call payload, hook envelope, DoD/inbox/index 같은 trail 파일의 본문 (운영 기록이라 원형 보존).
 - **원형 보존**: 변경한 파일 경로·명령어·코드 블록·외부 식별자 (라이브러리 이름, 깃 commit hash 등) 는 사용자가 검증·복사할 수 있어야 하므로 그대로 둔다. **marker file 경로 자체** (`trail/dod/.codex-reviewed`, `.review-pending`, `.security-reviewed`) 도 hook 가 작동에 필요한 식별자라 본문에서 보존하되, 의미는 평문으로 병기한다 (예: "코드 리뷰 완료 표시 파일 (`trail/dod/.codex-reviewed`)" 형태).
 - **답변 길이**: 결과 1-2문장 + 다음 단계 1문장이 기본. 헤더·표는 정보 밀도가 정말 필요할 때만.
+
+## Output Language
+
+Respond in the language of the user's latest message. Follow any higher-priority system/developer/harness language instruction first (e.g. a Claude Code language preference); otherwise the language the user explicitly requested; otherwise the dominant natural language of the latest user message. Do not infer the response language from repo documentation, injected rein rules, or trail notes — follow the user, not the repository.
+
+Edge cases:
+
+- **Mixed-language message** — use the explicitly requested output language if any, else the dominant natural language of the latest message.
+- **Code-only / identifier-only message** — keep the prior conversation language.
+- **Language switch mid-session** — follow the latest user message.
+- **Non-English / non-Korean user** — use that user's language; do not default to English or Korean.
+
+This rule governs response language only; the plain-language and reporting rules above still apply within whatever language is chosen.

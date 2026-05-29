@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.3.7** (2026-05-24) — Security hardening: extends the v1.3.6 git-env protection to every project-root detection path (the active-task resolver, session state, the trail-protection gate, review-stamp writing, and the legacy-cleanup tool), so a poisoned `GIT_DIR` can no longer make rein latch a decoy repo as the project root — closing a path where the trail gate could be bypassed. No effect on normal use. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.4.1** (2026-05-29) — Replies now follow your language. The per-turn rule text rein injects was written in Korean, which could nudge replies toward Korean even in English-configured projects (there was never an explicit "respond in Korean" directive — just soft anchoring from the recurring Korean context). That text is now English, and a new output-language policy answers in the language of your messages while deferring to any explicit Claude Code `language` setting. No effect if you've pinned a language. This release also bundles review-gate accuracy fixes (no more false blocks from branch operations that leave content unchanged, `tests/` edits exempt from the unreviewed-spec gate) and commit-guard hardening. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

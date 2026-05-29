@@ -455,20 +455,33 @@ if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]; then
   # never runs for that hash → source edits proceed with unreviewed spec
   # changes. Pre-existing trust boundary (.pending-keyed), not a new gap
   # from SR-1. Mitigation: iterate orphan .reviewed markers (no matching
-  # .pending) and compare the spec file's mtime against reviewed=. Spec
-  # mtime > reviewed → stale → block. The R1 risk (git checkout setting
-  # mtime to checkout time rather than commit time, producing
-  # false-positives) is accepted: orphan .reviewed is itself abnormal
-  # (normal flow leaves .pending+.reviewed together until mark-spec-
-  # reviewed.sh clears .pending), so the safer side is to block and let
-  # the user re-review or set `.skip-spec-gate`.
+  # .pending) and decide staleness by CONTENT (see the tiered logic below).
+  # The original mtime compare (R1 risk, "accepted" in an earlier revision)
+  # produced real false-positives — checkout/cherry-pick/rotation bump mtime
+  # without changing content — so it was replaced (SR-1.b-MTIME-FP).
   if [ "$UNRESOLVED_SPECS" = false ]; then
+    # SR-1.b-MTIME-FP fix (codex Mode B "tightened A", 2026-05-29): the orphan
+    # backstop previously compared the spec's filesystem mtime against
+    # reviewed=, but git checkout / cherry-pick / rotation bump mtime WITHOUT
+    # changing content → false "stale" → unrelated source edits chain-blocked
+    # (2026-05-29 incident: 25 dev-only docs). Decide staleness by CONTENT
+    # (content_sha anchor), with a git committer-time fallback restricted to
+    # retrospective/healer markers (whose shipped origin is knowable), and the
+    # legacy mtime path only for non-retro / non-git markers.
+    #
+    # git work-tree detection, computed once. Sanitized per BC-INFO1 class so a
+    # poisoned GIT_DIR/GIT_WORK_TREE cannot redirect discovery to a decoy repo.
+    SR1B_GIT_WORKTREE=false
+    if [ "$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+            git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ]; then
+      SR1B_GIT_WORKTREE=true
+    fi
     for reviewed_marker in "$SPEC_REVIEWS_DIR"/*.reviewed; do
       [ -f "$reviewed_marker" ] || continue
 
       hash_val=$(basename "$reviewed_marker" .reviewed)
       # Skip if a matching .pending exists — that path is handled by the
-      # SR-1 branch above and we must not double-count or apply mtime
+      # SR-1 branch above and we must not double-count or apply the orphan
       # semantics (which would override SR-1's content-timestamp logic).
       if [ -f "$SPEC_REVIEWS_DIR/${hash_val}.pending" ]; then
         continue
@@ -486,10 +499,88 @@ if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]; then
         break
       fi
 
-      # Convert spec mtime + reviewed_at into epoch seconds via Python
-      # (avoids GNU vs BSD `stat` divergence and `date -d` portability
-      # issues). PYTHON_RUNNER is already populated at the top of this
-      # hook; any failure here is fail-closed.
+      content_sha_stored=$(grep -E '^content_sha=' "$reviewed_marker" 2>/dev/null | head -1 | sed 's/^content_sha=//')
+
+      if [ -n "$content_sha_stored" ]; then
+        # TIER 1 — content hash anchor (strict, FP-free + FN-safe). Byte hash of
+        # the spec NOW vs the hash recorded at review. Immune to mtime / checkout
+        # / cherry-pick / rotation; catches any committed OR uncommitted edit.
+        spec_sha_now=$("${PYTHON_RUNNER[@]}" -c '
+import hashlib, sys
+try:
+    with open(sys.argv[1], "rb") as f:
+        print(hashlib.sha256(f.read()).hexdigest())
+except Exception:
+    sys.exit(1)
+' "$spec_path" 2>/dev/null) || {
+          UNRESOLVED_SPECS=true   # unreadable spec → fail-closed
+          break
+        }
+        if [ "$spec_sha_now" != "$content_sha_stored" ]; then
+          UNRESOLVED_SPECS=true   # content changed since review → stale
+          break
+        fi
+        continue                  # content unchanged → not stale
+      fi
+
+      # No content anchor (legacy marker). reviewed_epoch is needed by both
+      # remaining tiers. fromisoformat parses naive ISO 8601 (no offset);
+      # anchor to UTC since the writer uses `date -u`.
+      reviewed_epoch=$("${PYTHON_RUNNER[@]}" -c '
+import sys
+from datetime import datetime, timezone
+try:
+    dt = datetime.fromisoformat(sys.argv[1]).replace(tzinfo=timezone.utc)
+    print(int(dt.timestamp()))
+except Exception:
+    sys.exit(1)
+' "$reviewed_at" 2>/dev/null) || {
+        UNRESOLVED_SPECS=true   # malformed reviewed= despite regex pass → fail-closed
+        break
+      }
+
+      # Provenance gate for the git fallback: retrospective / healer markers
+      # have a knowable shipped origin, so a committer-time heuristic is
+      # acceptable for them — but NOT for arbitrary contentless markers, whose
+      # reviewed content is unknowable (codex Mode B: do not broadly bless).
+      reviewer_val=$(grep -E '^reviewer=' "$reviewed_marker" 2>/dev/null | head -1 | sed 's/^reviewer=//')
+      mechanism_val=$(grep -E '^mechanism=' "$reviewed_marker" 2>/dev/null | head -1 | sed 's/^mechanism=//')
+      is_retro=false
+      case "$reviewer_val" in retrospective-shipped*) is_retro=true ;; esac
+      [ "$mechanism_val" = "rein-heal-legacy-pending" ] && is_retro=true
+
+      if [ "$is_retro" = true ] && [ "$SR1B_GIT_WORKTREE" = true ]; then
+        # TIER 2 — constrained git committer-time fallback (retrospective only).
+        rel_spec="${spec_path#"$PROJECT_DIR"/}"
+        # Confirm the path is tracked (git log history alone is not proof).
+        if ! env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+             git -C "$PROJECT_DIR" ls-files --error-unmatch -- "$rel_spec" >/dev/null 2>&1; then
+          UNRESOLVED_SPECS=true   # untracked retro spec → cannot verify → fail-closed
+          break
+        fi
+        # Uncommitted working-tree change → cannot prove freshness → stale.
+        if ! env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+             git -C "$PROJECT_DIR" diff --quiet HEAD -- "$rel_spec" >/dev/null 2>&1; then
+          UNRESOLVED_SPECS=true   # dirty → stale
+          break
+        fi
+        spec_commit_epoch=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+          git -C "$PROJECT_DIR" log -1 --format=%ct -- "$rel_spec" 2>/dev/null)
+        if ! [[ "$spec_commit_epoch" =~ ^[0-9]+$ ]]; then
+          UNRESOLVED_SPECS=true   # no commit history → fail-closed
+          break
+        fi
+        if [ "$spec_commit_epoch" -gt "$reviewed_epoch" ]; then
+          UNRESOLVED_SPECS=true   # spec committed after review → stale
+          break
+        fi
+        continue                  # committed content predates review, clean → not stale
+      fi
+
+      # TIER 3 — mtime fallback (non-retrospective marker, or non-git project).
+      # Preserves the pre-fix behavior where there is no checkout/cherry-pick FP
+      # source; such markers migrate to TIER 1 on their next review. Python
+      # getmtime avoids GNU vs BSD `stat` divergence; any failure is fail-closed.
       spec_mtime_epoch=$("${PYTHON_RUNNER[@]}" -c '
 import os, sys
 try:
@@ -500,26 +591,38 @@ except Exception:
         UNRESOLVED_SPECS=true   # unreadable mtime → fail-closed
         break
       }
-      reviewed_epoch=$("${PYTHON_RUNNER[@]}" -c '
-import sys
-from datetime import datetime, timezone
-try:
-    # SR-1 strips trailing Z and validates shape upstream; fromisoformat
-    # parses naive ISO 8601 (no offset). Anchor to UTC since the writer
-    # uses `date -u`.
-    dt = datetime.fromisoformat(sys.argv[1]).replace(tzinfo=timezone.utc)
-    print(int(dt.timestamp()))
-except Exception:
-    sys.exit(1)
-' "$reviewed_at" 2>/dev/null) || {
-        UNRESOLVED_SPECS=true   # malformed reviewed= despite regex pass → fail-closed
-        break
-      }
       if [ "$spec_mtime_epoch" -gt "$reviewed_epoch" ]; then
-        UNRESOLVED_SPECS=true   # spec edited after review (orphan path) → stale
+        UNRESOLVED_SPECS=true   # spec touched after review (legacy heuristic) → stale
         break
       fi
     done
+  fi
+
+  # DOD-GATE-FP-TESTS (2026-05-29, incident 351623296a9bc1d8): the spec gate
+  # blocks GLOBALLY on any unreviewed spec without consulting FILE_PATH. That
+  # also blocked test files (tests/**), breaking reproduction-first / TDD
+  # red-green — editing a failing test is the FIRST step of a fix, and the
+  # test cannot touch real source, so it is no review-bypass. Exempt edits
+  # whose target resolves under PROJECT_DIR/tests/. The containment check is
+  # done in Python (normpath + commonpath) so an absolute OR repo-relative
+  # FILE_PATH is handled, and a mere `tests` substring elsewhere (e.g.
+  # src/tests-helper.ts) is NOT exempted. PYTHON_RUNNER is populated above;
+  # a failure here falls through to the original block (fail-closed).
+  if [ "$UNRESOLVED_SPECS" = true ]; then
+    if "${PYTHON_RUNNER[@]}" -c '
+import os, sys
+project = os.path.realpath(sys.argv[1])
+tests_root = os.path.join(project, "tests")
+target = os.path.realpath(os.path.join(project, sys.argv[2]))
+try:
+    inside = os.path.commonpath([tests_root, target]) == tests_root
+except ValueError:
+    inside = False
+sys.exit(0 if inside else 1)
+' "$PROJECT_DIR" "$FILE_PATH" 2>/dev/null; then
+      echo "NOTICE: pre-edit-dod-gate spec gate skip — test file ($FILE_PATH) under tests/ is exempt from the unreviewed-spec block (reproduction-first / TDD)." >&2
+      UNRESOLVED_SPECS=false
+    fi
   fi
 
   if [ "$UNRESOLVED_SPECS" = true ]; then

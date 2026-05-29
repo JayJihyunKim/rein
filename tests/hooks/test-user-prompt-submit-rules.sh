@@ -28,13 +28,26 @@ hso = data.get("hookSpecificOutput", {})
 if hso.get("hookEventName") != "UserPromptSubmit":
     print(f"FAIL: hookEventName {hso.get('hookEventName')!r}", file=sys.stderr); sys.exit(1)
 ctx = hso.get("additionalContext", "")
-if "행동 강령" not in ctx:
-    print("FAIL: additionalContext missing '행동 강령' header", file=sys.stderr); sys.exit(1)
+# injected-rule-language-follow-user (2026-05-29): the per-turn short summaries
+# are now English so the recurring hot-path context does not soft-anchor output
+# to Korean for English users. Assert the English answer-only title instead of
+# the old '행동 강령' header.
+if "Answer-only quick rule" not in ctx:
+    print("FAIL: additionalContext missing 'Answer-only quick rule' (short answer-only summary)", file=sys.stderr); sys.exit(1)
+# The Korean action-mandate header must NOT appear in the per-turn hot path —
+# it was the soft anchor biasing output toward Korean.
+if "행동 강령" in ctx:
+    print("FAIL: per-turn envelope still carries Korean '행동 강령' anchor — hot path must be English", file=sys.stderr); sys.exit(1)
 # TONE-1 (2026-05-27) + communication-improve (2026-05-28):
 # Per-turn envelope ships the SHORT response-tone summary, not the full body.
-# Header text: "# Response Tone — 턴별 빠른 규칙".
+# Header text: "# Response Tone — per-turn quick rule".
 if "Response Tone" not in ctx:
     print("FAIL: additionalContext missing 'Response Tone' (short summary)", file=sys.stderr); sys.exit(1)
+# injected-rule-language-follow-user (2026-05-29): every turn must carry the
+# output-language policy so the model follows the user's message language
+# rather than the repo's Korean context.
+if "Respond in the language of the user" not in ctx:
+    print("FAIL: additionalContext missing output-language policy (follow user's language)", file=sys.stderr); sys.exit(1)
 # Sanity — the per-turn injection must NOT carry the full body's translation
 # table (delivered once via session-start instead, to keep per-turn cost flat).
 if "| 내부 표현 | 사용자 언어 |" in ctx:

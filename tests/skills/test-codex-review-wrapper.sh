@@ -968,6 +968,85 @@ test_wrapper_plugin_layout_user_repo_without_claude_dir_uses_bundled_lib() {
 }
 
 # ------------------------------------------------------------
+# BUG-WRAP-SOURCE (2026-05-29): fail-closed when the select-active-dod
+# library is missing or unreadable.
+#
+# Root cause: `set -euo pipefail` (wrapper line 37) interacts with the
+# `source` builtin's "cannot read source file" error path — the `if !`
+# errexit exception that works for ordinary commands does NOT suppress
+# errexit for a failed `source`, so the wrapper died (exit 1) BEFORE
+# reaching the intended `echo ERROR ... ; exit 2` block. The `2>/dev/null`
+# also swallowed the diagnostic. Fix: precheck `[ -r ]` + a subshell that
+# verifies the lib both sources cleanly AND defines `select_active_dod`,
+# avoiding the bare `source` that tripped errexit.
+#
+# These tests live under tests/ so they are exempt from the pre-edit spec
+# gate (TDD). They are RED against the pre-fix wrapper (exit 1, no message)
+# and GREEN after the fix (exit 2 + "missing or invalid ... library").
+# ------------------------------------------------------------
+test_wrapper_missing_lib_fails_closed_exit2() {
+  # The standard sandbox resolves the lib to .claude/hooks/lib/select-active-dod.sh
+  # (wrapper falls to its else branch since $SANDBOX/hooks/lib does not exist).
+  # Remove it so the lib is absent at the resolved path.
+  rm -f "$SANDBOX/.claude/hooks/lib/select-active-dod.sh"
+  run_wrapper "code review please" --non-interactive
+  [ "$RUN_WRAPPER_RC" = "2" ] \
+    || fail "missing lib expected exit 2, got $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  echo "$RUN_WRAPPER_ERR" | grep -qF "library" \
+    || fail "missing lib: stderr should name the library, got: $RUN_WRAPPER_ERR"
+  echo "$RUN_WRAPPER_ERR" | grep -qiF "ERROR" \
+    || fail "missing lib: stderr should carry an ERROR diagnostic, got: $RUN_WRAPPER_ERR"
+}
+
+test_wrapper_unreadable_lib_fails_closed_exit2() {
+  # Library present but not readable → the [ -r ] precheck must fail-close.
+  # (Skipped when running as root, where the read bit is ignored.)
+  if [ "$(id -u)" = "0" ]; then
+    return 0
+  fi
+  chmod 000 "$SANDBOX/.claude/hooks/lib/select-active-dod.sh"
+  run_wrapper "code review please" --non-interactive
+  local rc="$RUN_WRAPPER_RC"
+  # Restore perms so sandbox teardown can remove it cleanly.
+  chmod 644 "$SANDBOX/.claude/hooks/lib/select-active-dod.sh" 2>/dev/null || true
+  [ "$rc" = "2" ] \
+    || fail "unreadable lib expected exit 2, got $rc (stderr: $RUN_WRAPPER_ERR)"
+  echo "$RUN_WRAPPER_ERR" | grep -qF "library" \
+    || fail "unreadable lib: stderr should name the library, got: $RUN_WRAPPER_ERR"
+}
+
+test_wrapper_invalid_lib_missing_function_fails_closed_exit2() {
+  # Library present + readable + sources cleanly, but does NOT define
+  # select_active_dod → the subshell `declare -F` check must fail-close.
+  printf '#!/bin/bash\n# stub without select_active_dod\n: noop\n' \
+    > "$SANDBOX/.claude/hooks/lib/select-active-dod.sh"
+  run_wrapper "code review please" --non-interactive
+  [ "$RUN_WRAPPER_RC" = "2" ] \
+    || fail "invalid lib expected exit 2, got $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  echo "$RUN_WRAPPER_ERR" | grep -qF "library" \
+    || fail "invalid lib: stderr should name the library, got: $RUN_WRAPPER_ERR"
+}
+
+test_wrapper_valid_lib_still_works() {
+  # Regression guard: the precheck + double-source must NOT break the normal
+  # path. A valid lib (the real one copied by sandbox_setup) → wrapper runs
+  # codex (fake) and exits 0 (default PASS), proving select_active_dod is
+  # available in the wrapper's own shell after the subshell verification.
+  seed_design "docs/specs/wrap-source-design.md" "WS1"
+  seed_plan "docs/plans/wrap-source-plan.md" "docs/specs/wrap-source-design.md" "WS1"
+  seed_dod "trail/dod/dod-2026-05-29-wrap-source.md" "docs/plans/wrap-source-plan.md" "WS1"
+  echo "path=trail/dod/dod-2026-05-29-wrap-source.md" > "$SANDBOX/trail/dod/.active-dod"
+  run_wrapper "code review please" --non-interactive
+  [ "$RUN_WRAPPER_RC" = "0" ] \
+    || fail "valid lib expected exit 0, got $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  echo "$RUN_WRAPPER_ERR" | grep -qF "missing or invalid select-active-dod" \
+    && fail "valid lib must NOT emit the missing-library error"
+  # select_active_dod must have actually run (envelope carries the DoD path).
+  grep -qF "dod-2026-05-29-wrap-source.md" "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "valid lib: envelope missing active DoD path — select_active_dod not loaded in wrapper shell"
+}
+
+# ------------------------------------------------------------
 # Verification 8 (PD-2, 2026-05-19): PROJECT_DIR sanity check.
 # The wrapper resolves PROJECT_DIR then cd's into it + writes a stamp there.
 # If PROJECT_DIR does not point at a real repo root (no trail/, or not the
@@ -1162,6 +1241,11 @@ main() {
   run_test test_parse_verdict_no_keyword_returns_needs_fix
   # Plugin self-containment hotfix (2026-05-12)
   run_test test_wrapper_plugin_layout_user_repo_without_claude_dir_uses_bundled_lib
+  # BUG-WRAP-SOURCE: fail-closed on missing/unreadable/invalid lib (2026-05-29)
+  run_test test_wrapper_missing_lib_fails_closed_exit2
+  run_test test_wrapper_unreadable_lib_fails_closed_exit2
+  run_test test_wrapper_invalid_lib_missing_function_fails_closed_exit2
+  run_test test_wrapper_valid_lib_still_works
   # PROJECT_DIR sanity check (PD-2, 2026-05-19)
   run_test test_pd2_sanity_rejects_project_dir_without_trail
   run_test test_pd2_sanity_rejects_project_dir_not_git_toplevel

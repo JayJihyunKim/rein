@@ -38,10 +38,10 @@ if hso.get("hookEventName") != "UserPromptSubmit":
 ctx = hso.get("additionalContext", "")
 if "rein-bootstrap-project.py" not in ctx:
     print(f"FAIL(A): missing bootstrap command in additionalContext (len={len(ctx)})", file=sys.stderr); sys.exit(1)
-if "행동 강령" not in ctx:
-    print("FAIL(A): missing answer-only-mode body marker '행동 강령'", file=sys.stderr); sys.exit(1)
+if "Answer-only quick rule" not in ctx:
+    print("FAIL(A): missing answer-only-mode body marker 'Answer-only quick rule'", file=sys.stderr); sys.exit(1)
 # Ordering check: guidance precedes the rule body.
-if ctx.index("rein-bootstrap-project.py") >= ctx.index("행동 강령"):
+if ctx.index("rein-bootstrap-project.py") >= ctx.index("Answer-only quick rule"):
     print("FAIL(A): bootstrap guidance must precede the rule body", file=sys.stderr); sys.exit(1)
 PY
 
@@ -62,8 +62,8 @@ data = json.loads(raw)
 ctx = data["hookSpecificOutput"]["additionalContext"]
 if "rein-bootstrap-project.py" in ctx:
     print("FAIL(B): bootstrap complete yet bootstrap advisory still prepended", file=sys.stderr); sys.exit(1)
-if "행동 강령" not in ctx:
-    print("FAIL(B): missing answer-only-mode body marker '행동 강령'", file=sys.stderr); sys.exit(1)
+if "Answer-only quick rule" not in ctx:
+    print("FAIL(B): missing answer-only-mode body marker 'Answer-only quick rule'", file=sys.stderr); sys.exit(1)
 PY
 
 # ---------- (C) helper exit 11 (sensitive-path) → no bootstrap advisory ------
@@ -80,8 +80,8 @@ data = json.loads(raw)
 ctx = data["hookSpecificOutput"]["additionalContext"]
 if "rein-bootstrap-project.py" in ctx:
     print("FAIL(C): helper exit 11 should suppress advisory, but command is present", file=sys.stderr); sys.exit(1)
-if "행동 강령" not in ctx:
-    print("FAIL(C): missing answer-only-mode body marker '행동 강령'", file=sys.stderr); sys.exit(1)
+if "Answer-only quick rule" not in ctx:
+    print("FAIL(C): missing answer-only-mode body marker 'Answer-only quick rule'", file=sys.stderr); sys.exit(1)
 PY
 
 echo "test-user-prompt-submit-bootstrap-advisory: OK (A advisory + B silent + C helper-unsafe silent)"

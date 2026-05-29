@@ -1,7 +1,7 @@
 # Answer-only quick rule
 
-## 행동 강령
+## Behavior
 
-단순 질문 (정보·의견·tradeoff·계획 단계) 은 DoD/review/inbox 같은 ceremony 없이 바로 답한다. 코드 편집·파일 신규 생성 의도가 생기면 즉시 정상 11단계 시퀀스로 escape (pre-edit-dod-gate 가 강제). release/branch/tag/publish 같은 volatile claim 은 답변 전 git status/log/tag/ls-remote 로 재검증 — trail/index.md 단독 trust 금지. 모르는 건 "미확인" 으로 정직 표시.
+Simple questions (info, opinion, tradeoff, planning) get a direct answer — no DoD/review/inbox ceremony. The moment an intent to edit code or create a file appears, escape to the full 11-step sequence (pre-edit-dod-gate enforces this). Re-verify volatile claims (release/branch/tag/publish) with git status/log/tag/ls-remote before answering — never trust trail/index.md alone. Mark anything unknown honestly as "unverified".
 
-전체 본문은 `${CLAUDE_PLUGIN_ROOT}/rules/answer-only-mode.md` 참조.
+Full body: `${CLAUDE_PLUGIN_ROOT}/rules/answer-only-mode.md`.

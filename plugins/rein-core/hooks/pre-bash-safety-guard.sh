@@ -131,7 +131,57 @@ if echo "$COMMAND" | grep -qE "git add"; then
 fi
 
 # --- [P10] git commit -am ---
-if echo "$COMMAND" | grep -qE "git commit.*-[a-z]*a[a-z]*m"; then
+# 위협 모델: P10 은 "실수로 `.env` 를 `git commit -am` (auto-add) 으로 커밋하는
+# 것" 을 막는 mistake-prevention 가드다. 작정한 적대적 우회 (따옴표 중첩 전역옵션
+# 값 등) 를 막는 장벽이 아니다 — 그건 명시적 비목표 (아래 "수용하는 한계").
+#
+# 정규식 의도 (SIMPLIFY, codex Round 2 권고 + 사용자 승인, 2026-05-29):
+#   이전 R5/v6 의 git-argument-grammar (CHUNK matcher: double/single-quote span +
+#   escape 모델링) 를 폐기하고 단순형으로 교체. 이전 모델은 mistake-prevention
+#   위협 표면에 과했고, 그 복잡도에도 attached `-mfoo` 미포착 + quoted-message
+#   오탐이 남았다.
+#   command_invokes 로 실제 git invocation 만 매치 (clause 앵커링 — echo/grep 의
+#   텍스트 언급 제외). PREFIX 가 git 과 commit 사이의 전역 옵션을 흡수한다:
+#     PREFIX = git ( 옵션 )* [[:space:]]+ commit
+#     옵션 = value-taking opt + bare value 토큰 (-C/-c/--git-dir/--work-tree)
+#            | 그 외 dash-led 자기완결 flag (`-[^;&|[:space:]]*` — --no-pager,
+#              --paginate, -p, --config-env=X 등 전부)
+#   bare value 토큰을 소비하는 건 4개 known value-taking opt 뿐 → value-less
+#   flag 뒤의 bare 단어 (예: `git --no-pager log` 의 log) 는 subcommand 로 남아
+#   `git --no-pager log commit -am` 은 비차단. `--amend` 는 a/m bundle 도 아니고
+#   message/all 쌍도 아니라 비차단.
+#   3 arm (auto-add = `-a`/`--all` AND message):
+#     arm1 = combined short bundle: `-am` / `-ma` (한 single-dash 번들 안 a+m).
+#            alpha-run 종료 토큰 = 공백 / 끝 / 따옴표 시작 (`"` 또는 `'`) —
+#            따옴표 종료 허용은 attached 메시지 (`-am"msg"` / `-ma'msg'`) 를
+#            포착하기 위함 (BUG-P10-ATTACHED-QUOTE, 보안 리뷰 MEDIUM, 2026-05-29).
+#            SIMPLIFY 직후 종료가 공백/끝뿐이라 `m` 다음 따옴표에서 매치가 끊겨
+#            attached 메시지 번들이 미포착되던 회귀를 닫는다. (이전 단순 정규식
+#            `git commit.*-[a-z]*a[a-z]*m` 은 이를 차단했었음.) `a` 없는 단독
+#            attached 메시지 (`-m"msg"`) 는 arm1 의 a+m 동반 요구 때문에 비매치 →
+#            정상 통과.
+#     arm2 = all → message (attached `-mfoo`, `--message=foo` 포함)
+#     arm3 = message → all (좌우 대칭)
+#
+# 수용하는 한계 (비목표 — 단순 버전은 의도적으로 처리하지 않는다):
+#   1. False NEGATIVE — 적대적 따옴표 중첩 전역옵션 값: `git -c "u=J K" commit -am`
+#      류. bare value matcher (`[^;&|[:space:]]+`) 가 공백에서 멈춰 따옴표 안
+#      공백을 흡수하지 못하므로 trailing commit -am 을 차단하지 못한다.
+#      mistake-prevention 범위 밖 (작정한 우회) — 막지 않는다.
+#   2. False POSITIVE — quoted 메시지 안 standalone `-a` 토큰:
+#      `git commit -m "use -a flag"` 류. command_invokes 는 따옴표를 인식하지
+#      못하는 분류기라 arm3 (message → all) 가 `-m` 뒤 `[^;&|]*` 로 따옴표 안을
+#      스캔하다 메시지 텍스트의 ` -a ` 를 ALL 토큰으로 오인해 차단한다. 이전
+#      단순 정규식 (`git commit.*-[a-z]*a[a-z]*m`) 대비 신규 over-block 이지만,
+#      mistake-prevention 가드의 보수적 방향 (의심스러우면 차단) 으로 수용한다.
+#      사용자는 `git add` + 별도 `-m` 으로 우회 가능. 따옴표 인식 분류기 (별도
+#      트랙) 가 도입되면 해소.
+GIT_COMMIT_PREFIX='git([[:space:]]+(-C[[:space:]]+[^;&|[:space:]]+|-c[[:space:]]+[^;&|[:space:]]+|--git-dir(=[^;&|[:space:]]+|[[:space:]]+[^;&|[:space:]]+)|--work-tree(=[^;&|[:space:]]+|[[:space:]]+[^;&|[:space:]]+)|-[^;&|[:space:]]*))*[[:space:]]+commit'
+GIT_AM_ALL='(-a|--all)'
+GIT_AM_MSG='(-m([^;&|[:space:]]+)?|--message(=[^;&|[:space:]]+)?)'
+if command_invokes "${GIT_COMMIT_PREFIX}[^;&|]*(^|[[:space:]])-[[:alpha:]]*(a[[:alpha:]]*m|m[[:alpha:]]*a)[[:alpha:]]*([[:space:]]|[\"']|\$)" \
+   || command_invokes "${GIT_COMMIT_PREFIX}[^;&|]*(^|[[:space:]])${GIT_AM_ALL}[[:space:]][^;&|]*${GIT_AM_MSG}([[:space:]]|\$)" \
+   || command_invokes "${GIT_COMMIT_PREFIX}[^;&|]*(^|[[:space:]])${GIT_AM_MSG}[[:space:]][^;&|]*${GIT_AM_ALL}([[:space:]]|\$)"; then
   if [ -f "$PROJECT_DIR/.env" ] || ls "$PROJECT_DIR"/.env.* 1>/dev/null 2>&1; then
     # [P10] policy block — JSON deny
     deny_emit "A .env file exists in the repo root and git commit -am would include it. Use git add <files> to stage only the files you intend to commit." "ENV_COMMIT_AM_BLOCKED" "$COMMAND"; rc=$?
