@@ -1,7 +1,0 @@
-reviewed_at: 2026-05-29T08:39:09Z
-reviewer: codex
-diff_base: e136d701fc667c1d109dddda5819b0aada120cc7
-verdict: PASS
-cycle: 
-scope: wrapper-generated
-active_dod: 
