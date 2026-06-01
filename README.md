@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.4.1** (2026-05-29) — Replies now follow your language. The per-turn rule text rein injects was written in Korean, which could nudge replies toward Korean even in English-configured projects (there was never an explicit "respond in Korean" directive — just soft anchoring from the recurring Korean context). That text is now English, and a new output-language policy answers in the language of your messages while deferring to any explicit Claude Code `language` setting. No effect if you've pinned a language. This release also bundles review-gate accuracy fixes (no more false blocks from branch operations that leave content unchanged, `tests/` edits exempt from the unreviewed-spec gate) and commit-guard hardening. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.4.2** (2026-06-01) — Plan-driven parallel execution. A new `parallel-execute` skill reads a plan's declared task dependencies and runs the independent, edit-only tasks as concurrent subagents in the same working tree, while dependent or file-mutating tasks run sequentially; the main session verifies, tests, and commits after each wave, and falls back to sequential when the host can't parallelize. This release also closes a gap where autonomous runs could skip the code/security review gates, and reduces false review blocks from branch operations that only change file timestamps. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

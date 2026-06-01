@@ -8,9 +8,14 @@ Scope IDs:
 
 Purpose:
   Collect every ``scripts/rein-*.{sh,py}`` reference from the governance
-  surface (``AGENTS.md``, ``.claude/CLAUDE.md``, ``.claude/orchestrator.md``,
-  and every ``.claude/hooks/*.sh``), then verify that each referenced file
-  (a) exists on disk and (b) parses in its own language:
+  surface (``AGENTS.md``, ``.claude/CLAUDE.md``, and every hook under
+  ``plugins/rein-core/hooks/*.sh`` — the plugin SSOT since the ``.claude/``
+  overlay hooks were retired in Option C Phase 3), then verify that each
+  referenced file (a) exists on disk and (b) parses in its own language:
+
+  References are resolved against the repo root first, then against
+  ``plugins/rein-core/`` (so a ``scripts/rein-state-paths.py`` reference that
+  only ships inside the plugin tree still validates).
 
   * ``.py`` → ``ast.parse(open(path).read())`` must succeed.
   * ``.sh`` → ``bash -n <path>`` must succeed (return code 0).
@@ -42,14 +47,19 @@ from typing import Iterable
 SCRIPT_REF_RE = re.compile(r"scripts/rein-[a-zA-Z0-9._-]+\.(?:sh|py)")
 
 # Entry points into the governance surface.
+# `.claude/orchestrator.md` was removed in the 2026-06-01 overlay cleanup
+# (routing SSOT moved to plugins/rein-core/rules/routing-procedure.md).
 ROOT_DOCS = (
     "AGENTS.md",
     ".claude/CLAUDE.md",
-    ".claude/orchestrator.md",
 )
 
 # Hook files contain executable shell code; parse for references similarly.
-HOOK_GLOB = ".claude/hooks/*.sh"
+# Hooks live in the plugin tree (the `.claude/hooks/` overlay was retired in
+# Option C Phase 3, 2026-05-13, and is not recreated on maintainer checkout).
+HOOK_GLOBS = (
+    "plugins/rein-core/hooks/*.sh",
+)
 
 BASH_SYNTAX_TIMEOUT_S = 10
 
@@ -65,8 +75,11 @@ def collect_script_refs(root: Path) -> set[str]:
         p = root / rel
         if p.is_file():
             sources.append(p)
-    # Hook files — walk the glob once.
-    for hook_path in sorted(glob.glob(str(root / HOOK_GLOB))):
+    # Hook files — walk each glob (plugin SSOT + legacy overlay).
+    hook_paths: list[str] = []
+    for hook_glob in HOOK_GLOBS:
+        hook_paths.extend(glob.glob(str(root / hook_glob)))
+    for hook_path in sorted(set(hook_paths)):
         hp = Path(hook_path)
         if hp.is_file():
             sources.append(hp)
@@ -120,10 +133,19 @@ def _validate_sh(ref_path: Path) -> tuple[bool, str]:
 
 
 def validate_ref(ref: str, root: Path) -> tuple[bool, str]:
-    """Validate a single script reference; return (ok, detail)."""
+    """Validate a single script reference; return (ok, detail).
+
+    Resolution order: repo root first, then ``plugins/rein-core/`` — a
+    ``scripts/rein-*`` reference may ship only inside the plugin tree
+    (e.g. ``rein-state-paths.py``), so a root miss is not yet a failure.
+    """
     ref_path = root / ref
     if not ref_path.is_file():
-        return False, "file not found"
+        plugin_path = root / "plugins" / "rein-core" / ref
+        if plugin_path.is_file():
+            ref_path = plugin_path
+        else:
+            return False, "file not found (checked repo root and plugins/rein-core/)"
     suffix = ref_path.suffix.lower()
     if suffix == ".py":
         return _validate_py(ref_path)

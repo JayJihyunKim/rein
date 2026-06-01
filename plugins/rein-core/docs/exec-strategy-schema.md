@@ -1,61 +1,91 @@
-# Plan 실행 전략 schema (PLN-1)
+# Plan 실행 전략 schema v2 (wave parallel)
 
-> `plugins/rein-core/rules/design-plan-coverage.md` §2A 의 상세 본문. rule 파일은 SessionStart inject token budget (≤12000 bytes) 보호를 위해 schema 핵심만 두고 본 doc 으로 분리한다.
+> `plugins/rein-core/rules/design-plan-coverage.md` §2A 의 상세 본문. rule 파일은
+> SessionStart inject token budget (≤12000 bytes) 보호를 위해 요약만 두고 본 doc
+> 으로 분리한다. 검증기: `scripts/rein-validate-coverage-matrix.py`
+> (+ `plugins/rein-core/scripts/` byte-identical 미러).
 
-## 1. 섹션 schema 전체
+## 1. 섹션 schema
 
-```markdown
+plan 의 선택적 `## 실행 전략` 섹션은 태스크별 v2 스키마다. 섹션 부재 = 순차 실행
+(회귀 없음).
+
+```
 ## 실행 전략
 
-parallelizable: <true|false>
-workers:
-  - name: <worker-name>
+tasks:
+  - id: <task-id>
+    depends_on: [<id>, ...]      # optional, default []
+    mode: edit_only | mutating
     scope:
       - <literal-file-path>
-      - <literal-file-path>
-  - name: <worker-name>
+  - id: <task-id-2>
+    depends_on: [<task-id>]
+    mode: mutating
     scope:
       - <literal-file-path>
-merge_gate: <description>
 ```
 
 ### 필드 정의
 
-- **`parallelizable: bool`** (기본 false) — 본 plan 의 work units 가 worktree 격리 worker 로 병렬 dispatch 가능한지. plan-writer 의 3 axis 판단 (§2) 결과.
-- **`workers[]`** (parallelizable=true 일 때 필수) — worker 분할 list. 각 worker 는 `name` (식별자) + `scope` (literal file path list).
-- **`workers[].scope`** — 본 worker 가 변경 권한을 가진 파일들의 **literal repo-relative path** list. **glob/regex 미지원 (첫 cycle)** — `*`, `?`, `[`, `]` 메타문자 포함 시 validator fail-closed. 디렉토리 경로 (`plugins/`) 도 fail-closed — 명시적 파일만 허용.
-- **`merge_gate: <description>`** — 모든 worker 완료 후 메인 worktree 머지 시점의 검증 절차 (예: "각 worker 의 codex-review PASS + 메인에서 통합 테스트 실행").
+- **`id`** — 태스크 고유 식별자 (plan 내 unique). 중복 금지.
+- **`depends_on: [id, ...]`** (optional, 기본 `[]`) — 선행 태스크 id list. 존재하는
+  id 만 참조 가능. inline list 형식 (`[a, b]`).
+- **`mode: edit_only | mutating`** —
+  - `edit_only`: 부작용 없는 편집만 (커밋·코드젠·전체 포매터·변경성 테스트 금지).
+    같은 웨이브에서 병렬 dispatch 가능.
+  - `mutating`: 변경성 명령 허용 (코드젠·변경성 테스트·패키지 설치 등). 단
+    커밋·리뷰/보안 stamp·trail 기록은 여전히 부모(메인 세션) 소유. 단독 웨이브로만
+    실행.
+- **`scope`** — 본 태스크가 변경하는 **literal repo-relative file path** list.
+  `mutating` 은 선언 파일 + **예상 부작용 경로** 를 함께 포함. **glob/디렉토리
+  미지원** — `*`, `?`, `[`, `]` 메타문자 또는 `/` 로 끝나는 디렉토리 경로는
+  validator fail-closed (기존 literal-path 규칙 재사용). 명시적 파일만 허용.
 
-## 2. parallelizable 판정 3 axis
+## 2. 판정 기준 (태스크별 mode + 동시쌍 disjoint)
 
-plan-writer 는 다음 3 axis 를 **모두 충족** 할 때만 `parallelizable: true` 로 결정:
+plan-writer 는 통짜 불리언이 아니라 **태스크별** 로 판단한다:
 
-| Axis | true 조건 | false 조건 |
-|------|-----------|-----------|
-| 파일 분산도 | 변경 파일 ≥ 4개 (1 worker 당 ≥2 파일) | 변경 파일 ≤ 3개 (분할 의미 없음) |
-| 파일 소유권 충돌 | worker 별 disjoint file set | 동일 파일 다중 worker 편집 |
-| 실행 순서 의존 | acceptance 순서만 의존 (각 worker 독립 verify) | implementation 의존 (A 가 B 의 산출물 사용) |
+- **mode 판단**: 커밋/코드젠/전체포매터/패키지설치/스냅샷/변경성 테스트/scope 밖 쓰기
+  가능성 중 하나라도 있으면 `mutating`, 아니면 `edit_only`. 불명확 시 보수적으로
+  `mutating` (또는 의존으로 순차화).
+- **scope** = 그 태스크의 **예상 실제 write set** (의도 소스가 아닌 실제 쓰기 집합).
+- **동시쌍 disjoint**: 서로 `depends_on` 경로가 없어 **동시 실행 가능한** 두
+  `edit_only` 태스크의 `scope` 는 겹치면 안 된다. `depends_on` 으로 순서가 강제돼
+  동시 실행되지 않는 쌍은 같은 파일을 만져도 무방.
 
-3 axis 중 하나라도 위반 → `parallelizable: false`. 보수적 기본값.
+## 3. validator fail-closed (8조건)
 
-## 3. validator 강제 사항 (fail-closed 상세)
+`scripts/rein-validate-coverage-matrix.py plan <plan-file>` 가 본 섹션을 파싱한다.
+섹션 부재 → exit 0. present 시 아래 중 하나라도 위반 → **exit 2**:
 
-`scripts/rein-validate-coverage-matrix.py plan <plan-file>` 가 본 섹션을 파싱:
+- **(a)** `id` 누락 또는 중복.
+- **(b)** `depends_on` 원소가 존재하지 않는 id 참조.
+- **(c)** 의존 사이클 (Kahn 위상정렬로 모든 노드 소진 못 함).
+- **(d)** `mode` 가 `edit_only`/`mutating` 아님.
+- **(e)** `scope` 누락 / 빈 list / inline non-list shape.
+- **(f)** `scope` 원소가 glob 메타문자 / 디렉토리 (`/` 끝) / non-path token
+  (alpha char 와 `/` 둘 다 없음, 예: `123`).
+- **(g)** 동시 실행 가능한 두 `edit_only` 태스크의 `scope` 가 겹침
+  (`depends_on` 연결쌍은 허용 — g').
+- **(h)** 구 `parallelizable:`/`workers:` shape 감지 → 마이그레이션 메시지 후 exit 2.
 
-- 섹션 부재 = `parallelizable: false` (legacy plan 회귀 없음, exit 0)
-- `parallelizable: true` 이면 아래 조건 중 하나라도 위반 시 **exit 2 fail-closed**:
-  - **(a)** `workers` list 가 비어있거나 누락
-  - **(b)** 임의 worker 의 `scope` 가 누락 (`b1`)·빈 list (`b2`)·inline non-list shape (`b3`)
-  - **(c)** `scope` 의 원소가 file path 로 식별 불가 — `c1`: non-string element (markdown parser layer 에서는 unreachable, 방어 깊이 유지) / `c`: alpha char 와 `/` 둘 다 없는 token (numeric-only `123`, symbol-only `---` 등). markdown parser 가 모든 list item 을 string 으로 yield 하므로 c1 만으로는 numeric token 을 잡지 못해 c heuristic 으로 보강 (2026-05-28 codex Round 1 NEEDS-FIX fix).
-  - **(d)** `scope` 의 원소가 glob 메타문자 (`*`, `?`, `[`, `]`) 포함
-  - **(e)** `scope` 의 원소가 디렉토리 경로 (`/` 로 끝남)
+## 4. 결정적 웨이브 스케줄
 
-## 4. 단계적 활성화 (advisory only, AG-2 안정화 전까지)
+`scripts/rein-validate-coverage-matrix.py schedule <plan-file>` 가 결정적 웨이브
+순서를 emit 한다 (스케줄 결정성의 SSOT — 스킬은 이를 소비하거나 같은 규칙을 복제).
 
-`pre-edit-dod-gate.sh` 는 active DoD 의 plan ref 가 `parallelizable: true` 인지 감지 — **감지 + advisory emit 코드는 active** (실행됨), 차단 (exit 2) 은 다음 cycle 까지 비활성. `# PLN1-GATE-ENFORCEMENT-DISABLED-PENDING-AG2-STABILIZATION` 마커로 활성화 지점 표시.
+알고리즘: 매 스텝 ready 집합 계산 (`depends_on` 가 모두 완료된 미실행 태스크) →
+ready 에 `mutating` 이 있으면 **plan 순서 가장 앞선 mutating 1개만 단독 step** 후
+재계산; ready 가 전부 `edit_only` 이면 그 전부를 한 step(웨이브). `mutating` 은
+어떤 태스크와도 동시 실행 안 됨. 사이클 없음(검증기 보증) → 데드락 없음.
 
-활성화 시점 (다음 cycle): AG-2 worker (`feature-builder-worker`) dogfood 검증 후, 위 마커 grep 하여 enforcement 코드 주석 제거.
+출력: `step <n>: <id> [<id> ...]` (step 내 id 는 plan 순서). 섹션 부재 → 빈 출력 +
+exit 0.
 
-## 5. worker dispatch (manual, 첫 cycle)
+## 5. dispatch 소유권
 
-본 cycle 에서는 worker 자동 dispatch 메커니즘 부재 — 사용자가 manual 로 `Agent` tool 호출 시 `feature-builder-worker` 를 지정 + 본 섹션의 `workers[].scope` 를 prompt 로 전달. cleanup 절차는 `plugins/rein-core/docs/worktree-cleanup.md` 참조.
+웨이브 dispatch 는 `parallel-execute` 스킬이 **같은 작업 트리에서** 소유한다 — 독립
+`edit_only` 태스크를 서브에이전트로 병렬 실행, `mutating`·의존 태스크는 순차 실행.
+워커는 편집만 하고 부모가 웨이브 단위로 검증·테스트·커밋한다. (파일시스템 격리 없음 —
+안전성은 동시쌍 write-set 분리 + 부모 사후 델타 검증 두 겹.)

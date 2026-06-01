@@ -92,7 +92,7 @@ Answer-only turn 으로 시작했어도 다음 중 하나가 발생하는 즉시
 
 **예시 2**: "codex-ask 와 codex-review 차이가 뭐야?"
 
-→ 정보 조회. ceremony skip. `.claude/skills/codex-ask/SKILL.md` 와 `codex-review/SKILL.md` 직접 read 후 답변.
+→ 정보 조회. ceremony skip. `${CLAUDE_PLUGIN_ROOT}/skills/codex-ask/SKILL.md` 와 `codex-review/SKILL.md` 직접 read 후 답변.
 
 ### 5.2 BAD — Answer-only 로 잘못 처리한 사례 (trail 우선시)
 

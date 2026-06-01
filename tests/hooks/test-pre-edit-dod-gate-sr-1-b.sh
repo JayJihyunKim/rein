@@ -22,6 +22,32 @@ _sr1b_compute_hash() {
   printf '%s' "$input" | shasum 2>/dev/null | cut -c1-16
 }
 
+# Initialise the sandbox as a git work-tree so TIER 2 (git-time fallback for
+# retrospective provenance markers) is exercised. The gate sanitises git env
+# (env -u GIT_DIR ...) and runs `git -C "$PROJECT_DIR"`, so a real .git under
+# $SANDBOX is what it discovers.
+_sr1b_git_init() {
+  git -C "$SANDBOX" init -q 2>/dev/null
+  git -C "$SANDBOX" config user.email "test@rein.local"
+  git -C "$SANDBOX" config user.name "rein test"
+}
+
+# Commit a tracked file with explicit author/committer dates. Cherry-pick /
+# rebase preserve AUTHOR date but rewrite COMMITTER date — so passing them
+# separately models that exact divergence. Dates use explicit +0000 so the
+# resulting %at/%ct epochs are timezone-deterministic and comparable to the
+# gate's UTC-anchored reviewed= parse.
+#   $1 = absolute file path inside $SANDBOX
+#   $2 = author date  (e.g. "2026-01-01T00:00:00 +0000")
+#   $3 = committer date (optional; defaults to $2)
+_sr1b_git_commit_file() {
+  local f="$1" adate="$2" cdate="${3:-$2}"
+  local rel="${f#"$SANDBOX"/}"
+  git -C "$SANDBOX" add -- "$rel" 2>/dev/null
+  GIT_AUTHOR_DATE="$adate" GIT_COMMITTER_DATE="$cdate" \
+    git -C "$SANDBOX" commit -q -m "add $rel" >/dev/null 2>&1
+}
+
 # F1 (RED→GREEN proof): orphan .reviewed + spec mtime newer than reviewed=
 #   must be blocked. Pre-fix this falls through to "no .pending found" branch
 #   and the source edit succeeds (bug). Post-fix the gate iterates orphan
@@ -181,6 +207,114 @@ test_pending_plus_reviewed_uses_sr1_branch_only() {
   [ $? -eq 0 ] || fail "coexisting .pending+.reviewed must follow SR-1 branch (allow when created ≤ reviewed), not orphan branch (which would block since spec mtime > reviewed=)"
 }
 
+# F6 (RED→GREEN proof — mtime false-positive removed, soundly): a contentless
+#   orphan .reviewed whose provenance is the retrospective "cherry-pick-mtime-fp"
+#   class. This models the ACTUAL incident: the spec was committed before review
+#   (committer date ≤ reviewed=) and never re-committed, but a later checkout /
+#   branch-switch / rotation bumped only the filesystem mtime to AFTER reviewed=.
+#   Pre-fix the provenance is unrecognised → TIER 3 mtime → mtime > reviewed →
+#   false block. Post-fix the provenance is recognised → TIER 2 committer-time →
+#   committer ≤ reviewed + clean → allow. Exit 0 proves the provenance is
+#   recognised AND that the bumped mtime is ignored. This is SOUND: clean +
+#   committer ≤ reviewed means the content was integrated before review.
+test_cherrypick_mtimefp_provenance_mtime_bump_allows() {
+  seed_dod "dod-2026-04-13-test.md"
+  _sr1b_git_init
+  mkdir -p "$SANDBOX/docs/specs"
+  local spec_file="$SANDBOX/docs/specs/wave.md"
+  echo "# Spec (committed pre-review, only mtime bumped since)" > "$spec_file"
+
+  # Committed in the PAST (author == committer ≤ reviewed): a normal commit that
+  # predates review and was NOT re-integrated since.
+  _sr1b_git_commit_file "$spec_file" "2026-01-01T00:00:00 +0000" "2026-01-01T00:00:00 +0000"
+
+  # Plain checkout / rotation bumps only the filesystem mtime → set it > reviewed.
+  touch -t 202607010000 "$spec_file" 2>/dev/null || touch -d "2026-07-01" "$spec_file" 2>/dev/null
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(_sr1b_compute_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=retrospective-cherry-pick-mtime-fp-2026-05-29"
+    echo "reviewed=2026-03-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "cherry-pick-mtime-fp provenance + committer date ≤ reviewed + clean must allow (a bumped mtime alone must not block)"
+}
+
+# F7 (no false-negative — content integrated AFTER review is blocked): the
+#   critical soundness test. The spec's content was AUTHORED before review
+#   (author date ≤ reviewed=) but INTEGRATED into this branch after review
+#   (committer date > reviewed=) — exactly a cherry-pick/rebase of a
+#   pre-review-authored commit landing after the review. The reviewed content
+#   could NOT have included it, so it must block. Exit 2 proves committer-time
+#   (not author-time) is the signal: author-time would wrongly allow this.
+test_cherrypick_mtimefp_provenance_integrated_after_review_blocks() {
+  seed_dod "dod-2026-04-13-test.md"
+  _sr1b_git_init
+  mkdir -p "$SANDBOX/docs/specs"
+  local spec_file="$SANDBOX/docs/specs/wave.md"
+  echo "# Spec authored pre-review but integrated (committed) after review" > "$spec_file"
+
+  # Author date PAST (≤ reviewed), committer date FUTURE (> reviewed): a commit
+  # cherry-picked/integrated into this branch only after the review happened.
+  _sr1b_git_commit_file "$spec_file" "2026-01-01T00:00:00 +0000" "2026-06-01T00:00:00 +0000"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(_sr1b_compute_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=retrospective-cherry-pick-mtime-fp-2026-05-29"
+    echo "reviewed=2026-03-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "spec integrated (committed) after review must block — committer-time > reviewed; author-time being ≤ reviewed must NOT allow it (no false-negative)"
+}
+
+# F8 (fail-closed on dirty): recognised provenance, author date ≤ reviewed (would
+#   allow if clean), but the spec has an UNCOMMITTED change. Cannot prove the
+#   working-tree content matches the reviewed content → block. Guards the TIER 2
+#   dirty branch for the newly-recognised provenance class.
+test_cherrypick_mtimefp_provenance_dirty_fails_closed() {
+  seed_dod "dod-2026-04-13-test.md"
+  _sr1b_git_init
+  mkdir -p "$SANDBOX/docs/specs"
+  local spec_file="$SANDBOX/docs/specs/wave.md"
+  echo "# Spec (committed clean)" > "$spec_file"
+  _sr1b_git_commit_file "$spec_file" "2026-01-01T00:00:00 +0000" "2026-01-01T00:00:00 +0000"
+
+  # Now make the work-tree dirty (uncommitted edit).
+  echo "# uncommitted change" >> "$spec_file"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(_sr1b_compute_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=retrospective-cherry-pick-mtime-fp-2026-05-29"
+    echo "reviewed=2026-03-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "cherry-pick-mtime-fp provenance with a dirty work-tree must fail-closed (cannot prove content matches review)"
+}
+
 # =================================================================
 # RUN ALL TESTS
 # =================================================================
@@ -190,5 +324,8 @@ run_test test_orphan_reviewed_with_fresh_spec_allows pre-edit-dod-gate.sh
 run_test test_orphan_reviewed_with_garbled_timestamp_fails_closed pre-edit-dod-gate.sh
 run_test test_no_markers_allows pre-edit-dod-gate.sh
 run_test test_pending_plus_reviewed_uses_sr1_branch_only pre-edit-dod-gate.sh
+run_test test_cherrypick_mtimefp_provenance_mtime_bump_allows pre-edit-dod-gate.sh
+run_test test_cherrypick_mtimefp_provenance_integrated_after_review_blocks pre-edit-dod-gate.sh
+run_test test_cherrypick_mtimefp_provenance_dirty_fails_closed pre-edit-dod-gate.sh
 
 summary

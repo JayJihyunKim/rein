@@ -236,60 +236,73 @@ def parse_plan_work_unit_covers(plan_path: Path, work_unit: str) -> set[str] | N
     return None
 
 
-# ---------- Execution strategy parser (PLN-1, 2026-05-27) -------------
+# ---------- Execution strategy parser v2 (wave parallel, 2026-05-30) -------
 #
-# Plan 의 `## 실행 전략` 섹션 파싱 + parallelizable=true 의 literal-path-only
-# fail-closed 조건 검증. 섹션 부재 plan 은 parallelizable=false 로 처리
-# (backward-compat — legacy plan 회귀 없음).
+# Plan 의 `## 실행 전략` 섹션을 태스크별 v2 스키마로 파싱 + fail-closed 검증.
+# 섹션 부재 plan 은 순차 실행으로 처리 (backward-compat — legacy plan 회귀 없음).
 #
-# rule: plugins/rein-core/rules/design-plan-coverage.md §2A
-#   섹션 schema:
-#     ## 실행 전략
-#     parallelizable: <true|false>
-#     workers:
-#       - name: <worker-name>
-#         scope:
-#           - <literal-file-path>
-#     merge_gate: <description>
+# rule:  plugins/rein-core/rules/design-plan-coverage.md §2A
+# schema: plugins/rein-core/docs/exec-strategy-schema.md
 #
-# Fail-closed 조건 (parallelizable=true 일 때만 검증):
-#   (a) workers list 비어있거나 누락
-#   (b) 임의 worker 의 scope 누락·빈 list·non-list shape
-#   (c) scope 원소 중 비-string
-#   (d) scope 원소가 glob 메타문자 (*, ?, [, ]) 포함
-#   (e) scope 원소가 디렉토리 (/ 로 끝남)
+#   ## 실행 전략
+#   tasks:
+#     - id: <task-id>
+#       depends_on: [<id>, ...]      # optional, default []
+#       mode: edit_only | mutating
+#       scope:
+#         - <literal-file-path>
+#
+# Fail-closed 조건 (present 일 때 검증; 하나라도 위반 → validate_plan exit 2):
+#   (a) id 누락 또는 중복
+#   (b) depends_on 원소가 존재하지 않는 id 참조
+#   (c) 의존 사이클 (Kahn 위상정렬로 모든 노드 소진 못 함)
+#   (d) mode 가 {edit_only, mutating} 아님
+#   (e) scope 누락 / 빈 list / non-list (inline) shape
+#   (f) scope 원소가 glob 메타문자 / 디렉토리 / non-path token
+#   (g) 동시 실행 가능한 두 edit_only 태스크 (서로 depends_on 경로 없음) 의
+#       scope 가 겹침 — depends_on 으로 순서 강제된 쌍은 겹쳐도 OK
+#   (h) 구 parallelizable:/workers: shape 감지 → 마이그레이션 메시지
 
 EXEC_STRATEGY_HEADING = "## 실행 전략"
-PARALLELIZABLE_RE = re.compile(r"^\s*parallelizable\s*:\s*(?P<value>\S+)\s*$", re.IGNORECASE)
-WORKERS_HEADER_RE = re.compile(r"^\s*workers\s*:\s*$", re.IGNORECASE)
-WORKER_ITEM_RE = re.compile(r"^\s*-\s+name\s*:\s*(?P<name>.+?)\s*$", re.IGNORECASE)
-SCOPE_HEADER_RE = re.compile(r"^\s{2,}scope\s*:\s*$", re.IGNORECASE)
-SCOPE_ITEM_RE = re.compile(r"^\s{4,}-\s+(?P<value>.+?)\s*$")
-SCOPE_INLINE_RE = re.compile(r"^\s{2,}scope\s*:\s*(?P<value>.+?)\s*$", re.IGNORECASE)
-MERGE_GATE_RE = re.compile(r"^\s*merge_gate\s*:\s*(?P<value>.+?)\s*$", re.IGNORECASE)
+# Legacy v1 shape detection (condition h).
+LEGACY_PARALLELIZABLE_RE = re.compile(r"^\s*parallelizable\s*:", re.IGNORECASE)
+LEGACY_WORKERS_RE = re.compile(r"^\s*workers\s*:", re.IGNORECASE)
+LEGACY_MIGRATION_MSG = (
+    "legacy parallelizable/workers shape — migrate to "
+    "tasks[]/depends_on/mode/scope v2; see "
+    "plugins/rein-core/docs/exec-strategy-schema.md"
+)
+
+TASKS_HEADER_RE = re.compile(r"^\s*tasks\s*:\s*$", re.IGNORECASE)
+TASK_ID_RE = re.compile(r"^\s*-\s+id\s*:\s*(?P<id>.+?)\s*$", re.IGNORECASE)
+# A new task list item begins with `- <key>:` (e.g. `- id:`, `- mode:`). Used to
+# detect a task element whose first key is NOT `id` → fail-closed (a) id missing.
+TASK_ITEM_START_RE = re.compile(r"^\s*-\s+(?P<key>[A-Za-z_]+)\s*:", re.IGNORECASE)
+DEPENDS_ON_RE = re.compile(r"^\s*depends_on\s*:\s*\[(?P<ids>.*)\]\s*$", re.IGNORECASE)
+MODE_RE = re.compile(r"^\s*mode\s*:\s*(?P<mode>\S+)\s*$", re.IGNORECASE)
+SCOPE_HEADER_RE = re.compile(r"^\s+scope\s*:\s*$", re.IGNORECASE)
+SCOPE_INLINE_RE = re.compile(r"^\s+scope\s*:\s*(?P<value>.+?)\s*$", re.IGNORECASE)
+SCOPE_ITEM_RE = re.compile(r"^\s+-\s+(?P<value>.+?)\s*$")
+
+VALID_MODES = {"edit_only", "mutating"}
 
 # Glob meta-chars (subset of POSIX glob — first-cycle conservative).
 GLOB_META_RE = re.compile(r"[\*\?\[\]]")
 
 
 def parse_execution_strategy(plan_path: Path) -> dict:
-    """Return execution-strategy dict for a plan.
+    """Return execution-strategy v2 dict for a plan.
 
-    Shape: ``{"parallelizable": bool, "workers": list[dict], "merge_gate": str|None,
-              "errors": list[str]}``.
+    Shape: ``{"tasks": [{"id","depends_on":[...],"mode","scope":[...]}],
+              "errors": list[str], "present": bool}``.
 
-    ``errors`` is empty for a valid section or an absent section. Populated
-    only when ``parallelizable: true`` and a fail-closed condition triggers.
+    Absent section → ``{"tasks": [], "errors": [], "present": False}``
+    (backward-compat — sequential execution, no regression).
 
-    Backward-compat: absent section returns ``parallelizable=False`` with empty
-    workers + no errors. validate_plan caller treats empty ``errors`` as pass.
+    Legacy ``parallelizable:``/``workers:`` shape → single migration error
+    (condition h) returned immediately.
     """
-    out: dict = {
-        "parallelizable": False,
-        "workers": [],
-        "merge_gate": None,
-        "errors": [],
-    }
+    out: dict = {"tasks": [], "errors": [], "present": False}
     if not plan_path.exists():
         return out
     try:
@@ -298,78 +311,111 @@ def parse_execution_strategy(plan_path: Path) -> dict:
         return out
     lines = text.splitlines()
 
-    # Locate section.
+    # Locate section. A real `## 실행 전략` heading is a column-0 H2; the schema
+    # is also shown as an INDENTED example inside ```fenced``` code blocks in
+    # plan prose (e.g. this plan's Task 1.1) — those must NOT be treated as the
+    # live section. So: skip fenced code blocks AND require the heading at
+    # column 0 (no leading indentation).
     sec_start = None
+    in_fence = False
     for i, line in enumerate(lines):
-        if line.strip() == EXEC_STRATEGY_HEADING:
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if line.rstrip() == EXEC_STRATEGY_HEADING:
             sec_start = i
             break
     if sec_start is None:
-        return out  # backward-compat: absent section = parallelizable=false
+        return out  # backward-compat: absent section = sequential
 
-    # Walk until next "## " heading.
-    in_workers = False
-    current_worker: dict | None = None
-    in_scope = False
+    out["present"] = True
+
+    # Gather the section body (until next top-level "## " heading; ignore
+    # headings inside fenced code blocks within the section body).
+    body: list[str] = []
+    body_in_fence = False
     for raw in lines[sec_start + 1 :]:
-        if raw.startswith("## "):
+        stripped = raw.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            body_in_fence = not body_in_fence
+            body.append(raw)
+            continue
+        if not body_in_fence and raw.startswith("## "):
             break
+        body.append(raw)
 
-        # parallelizable: <value>
-        m = PARALLELIZABLE_RE.match(raw)
-        if m and not in_workers:
-            val = m.group("value").lower().rstrip(",")
-            out["parallelizable"] = val == "true"
+    # (h) Legacy shape detection — short-circuit before v2 parsing.
+    for raw in body:
+        if LEGACY_PARALLELIZABLE_RE.match(raw) or LEGACY_WORKERS_RE.match(raw):
+            out["errors"].append(LEGACY_MIGRATION_MSG)
+            return out
+
+    # v2 parse: tasks[] with id / depends_on / mode / scope.
+    in_tasks = False
+    current: dict | None = None
+    in_scope = False
+    for raw in body:
+        if not in_tasks:
+            if TASKS_HEADER_RE.match(raw):
+                in_tasks = True
             continue
 
-        # merge_gate: <value>
-        m = MERGE_GATE_RE.match(raw)
-        if m:
-            out["merge_gate"] = m.group("value")
-            in_workers = False
-            current_worker = None
+        # A new task list element begins with `- <key>:`. If the first key is
+        # `id`, capture the id; otherwise the task is missing its id (the YAML
+        # element exists but `id` is not its leading key) → fail-closed (a). We
+        # still fall through so the leading key (e.g. `- mode: ...`) is parsed
+        # as a field of this task rather than dropped.
+        m_item = TASK_ITEM_START_RE.match(raw)
+        if m_item:
+            m = TASK_ID_RE.match(raw)
+            current = {
+                "id": m.group("id").strip() if m else None,
+                "depends_on": [],
+                "mode": None,
+                "scope": [],
+                "_has_scope_key": False,
+                "_inline_scope": None,
+            }
+            out["tasks"].append(current)
             in_scope = False
+            if m:
+                continue  # `- id:` fully consumed
+            # Non-id leading key (e.g. `- mode:`): strip the dash so the field
+            # regexes below see a plain `key: value` line, then re-process.
+            raw = re.sub(r"^(\s*)-\s+", r"\1  ", raw, count=1)
+
+        if current is None:
             continue
 
-        # workers:
-        if WORKERS_HEADER_RE.match(raw):
-            in_workers = True
-            current_worker = None
-            in_scope = False
+        # depends_on: [a, b]
+        m = DEPENDS_ON_RE.match(raw)
+        if m and not in_scope:
+            ids_raw = m.group("ids")
+            current["depends_on"] = [x.strip() for x in ids_raw.split(",") if x.strip()]
             continue
 
-        if not in_workers:
+        # mode: edit_only|mutating
+        m = MODE_RE.match(raw)
+        if m and not in_scope:
+            current["mode"] = m.group("mode").strip().lower()
             continue
 
-        # - name: <name>
-        m = WORKER_ITEM_RE.match(raw)
-        if m:
-            current_worker = {"name": m.group("name"), "scope": [], "_has_scope_key": False}
-            out["workers"].append(current_worker)
-            in_scope = False
-            continue
-
-        if current_worker is None:
-            continue
-
-        # scope: (inline) — `scope: foo` not a list → record as fail-closed marker
+        # scope: (inline) — `scope: foo` non-list, or `scope: []` empty.
         m = SCOPE_INLINE_RE.match(raw)
         if m:
-            current_worker["_has_scope_key"] = True
+            current["_has_scope_key"] = True
             inline_val = m.group("value").strip()
-            # Anything other than the empty-list literal "[]" is treated as
-            # non-list shape (single string). Empty list "[]" registers a
-            # scope key with no items, which is fail-closed (b2).
-            if inline_val == "[]":
-                in_scope = False
-            else:
-                current_worker["_inline_scope"] = inline_val
-                in_scope = False
+            if inline_val != "[]":
+                current["_inline_scope"] = inline_val
+            in_scope = False
             continue
 
         # scope:  (block form)
         if SCOPE_HEADER_RE.match(raw):
-            current_worker["_has_scope_key"] = True
+            current["_has_scope_key"] = True
             in_scope = True
             continue
 
@@ -377,50 +423,184 @@ def parse_execution_strategy(plan_path: Path) -> dict:
         if in_scope:
             m = SCOPE_ITEM_RE.match(raw)
             if m:
-                current_worker["scope"].append(m.group("value"))
-
-    # ---- Fail-closed validation (only when parallelizable=true) ----
-    if not out["parallelizable"]:
-        return out  # no further checks
-
-    if not out["workers"]:
-        out["errors"].append("parallelizable=true but workers list is empty or missing (PLN-1 fail-closed a)")
-        return out
-
-    for w in out["workers"]:
-        name = w.get("name", "<unnamed>")
-        if not w.get("_has_scope_key"):
-            out["errors"].append(f"worker '{name}': scope key missing (PLN-1 fail-closed b1)")
-            continue
-        if "_inline_scope" in w:
-            # Inline non-list scope (e.g. `scope: foo`).
-            out["errors"].append(f"worker '{name}': scope is not a list — inline value '{w['_inline_scope']}' (PLN-1 fail-closed b3)")
-            continue
-        scope = w.get("scope") or []
-        if not scope:
-            out["errors"].append(f"worker '{name}': scope is empty list (PLN-1 fail-closed b2)")
-            continue
-        for item in scope:
-            if not isinstance(item, str):
-                out["errors"].append(f"worker '{name}': scope contains non-string item {item!r} (PLN-1 fail-closed c1)")
-                continue
-            # PLN-1 fail-closed c: markdown parser yields every list item as a
-            # plain string, so the isinstance branch above is unreachable for
-            # markdown-derived plans. Explicitly reject tokens that lack any
-            # alpha char or path separator (e.g. `- 123`, `- 0`, `- ---`) —
-            # these cannot denote a literal file path and would otherwise slip
-            # past the d/e checks (no glob meta-char, no trailing slash).
-            if not re.search(r'[A-Za-z/]', item):
-                out["errors"].append(f"worker '{name}': scope item '{item}' is not a valid file path token — needs alpha char or '/' (PLN-1 fail-closed c)")
-                continue
-            if GLOB_META_RE.search(item):
-                out["errors"].append(f"worker '{name}': scope contains glob meta-char in '{item}' (PLN-1 fail-closed d)")
-                continue
-            if item.endswith("/"):
-                out["errors"].append(f"worker '{name}': scope contains directory path '{item}' — literal file path required (PLN-1 fail-closed e)")
-                continue
+                current["scope"].append(m.group("value").strip())
 
     return out
+
+
+def _reachable_pairs(tasks: list[dict]) -> tuple[dict[str, set[str]], list[str]]:
+    """Transitive reachability over depends_on.
+
+    Returns ``(reach, cycle_errors)`` where ``reach[x]`` is the set of task ids
+    reachable from ``x`` following ``depends_on`` edges (i.e. ``x`` transitively
+    depends on every id in ``reach[x]``). ``cycle_errors`` is non-empty when a
+    dependency cycle is detected via Kahn topological sort (condition c).
+    """
+    ids = [t["id"] for t in tasks]
+    id_set = set(ids)
+    # edges: x depends_on y  (x -> y). For Kahn, count in-degree of x = len(deps).
+    deps = {t["id"]: [d for d in t["depends_on"] if d in id_set] for t in tasks}
+
+    # Kahn topological sort over the dependency graph.
+    indeg = {i: len(deps[i]) for i in ids}
+    dependents: dict[str, list[str]] = {i: [] for i in ids}
+    for x in ids:
+        for y in deps[x]:
+            dependents[y].append(x)
+    queue = [i for i in ids if indeg[i] == 0]
+    drained = 0
+    qi = 0
+    while qi < len(queue):
+        node = queue[qi]
+        qi += 1
+        drained += 1
+        for child in dependents[node]:
+            indeg[child] -= 1
+            if indeg[child] == 0:
+                queue.append(child)
+
+    cycle_errors: list[str] = []
+    if drained != len(ids):
+        cycle_errors.append("exec-strategy: dependency cycle detected in depends_on (fail-closed c)")
+
+    # Transitive closure of depends_on (DFS per node; safe even with a cycle).
+    reach: dict[str, set[str]] = {i: set() for i in ids}
+    for start in ids:
+        stack = list(deps[start])
+        seen: set[str] = set()
+        while stack:
+            cur = stack.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            stack.extend(deps.get(cur, []))
+        reach[start] = seen
+    return reach, cycle_errors
+
+
+def _validate_exec_strategy_tasks(tasks: list[dict]) -> list[str]:
+    """Enforce v2 fail-closed conditions (a)-(g). Returns error strings."""
+    errors: list[str] = []
+
+    # (a) id missing / duplicate.
+    seen_ids: set[str] = set()
+    for t in tasks:
+        tid = t.get("id")
+        if not tid:
+            errors.append("exec-strategy: task with missing id (fail-closed a)")
+            continue
+        if tid in seen_ids:
+            errors.append(f"exec-strategy: duplicate task id '{tid}' (fail-closed a)")
+        seen_ids.add(tid)
+
+    # (b) depends_on references nonexistent id.
+    for t in tasks:
+        for dep in t.get("depends_on", []):
+            if dep not in seen_ids:
+                errors.append(
+                    f"exec-strategy: task '{t.get('id')}' depends_on unknown id '{dep}' (fail-closed b)"
+                )
+
+    # (d) mode invalid.
+    for t in tasks:
+        mode = t.get("mode")
+        if mode not in VALID_MODES:
+            errors.append(
+                f"exec-strategy: task '{t.get('id')}' mode '{mode}' not in {{edit_only, mutating}} (fail-closed d)"
+            )
+
+    # (e) scope missing / empty / non-list.
+    for t in tasks:
+        tid = t.get("id")
+        if not t.get("_has_scope_key"):
+            errors.append(f"exec-strategy: task '{tid}' scope key missing (fail-closed e)")
+            continue
+        if t.get("_inline_scope") is not None:
+            errors.append(
+                f"exec-strategy: task '{tid}' scope is not a list — inline value "
+                f"'{t['_inline_scope']}' (fail-closed e)"
+            )
+            continue
+        if not t.get("scope"):
+            errors.append(f"exec-strategy: task '{tid}' scope is empty list (fail-closed e)")
+            continue
+        # (f) scope item: glob meta-char / directory / non-path token.
+        for item in t["scope"]:
+            if not re.search(r"[A-Za-z/]", item):
+                errors.append(
+                    f"exec-strategy: task '{tid}' scope item '{item}' is not a valid file path "
+                    f"token — needs alpha char or '/' (fail-closed f)"
+                )
+                continue
+            if GLOB_META_RE.search(item):
+                errors.append(
+                    f"exec-strategy: task '{tid}' scope contains glob meta-char in '{item}' (fail-closed f)"
+                )
+                continue
+            if item.endswith("/"):
+                errors.append(
+                    f"exec-strategy: task '{tid}' scope contains directory path '{item}' — "
+                    f"literal file path required (fail-closed f)"
+                )
+                continue
+
+    # (c) cycle + (g) concurrent edit_only disjoint scope.
+    reach, cycle_errors = _reachable_pairs(tasks)
+    errors.extend(cycle_errors)
+    if not cycle_errors:
+        edit_only = [t for t in tasks if t.get("mode") == "edit_only" and t.get("id")]
+        for i in range(len(edit_only)):
+            for j in range(i + 1, len(edit_only)):
+                a, b = edit_only[i], edit_only[j]
+                aid, bid = a["id"], b["id"]
+                # Concurrent = neither reachable from the other (no depends_on path).
+                if bid in reach.get(aid, set()) or aid in reach.get(bid, set()):
+                    continue  # ordered by depends_on → may share scope (g')
+                overlap = set(a.get("scope", [])) & set(b.get("scope", []))
+                if overlap:
+                    errors.append(
+                        f"exec-strategy: concurrent edit_only tasks '{aid}' and '{bid}' have "
+                        f"overlapping scope {sorted(overlap)} (fail-closed g)"
+                    )
+
+    return errors
+
+
+def compute_wave_schedule(tasks: list[dict]) -> list[list[str]]:
+    """Deterministic wave schedule (schedule emitter — scheduling SSOT).
+
+    Each step computes the ready set (tasks whose depends_on are all completed).
+    If any ready task is ``mutating``, run ONLY the earliest-in-plan-order
+    mutating task as its own step, then recompute. Otherwise emit all ready
+    ``edit_only`` tasks as one step (wave). Ids within a step keep plan order.
+
+    Assumes acyclic input (validator guarantees it). Returns ``[]`` for empty
+    or absent tasks.
+    """
+    order = {t["id"]: idx for idx, t in enumerate(tasks) if t.get("id")}
+    by_id = {t["id"]: t for t in tasks if t.get("id")}
+    completed: set[str] = set()
+    schedule: list[list[str]] = []
+
+    remaining = [t["id"] for t in tasks if t.get("id")]
+    while len(completed) < len(remaining):
+        ready = [
+            tid
+            for tid in remaining
+            if tid not in completed
+            and all(dep in completed for dep in by_id[tid].get("depends_on", []))
+        ]
+        if not ready:
+            break  # safety: should not happen on acyclic input
+        ready.sort(key=lambda x: order[x])
+        mutating = [tid for tid in ready if by_id[tid].get("mode") == "mutating"]
+        if mutating:
+            schedule.append([mutating[0]])
+            completed.add(mutating[0])
+            continue
+        schedule.append(ready)
+        completed.update(ready)
+    return schedule
 
 
 # ---------- Plan parser (v1 behavior preserved) ----------
@@ -581,11 +761,14 @@ def validate_plan(plan_path: Path) -> int:
             f"{sorted(uncovered)}"
         )
 
-    # PLN-1 (2026-05-27): execution-strategy fail-closed validation.
-    # Absent section → parallelizable=false → no errors (backward-compat).
+    # Execution-strategy v2 (2026-05-30): wave-parallel fail-closed validation.
+    # Absent section → present=False → no errors (backward-compat, sequential).
     exec_strategy = parse_execution_strategy(plan_path)
     for e in exec_strategy.get("errors", []):
         failures.append(e)
+    if exec_strategy.get("present") and not exec_strategy.get("errors"):
+        for e in _validate_exec_strategy_tasks(exec_strategy["tasks"]):
+            failures.append(e)
 
     if failures:
         err(f"validation failed for {plan_path}:")
@@ -935,8 +1118,9 @@ def _enforce_behavioral_contract_checkbox(
 
 USAGE = (
     "usage:\n"
-    "  rein-validate-coverage-matrix.py plan <plan-file>\n"
-    "  rein-validate-coverage-matrix.py dod  <dod-file>\n"
+    "  rein-validate-coverage-matrix.py plan     <plan-file>\n"
+    "  rein-validate-coverage-matrix.py dod      <dod-file>\n"
+    "  rein-validate-coverage-matrix.py schedule <plan-file>\n"
     "  rein-validate-coverage-matrix.py <plan-file>   # deprecated legacy shim"
 )
 
@@ -969,6 +1153,38 @@ def validate_dod_cli(argv: list[str]) -> int:
     return validate_dod(dod_path)
 
 
+def emit_schedule_cli(argv: list[str]) -> int:
+    """`schedule <plan>` — print the deterministic wave schedule.
+
+    Output: one ``step <n>: <id> [<id> ...]`` line per wave (ids in plan order).
+    Absent ``## 실행 전략`` section → empty output + exit 0. The schedule is
+    only emitted when the strategy section is present AND structurally valid;
+    a validation failure (or legacy shape) exits 2 so callers never dispatch
+    against an unsound schedule.
+    """
+    if len(argv) < 2:
+        return _usage_error("schedule subcommand requires <plan-file>")
+    plan_path = Path(argv[1])
+    if not plan_path.exists():
+        err(f"plan file not found: {plan_path}")
+        return 2
+    exec_strategy = parse_execution_strategy(plan_path)
+    if not exec_strategy.get("present"):
+        return 0  # absent section → empty output, sequential
+    errors = list(exec_strategy.get("errors", []))
+    if not errors:
+        errors = _validate_exec_strategy_tasks(exec_strategy["tasks"])
+    if errors:
+        err(f"schedule: execution strategy invalid for {plan_path}:")
+        for e in errors:
+            err(f"  - {e}")
+        return 2
+    schedule = compute_wave_schedule(exec_strategy["tasks"])
+    for n, step in enumerate(schedule, start=1):
+        print(f"step {n}: {' '.join(step)}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     # argv layout: [script, ...]
     if len(argv) < 2:
@@ -981,6 +1197,8 @@ def main(argv: list[str]) -> int:
         return validate_plan_cli(argv[1:])
     if first == "dod":
         return validate_dod_cli(argv[1:])
+    if first == "schedule":
+        return emit_schedule_cli(argv[1:])
 
     # Legacy shim: if the first arg is an existing file, treat as the old
     # CLI and emit a deprecation warning on stderr (so the caller/user

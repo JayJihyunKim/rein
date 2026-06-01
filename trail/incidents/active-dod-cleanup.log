@@ -45,3 +45,7 @@
 2026-05-29T00:42:53Z	target file missing	/Users/jihyunkim/dreamline/rein-dev/trail/dod/dod-2026-05-28-v1-4-0-release.md
 2026-05-29T06:08:42Z	target lacks ## 범위 연결	trail/dod/dod-2026-05-29-p10-attached-quote-regression.md
 2026-05-29T07:19:09Z	target lacks ## 범위 연결	trail/dod/dod-2026-05-29-sr-1b-mtime-fp-content-compare.md
+2026-05-29T08:58:32Z	target lacks ## 범위 연결	trail/dod/dod-2026-05-29-injected-rule-language-follow-user.md
+2026-05-30T20:05:50Z	archived: matching inbox completion record	trail/dod/dod-2026-05-31-wave-parallel-phase1-schema-validator.md
+2026-06-01T05:06:25Z	target file missing	trail/dod/dod-2026-05-31-gate-bypass-guardrail-mtime-fp.md
+2026-06-01T07:23:53Z	target lacks ## 범위 연결	trail/dod/dod-2026-06-01-phase4-regression-suite.md

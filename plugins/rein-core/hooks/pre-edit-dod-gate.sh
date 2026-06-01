@@ -466,8 +466,21 @@ if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]; then
     # changing content → false "stale" → unrelated source edits chain-blocked
     # (2026-05-29 incident: 25 dev-only docs). Decide staleness by CONTENT
     # (content_sha anchor), with a git committer-time fallback restricted to
-    # retrospective/healer markers (whose shipped origin is knowable), and the
-    # legacy mtime path only for non-retro / non-git markers.
+    # retrospective/healer markers (whose origin is knowable), and the legacy
+    # mtime path only for non-retro / non-git markers.
+    #
+    # 2026-05-31 follow-up: also recognise the `retrospective-cherry-pick-mtime-fp*`
+    # provenance class. Those markers were deliberately re-stamped on 2026-05-29
+    # to absorb exactly this mtime FP, but were previously unrecognised and fell
+    # to the mtime path — so the FP they were meant to fix still fired. Routing
+    # them through the committer-time tier clears the mtime FP SOUNDLY: plain
+    # checkout / branch-switch / rotation bump only the filesystem mtime, NOT
+    # committer-time, so a spec committed before review reads as fresh; while a
+    # genuine post-review commit (or a spec cherry-picked/integrated after
+    # review) has committer-time > reviewed and is still blocked (no
+    # false-negative). committer-time — not author-time — is the sound signal:
+    # author-time would wrongly allow a pre-review-authored commit that was only
+    # integrated into this branch AFTER review (its content was never reviewed).
     #
     # git work-tree detection, computed once. Sanitized per BC-INFO1 class so a
     # poisoned GIT_DIR/GIT_WORK_TREE cannot redirect discovery to a decoy repo.
@@ -539,18 +552,41 @@ except Exception:
         break
       }
 
-      # Provenance gate for the git fallback: retrospective / healer markers
-      # have a knowable shipped origin, so a committer-time heuristic is
+      # Provenance gate for the git fallback: deliberate retrospective / healer
+      # markers have a knowable origin, so a git author-time heuristic is
       # acceptable for them — but NOT for arbitrary contentless markers, whose
       # reviewed content is unknowable (codex Mode B: do not broadly bless).
+      # Recognised provenance classes (each a deliberate, auditable namespace —
+      # a normal review writes reviewer=codex/sonnet/… which never matches):
+      #   - retrospective-shipped*              release-shipped / healer specs
+      #   - retrospective-cherry-pick-mtime-fp* legacy markers re-stamped to
+      #                                         absorb a checkout/cherry-pick
+      #                                         mtime false-positive
+      #   - mechanism=rein-heal-legacy-pending  legacy-pending healer
       reviewer_val=$(grep -E '^reviewer=' "$reviewed_marker" 2>/dev/null | head -1 | sed 's/^reviewer=//')
       mechanism_val=$(grep -E '^mechanism=' "$reviewed_marker" 2>/dev/null | head -1 | sed 's/^mechanism=//')
       is_retro=false
-      case "$reviewer_val" in retrospective-shipped*) is_retro=true ;; esac
+      case "$reviewer_val" in
+        retrospective-shipped*|retrospective-cherry-pick-mtime-fp*) is_retro=true ;;
+      esac
       [ "$mechanism_val" = "rein-heal-legacy-pending" ] && is_retro=true
 
       if [ "$is_retro" = true ] && [ "$SR1B_GIT_WORKTREE" = true ]; then
         # TIER 2 — constrained git committer-time fallback (retrospective only).
+        # SOUND (no false-negative): a clean work-tree means the current content
+        # IS the last commit touching the spec; committer-time ≤ reviewed means
+        # that commit was integrated into THIS branch's history before review,
+        # so its content was present at review time. Any post-review content
+        # change is either a new commit (committer-time = now > reviewed → block)
+        # or uncommitted (dirty → blocked just above). Plain checkout / branch
+        # switch / rotation bump only the filesystem mtime, NOT committer-time,
+        # so this tier clears the mtime false-positive without under-blocking.
+        # A spec genuinely cherry-picked/integrated AFTER review has
+        # committer-time = the integration moment > reviewed and is
+        # conservatively blocked (we cannot prove the integrated content was the
+        # reviewed content) — intended. NB: committer-time, not author-time —
+        # author-time would wrongly allow a pre-review-authored commit that was
+        # only integrated after review.
         rel_spec="${spec_path#"$PROJECT_DIR"/}"
         # Confirm the path is tracked (git log history alone is not proof).
         if ! env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
@@ -571,10 +607,10 @@ except Exception:
           break
         fi
         if [ "$spec_commit_epoch" -gt "$reviewed_epoch" ]; then
-          UNRESOLVED_SPECS=true   # spec committed after review → stale
+          UNRESOLVED_SPECS=true   # committed/integrated after review → cannot prove → stale
           break
         fi
-        continue                  # committed content predates review, clean → not stale
+        continue                  # integrated before review, clean → content present at review
       fi
 
       # TIER 3 — mtime fallback (non-retrospective marker, or non-git project).
@@ -736,71 +772,6 @@ if [ -n "$ROUTING_VIOLATIONS" ]; then
 fi
 
 # END routing-gate
-
-# === PLN-1: parallelizable enforcement (ACTIVE since 2026-05-28-worker-contract-plus-pln1-enforce cycle) ===
-#
-# rule: plugins/rein-core/rules/design-plan-coverage.md §2A
-# spec: docs/specs/2026-05-27-pln1-ag2-parallel-execution.md
-# activation: trail/dod/dod-2026-05-28-worker-contract-plus-pln1-enforce.md
-#
-# Detection + enforcement: parallelizable: true plan + source edit attempt
-# from outside a worker worktree (i.e. .rein/worker-marker.json absent at
-# $PROJECT_DIR) → exit 2 block. Worker-internal edits bypass the gate.
-#
-# Worker-marker bypass rationale: feature-builder-worker agent creates
-# .rein/worker-marker.json in its own worktree root. The marker's presence
-# at $PROJECT_DIR signals that the current hook invocation is inside a
-# worker dispatch — the worker is editing its own scope which IS the
-# legitimate path for parallelizable plans.
-#
-# Backward-compat: legacy plans without `## 실행 전략` section, or with
-# `parallelizable: false`, never enter the inner regex branch. Zero impact.
-if [ -d "$DOD_DIR" ]; then
-  for _pln1_dod_file in "$DOD_DIR"/dod-[0-9]*.md; do
-    [ -f "$_pln1_dod_file" ] || continue
-    _pln1_fname=$(basename "$_pln1_dod_file")
-    echo "$_pln1_fname" | grep -q '^dod-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-' || continue
-    # Skip DoDs already matched in inbox (= completed)
-    _pln1_slug=$(echo "$_pln1_fname" | sed 's/^dod-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-//' | sed 's/\.md$//')
-    _pln1_matched=false
-    if [ -d "$INBOX_DIR" ]; then
-      for _pln1_inbox in "$INBOX_DIR"/[0-9]*.md; do
-        [ -f "$_pln1_inbox" ] || continue
-        _pln1_inbox_slug=$(basename "$_pln1_inbox" .md | sed 's/^[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}-//')
-        if [ "$_pln1_inbox_slug" = "$_pln1_slug" ]; then
-          _pln1_matched=true
-          break
-        fi
-      done
-    fi
-    [ "$_pln1_matched" = true ] && continue
-
-    # Extract plan ref from DoD's ## 범위 연결 section
-    _pln1_plan_ref=$(awk '/^## 범위 연결/{flag=1; next} /^## /{flag=0} flag && /^plan ref:/{sub(/^plan ref:[ \t]*/, ""); gsub(/[ \t]+\([^)]*\)[ \t]*$/, ""); print; exit}' "$_pln1_dod_file" 2>/dev/null)
-    [ -z "$_pln1_plan_ref" ] && continue
-
-    # Resolve plan path relative to PROJECT_DIR
-    _pln1_plan_path="$PROJECT_DIR/$_pln1_plan_ref"
-    [ -f "$_pln1_plan_path" ] || continue
-
-    # Detect `parallelizable: true` literal in plan's ## 실행 전략 section
-    # awk extracts the section body, then grep for the literal value (case-insensitive,
-    # whitespace tolerant). Only stderr advisory; no block.
-    if awk '/^## 실행 전략/{flag=1; next} /^## /{flag=0} flag' "$_pln1_plan_path" 2>/dev/null | grep -qiE '^[[:space:]]*parallelizable[[:space:]]*:[[:space:]]*true[[:space:]]*$'; then
-      # Worker-marker bypass: hook invocation inside a worker worktree is
-      # legitimate (worker editing its declared scope). $PROJECT_DIR resolves
-      # to the current worktree root for worker dispatches.
-      if [ -f "$PROJECT_DIR/.rein/worker-marker.json" ]; then
-        echo "[rein] NOTICE: parallelizable: true plan + worker-marker present — enforcement skip (legitimate worker edit)." >&2
-        continue
-      fi
-      # PLN1-GATE-ENFORCEMENT-ACTIVE (2026-05-28)
-      echo "[rein] BLOCKED: parallelizable plan without AG-2 worker dispatch — plan='$_pln1_plan_ref', file='$FILE_PATH'. Either dispatch via feature-builder-worker agent or set parallelizable: false in the plan." >&2
-      log_block "parallelizable plan without AG-2 worker" "$FILE_PATH"
-      exit 2
-    fi
-  done
-fi
 
 if [ "$DOD_FOUND" = true ]; then
   # Plan A Phase 4 Task 4.2 (GI-dod-gate-validator-call):

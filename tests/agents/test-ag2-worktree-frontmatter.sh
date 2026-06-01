@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # tests/agents/test-ag2-worktree-frontmatter.sh
 #
-# AG-2 regression: feature-builder-worker.md frontmatter + worktree-cleanup.md
-# 존재 + 일반 feature-builder 변형은 isolation:worktree 미보유 (overhead 회피).
+# WORKTREE-MACHINERY-DISCARD regression (Phase 3 / Task 3.3):
+# feature-builder-worker.md is now a SAME-TREE edit-only parallel worker.
+# The worktree machinery (isolation:worktree frontmatter, worker-marker.json,
+# worker-result.json, git worktree, cleanup) and the worktree-cleanup.md doc
+# are DISCARDED. The worker reports via a structured result returned as its
+# final message (Phase 2 parallel-execute 6-key schema).
 #
-# Scope IDs:
-#   AG2-FEATURE-BUILDER-WORKER-WITH-ISOLATION-WORKTREE-FRONTMATTER
-#   AG2-WORKTREE-CLEANUP-MANUAL-PROCEDURE-DOC-WITH-MARKER-RULE
+# Scope ID:
+#   WORKTREE-MACHINERY-DISCARD
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -34,13 +37,13 @@ fail() {
   FAIL=$((FAIL + 1))
 }
 
-echo "=== test-ag2-worktree-frontmatter ==="
+echo "=== test-ag2-worktree-frontmatter (same-tree edit-only worker) ==="
 
 # -----------------------------------------------------------------------
-# (1) feature-builder-worker.md 존재 + frontmatter 검증
+# (1) feature-builder-worker.md exists + frontmatter has NO isolation:worktree
 # -----------------------------------------------------------------------
 echo ""
-echo "[1] feature-builder-worker.md presence + frontmatter"
+echo "[1] feature-builder-worker.md presence + frontmatter (no worktree isolation)"
 
 if [ -f "$WORKER" ]; then
   pass "$WORKER exists"
@@ -48,7 +51,7 @@ else
   fail "$WORKER MISSING"
 fi
 
-# frontmatter block (first --- ... --- pair) 추출
+# frontmatter block (first --- ... --- pair) extraction
 if [ -f "$WORKER" ]; then
   FRONT=$(awk '/^---/{n++; if(n==2) exit; next} n==1{print}' "$WORKER")
 
@@ -59,9 +62,9 @@ if [ -f "$WORKER" ]; then
   fi
 
   if echo "$FRONT" | grep -qE '^isolation:\s*worktree\s*$'; then
-    pass "frontmatter has isolation: worktree (AG-2 literal)"
+    fail "frontmatter still has isolation: worktree (must be removed — same-tree model)"
   else
-    fail "frontmatter MISSING isolation: worktree literal"
+    pass "frontmatter has NO isolation: worktree (same-tree model)"
   fi
 
   if echo "$FRONT" | grep -qE '^description:'; then
@@ -72,91 +75,91 @@ if [ -f "$WORKER" ]; then
 fi
 
 # -----------------------------------------------------------------------
-# (2) feature-builder-worker.md 본문 — cleanup doc reference + stamp refs
+# (2) body has NO worktree machinery references
 # -----------------------------------------------------------------------
 echo ""
-echo "[2] feature-builder-worker.md body references"
+echo "[2] feature-builder-worker.md body has NO worktree machinery"
 
 if [ -f "$WORKER" ]; then
-  if grep -q "docs/worktree-cleanup.md" "$WORKER"; then
-    pass "worker references docs/worktree-cleanup.md"
-  else
-    fail "worker MISSING docs/worktree-cleanup.md reference"
-  fi
-
-  if grep -q "\.codex-reviewed" "$WORKER"; then
-    pass "worker references .codex-reviewed"
-  else
-    fail "worker MISSING .codex-reviewed reference"
-  fi
-
-  if grep -q "\.security-reviewed" "$WORKER"; then
-    pass "worker references .security-reviewed"
-  else
-    fail "worker MISSING .security-reviewed reference"
-  fi
-
-  if grep -q "worker-marker.json" "$WORKER"; then
-    pass "worker references .rein/worker-marker.json (cleanup marker)"
-  else
-    fail "worker MISSING worker-marker.json reference"
-  fi
+  for token in "worker-marker.json" "worker-result.json" "git worktree" "cleanup"; do
+    if grep -qi "$token" "$WORKER"; then
+      fail "worker still references discarded machinery: '$token'"
+    else
+      pass "worker has NO reference to '$token'"
+    fi
+  done
 fi
 
 # -----------------------------------------------------------------------
-# (3) 일반 feature-builder 변형 — isolation: 키 미보유 (overhead 회피)
+# (3) body has the same-tree edit-only contract + structured result schema
 # -----------------------------------------------------------------------
 echo ""
-echo "[3] General feature-builder variants do NOT have isolation:"
+echo "[3] feature-builder-worker.md body has edit-only contract + result schema"
+
+if [ -f "$WORKER" ]; then
+  if grep -q "edit_only" "$WORKER"; then
+    pass "worker declares edit_only mode"
+  else
+    fail "worker MISSING edit_only"
+  fi
+
+  if grep -q "선언 scope" "$WORKER"; then
+    pass "worker restricts editing to 선언 scope (declared scope)"
+  else
+    fail "worker MISSING '선언 scope' (declared-scope restriction)"
+  fi
+
+  if grep -q "커밋 금지" "$WORKER"; then
+    pass "worker prohibits commit (커밋 금지)"
+  else
+    fail "worker MISSING '커밋 금지' (commit prohibition)"
+  fi
+
+  if grep -q "구조화 결과" "$WORKER"; then
+    pass "worker returns 구조화 결과 (structured result)"
+  else
+    fail "worker MISSING '구조화 결과' (structured result)"
+  fi
+
+  # Phase 2 6-key result schema must be present (returned as final message)
+  for key in "task_id" "status" "changed_files" "blocked_reason" "recommendation" "summary"; do
+    if grep -q "$key" "$WORKER"; then
+      pass "worker result schema includes key: $key"
+    else
+      fail "worker result schema MISSING key: $key"
+    fi
+  done
+fi
+
+# -----------------------------------------------------------------------
+# (4) general feature-builder variants still have NO isolation: key
+# -----------------------------------------------------------------------
+echo ""
+echo "[4] General feature-builder variants do NOT have isolation:"
 
 for agent in "${GENERAL_AGENTS[@]}"; do
   if [ ! -f "$agent" ]; then
     fail "$agent MISSING (cannot verify)"
     continue
   fi
-  # Check only frontmatter block (first --- ... --- pair)
   FRONT=$(awk '/^---/{n++; if(n==2) exit; next} n==1{print}' "$agent")
   if echo "$FRONT" | grep -qE '^isolation:'; then
-    fail "$(basename "$agent"): has isolation: key in frontmatter (overhead — should be reserved for worker only)"
+    fail "$(basename "$agent"): has isolation: key in frontmatter (should have none)"
   else
-    pass "$(basename "$agent"): no isolation: key (single-worktree, correct)"
+    pass "$(basename "$agent"): no isolation: key (correct)"
   fi
 done
 
 # -----------------------------------------------------------------------
-# (4) worktree-cleanup.md 존재 + 4 sections
+# (5) worktree-cleanup.md is DISCARDED (must not exist)
 # -----------------------------------------------------------------------
 echo ""
-echo "[4] worktree-cleanup.md presence + sections"
+echo "[5] worktree-cleanup.md is discarded"
 
 if [ -f "$CLEANUP_DOC" ]; then
-  pass "$CLEANUP_DOC exists"
+  fail "$CLEANUP_DOC STILL EXISTS (must be deleted — worktree machinery discarded)"
 else
-  fail "$CLEANUP_DOC MISSING"
-fi
-
-if [ -f "$CLEANUP_DOC" ]; then
-  for section in "## 배경" "## Rein worktree 판별 마커" "## 수동 cleanup 절차" "## stamp 소유권 규칙"; do
-    if grep -q "^${section}" "$CLEANUP_DOC"; then
-      pass "cleanup doc has section: $section"
-    else
-      fail "cleanup doc MISSING section: $section"
-    fi
-  done
-
-  # WorktreeCreate matcher 미지원 사유 명시 확인
-  if grep -q "WorktreeCreate\|WorktreeRemove" "$CLEANUP_DOC"; then
-    pass "cleanup doc cites WorktreeCreate/Remove matcher constraint"
-  else
-    fail "cleanup doc MISSING WorktreeCreate/Remove citation"
-  fi
-
-  # worker-marker.json schema 정의 확인
-  if grep -q "worker-marker.json" "$CLEANUP_DOC" && grep -q "schema_version" "$CLEANUP_DOC"; then
-    pass "cleanup doc defines worker-marker.json schema"
-  else
-    fail "cleanup doc MISSING worker-marker.json schema definition"
-  fi
+  pass "$CLEANUP_DOC does not exist (discarded)"
 fi
 
 echo ""

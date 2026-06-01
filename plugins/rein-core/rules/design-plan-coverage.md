@@ -140,9 +140,9 @@ covers: [A1]
 - matrix 의 모든 `implemented` ID 는 최소 1개 work unit 의 `covers:` 에 등장해야 한다.
 - `covers:` 는 소문자 `covers:` 로 정확히 시작하는 독립 라인이어야 한다 (대문자/공백 변형 불허). ID 목록은 `[id1, id2, ...]` 형식만 허용하며, ID 는 영문·숫자·하이픈·언더스코어만 포함한다. validator 는 plan 파일 어느 위치에서든 `covers:` 라인을 수집하므로 (heading 다음 줄 제약은 강제하지 않음), 가독성을 위해 관련 work unit heading 바로 다음에 배치할 것을 권장한다.
 
-## 2A. 실행 전략 (PLN-1)
+## 2A. 실행 전략 (wave parallel v2)
 
-plan 의 선택적 `## 실행 전략` 섹션이 worker 병렬화를 선언. 부재 = `parallelizable: false`. `true` 시 validator 가 5 fail-closed (workers 누락 / scope 누락·빈·inline / non-path token / glob / 디렉토리) → exit 2. 첫 cycle advisory only — `# PLN1-GATE-ENFORCEMENT-DISABLED-PENDING-AG2-STABILIZATION` 마커 제거로 활성. 상세: `plugins/rein-core/docs/exec-strategy-schema.md`.
+plan 의 선택적 `## 실행 전략` 섹션이 태스크별 `depends_on`/`mode(edit_only|mutating)`/`scope` 로 웨이브를 선언한다. 부재 = 순차 실행 (회귀 없음). validator 가 위상정렬·사이클·동시쌍 disjoint·legacy shape 를 fail-closed (exit 2). 상세 8조건 + schedule emitter: `plugins/rein-core/docs/exec-strategy-schema.md`.
 
 ---
 
@@ -183,7 +183,7 @@ Malformed config 는 **모든 Stage 에서 fail-closed** — Stage 1 silent down
 ## 4. Validator 및 Enforcement
 
 - `scripts/rein-validate-coverage-matrix.py <plan-file>` — 정적 검증
-- `.claude/hooks/post-edit-plan-coverage.sh` — plan 편집 시 자동 실행, 실패 시 `trail/dod/.coverage-mismatch` 마커 생성
+- `post-edit-plan-coverage.sh` — plan 편집 시 자동 실행, 실패 시 `trail/dod/.coverage-mismatch` 마커 생성
 - `pre-bash-test-commit-gate.sh` — 마커 존재 시 `git commit` / `pytest` 차단 (exit 2)
 - 마커 해제: validator 가 성공할 때까지 plan 을 수정하거나, 예외 승인 후 `rm trail/dod/.coverage-mismatch`
 

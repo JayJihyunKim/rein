@@ -21,61 +21,62 @@ description: design 문서를 읽어 rein 의 coverage 매트릭스 + covers 메
 
 후속 구현 작업의 DoD 를 추천·생성하는 경우, 그 DoD 에 `## 변경 파일` 섹션을 필수로 포함하도록 안내한다. repo-relative literal path 를 1개 이상 bullet list (`- <path>`) 로 나열. glob / regex 미지원 (첫 cycle).
 
-## 실행 전략 결정 (PLN-1, v2 추가)
+## 실행 전략 결정 (v2 — 웨이브 병렬)
 
-plan 작성 시 `## 실행 전략` 섹션을 **항상 첨부** 한다. 본 섹션은 plan 의 work units 를 병렬 worker 로 분할할 수 있는지 명시. 기본값은 `parallelizable: false` — **3 axis 모두 충족** 할 때만 true.
+plan 작성 시 v2 `## 실행 전략` 섹션을 **항상 첨부** 한다. 통짜 불리언이 아니라 **태스크별** 로 `depends_on` + `mode`(`edit_only`/`mutating`) + `scope`(예상 실제 write set) 를 선언한다. 스키마 상세·validator 8조건·웨이브 스케줄은 `plugins/rein-core/docs/exec-strategy-schema.md` 참조.
 
-### 3 axis 판정 기준
+### 태스크별 mode 판단 (edit_only | mutating)
 
-| Axis | parallelizable: true 조건 | parallelizable: false 조건 |
-|------|--------------------------|---------------------------|
-| 파일 분산도 | 변경 파일 ≥ 4개 (1 worker 당 ≥2 파일) | 변경 파일 ≤ 3개 (분할 의미 없음) |
-| 파일 소유권 충돌 | worker 별 disjoint file set | 동일 파일 다중 worker 편집 |
-| 실행 순서 의존 | acceptance 순서만 의존 (각 worker 독립 verify) | implementation 의존 (A 가 B 의 산출물 사용) |
+각 태스크의 작업 내용에서 아래 **변경성(mutating) 가능성** 중 **하나라도** 있으면 `mode: mutating`, 없으면 `mode: edit_only`:
 
-3 axis 중 **하나라도** false → `parallelizable: false`. 보수적 기본.
+- 커밋 / 스테이징
+- 코드젠 (코드 생성기 실행)
+- 전체 포매터 (full-formatter — 파일 광범위 rewrite)
+- 패키지 설치 (의존성 추가)
+- 스냅샷 갱신
+- 변경성(mutating) 테스트 — 파일을 쓰는 테스트
+- `scope` **밖** 쓰기 가능성
 
-### worker scope 분할 알고리즘
+판단이 **불명확** 하면 보수적으로 `mutating` 으로 두거나 `depends_on` 으로 순차화한다.
 
-`parallelizable: true` 인 경우 worker 별 scope 결정:
+### scope = 예상 실제 write set
 
-1. **domain boundary 우선** — 자연스러운 디렉토리/모듈 boundary (예: `hooks/` / `rules/` / `agents/` / `tests/`) 로 분할 시도. 한 worker = 한 domain.
-2. **충돌 시 manual ownership fallback** — domain 안에 cross-cut 파일이 있으면, plan-writer 가 파일별로 owner worker 를 명시 지정.
+- `scope` 는 그 태스크가 실제로 **쓸 것으로 예상되는** literal repo-relative file path list (의도된 소스 파일이 아니라 **실제 쓰기 집합**).
+- `mutating` 은 선언 파일에 더해 **예상 부작용 경로**(코드젠 산출물, 스냅샷, 포매터가 건드릴 파일 등) 도 함께 포함한다.
+- **glob/디렉토리 미지원** — `*`, `?`, `[`, `]` 메타문자 또는 `/` 로 끝나는 디렉토리 경로는 validator fail-closed. 명시적 파일만 허용.
 
-### scope 표기 규칙
+### 동시 실행 가능 쌍만 disjoint 필수
 
-- `workers[].scope` 는 **literal repo-relative file path** 만 (예: `plugins/rein-core/hooks/foo.sh`)
-- **glob/regex 미지원** (첫 cycle) — `*`, `?`, `[`, `]` 포함 시 validator fail-closed (exit 2)
-- 디렉토리 경로 (예: `plugins/`) 금지 — 명시적 파일만 허용
+- 서로 `depends_on` 경로가 없어 **동시 실행 가능한** 두 `edit_only` 태스크의 `scope` 는 **pairwise disjoint** 여야 한다 (겹치면 validator fail-closed).
+- `depends_on` 으로 순서가 강제돼 동시 실행되지 않는 쌍은 같은 파일을 만져도 무방하다.
+- 분할 여부가 불명확하면 `depends_on` 으로 순차 실행을 기본으로 둔다.
 
-### 예시 (parallelizable=true)
+### 예시 (edit_only 2개 동시 + mutating 1개 의존)
 
 ```markdown
 ## 실행 전략
 
-parallelizable: true
-workers:
-  - name: rules-worker
+tasks:
+  - id: rules-edit
+    mode: edit_only
     scope:
       - plugins/rein-core/rules/foo.md
       - plugins/rein-core/rules/bar.md
-  - name: agents-worker
+  - id: agents-edit
+    mode: edit_only
     scope:
       - plugins/rein-core/agents/baz.md
-merge_gate: 각 worker 의 codex-review PASS + 메인에서 통합 테스트 실행
+  - id: codegen
+    depends_on: [rules-edit, agents-edit]
+    mode: mutating
+    scope:
+      - plugins/rein-core/generated/schema.json
+      - plugins/rein-core/generated/index.md
 ```
 
-### 예시 (parallelizable=false — 기본)
+`rules-edit` 와 `agents-edit` 는 `depends_on` 경로가 없어 동시 실행 가능 → scope 가 disjoint 다. `codegen` 은 코드젠을 돌리므로 `mutating` 이며, 산출물(예상 부작용 경로)을 scope 에 포함하고 두 edit_only 태스크에 의존해 단독 웨이브로 실행된다.
 
-```markdown
-## 실행 전략
-
-parallelizable: false
-workers: []
-merge_gate: N/A (단일 worker, 본 worktree 에서 sequential 실행)
-```
-
-worker dispatch 는 **manual** (첫 cycle) — 사용자가 `Agent` tool 호출 시 `feature-builder-worker` 지정 + 위 `workers[].scope` 를 prompt 로 전달. cleanup 절차는 `plugins/rein-core/docs/worktree-cleanup.md` 참조.
+웨이브 dispatch 자체는 `parallel-execute` 스킬이 소유한다 — plan-writer 는 위 v2 섹션만 산출하고 워커를 직접 띄우지 않는다.
 
 ## 담당 아님 (경계)
 

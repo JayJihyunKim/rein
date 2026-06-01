@@ -78,11 +78,11 @@ bash scripts/rein-mark-spec-reviewed.sh docs/specs/foo.md codex
 
 #### 범위 커버리지 (design → plan)
 
-plan 문서는 `## Design 범위 커버리지 매트릭스` 섹션을 포함하고 각 work unit(Gate/Phase/Task 등) 에 `covers: [ID, ...]` 메타데이터를 표기할 것을 권장한다. 매트릭스 섹션이 없는 legacy plan 은 validator 가 경고만 출력하며 차단하지 않는다. 자세한 절차는 `.claude/workflows/design-to-plan.md` 참조. `post-edit-plan-coverage.sh` 훅이 자동 검증하고 실패 시 `trail/dod/.coverage-mismatch` 마커로 commit/test 를 차단한다.
+plan 문서는 `## Design 범위 커버리지 매트릭스` 섹션을 포함하고 각 work unit(Gate/Phase/Task 등) 에 `covers: [ID, ...]` 메타데이터를 표기할 것을 권장한다. 매트릭스 섹션이 없는 legacy plan 은 validator 가 경고만 출력하며 차단하지 않는다. 자세한 절차는 plugin 규칙 `plugins/rein-core/rules/design-plan-coverage.md` + `rein:writing-plans` 스킬 참조. `post-edit-plan-coverage.sh` 훅이 자동 검증하고 실패 시 `trail/dod/.coverage-mismatch` 마커로 commit/test 를 차단한다.
 
 #### `/codex-review` 장애 시 Fallback
 
-1. **대체 리뷰어**: rein 자체 `code-reviewer` 스킬 (`.claude/skills/code-reviewer/`) 또는 `general-purpose` 에이전트에게 리뷰 요청 후:
+1. **대체 리뷰어**: rein 자체 `rein:code-reviewer` 스킬 (plugin: `plugins/rein-core/skills/code-reviewer/`) 또는 `general-purpose` 에이전트에게 리뷰 요청 후:
    ```bash
    bash scripts/rein-mark-spec-reviewed.sh docs/specs/foo.md code-reviewer
    ```
@@ -227,12 +227,19 @@ Incident 파일 포맷:
 ## 8. 에이전트 운영 원칙
 
 ### 역할 목록
+
+> 에이전트 정본(SSOT)은 plugin 배포본 `plugins/rein-core/agents/` 다 (Option C Phase 3, 2026-05-13 이후 — `.claude/agents/` overlay 폐기). `/plugin install rein@rein` 으로 `rein:*` namespaced 에이전트로 활성된다.
+
 | 에이전트 | 역할 | 파일 |
 |---------|------|------|
-| feature-builder | 신규 기능 구현 + 버그 수정 + 새 모듈·서비스 초기 스캐폴딩 | `.claude/agents/feature-builder.md` |
-| researcher | 기술 조사 및 문서 수집 전담 | `.claude/agents/researcher.md` |
-| docs-writer | 문서화 및 changelog 작성 전담 | `.claude/agents/docs-writer.md` |
-| security-reviewer | 보안 취약점 탐지 및 수정 제안 전담 | `.claude/agents/security-reviewer.md` |
+| feature-builder | 신규 기능 구현 + 새 모듈·서비스 초기 스캐폴딩 | `plugins/rein-core/agents/feature-builder.md` |
+| feature-builder-fix | 버그 수정 전담 | `plugins/rein-core/agents/feature-builder-fix.md` |
+| feature-builder-refactor | 리팩토링 전담 (기능 변경 없는 구조 개선) | `plugins/rein-core/agents/feature-builder-refactor.md` |
+| feature-builder-worker | 병렬 실행 워커 (같은 트리 edit-only) | `plugins/rein-core/agents/feature-builder-worker.md` |
+| researcher | 기술 조사 및 문서 수집 전담 | `plugins/rein-core/agents/researcher.md` |
+| plan-writer | design 문서 → plan (coverage 매트릭스 + covers) 작성 | `plugins/rein-core/agents/plan-writer.md` |
+| docs-writer | 문서화 및 changelog 작성 전담 | `plugins/rein-core/agents/docs-writer.md` |
+| security-reviewer | 보안 취약점 탐지 및 수정 제안 전담 | `plugins/rein-core/agents/security-reviewer.md` |
 
 ### 새 에이전트 추가 기준 (3가지 모두 충족 시만)
 1. 동일 작업 유형에서 기존 에이전트의 self-review 실패가 **3회 이상** 반복
