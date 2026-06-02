@@ -422,7 +422,12 @@ except ValueError as exc:
     )
     sys.exit(2)
 
-sys.stdout.write(out)
+# Integrity sentinel (PERF-A-LAUNCH-SKIP mitigation): prefix the JSON with a
+# fixed marker the REAL serializer always emits. resolve_python no longer
+# launch-probes bare python3/python on POSIX, so a present-but-broken/garbage
+# interpreter that exits 0 with non-JSON output can reach this point. The shell
+# side requires this exact prefix before trusting stdout; without it → fail-closed.
+sys.stdout.write("\x02REIN_DENY_V1\x02" + out)
 '
   ); then
     py_rc=0
@@ -430,14 +435,32 @@ sys.stdout.write(out)
     py_rc=$?
   fi
 
-  # Fail-closed #4 — python exited nonzero, or produced no output.
-  if [ "$py_rc" -ne 0 ] || [ -z "$json" ]; then
-    if [ "$py_rc" -eq 0 ]; then
+  # Fail-closed #4 — python exited nonzero, produced no output, OR produced
+  # output lacking the integrity sentinel. The three branches each emit a
+  # distinct stderr diagnostic and all `return 2` (no stdout JSON).
+  #
+  # Why the sentinel check (codex review High): resolve_python no longer
+  # launch-probes bare python3/python on POSIX (PERF-A-LAUNCH-SKIP,
+  # docs/specs/2026-06-02-hook-hotpath-perf.md). A present-but-broken/garbage
+  # interpreter is therefore accepted by resolution and runs HERE. Checking
+  # py_rc + non-empty is NOT enough: a shim that exits 0 with non-JSON garbage
+  # would otherwise reach `printf "%s" "$json"; return 0` and UNBLOCK the deny
+  # (fail-OPEN). The real serializer always prefixes its JSON with this exact
+  # sentinel, so a missing sentinel ⇒ not our serializer ⇒ fail-closed.
+  _DENY_SENTINEL=$'\x02REIN_DENY_V1\x02'
+  if [ "$py_rc" -ne 0 ] || [ -z "$json" ] || [ "${json#"$_DENY_SENTINEL"}" = "$json" ]; then
+    if [ "$py_rc" -ne 0 ]; then
+      echo "[rein] A tool call was blocked. rein needs python3 to build the explanation but the interpreter failed to run (a broken or partial python3 install is the likely cause) — the call stays blocked for safety. Installing a working python3, or setting REIN_PYTHON to one, will restore the detailed message." >&2
+    elif [ -z "$json" ]; then
       echo "[rein] A tool call was blocked, but rein's explanation came back empty unexpectedly — discarding it. The call stays blocked for safety." >&2
+    else
+      echo "[rein] A tool call was blocked, but rein's explanation came back malformed (the python3 interpreter produced unexpected output — a broken or non-standard python3 is the likely cause). It stays blocked for safety. Installing a working python3, or setting REIN_PYTHON to one, will restore the detailed message." >&2
     fi
     return 2
   fi
 
+  # Strip the integrity sentinel before emitting the validated JSON.
+  json="${json#"$_DENY_SENTINEL"}"
   printf '%s\n' "$json"
   return 0
 }

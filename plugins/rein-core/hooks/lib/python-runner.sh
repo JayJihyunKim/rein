@@ -198,6 +198,23 @@ resolve_python() {
         ;;
     esac
 
+    # PERF-A-LAUNCH-SKIP: bare python3/python (PATH) on POSIX is sufficiently
+    # proven by command -v success + non-WindowsApps path — skip the launch-based
+    # health_check (~24ms). REIN_PYTHON / VENV candidates do NOT match this branch
+    # (label != python3/python), so they keep health_check (broken-candidate guard).
+    case "$label" in
+      python3|python)
+        case "$(uname -s 2>/dev/null)" in
+          MINGW*|MSYS*|CYGWIN*) : ;;  # Windows family: keep launch
+          *)
+            PYTHON_RUNNER=("${cand[@]}")
+            : "$label" "$found_missing"
+            return 0
+            ;;
+        esac
+        ;;
+    esac
+
     # Actually launch it. This is where Windows 9009 stubs that passed
     # `command -v` get caught (exit 49 after 8-bit truncation).
     if ! health_check "${cand[@]}"; then

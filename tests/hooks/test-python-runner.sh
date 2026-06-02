@@ -344,22 +344,29 @@ EOF
 }
 
 # ============================================================
-# Test 8: launch fail, non-stub → rc=12
-#   python3 exists on a non-WindowsApps path but exits 49 when
-#   invoked → health_check fails → rc=12.
+# Test 8: bare python3/python launch-fail on POSIX → rc=0 (PERF-A-EXIT-PARITY vi)
+#   Hook hot-path perf cycle (2026-06-02, docs/specs/2026-06-02-hook-hotpath-perf.md):
+#   resolve_python skips the launch-based health_check for bare python3/python
+#   on non-Windows. A bare python3 that would launch-fail is therefore ACCEPTED
+#   (rc 0) — the breakage surfaces downstream at extract time. This is the single
+#   intended behavior change (was rc 12 before the cycle).
+#   The launch-fail -> 12 contract for *health_checked* candidates (REIN_PYTHON /
+#   VENV, which do NOT match the bare-name skip branch) is preserved and covered
+#   by tests/hooks/test-python-runner-launch-skip.sh (#6 executable-but-failing
+#   REIN_PYTHON with no fallback).
 # ============================================================
 test_resolver_launch_fail_non_stub() {
   begin "test_resolver_launch_fail_non_stub"
   local out rc
-  # with_fake_python plants python3/python in a tmp dir whose path
-  # does NOT contain "windowsapps". Both will fail health_check with
-  # exit 49. uname=Darwin so no `py -3` branch is added.
+  # with_fake_python plants bare python3/python (exit 49) on a non-windowsapps
+  # path. uname=Darwin → the PERF-A-LAUNCH-SKIP branch applies → the bare python3
+  # candidate is accepted WITHOUT health_check → rc 0 (deviation, was 12).
   out=$(run_resolver \
     "with_fake_uname 'Darwin'" \
     "with_empty_path" \
     "with_fake_python 49")
   rc=$(parse_rc "$out")
-  [ "$rc" = "12" ] || fail "expected rc=12 (launch fail), got '$rc' (out=$out)"
+  [ "$rc" = "0" ] || fail "expected rc=0 (bare python3 launch-skip deviation PERF-A-EXIT-PARITY vi), got '$rc' (out=$out)"
   end
 }
 

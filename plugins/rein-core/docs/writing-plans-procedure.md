@@ -1,16 +1,10 @@
----
-name: writing-plans
-description: design 문서를 읽어 구현 plan (coverage 매트릭스 + covers 메타데이터 포함) 을 작성한다. rein 자체 스킬 — superpowers 미의존.
-triggers:
-  - "design 문서(docs/**/specs/**-design.md) 리뷰 통과 후"
-  - "plan-writer 에이전트 내부 호출"
----
+# plan 작성 절차 (plan-writer 내부 참조)
 
-# writing-plans
+이 문서는 `plan-writer` 에이전트가 plan 작성 시 따르는 내부 참조 절차이며, 사용자가 직접 호출하는 스킬이 아니다.
 
 ## 목적
 
-design 문서의 `## Scope Items` 표에서 ID 를 추출하고, Phase/Task 로 분해한 뒤, `## Design 범위 커버리지 매트릭스` + `covers:` 메타데이터를 포함하는 plan 파일을 작성한다. 작성 후 `python3 scripts/rein-validate-coverage-matrix.py <plan>` 를 실행해 exit 0 이 될 때까지 자기수정 loop 를 돌린다. 이 스킬의 핵심 산출물은 "validator 가 통과하는 plan 문서" 이다.
+design 문서의 `## Scope Items` 표에서 ID 를 추출하고, Phase/Task 로 분해한 뒤, `## Design 범위 커버리지 매트릭스` + `covers:` 메타데이터를 포함하는 plan 파일을 작성한다. 작성 후 `python3 scripts/rein-validate-coverage-matrix.py <plan>` 를 실행해 exit 0 이 될 때까지 자기수정 loop 를 돌린다. 이 절차의 핵심 산출물은 "validator 가 통과하는 plan 문서" 이다.
 
 ## 실행 순서
 
@@ -104,23 +98,25 @@ covers: [A2]
 
 ## Handoff 메시지 포맷
 
+이 절차는 `plan-writer` 가 수행한다. validator 통과(exit 0) 직후 plan-writer 가 자동으로 codex 리뷰를 이어서 수행하므로 **사용자의 수동 `/codex-review` 호출은 불필요**하다. 리뷰 통과 시 plan-writer 가 리뷰 표식을 생성한 뒤 구현 단계로 핸드오프한다.
+
 ```
 Plan 작성 완료: docs/**/plans/YYYY-MM-DD-<slug>-implementation.md
 - Scope IDs covered: [A1, A2, A3] (N implemented / M deferred)
 - Validator: exit 0
 
-다음 단계:
-1. /codex-review 로 plan 문서 리뷰 요청
-2. 리뷰 통과 후 bash scripts/rein-mark-spec-reviewed.sh <plan-file> 실행
-3. subagent-driven-development 스킬 (또는 executing-plans) 으로 plan 실행
+이후 자동 진행 (plan-writer 수행):
+1. validator 통과 직후 plan-writer 가 plan 문서에 대한 codex 리뷰를 자동 수행 (사용자 수동 트리거 불필요)
+2. 리뷰 통과 시 plan-writer 가 리뷰 표식 생성
+3. 구현 단계로 핸드오프
 ```
 
 ## 사용자 안내
 
-이 SKILL 의 결과를 사용자에게 보고할 때 다음 짧은 형식을 **먼저** 출력한다 (위 `Handoff 메시지 포맷` 블록은 그 다음에 그대로 이어 붙인다). 형식은 한 문장 또는 두 문장 — 결과 1줄 + 다음 액션 1줄.
+plan 작성 결과를 사용자에게 보고할 때 다음 짧은 형식을 **먼저** 출력한다 (위 `Handoff 메시지 포맷` 블록은 그 다음에 그대로 이어 붙인다). 형식은 한 문장 또는 두 문장 — 결과 1줄 + 다음 진행 1줄.
 
 **성공 (plan 작성 + matrix 통과)**:
-> plan 작성 완료. design 의 Scope IDs N개 모두 cover 했고 validator 통과. 이제 /codex-review 로 plan 리뷰를 요청하면 됩니다.
+> plan 작성 완료. design 의 Scope IDs N개 모두 cover 했고 validator 통과. plan-writer 가 이어서 codex 리뷰를 자동 수행하며, 통과하면 구현 단계로 넘어갑니다 (별도 수동 리뷰 요청 불필요).
 
 **Coverage validator 실패 (gap)**:
 > plan 의 coverage matrix 에 [gap 종류 — 미해결 ID N개 또는 unknown ID 등] 가 있어 validator 가 차단했어요. matrix/covers 를 수정한 뒤 다시 시도하세요.

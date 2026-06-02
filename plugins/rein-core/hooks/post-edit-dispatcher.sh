@@ -2,9 +2,11 @@
 # Hook: PostToolUse(Edit|Write|MultiEdit) — dispatcher (DEPRECATED, Phase 2b)
 #
 # Cycle X3 (영역 E.3, plan §4.5.3, 2026-05-20): historical body removed.
-# The 8 sub-hooks have been registered as separate hooks.json entries since
-# Phase 2b (HK-4); Claude Code's native entry-merge semantics replace the
-# aggregator role this dispatcher used to fill. PERF-2's resolver cache
+# The sub-hooks have been registered as separate hooks.json entries since
+# Phase 2b (HK-4); there are now 11 PostToolUse(Edit) entries (the original
+# 8 + dod-routing-check + state-journal + aggregator). Claude Code's native
+# entry-merge semantics replace the aggregator role this dispatcher used to
+# fill. PERF-2's resolver cache
 # (`lib/hook-resolver-cache.sh`) replaces the dispatcher's env-var cache.
 #
 # This stub is retained so that a hooks.json regression that re-registers

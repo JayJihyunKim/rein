@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.4.2** (2026-06-01) — Plan-driven parallel execution. A new `parallel-execute` skill reads a plan's declared task dependencies and runs the independent, edit-only tasks as concurrent subagents in the same working tree, while dependent or file-mutating tasks run sequentially; the main session verifies, tests, and commits after each wave, and falls back to sequential when the host can't parallelize. This release also closes a gap where autonomous runs could skip the code/security review gates, and reduces false review blocks from branch operations that only change file timestamps. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.4.3** (2026-06-02) — Spec-authoring agent + unified plan-authoring entry point + faster, hardened hooks. A new `spec-writer` agent turns a brainstorm doc into a rein-format spec with an automatic review pass, mirroring the plan-authoring flow. The `/writing-plans` skill is removed so plan authoring always goes through `plan-writer` (and its review step). Edit/Bash hooks spawn the Python interpreter fewer times (skipping the launch-time existence probe on POSIX; the Windows diagnostic path is unchanged), and the deny-message builder gained an integrity check so a present-but-broken python3 can never let a blocked call slip through (always fail-closed, with a clearer diagnostic). ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

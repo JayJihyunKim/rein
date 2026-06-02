@@ -69,16 +69,14 @@ fi
 INPUT=$(cat || true)
 [ -n "$INPUT" ] || exit 0
 
-FILE_PATH=$(printf '%s' "$INPUT" | python3 -c '
+META2=$(printf '%s' "$INPUT" | python3 -c '
 import json, sys
 try:
     data = json.loads(sys.stdin.read())
 except Exception:
-    print("")
-    sys.exit(0)
+    print(""); print(""); sys.exit(0)
 if not isinstance(data, dict):
-    print("")
-    sys.exit(0)
+    print(""); print(""); sys.exit(0)
 ti = data.get("tool_input") or {}
 tr = data.get("tool_response") or {}
 tl = data.get("tool_result") or {}
@@ -89,8 +87,15 @@ if not p and isinstance(tr, dict):
     p = tr.get("filePath") or ""
 if not p and isinstance(tl, dict):
     p = tl.get("file_path") or ""
-print(p or "")
+tid = data.get("tool_use_id")
+tid = tid if isinstance(tid, str) else ""
+# tool_use_id FIRST (toolu_ format — newline-free), file_path LAST so any
+# embedded newline in file_path is preserved as the remaining lines (codex
+# Medium: a newline-bearing file_path must not desync the two-field transport).
+sys.stdout.write(tid + "\n" + (p or ""))
 ' 2>/dev/null || true)
+TOOL_USE_ID=$(printf '%s\n' "$META2" | sed -n '1p')
+FILE_PATH=$(printf '%s\n' "$META2" | sed '1d')
 
 [ -n "$FILE_PATH" ] || exit 0
 
@@ -126,17 +131,7 @@ sys.stdout.write(json.dumps(env, ensure_ascii=False, separators=(",", ":")))
 # Phase 2c HK-5: aggregator merge 위해 output cache 에 write 시도. 성공 시
 # stdout skip — post-edit-aggregator (PostToolUse 마지막 entry) 가 자신의 entry
 # 에서 합쳐 emit. 실패 시 stdout fallback (기존 동작 — Claude Code 가 본 entry
-# 의 envelope 을 직접 surface).
-TOOL_USE_ID=$(printf '%s' "$INPUT" | python3 -c '
-import sys, json
-try:
-    d = json.loads(sys.stdin.read())
-except Exception:
-    sys.exit(0)
-if isinstance(d, dict):
-    sys.stdout.write(d.get("tool_use_id", "") or "")
-' 2>/dev/null || true)
-
+# 의 envelope 을 직접 surface). TOOL_USE_ID 는 위 META2 추출에서 이미 설정됨.
 if [ -n "$TOOL_USE_ID" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/hook-output-cache.sh" ]; then
   # shellcheck disable=SC1091
   . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/hook-output-cache.sh"

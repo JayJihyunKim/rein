@@ -61,9 +61,10 @@ DoD 파일에서 아래 4가지 신호를 추출한다.
 | 새 기능 추가 | `rein:feature-builder` | `rein:codex-review` | — |
 | 버그 수정 | `rein:feature-builder-fix` | `rein:codex-review`, `superpowers:systematic-debugging` | — |
 | 리팩토링 | `rein:feature-builder-refactor` | `rein:codex-review` | — |
-| 새 모듈·서비스 초기화 | `rein:feature-builder` | `rein:writing-plans`, `rein:codex-review` | — |
+| 새 모듈·서비스 초기화 | `rein:feature-builder` | `rein:codex-review` | — |
 | 기술 조사 | `rein:researcher` | — | `context7` |
-| plan 작성 | `rein:plan-writer` | `rein:writing-plans` | — |
+| spec 작성 | `rein:spec-writer` | — | — |
+| plan 작성 | `rein:plan-writer` | — | — |
 | 코드 리뷰 | `rein:code-reviewer` | `rein:codex-review` | — |
 | 보안 리뷰 | `rein:security-reviewer` | — | — |
 | 문서 작성 | `rein:docs-writer` | — | — |

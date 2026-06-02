@@ -83,9 +83,9 @@ tasks:
 - self-fix loop (Codex spec review 피드백 자동 반영): 사용자 개입 필요
 - 구현 코드 편집: feature-builder
 
-## 내부 호출
+## plan 작성 절차
 
-- `.claude/skills/writing-plans/` 스킬 (rein-native, A4)
+plan 작성의 단계별 절차(Scope 추출 → Phase·Task 분해 → covers 매핑 → matrix 작성 → validator 자기수정 loop → Plan 문서 구조·작성 원칙)는 `plugins/rein-core/docs/writing-plans-procedure.md` 를 따른다. 이 문서는 plan-writer 전용 내부 참조이며 사용자가 직접 호출하는 스킬이 아니다.
 
 ## 완료 기준 (DoD)
 

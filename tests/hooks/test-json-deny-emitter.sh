@@ -316,6 +316,40 @@ if [ -z "$ERR" ]; then
 fi
 echo "  ok: (8) python3 absent → fail-closed (exit 2, stderr, no stdout JSON)"
 
+# ---------- (8b) broken python exits 0 with garbage → fail-closed ------------
+# codex review (perf cycle) High: PERF-A-LAUNCH-SKIP means resolve_python no
+# longer launch-probes bare python3/python. A shim that EXITS 0 but emits
+# non-JSON garbage (no integrity sentinel) must NOT unblock the deny — without
+# the sentinel check, deny_emit would print the garbage on stdout and return 0
+# (fail-OPEN). Expect: exit 2, NO stdout JSON, stderr diagnostic.
+FAKE_BIN2=$(mktemp -d)
+printf '#!/bin/sh\ncat >/dev/null 2>&1\nprintf "not json"\nexit 0\n' > "$FAKE_BIN2/python3"
+printf '#!/bin/sh\ncat >/dev/null 2>&1\nprintf "not json"\nexit 0\n' > "$FAKE_BIN2/python"
+chmod +x "$FAKE_BIN2/python3" "$FAKE_BIN2/python"
+CLEAN_PATH2="$FAKE_BIN2"
+for tool in bash cat dirname mktemp chmod env tr; do
+  tdir=$(dirname "$(command -v "$tool" 2>/dev/null)" 2>/dev/null)
+  case ":$CLEAN_PATH2:" in
+    *":$tdir:"*) : ;;
+    *) [ -n "$tdir" ] && CLEAN_PATH2="$CLEAN_PATH2:$tdir" ;;
+  esac
+done
+err_file=$(mktemp); out_file=$(mktemp)
+PATH="$CLEAN_PATH2" REIN_PYTHON="" VIRTUAL_ENV="" \
+  bash "$HELPER" "garbage interpreter must fail closed" "GARBAGE_PY_CODE" >"$out_file" 2>"$err_file"
+RC=$?; OUT=$(cat "$out_file"); ERR=$(cat "$err_file"); rm -f "$err_file" "$out_file"
+rm -rf "$FAKE_BIN2"
+if [ "$RC" -ne 2 ]; then
+  note_fail "(8b) garbage-exit-0 python must fail-closed with exit 2, got $RC"
+fi
+if [ -n "$OUT" ]; then
+  note_fail "(8b) garbage-exit-0 python must emit NO stdout (fail-OPEN guard), got: $OUT"
+fi
+if [ -z "$ERR" ]; then
+  note_fail "(8b) garbage-exit-0 python must write a diagnostic to stderr"
+fi
+echo "  ok: (8b) broken python exits 0 + garbage → fail-closed (sentinel guard, no stdout)"
+
 # ---------- (9) empty trusted_reason → fail-closed ---------------------------
 run_emit "" "SOME_CODE"
 if [ "$RC" -ne 2 ]; then
@@ -565,7 +599,7 @@ echo "  ok: (15) tiny REIN_DENY_MAX_LEN floor-clamped: normal code marker whole,
 
 echo ""
 if [ "$FAIL" -eq 0 ]; then
-  echo "test-json-deny-emitter: OK (15 scenarios, incl. 6b boundary sub-case)"
+  echo "test-json-deny-emitter: OK (15 scenarios, incl. 6b boundary + 8b garbage-exit-0 sentinel sub-cases)"
   exit 0
 else
   echo "test-json-deny-emitter: $FAIL scenario(s) FAILED"
