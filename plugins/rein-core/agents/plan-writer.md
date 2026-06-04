@@ -87,6 +87,30 @@ tasks:
 
 plan 작성의 단계별 절차(Scope 추출 → Phase·Task 분해 → covers 매핑 → matrix 작성 → validator 자기수정 loop → Plan 문서 구조·작성 원칙)는 `plugins/rein-core/docs/writing-plans-procedure.md` 를 따른다. 이 문서는 plan-writer 전용 내부 참조이며 사용자가 직접 호출하는 스킬이 아니다.
 
+### 작성 직전: provenance claim (ROUTE-BIND-1)
+
+plan 파일을 **Write/Edit/MultiEdit 하기 직전마다** provenance claim 을 기록한다.
+"이 plan 은 plan-writer 가 작성했다"는 증거로, 호스트 훅이 인라인 작성 nudge 판정에
+쓴다. **작성 직후가 아니라 직전.**
+
+Bash tool 로 (plugin-aware 경로):
+
+```bash
+MARK_SCRIPT="${CLAUDE_PLUGIN_ROOT:-}/scripts/rein-mark-design-provenance.sh"
+[ -f "$MARK_SCRIPT" ] || MARK_SCRIPT="plugins/rein-core/scripts/rein-mark-design-provenance.sh"   # repo-local/비-plugin fallback (helper 가 plugin source 에만 존재 — 루트 scripts/ 에 없음)
+[ -f "$MARK_SCRIPT" ] || MARK_SCRIPT="scripts/rein-mark-design-provenance.sh"
+bash "$MARK_SCRIPT" "<작성할 plan 경로>" plan-writer "${CLAUDE_SESSION_ID:-unknown}"
+```
+
+- **매 authored write 직전 재기록**.
+- **자기수정 loop 주의**: validator 통과까지의 matrix/covers 재편집, codex-review
+  후 수정 등 같은 plan 을 여러 번 편집할 때도 **매 Edit 직전 claim 을 재기록**한다.
+  consume 는 1회성이므로 직전 재-claim 이 없으면 두 번째 편집부터 nudge 가 뜬다
+  (정상 경로 무발화 유지를 위해 재-claim 필수).
+- **session 식별자 출처**: `${CLAUDE_SESSION_ID:-unknown}` 을 helper 의 세 번째 인자로
+  넘긴다. 에이전트 컨텍스트에 세션 id 환경변수가 없으면 helper 의 default `unknown`
+  이 적용된다 — 매칭 키는 경로(`path=`)라 session 값은 기능에 영향 없다.
+
 ## 완료 기준 (DoD)
 
 1. design 의 모든 Scope ID 가 plan matrix 의 `implemented` 또는 `deferred` 행으로 등장

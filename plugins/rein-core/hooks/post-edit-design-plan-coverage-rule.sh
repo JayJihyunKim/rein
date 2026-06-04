@@ -21,12 +21,41 @@
 # (cheap), not file-existence based — the model gets the brief regardless
 # of whether the validator finds a matrix on disk.
 #
+# ROUTE-BIND-1: spec/plan 작성 시 provenance claim 부재면 soft nudge(stderr,
+# exit 0) 도 emit — 전용 에이전트 경유 작성을 유도(차단 아님). 정당 수동 작성은
+# advisory 라 무해.
+#
 # Scope ID: post-tool-use-injects-design-plan-coverage-action-mandate-plus-body-when-edit-write-targets-docs-specs-or-docs-plans-or-trail-dod-dod
 set -euo pipefail
 
 if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   exit 0
 fi
+
+# --- design-route nudge 문구 (ROUTE-BIND-1, SC-5) ---
+# 정의가 호출 블록(glob case 이후)보다 위에 있어야 한다 — bash 는 top-to-bottom
+# 이라 호출 라인 실행 시점에 정의돼 있어야 한다(미정의 함수 호출 exit 127 방지).
+# 채널 = stderr(>&2), exit 0 — additionalContext 미사용(aggregator 미간섭).
+# stamp/provenance/hash/exit code/표식 등 내부용어 비노출 — "전용 작성 경로"로
+# 평이화(response-tone).
+_design_route_nudge() {
+  case "$1" in
+    spec)
+      {
+        echo "[rein] docs/specs 에 직접 작성한 것으로 보입니다. rein 에서는 spec-writer 가 설계 문서를 쓰고"
+        echo "       바로 검토까지 받게 되어 있습니다. 전용 작성 경로가 아니었다면, 멈추고 spec-writer 로"
+        echo "       다시 작성하는 편이 안전합니다. (의도한 수동 작성이면 이 안내는 무시해도 됩니다.)"
+      } >&2
+      ;;
+    plan)
+      {
+        echo "[rein] docs/plans 에 직접 작성한 것으로 보입니다. rein 에서는 plan-writer 가 구현 계획을 쓰고"
+        echo "       커버리지 검증·검토까지 받게 되어 있습니다. 전용 작성 경로가 아니었다면, 멈추고 plan-writer 로"
+        echo "       다시 작성하는 편이 안전합니다. (의도한 수동 작성이면 이 안내는 무시해도 됩니다.)"
+      } >&2
+      ;;
+  esac
+}
 
 # HK-4: 분할 후 dispatcher 가 처리하던 정책 평가를 각 sub-hook 이 자체 호출.
 if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/post-edit-policy-gate.sh" ]; then
@@ -102,12 +131,67 @@ FILE_PATH=$(printf '%s\n' "$META2" | sed '1d')
 # Glob match — accept absolute or repo-relative paths. Order matters: the
 # trail/dod pattern requires a `dod-` prefix on the filename, while the
 # docs/specs and docs/plans patterns match any descendant.
+# NUDGE_KIND 은 spec/plan match 에만 세팅 — ROUTE-BIND-1 nudge 분기용.
+# trail/dod 는 coverage brief 만 받고 nudge 비대상(빈 동작).
+NUDGE_KIND=""
 case "$FILE_PATH" in
-  */docs/specs/*|docs/specs/*) ;;
-  */docs/plans/*|docs/plans/*) ;;
-  */trail/dod/dod-*.md|trail/dod/dod-*.md) ;;
+  */docs/specs/*|docs/specs/*) NUDGE_KIND="spec" ;;
+  */docs/plans/*|docs/plans/*) NUDGE_KIND="plan" ;;
+  */trail/dod/dod-*.md|trail/dod/dod-*.md) ;;   # coverage brief 만, nudge 아님
   *) exit 0 ;;
 esac
+
+# --- design-route nudge (ROUTE-BIND-1) ---
+# spec/plan 이 전용 에이전트(spec-writer/plan-writer)의 provenance claim 없이
+# 써지면 soft nudge(stderr advisory, exit 0)를 emit. claim 이 있으면 매칭 후
+# 소비(삭제)하고 무발화 (presence+consume — SC-3). timestamp 비교 없음.
+# 비차단 불변식: 어떤 단계 실패도 exit 2 안 함 (호스트 훅 계약 보존).
+# 의도한 수동 작성(메인테이너 dogfood / 외부 에디터 / 리뷰 fix / 마이그레이션)이면
+# advisory 라 무해 — nudge 문구 괄호절이 면책 (SC-7).
+# opt-out 메커니즘은 첫 cycle 비도입 (advisory 라 무해 + 괄호절 면책).
+# 후속 cycle 에서 .rein/policy 기반 suppress 검토 (본 cycle 비범위 — SC-7).
+# hot-path 0 (NFR-1/2): 본 블록은 위 case 가 비-design 을 *) exit 0 으로 거른
+# 이후 [ -n "$NUDGE_KIND" ] 안쪽에서만 실행 → 비-design 편집은 python3/grep/rm
+# 어떤 프로세스도 spawn 안 함.
+if [ -n "$NUDGE_KIND" ]; then
+  _emit_nudge=1
+  # 절대경로 정규화 — helper/spec-review-gate 와 동일 (매칭 키 일치).
+  _abs=$(python3 -c "import os,sys; print(os.path.abspath(sys.argv[1]))" "$FILE_PATH" 2>/dev/null || true)
+  if [ -n "$_abs" ]; then
+    # hash 규약 재사용 (post-edit-spec-review-gate.sh:81-93 와 byte-identical).
+    _design_compute_hash() {
+      local input="$1"
+      if command -v shasum >/dev/null 2>&1; then printf '%s' "$input" | shasum | cut -c1-16
+      elif command -v sha1sum >/dev/null 2>&1; then printf '%s' "$input" | sha1sum | cut -c1-16
+      else local t="${input: -12}"; local l="${#input}"; printf '%s%d' "$(echo "$t" | tr -cd 'a-zA-Z0-9')" "$l" | cut -c1-16; fi
+    }
+    # hash 실패도 비차단 (set -e fail-soft): shasum/sha1sum/cut 파이프가 깨져도
+    # _hash="" 로 두고 매칭을 건너뛴다 → nudge 정상 발화, exit 0 유지.
+    _hash=$(_design_compute_hash "$_abs" 2>/dev/null) || _hash=""
+    # PROJECT_DIR: 호스트 훅은 CLAUDE_PLUGIN_ROOT inject runtime — project-dir.sh
+    # 로 helper 와 동일 해소. (미source 시 source)
+    if ! declare -F resolve_project_dir >/dev/null 2>&1; then
+      . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/project-dir.sh" 2>/dev/null || true
+    fi
+    if declare -F resolve_project_dir >/dev/null 2>&1; then
+      # resolve_project_dir 실패도 비차단 — $PWD 로 fallback (set -e 회피).
+      _pd=$(resolve_project_dir "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)") || _pd="$PWD"
+      [ -n "$_pd" ] || _pd="$PWD"
+    else
+      _pd="$PWD"
+    fi
+    _marker="$_pd/.rein/cache/.design-provenance/${_hash}.touched"
+    # 매칭 = hash 비어있지 않음 + claim 존재 + path= 정확 대조 (grep -qxF — BRE
+    # 메타문자 방어). hash 실패(_hash="") 시 매칭 건너뜀 → nudge.
+    if [ -n "$_hash" ] && [ -f "$_marker" ] && grep -qxF -- "path=$_abs" "$_marker" 2>/dev/null; then
+      rm -f "$_marker" 2>/dev/null || true   # consume — 1회성. rm 실패해도 비차단(exit 0 유지).
+      _emit_nudge=0                            # 정상 경로 — 무발화.
+    fi
+  fi
+  if [ "$_emit_nudge" = "1" ]; then
+    _design_route_nudge "$NUDGE_KIND"   # 위에서 정의한 문구 함수 (정의가 위·같은 커밋 — issue 1)
+  fi
+fi
 
 # shellcheck disable=SC1091
 . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/rule-inject.sh"

@@ -63,6 +63,7 @@ for test_file in \
   "$SCRIPT_DIR/test-pre-tool-use-agent-rules.sh" \
   "$SCRIPT_DIR/test-pre-tool-use-bash-rules.sh" \
   "$SCRIPT_DIR/test-post-edit-design-plan-coverage-rule.sh" \
+  "$SCRIPT_DIR/test-design-provenance-marker.sh" \
   "$SCRIPT_DIR/test-hooks-json-schema.sh" \
   "$SCRIPT_DIR/test-overflow-handoff-no-truncation.sh" \
   "$SCRIPT_DIR/test-pre-edit-dod-gate-no-orchestrator-ref.sh" \

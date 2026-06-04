@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.4.3** (2026-06-02) — Spec-authoring agent + unified plan-authoring entry point + faster, hardened hooks. A new `spec-writer` agent turns a brainstorm doc into a rein-format spec with an automatic review pass, mirroring the plan-authoring flow. The `/writing-plans` skill is removed so plan authoring always goes through `plan-writer` (and its review step). Edit/Bash hooks spawn the Python interpreter fewer times (skipping the launch-time existence probe on POSIX; the Windows diagnostic path is unchanged), and the deny-message builder gained an integrity check so a present-but-broken python3 can never let a blocked call slip through (always fail-closed, with a clearer diagnostic). ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.4.4** (2026-06-04) — Guidance when design docs are written inline. When a `docs/specs/` or `docs/plans/` file is authored without going through the `spec-writer`/`plan-writer` agent, a post-edit hook now emits a soft, non-blocking nudge ("safer to re-author via the dedicated path — ignore if the manual write was intentional"). The normal path (authored by the dedicated agents) stays silent, and since it never blocks, manual fixes / review tweaks / external-editor writes / migrations still work. It fires only when design docs are written, so there is no latency impact on the per-edit hot path. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

@@ -35,10 +35,37 @@ brainstorm 의 세 축을 spec 으로 전개한다:
 
 이 흐름은 plan-writer 와 달리 **2단계**다 — **(1) spec 작성 → (2) 자동 codex-review**. 그 사이에 plan-writer 가 수행하는 **coverage-matrix validator 단계가 없다**. spec 은 plan 의 입력일 뿐 coverage 매트릭스를 스스로 갖지 않으므로, spec-writer 는 coverage-matrix validator 를 실행하지 않는다(부재). 매트릭스 검증은 다운스트림 plan-writer 가 plan 작성 시 수행한다.
 
+절차 흐름: **추출 → claim → 작성 → codex-review → verdict 분기**.
+
 1. brainstorm 문서를 읽고 Chosen Direction / Constraints / Open Questions 를 추출.
-2. spec 본문 작성 — 반드시 `brainstorm ref:` 줄과 `## Scope Items` 섹션을 포함(아래 "필수 섹션 계약" 참조).
-3. 작성 직후 자동 codex-review 호출 (아래 "자동 codex review" 섹션).
-4. verdict 분기 — PASS → 표식 생성 + handoff, NEEDS-FIX/REJECT → 표식 미생성 + 사용자 핸드오프.
+2. **작성 직전: provenance claim 기록** (아래 "### 작성 직전: provenance claim (ROUTE-BIND-1)" 단계).
+3. spec 본문 작성 — 반드시 `brainstorm ref:` 줄과 `## Scope Items` 섹션을 포함(아래 "필수 섹션 계약" 참조).
+4. 작성 직후 자동 codex-review 호출 (아래 "자동 codex review" 섹션).
+5. verdict 분기 — PASS → 표식 생성 + handoff, NEEDS-FIX/REJECT → 표식 미생성 + 사용자 핸드오프.
+
+### 작성 직전: provenance claim (ROUTE-BIND-1)
+
+spec 파일을 **Write/Edit/MultiEdit 하기 직전마다** provenance claim 을 기록한다.
+이것은 "이 spec 은 전용 에이전트(spec-writer)가 작성했다"는 증거로, 호스트 훅이
+인라인 작성 nudge 를 띄울지 판정하는 데 쓴다. **작성 직후가 아니라 직전** — 훅은
+파일 Write 직후 동기 발화하므로, 직전 claim 이 있어야 정상 경로가 무발화한다.
+
+Bash tool 로 (plugin-aware 경로):
+
+```bash
+MARK_SCRIPT="${CLAUDE_PLUGIN_ROOT:-}/scripts/rein-mark-design-provenance.sh"
+[ -f "$MARK_SCRIPT" ] || MARK_SCRIPT="plugins/rein-core/scripts/rein-mark-design-provenance.sh"   # repo-local/비-plugin fallback (helper 가 plugin source 에만 존재 — 루트 scripts/ 에 없음)
+[ -f "$MARK_SCRIPT" ] || MARK_SCRIPT="scripts/rein-mark-design-provenance.sh"
+bash "$MARK_SCRIPT" "<작성할 spec 절대/상대 경로>" spec-writer "${CLAUDE_SESSION_ID:-unknown}"
+```
+
+- **매 authored write 직전 재기록** — 같은 spec 을 여러 turn/Edit 으로 수정해도 각
+  write 직전 claim 이 그 write 를 커버한다(멱등; consume 1회성과 충돌 없음).
+- claim 작성 실패는 비차단 — 작성을 계속 진행한다(최악 = 그 write 가 nudge 될 뿐,
+  advisory 라 무해).
+- **session 식별자 출처**: `${CLAUDE_SESSION_ID:-unknown}` 을 helper 의 세 번째 인자로
+  넘긴다. 에이전트 컨텍스트에 세션 id 환경변수가 없으면 helper 의 default `unknown`
+  이 적용된다 — 매칭 키는 경로(`path=`)라 session 값은 기능에 영향 없다.
 
 ## 필수 섹션 계약
 

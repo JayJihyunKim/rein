@@ -4,6 +4,11 @@
 
 DoD → routing → implement → codex-review → security-review → fix → test → self-review → inbox → index 순서를 따른다. hook 이 차단하면 stderr 안내에 따라 이전 단계로 복귀. Answer-only mode (단순 정보·의견·tradeoff) 는 skip 하지만 코드 편집 의도 발생 즉시 정상 시퀀스 자동 전환 (`pre-edit-dod-gate.sh`).
 
+## 설계 체인
+
+설계 작업은 brainstorm(`rein:brainstorming`) → spec-writer → plan-writer → 구현 순으로 흐른다.
+spec/plan 은 전용 에이전트로 작성한다(인라인 작성 시 nudge 가 안내).
+
 ## 11-step 압축 표
 
 | # | Step | 행동 / 산출물 | Why |
