@@ -22,6 +22,8 @@
 - 발견 대상은 **현재 세션에서 실제로 활성화된 capability** 뿐이다 — 세션 목록에 없는 항목은 추천하지 않는다.
 - **SKILL.md 본문 blanket pre-scan 금지** — 발견 단계에서 모든 skill 의 `SKILL.md` 본문을 미리 읽지 않는다. description 1줄로 1차 매칭하고, 특정 skill 을 선택·실행할 때 필요하면 그때 progressive disclosure 로 해당 skill 본문만 읽는다.
 
+> 런타임 id 는 `rein:*` 가 canonical 이고 package manifest 의 `name:` 은 unnamespaced(local) 다 — 기록·추천 시 namespaced(`rein:*`) 를 쓴다.
+
 ---
 
 ## 2. 신호 추출 — DoD 에서
@@ -98,6 +100,8 @@ DoD 파일에서 아래 4가지 신호를 추출한다.
 복합 작업 분리 원칙:
 - 버그 수정 + 신규 기능이 동시에 필요하면 **DoD 를 두 개로 분리**하고 각각 적합한 에이전트로 라우팅한다.
 - 단일 DoD 내에서 변형이 혼재하면 **더 지배적인 작업 유형**으로 판단하고 근거를 rationale 에 명시한다.
+- **유형 우선순위**: 한 작업이 여러 유형에 걸치면 `spec`/`plan` 작성(명시 시) > `review`(코드/보안) > 구현(feature/fix/refactor) > `research` > `docs` 순으로 지배 유형을 정한다 (산출물 단계가 가장 강한 신호).
+- **지배적 유형 판정**: 단일 DoD 에 변형이 혼재하면 완료 기준(acceptance)이 가리키는 산출물을 지배 유형으로 보고 근거를 rationale 에 1줄 명시한다.
 
 ---
 

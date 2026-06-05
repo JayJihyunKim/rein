@@ -144,6 +144,14 @@ ok "C: approved helper bootstraps repo-local state"
 #
 # After B auto-bootstrapped $REPO, a second SessionStart on the same repo
 # should hit bootstrap_check rc=0 and exit silently.
+#
+# ONBOARD-1: the rc=0 path now emits a one-time first-session backfill primer
+# when the .rein/.onboarded marker is absent (SCOPE-BACKFILL; covered by
+# test-onboarding-primer.sh). Fixture B auto-bootstraps via the read-only
+# bootstrap hook, which never writes that marker (the rules hook does, and this
+# test never runs it). Seed the marker here so D asserts only the rc=0
+# degraded-clear silence, representing an already-onboarded user.
+printf 'onboarded=2026-01-01T00:00:00\nversion=1.0.0\n' > "$REPO/.rein/.onboarded"
 run_hook "$REPO" "$TMP/repo-initialized.out"
 [ ! -s "$TMP/repo-initialized.out" ] || fail "D: initialized repo should be silent"
 ok "D: initialized repo silent"
@@ -358,6 +366,11 @@ printf '# index\n' > "$HEALED_REPO/trail/index.md"
 printf 'user-opt-out\n' > "$HEALED_REPO/.claude/cache/.rein-session-degraded"
 [ -f "$HEALED_REPO/.claude/cache/.rein-session-degraded" ] \
   || fail "J: setup error — stale marker not seeded"
+# ONBOARD-1: seed the onboarded marker so the rc=0 backfill primer
+# (SCOPE-BACKFILL, covered by test-onboarding-primer.sh) does not fire here.
+# This fixture asserts only the degraded-clear rc=0 silence for an
+# already-onboarded user.
+printf 'onboarded=2026-01-01T00:00:00\nversion=1.3.0\n' > "$HEALED_REPO/.rein/.onboarded"
 run_hook "$HEALED_REPO" "$TMP/repo-healed.out"
 [ ! -f "$HEALED_REPO/.claude/cache/.rein-session-degraded" ] \
   || fail "J: stale degraded marker must be cleared when bootstrap is healthy (rc=0 path)"

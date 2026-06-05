@@ -27,6 +27,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # (was an inline 4-check; now one copy shared with select-active-dod.sh).
 # shellcheck source=./lib/path-containment.sh
 . "$SCRIPT_DIR/lib/path-containment.sh" 2>/dev/null || true
+# GS-1: authoritative git-fact snapshot lib (fail-open — missing lib degrades
+# to no snapshot block, never aborts SessionStart).
+# shellcheck source=./lib/git-snapshot.sh
+. "$SCRIPT_DIR/lib/git-snapshot.sh" 2>/dev/null || true
 
 # resolve_project_dir() 가 REIN_PROJECT_DIR_OVERRIDE / REIN_PROJECT_DIR /
 # git rev-parse / SCRIPT_DIR fallback / $PWD 순으로 결정.
@@ -344,5 +348,24 @@ fi
 
 # index.md — lean mode 의 유일한 파일 주입 대상
 emit_file_block "trail/index.md"
+
+# GS-1..GS-3: regenerate the authoritative git-fact snapshot and inject it
+# immediately AFTER the index block. The lib's fresh-write-or-clear contract
+# guarantees the file is either fresh or absent — so injecting only when it
+# exists can never surface a stale snapshot. Reaching here implies bootstrap is
+# complete (line 40-42 early-exit already filtered the uninitialized case).
+if declare -F rein_write_git_snapshot >/dev/null 2>&1; then
+  rein_write_git_snapshot "$PROJECT_DIR"
+fi
+if [ -f "$PROJECT_DIR/.rein/state/git-snapshot.md" ]; then
+  echo "### .rein/state/git-snapshot.md (자동 — git 권위본)"
+  # Use a ~~~ fence (not ```): git ref names cannot contain '~', so a branch/tag
+  # name can never break this fence — a second layer behind the lib's backtick
+  # stripping (prompt-injection hardening).
+  echo '~~~markdown'
+  cat "$PROJECT_DIR/.rein/state/git-snapshot.md"
+  echo '~~~'
+  echo
+fi
 
 exit 0

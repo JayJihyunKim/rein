@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.4.4** (2026-06-04) — Guidance when design docs are written inline. When a `docs/specs/` or `docs/plans/` file is authored without going through the `spec-writer`/`plan-writer` agent, a post-edit hook now emits a soft, non-blocking nudge ("safer to re-author via the dedicated path — ignore if the manual write was intentional"). The normal path (authored by the dedicated agents) stays silent, and since it never blocks, manual fixes / review tweaks / external-editor writes / migrations still work. It fires only when design docs are written, so there is no latency impact on the per-edit hot path. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.4.5** (2026-06-05) — First-session onboarding + automatic git facts in session state. A freshly installed repo shows a short one-time onboarding note on its first session, and core gate block messages now tell you the next step (not just why you were blocked). Session state no longer hand-writes git facts (branch / committed-pushed status / change count / latest tag): a hook reads them straight from git every session start/stop and shows them in an auto block (`.rein/state/git-snapshot.md`, an uncommitted temp file; local git only, no network), so the recorded state can't drift from reality. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

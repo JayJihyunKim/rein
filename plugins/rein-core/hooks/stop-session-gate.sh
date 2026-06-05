@@ -22,6 +22,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib/portable.sh"
 # shellcheck source=./lib/project-dir.sh
 . "$SCRIPT_DIR/lib/project-dir.sh"
+# GS-1: authoritative git-fact snapshot lib (fail-open — missing lib degrades to
+# no snapshot refresh, never aborts the gate).
+# shellcheck source=./lib/git-snapshot.sh
+. "$SCRIPT_DIR/lib/git-snapshot.sh" 2>/dev/null || true
 PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 
 # RES-1: plugin-aware helper script resolver. AGGREGATE_PY is consulted
@@ -155,6 +159,17 @@ _rein_gc_resolver_cache() {
 }
 _rein_gc_resolver_cache || true
 
+# GS-2: regenerate the authoritative git-fact snapshot BEFORE the no-source-edit
+# early exit below. A push/release-only session (no source edit — the very
+# staleness scenario this feature targets) would otherwise exit here without
+# refreshing the snapshot. Guard on bootstrap-complete (both BG-1 markers) so a
+# half-initialized repo is skipped. fresh-write-or-clear keeps it stale-free;
+# always non-blocking.
+if [ -f "$PROJECT_DIR/.rein/project.json" ] && [ -d "$PROJECT_DIR/trail" ] \
+   && declare -F rein_write_git_snapshot >/dev/null 2>&1; then
+  rein_write_git_snapshot "$PROJECT_DIR"
+fi
+
 if [ ! -f "$SRC_EDIT_MARKER" ]; then
   exit 0
 fi
@@ -262,6 +277,18 @@ if [ -f "$INDEX_FILE" ]; then
   INDEX_LINES=$(wc -l < "$INDEX_FILE" 2>/dev/null | tr -d ' ' || echo 0)
   if [ -n "$INDEX_LINES" ] && { [ "$INDEX_LINES" -lt 5 ] || [ "$INDEX_LINES" -gt 25 ]; }; then
     MISSING="${MISSING}\n- trail/index.md가 ${INDEX_LINES}줄입니다. 5~25줄 범위로 유지하세요."
+  fi
+fi
+
+# --- GS-4: 손글씨 휘발 git 수치 advisory (좁음, 비차단) ---
+# index.md 서술에 손으로 쓴 휘발 git 수치가 남아 있으면 권위본(자동 스냅샷)을
+# 가리키는 stderr 1줄. 앵커 정규식만 매칭(bare dirty/clean 단독은 미매칭 — 과탐
+# 원천). 헤더/인용(>)·heading(#) 줄은 제외해 권위 규칙 노트가 자기 자신을 트리거
+# 하지 않게 한다. exit code / block JSON 을 절대 바꾸지 않는다(순수 nudge).
+if [ -f "$INDEX_FILE" ]; then
+  if grep -vE '^[[:space:]]*[>#]' "$INDEX_FILE" 2>/dev/null \
+     | grep -qE '미push[[:space:]]*[0-9]+[[:space:]]*건|미커밋|(ahead|behind)[[:space:]]+[0-9]+|dirty[[:space:]]*\([0-9]+|[0-9]+[[:space:]]*changed' 2>/dev/null; then
+    echo "[advisory] trail/index.md 서술에 손으로 쓴 git 수치가 있습니다 — .rein/state/git-snapshot.md(자동) 가 권위본입니다. 수치는 스냅샷에 맡기고 서술에서 빼주세요." >&2
   fi
 fi
 

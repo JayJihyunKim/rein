@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Router 산출물 쓰기 경로.
 
-.rein/policy/router/{overrides,feedback-log,registry}.yaml 에 entry 를 안전하게
-append. 주석/공백을 보존하기 위해 ruamel.yaml 우선, 없으면 수동 텍스트 삽입으로 폴백.
+.rein/policy/router/{overrides,feedback-log}.yaml 에 entry 를 안전하게 append.
+주석/공백을 보존하기 위해 ruamel.yaml 우선, 없으면 수동 텍스트 삽입으로 폴백.
 
 Commands:
   override  — 사용자가 추천 조합을 수정했을 때 overrides.yaml 에 기록
   feedback  — 작업 완료 후 feedback-log.yaml 에 결과 기록
-  learn     — 누적된 피드백을 분석해 registry.yaml 의 learned_preferences 갱신
+
+기록은 감사 로그(사람 검토용)다 — ID 정합성 검증은 호출자(LLM 라우팅 시점)
+책임이며 본 스크립트는 schema/format(outcome enum + 파일 존재)만 검증한다.
 
 --reason / --notes 제약:
   텍스트 폴백 (ruamel 미설치) 경로는 개행/CR/탭을 YAML double-quoted escape
@@ -21,8 +23,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from collections import Counter, defaultdict
-from datetime import date, datetime, timezone
+from datetime import date
 from pathlib import Path
 
 # Default project root; overridden by --project-dir at runtime
@@ -74,17 +75,6 @@ def _overrides_path() -> Path:
 
 def _feedback_path() -> Path:
     return _router_dir() / "feedback-log.yaml"
-
-
-def _registry_path() -> Path:
-    return _router_dir() / "registry.yaml"
-
-
-LEARN_MIN_REPEAT = 3
-LEARN_SUCCESS_MIN = 5
-LEARN_SUCCESS_RATE = 0.9
-LEARN_FAIL_MIN = 3
-LEARN_FAIL_RATE = 0.5
 
 
 def _load_ruamel():
@@ -244,96 +234,6 @@ def _append_entry(path: Path, entry: dict) -> None:
         _append_entry_textual(path, entry)
 
 
-def _load_known_ids(project_dir: Path) -> tuple[set[str], set[str]]:
-    """Scan agent + skill frontmatter to build known id sets.
-
-    Returns (agents_set, skills_set) where each element is a `name:` value
-    read from YAML frontmatter of the respective manifest files.
-    """
-    agents: set[str] = set()
-    skills: set[str] = set()
-
-    agents_dir = project_dir / ".claude" / "agents"
-    if agents_dir.is_dir():
-        for md in agents_dir.glob("*.md"):
-            name = _read_frontmatter_name(md)
-            if name:
-                agents.add(name)
-
-    skills_dir = project_dir / ".claude" / "skills"
-    if skills_dir.is_dir():
-        for skill_md in skills_dir.glob("*/SKILL.md"):
-            name = _read_frontmatter_name(skill_md)
-            if name:
-                skills.add(name)
-
-    return agents, skills
-
-
-def _read_frontmatter_name(path: Path) -> str | None:
-    """Extract `name:` from YAML frontmatter (--- delimited block)."""
-    try:
-        text = path.read_text()
-    except OSError:
-        return None
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return None
-    for line in lines[1:]:
-        stripped = line.strip()
-        if stripped == "---":
-            break
-        if stripped.startswith("name:"):
-            value = stripped[len("name:"):].strip().strip("\"'")
-            return value or None
-    return None
-
-
-def _split_valid_invalid(
-    ids: list[str],
-    known: set[str],
-    kind: str,
-    source: str = "recommended",
-) -> tuple[list[str], list[dict]]:
-    """Partition ids into (valid_list, invalid_entries).
-
-    invalid entries have the shape: {"kind": kind, "id": id, "source": source}
-    """
-    valid: list[str] = []
-    invalid: list[dict] = []
-    for item_id in ids:
-        if item_id in known:
-            valid.append(item_id)
-        else:
-            invalid.append({"kind": kind, "id": item_id, "source": source})
-    return valid, invalid
-
-
-def _atomic_write(path: Path, data: dict) -> None:
-    """Write YAML data to path atomically via tmp+rename."""
-    import tempfile
-    import os
-
-    yaml = _load_ruamel()
-    tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    try:
-        os.close(tmp_fd)
-        if yaml is not None:
-            with open(tmp_path, "w") as f:
-                yaml.dump(data, f)
-        else:
-            import yaml as pyyaml  # type: ignore
-            with open(tmp_path, "w") as f:
-                pyyaml.dump(data, f, allow_unicode=True, default_flow_style=False)
-        os.replace(tmp_path, path)
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
-
-
 def cmd_override(args: argparse.Namespace) -> int:
     overrides = _overrides_path()
     if not overrides.exists():
@@ -362,129 +262,19 @@ def cmd_feedback(args: argparse.Namespace) -> int:
         print("ERROR: --outcome 은 success|partial|failed 중 하나", file=sys.stderr)
         return 2
 
-    known_agents, known_skills = _load_known_ids(_PROJECT_ROOT)
-
-    raw_agent = args.agent or ""
-    raw_skills = _split_ids(args.skills or "")
-
-    invalid_ids: list[dict] = []
-
-    # Validate agent (only if non-empty and known set is populated)
-    valid_agent = raw_agent
-    if raw_agent and known_agents:
-        if raw_agent not in known_agents:
-            invalid_ids.append({"kind": "agent", "id": raw_agent, "source": "recommended"})
-            valid_agent = ""
-
-    # Validate skills
-    valid_skills, invalid_skills = _split_valid_invalid(raw_skills, known_skills, "skill")
-    invalid_ids.extend(invalid_skills)
-
-    entry: dict = {
+    entry = {
         "date": _today(),
         "dod": _dod_basename(args.dod),
         "recommended": {
-            "agent": valid_agent,
-            "skills": valid_skills,
+            "agent": args.agent or "",
+            "skills": _split_ids(args.skills or ""),
             "mcps": _split_ids(args.mcps or ""),
         },
         "outcome": args.outcome,
         "notes": args.notes or "",
     }
-    if invalid_ids:
-        entry["invalid_ids"] = invalid_ids
-
     _append_entry(feedback, entry)
     print(f"recorded feedback → {feedback}")
-    return 0
-
-
-def cmd_learn(_: argparse.Namespace) -> int:
-    """feedback + overrides 이력을 분석해 registry.yaml learned_preferences 갱신."""
-    feedback = _feedback_path()
-    overrides = _overrides_path()
-    registry = _registry_path()
-    if not feedback.exists() or not overrides.exists() or not registry.exists():
-        print("ERROR: router yaml 파일 누락", file=sys.stderr)
-        return 2
-
-    yaml = _load_ruamel()
-    if yaml is None:
-        print("WARNING: ruamel.yaml 없음 — learn 은 ruamel 필수. skipping.", file=sys.stderr)
-        return 0
-
-    with feedback.open() as f:
-        fb = yaml.load(f) or {}
-    with overrides.open() as f:
-        ov = yaml.load(f) or {}
-    with registry.open() as f:
-        reg = yaml.load(f) or {}
-
-    prefs: dict[str, dict] = {}
-
-    add_counter: Counter[str] = Counter()
-    rem_counter: Counter[str] = Counter()
-    for entry in ov.get("entries") or []:
-        mod = entry.get("modification") or {}
-        for added in mod.get("added") or []:
-            add_counter[added] += 1
-        for removed in mod.get("removed") or []:
-            rem_counter[removed] += 1
-
-    for item_id, n in add_counter.items():
-        if n >= LEARN_MIN_REPEAT:
-            prefs.setdefault(item_id, {"id": item_id, "boost": 0.0, "context": [], "last_updated": _today()})
-            prefs[item_id]["boost"] += 0.2
-            prefs[item_id]["context"].append(f"override added {n}x")
-
-    for item_id, n in rem_counter.items():
-        if n >= LEARN_MIN_REPEAT:
-            prefs.setdefault(item_id, {"id": item_id, "boost": 0.0, "context": [], "last_updated": _today()})
-            prefs[item_id]["boost"] -= 0.2
-            prefs[item_id]["context"].append(f"override removed {n}x")
-
-    combo_stats: defaultdict[str, list[str]] = defaultdict(list)
-    for entry in fb.get("entries") or []:
-        rec = entry.get("recommended") or {}
-        ids = [rec.get("agent") or ""] + (rec.get("skills") or []) + (rec.get("mcps") or [])
-        for item_id in ids:
-            if not item_id:
-                continue
-            combo_stats[item_id].append(entry.get("outcome") or "")
-
-    for item_id, outcomes in combo_stats.items():
-        n = len(outcomes)
-        if n == 0:
-            continue
-        success = sum(1 for o in outcomes if o == "success")
-        fail = sum(1 for o in outcomes if o == "failed")
-        rate_success = success / n
-        rate_fail = fail / n
-        if n >= LEARN_SUCCESS_MIN and rate_success >= LEARN_SUCCESS_RATE:
-            prefs.setdefault(item_id, {"id": item_id, "boost": 0.0, "context": [], "last_updated": _today()})
-            prefs[item_id]["boost"] += 0.2
-            prefs[item_id]["context"].append(f"success rate {rate_success:.0%} ({n} runs)")
-        if n >= LEARN_FAIL_MIN and rate_fail >= LEARN_FAIL_RATE:
-            prefs.setdefault(item_id, {"id": item_id, "boost": 0.0, "context": [], "last_updated": _today()})
-            prefs[item_id]["boost"] -= 0.2
-            prefs[item_id]["context"].append(f"fail rate {rate_fail:.0%} ({n} runs)")
-
-    if not prefs:
-        print("no learned preferences updated (insufficient data)")
-        return 0
-
-    reg["learned_preferences"] = [
-        {
-            "id": p["id"],
-            "boost": round(p["boost"], 2),
-            "context": "; ".join(p["context"]),
-            "last_updated": p["last_updated"],
-        }
-        for p in prefs.values()
-    ]
-    with registry.open("w") as f:
-        yaml.dump(reg, f)
-    print(f"updated learned_preferences ({len(prefs)} items) → {registry}")
     return 0
 
 
@@ -515,9 +305,6 @@ def main() -> int:
     p_fb.add_argument("--outcome", required=True)
     p_fb.add_argument("--notes", default="")
     p_fb.set_defaults(func=cmd_feedback)
-
-    p_ln = sub.add_parser("learn", help="registry.learned_preferences 재계산")
-    p_ln.set_defaults(func=cmd_learn)
 
     args = parser.parse_args()
 

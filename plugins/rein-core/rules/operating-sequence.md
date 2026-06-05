@@ -25,6 +25,8 @@ spec/plan 은 전용 에이전트로 작성한다(인라인 작성 시 nudge 가
 | 10 | WRITE inbox | `trail/inbox/YYYY-MM-DD-<작업명>.md` | 작업 완료 기록 (gate 강제) |
 | 11 | UPDATE index | `trail/index.md` 갱신 | 세션 종료 전 상태 (gate 강제) |
 
+> **git/릴리스 사실의 권위본 = 자동 git 스냅샷** (`.rein/state/git-snapshot.md`, SessionStart/Stop 자동 생성). branch·커밋/push 여부·dirty/clean·ahead·behind·최신 태그 같은 객관 수치는 **index 서술에 손으로 쓰지 말 것** — 스냅샷이 전담한다. 둘이 어긋나면 스냅샷(궁극적으로 살아있는 git)이 이긴다.
+
 ## 차단 시 행동
 
 1. **게이트 우회 절대 금지 (가드레일).** hook 차단(exit 2)을 만나면 차단을 유발한 조건을 **정당한 경로로만** 해소한다 — 누락 단계 완료, 실제 조건 수정. 게이트를 통과시키려고 환경을 조작하는 행위는 **금지**: 파일 수정시각(mtime) 되돌리기·`touch`, 마커/도장(stamp) 위조·삭제·내용 편집, 타임스탬프 조작, hook 비활성화. 차단이 **오탐**으로 보여도 스스로 우회하지 말고 **멈춘다**.

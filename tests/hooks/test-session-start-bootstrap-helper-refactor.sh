@@ -128,10 +128,17 @@ fi
 # Partial-bootstrap fix (v1.3.0+1): bootstrap_check requires all three
 # markers — trail/ dir, .rein/project.json, and trail/index.md. Seed all
 # three so the helper takes the rc=0 (bootstrapped) path.
+#
+# ONBOARD-1: also seed the .rein/.onboarded marker so this fixture represents
+# an already-onboarded existing user. Without it, the rc=0 path now emits the
+# first-session backfill primer (SCOPE-BACKFILL) — that behavior is covered by
+# test-onboarding-primer.sh. This fixture asserts only the degraded-clear rc=0
+# silence, so it must look like a user who has already seen the primer.
 B_DIR="$(mktemp -d "/tmp/ssb-B-XXXXXX")"
 mkdir "$B_DIR/trail" "$B_DIR/.rein"
 printf '%s' '{"mode":"plugin","scope":"project","version":"1.3.0"}' > "$B_DIR/.rein/project.json"
 printf '# trail/index.md\n' > "$B_DIR/trail/index.md"
+printf 'onboarded=2026-01-01T00:00:00\nversion=1.3.0\n' > "$B_DIR/.rein/.onboarded"
 B_OUT="$(mktemp)"
 set +e
 ( cd "$B_DIR" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK" </dev/null >"$B_OUT" 2>/dev/null )

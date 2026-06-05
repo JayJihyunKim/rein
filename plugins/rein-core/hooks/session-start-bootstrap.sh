@@ -68,6 +68,30 @@ if [ -f "$DEGRADED_HELPER" ]; then
   DEGRADED_HELPER_LOADED=1
 fi
 
+# ONBOARD-1: source the first-session onboarding helper so this hook can emit
+# the primer to the USER channel (stdout) when the onboarded marker is absent.
+# This hook reads the marker only — it NEVER writes it. The sole marker writer
+# is session-start-rules.sh (the last SessionStart hook), which guarantees
+# bootstrap always observes the marker-absent snapshot in the same session
+# (SCOPE-SINGLE-WRITER). Graceful-degrade: if the helper is missing the primer
+# is simply skipped, SessionStart never blocks.
+ONBOARDED_HELPER="${CLAUDE_PLUGIN_ROOT}/hooks/lib/onboarded-check.sh"
+ONBOARDED_HELPER_LOADED=0
+if [ -f "$ONBOARDED_HELPER" ]; then
+  # shellcheck disable=SC1091
+  source "$ONBOARDED_HELPER"
+  ONBOARDED_HELPER_LOADED=1
+fi
+
+# Emit the first-session primer to the user (stdout) only when the helper
+# loaded AND the onboarded marker is absent. Read-only — no marker write here.
+rein_emit_primer_stdout() {
+  [ "$ONBOARDED_HELPER_LOADED" = "1" ] || return 0
+  if ! rein_is_onboarded "$PROJECT_DIR"; then
+    rein_primer_body
+  fi
+}
+
 if [ "$HELPER_RC" = "10" ]; then
   # BG-A (v1.3.0): rc=10 means trail/ + .rein/project.json missing on a SAFE
   # project_dir. Replace the previous "emit guidance + exit 0" with a 6-step
@@ -120,6 +144,10 @@ EOF
        --project-dir "$PROJECT_DIR" \
        ${bootstrap_version:+--version "$bootstrap_version"} >/dev/null 2>&1; then
     echo "rein: bootstrap completed automatically — created trail/ and .rein/project.json in $PROJECT_DIR (version $bootstrap_version)."
+    # ONBOARD-1 (F-1): first-session primer on the rc=10 auto-bootstrap path.
+    # MUST sit between the notice echo and `exit 0` — after `exit 0` it would
+    # never run. Read-only (no marker write); rules writes the marker.
+    rein_emit_primer_stdout
     exit 0
   fi
 
@@ -140,5 +168,14 @@ fi
 # governance resumes on the next gate invocation.
 if [ "$HELPER_RC" = "0" ] && [ "$DEGRADED_HELPER_LOADED" = "1" ]; then
   rein_clear_degraded "$PROJECT_DIR"
+fi
+
+# ONBOARD-1 (F-2): backfill primer for existing users on the rc=0 path (trail/
+# already present). This is an INDEPENDENT branch gated only on marker absence,
+# deliberately placed OUTSIDE the DEGRADED_HELPER_LOADED if-block above so the
+# primer is not skipped when the degraded helper failed to load. Read-only —
+# rules writes the marker. SCOPE-BACKFILL: emit once, then permanently silent.
+if [ "$HELPER_RC" = "0" ]; then
+  rein_emit_primer_stdout
 fi
 exit 0

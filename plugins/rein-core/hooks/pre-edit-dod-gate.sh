@@ -662,9 +662,11 @@ sys.exit(0 if inside else 1)
   fi
 
   if [ "$UNRESOLVED_SPECS" = true ]; then
-    echo "[rein] There is a design document that has not been reviewed yet. Complete the review, then mark it done:" >&2
-    echo "  bash <scripts-dir>/rein-mark-spec-reviewed.sh \"$spec_path\" codex" >&2
-    echo "  (scripts-dir = \${CLAUDE_PLUGIN_ROOT}/scripts/ on plugin install, \${PROJECT_DIR}/scripts/ on maintainer repo)" >&2
+    echo "[rein] There is a design document that has not been reviewed yet. To proceed:" >&2
+    echo "  1) Review the design document (/codex-review, or the spec-writer auto-review path)." >&2
+    echo "  2) On PASS, mark it reviewed:" >&2
+    echo "     bash <scripts-dir>/rein-mark-spec-reviewed.sh \"$spec_path\" codex" >&2
+    echo "     (scripts-dir = \${CLAUDE_PLUGIN_ROOT}/scripts/ on plugin install, \${PROJECT_DIR}/scripts/ on maintainer repo)" >&2
     log_block "미리뷰 사양 문서" "$FILE_PATH"
     exit 2
   fi
@@ -764,7 +766,12 @@ if [ -n "$ROUTING_VIOLATIONS" ]; then
     rm -f "$ROUTING_BYPASS"
   else
     printf "[rein] The following active task records have a routing section without user approval:%b\n" "$ROUTING_VIOLATIONS" >&2
-    echo "  Add 'approved_by_user: true' to the '## 라우팅 추천' section after the user confirms the routing plan." >&2
+    echo "  To proceed:" >&2
+    echo "  1) Confirm the routing plan with the user." >&2
+    echo "  2) Add the approval line to the '## 라우팅 추천' section, then retry the edit." >&2
+    echo "  Approval line format: a standalone YAML line inside the '## 라우팅 추천' section," >&2
+    echo "    'approved_by_user: true' (no quotes). Leading spaces and a trailing inline '#' comment are OK." >&2
+    echo "    Not recognized: bullet (- approved_by_user: true), bold (**approved_by_user: true**), or quoted (approved_by_user: \"true\")." >&2
     echo "  Emergency bypass: echo 'reason=<reason>' > $ROUTING_BYPASS" >&2
     log_block "routing section 위반" "$FILE_PATH"
     exit 2
@@ -890,7 +897,9 @@ if [ "$DOD_FOUND" = true ]; then
   touch "$SRC_EDIT_MARKER" 2>/dev/null
   exit 0
 else
-  echo "[rein] Source files cannot be edited yet because there is no active task record. Create trail/dod/dod-$(date +%Y-%m-%d)-<slug>.md to describe what this task changes before editing any source." >&2
+  echo "[rein] Source files cannot be edited yet because there is no active task record. To proceed:" >&2
+  echo "  1) Create trail/dod/dod-$(date +%Y-%m-%d)-<slug>.md describing what this task changes." >&2
+  echo "  2) Add a '## 라우팅 추천' section with a user-approval line (the routing gate will require it next)." >&2
   log_block "미완료 DoD 없음" "$FILE_PATH"
   exit 2
 fi

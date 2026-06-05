@@ -37,6 +37,36 @@ if [ ! -d "$RULES_DIR" ]; then
   exit 0
 fi
 
+# ONBOARD-1: first-session onboarding. This hook is the LAST SessionStart hook
+# (bootstrap → load-trail → rules), so it is the SOLE marker writer
+# (SCOPE-SINGLE-WRITER): bootstrap (earlier) only reads the marker for its
+# stdout emit, this hook prepends the primer to additionalContext AND writes
+# the marker afterward. Because rules runs last, bootstrap always observes the
+# marker-absent snapshot in the same session → the two channels stay
+# synchronized without a lock.
+ONBOARDED_HELPER="${CLAUDE_PLUGIN_ROOT}/hooks/lib/onboarded-check.sh"
+ONBOARDED_HELPER_LOADED=0
+if [ -f "$ONBOARDED_HELPER" ]; then
+  # shellcheck disable=SC1091
+  source "$ONBOARDED_HELPER"
+  ONBOARDED_HELPER_LOADED=1
+fi
+
+# Resolve PROJECT_DIR (user git root) the same way the bootstrap hook does, so
+# the marker is read/written under the user's project, not the plugin root.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/project-dir.sh"
+PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
+
+# Snapshot marker presence BEFORE building/emitting content. We must capture
+# the first-session decision once: prepend the primer iff the helper loaded and
+# the marker is absent, then write the marker only after the envelope is emitted.
+ONBOARD_FIRST_SESSION=0
+if [ "$ONBOARDED_HELPER_LOADED" = "1" ] && ! rein_is_onboarded "$PROJECT_DIR"; then
+  ONBOARD_FIRST_SESSION=1
+fi
+
 CONTENT=""
 for RULE in code-style security testing operating-sequence routing-map response-tone; do
   # Per-rule override probe (Task 2.8). The loader prints the override body
@@ -68,7 +98,25 @@ if [ -z "$CONTENT" ]; then
   exit 0
 fi
 
+# ONBOARD-1: on the first session prepend the primer to the front of the 6-rule
+# additionalContext (same envelope's content extended — NOT a second envelope,
+# preserving the one-envelope-per-SessionStart contract). The primer body comes
+# from the shared single definition (rein_primer_body) so it is byte-identical
+# to the user-stdout channel emitted by the bootstrap hook.
+if [ "$ONBOARD_FIRST_SESSION" = "1" ]; then
+  CONTENT="$(rein_primer_body)"$'\n\n'"$CONTENT"
+fi
+
 # JSON-encode CONTENT via python3 (handles all escaping including newlines,
 # quotes, control chars). Print envelope to stdout.
 ESCAPED=$(printf '%s' "$CONTENT" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))')
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":%s}}\n' "$ESCAPED"
+
+# ONBOARD-1 (sole marker writer): only after the envelope is emitted, and only
+# if this was the first session, write the onboarded marker so subsequent
+# sessions stay silent on both channels. Marker write failure is non-blocking
+# (assumption B): worst case is one duplicate primer next session — harmless.
+if [ "$ONBOARD_FIRST_SESSION" = "1" ]; then
+  version=$(python3 -c "import json;print(json.load(open('${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json'))['version'])" 2>/dev/null || echo "")
+  rein_mark_onboarded "$PROJECT_DIR" "$version" || true
+fi

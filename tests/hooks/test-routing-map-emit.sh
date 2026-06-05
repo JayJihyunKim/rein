@@ -6,7 +6,10 @@
 # envelope, after the existing 4 rules.
 #
 # Assertions:
-#   (a) routing-map.md standalone byte count <= 800B (NFR token budget)
+#   (a) routing-map.md standalone byte count <= 900B (NFR token budget)
+#       Budget unified to 900B by ROUTE-DOC-1 (projection note + §5 label
+#       harmonize grew the file to 875B; the reviewed budget was raised
+#       782B→900B). Kept in lockstep with tests/scripts/test-routing-map-projection.sh.
 #   (b) additionalContext contains routing-map.md substring
 #       (`> 상세: plugins/rein-core/rules/routing-procedure.md`)
 #   (c) Emit order: `code-style` body precedes `routing-map` body
@@ -26,10 +29,10 @@ ROUTING_MAP="$PLUGIN_ROOT/rules/routing-map.md"
 [ -x "$HOOK" ]        || { echo "FAIL: $HOOK is not executable" >&2; exit 1; }
 [ -f "$ROUTING_MAP" ] || { echo "FAIL: $ROUTING_MAP missing" >&2; exit 1; }
 
-# ---------- (a) Byte count <= 800B ----------------------------------------
+# ---------- (a) Byte count <= 900B ----------------------------------------
 BYTES=$(wc -c < "$ROUTING_MAP")
-if [ "$BYTES" -gt 800 ]; then
-  echo "FAIL: routing-map.md $BYTES bytes exceeds 800B NFR budget" >&2
+if [ "$BYTES" -gt 900 ]; then
+  echo "FAIL: routing-map.md $BYTES bytes exceeds 900B NFR budget" >&2
   exit 1
 fi
 
@@ -37,6 +40,15 @@ fi
 OUT=$(mktemp)
 ERR=$(mktemp)
 trap 'rm -f "$OUT" "$ERR" 2>/dev/null || true' EXIT
+
+# ONBOARD-1 interaction: session-start-rules.sh now prepends a first-session
+# primer (and writes .rein/.onboarded) when the marker is absent. This test is
+# about routing-map emit/order/byte budget, not onboarding — so seed the marker
+# first to keep the run deterministic (no primer prepend, no first-session
+# marker write mid-test). The marker lives under the resolved project dir and
+# is gitignored; the primer itself is covered by tests/hooks/test-onboarding-primer.sh.
+mkdir -p "$PROJECT_DIR/.rein" 2>/dev/null || true
+printf 'onboarded=test-fixture\nversion=test\n' > "$PROJECT_DIR/.rein/.onboarded" 2>/dev/null || true
 
 CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK" </dev/null >"$OUT" 2>"$ERR"
 RC=$?
@@ -91,5 +103,5 @@ if not (cs_idx < rm_idx):
     )
     sys.exit(1)
 
-print("test-routing-map-emit: OK (byte<=800, marker present, code-style precedes routing-map)")
+print("test-routing-map-emit: OK (byte<=900, marker present, code-style precedes routing-map)")
 PY

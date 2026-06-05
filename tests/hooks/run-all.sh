@@ -74,7 +74,11 @@ for test_file in \
   "$SCRIPT_DIR/test-plan-coverage-deferral.sh" \
   "$SCRIPT_DIR/test-state-machine.sh" \
   "$SCRIPT_DIR/test-state-machine-integration.sh" \
-  "$SCRIPT_DIR/test-state-fast-path-skip.sh"
+  "$SCRIPT_DIR/test-state-fast-path-skip.sh" \
+  "$SCRIPT_DIR/test-onboarding-primer.sh" \
+  "$SCRIPT_DIR/test-teach-forward-gates.sh" \
+  "$SCRIPT_DIR/test-git-snapshot.sh" \
+  "$SCRIPT_DIR/test-routing-map-emit.sh"
 do
   echo ""
   echo "######## $(basename "$test_file") ########"

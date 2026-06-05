@@ -47,6 +47,12 @@ data/processed/
 /.rein/state.json
 /.rein/state-pending-*.log
 
+# rein first-session onboarding marker (ONBOARD-1) — 영속 runtime marker, 추적 제외.
+/.rein/.onboarded
+
+# rein session-state git snapshot (GS-1) — 훅 생성 git 스냅샷, 매 세션 재생성, commit 배제.
+/.rein/state/
+
 # rein incident aggregate lock (휘발성 — 매 세션 hook 이 갱신하는 commit noise)
 /trail/incidents/.aggregate.lock
 
