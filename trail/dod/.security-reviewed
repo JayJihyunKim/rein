@@ -1,9 +1,9 @@
-reviewer: rein:security-reviewer
-timestamp: 2026-06-01T06:36:28
-cycle: phase4-regression-suite
+reviewed_at: 2026-06-08T08:49:57Z
+reviewer: security-reviewer
 security_level: standard
-scope: test-wave-scheduler-and-parent-delta.sh + tests/agents/run-all.sh + tests/scripts/run-all.sh
-review_round: 1
-resolution: passed
-remaining_issues: none
-note: test/runner bash only; temp git repo isolated (mktemp+local identity+trap), destructive git clean confined to temp subshells, NUL-safe parse, exact-path compare, no eval/injection/secrets
+user_level: auto
+verdict: PASS
+scope: codex-model-profile-routing
+active_dod: trail/dod/dod-2026-06-08-codex-model-profile-routing.md
+files_reviewed: plugins/rein-core/config/codex-models.sh, plugins/rein-core/scripts/rein-codex-review.sh, plugins/rein-core/skills/codex-ask/SKILL.md, plugins/rein-core/skills/codex-review/SKILL.md, tests/skills/test-codex-model-failsoft.sh
+findings: none

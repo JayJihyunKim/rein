@@ -113,6 +113,20 @@ if [ ! -r "$_select_active_dod_lib" ] || \
 fi
 . "$_select_active_dod_lib"
 
+# ---- Load codex model single-source-of-truth. -------------------------
+#
+# 모델명은 plugins/rein-core/config/codex-models.sh 한 곳에서 관리한다
+# (DoD codex-model-profile-routing). 래퍼는 CODE_MODEL / CODE_EFFORT 를
+# 읽어 codex 호출에 반영한다. 파일 부재/미정의 시 CODE_MODEL 은 빈
+# 문자열로 두고 -m 을 생략 → codex 기본 모델로 graceful degrade.
+CODE_MODEL=""
+CODE_EFFORT=""
+_codex_models_conf="$_script_dir/../config/codex-models.sh"
+if [ -r "$_codex_models_conf" ]; then
+  # shellcheck source=/dev/null
+  . "$_codex_models_conf"
+fi
+
 # ---- Parse CLI options + read stdin prompt. ---------------------------
 
 NON_INTERACTIVE=0
@@ -893,6 +907,42 @@ _invoke_codex() {
   "$CODEX_BIN" exec "$@" || return $?
 }
 
+# ---- Model fail-soft (DoD codex-model-profile-routing). ---------------
+#
+# codex 가 요청 모델을 모르면 (upstream rename 등) exit≠0 + JSON
+# invalid_request_error / "... is not supported when using Codex" 를 낸다
+# (2026-06-08 실측). 이 경우 sonnet fallback 으로 넘기면 잘못된 모델을
+# 영구히 못 쓰고 문제만 숨겨지므로, 전용 종료 코드 3 으로 신호하고
+# 단일 출처(codex-models.sh) 수정을 안내한다 (SKILL.md §4 참조).
+
+# _detect_model_error <output> → 0(true) if codex rejected the model.
+# codex/OpenAI 의 모델 거부 메시지 변형을 포괄한다:
+#   - invalid_request_error : OpenAI JSON 에러 타입(모델/요청 설정 거부)
+#   - model_not_found / "model not found" : 모델 미존재
+#   - "is not supported when using ..." : ChatGPT 계정 등에서 모델 미지원(실측)
+#   - "is not supported by this (api|model)" : API/모델 미지원 변형
+# 정상 리뷰 본문 오탐을 줄이려고 일반 "is not supported" 단독은 매칭하지 않는다.
+_detect_model_error() {
+  local out="${1:-}"
+  # 오탐 방지: 정상 리뷰 출력은 FINAL_VERDICT 라인을 포함한다. codex 가 모델
+  # 거부로 응답 자체를 생성하지 못하면 verdict 가 없고 ERROR JSON 만 남는다.
+  # 따라서 verdict 가 있으면 — 리뷰 본문이 거부 문구를 단지 인용/논의한 경우
+  # 포함 — 모델 거부가 아니다. (이 가드가 없으면 fail-soft 자체를 리뷰할 때
+  # 본문의 패턴 언급을 거부로 오인해 정상 PASS 가 차단된다.)
+  if printf '%s' "$out" | grep -qE '^[[:space:]]*FINAL_VERDICT:'; then
+    return 1
+  fi
+  printf '%s' "$out" | grep -qiE 'invalid_request_error|model_not_found|model not found|is not supported when using|is not supported by this (api|model)'
+}
+
+# _emit_model_failsoft <role-var-name> <model-value>
+_emit_model_failsoft() {
+  local role_var="${1:-CODE_MODEL}" model_val="${2:-}"
+  echo "ERROR: [codex-review] codex 가 요청한 모델을 거부했습니다 — 모델명이 변경되었을 수 있습니다." >&2
+  echo "  현재 ${role_var}=\"${model_val}\"" >&2
+  echo "  → plugins/rein-core/config/codex-models.sh 의 ${role_var} 를 codex 의 최신 모델명으로 수정하세요." >&2
+}
+
 # ---- Stamp writer (Task 6.3 Step 3). ----------------------------------
 
 # write_code_review_stamp <verdict> <reviewer>
@@ -939,6 +989,16 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   #   REIN_EFFORT → --config model_reasoning_effort="<level>" (TOML-quoted).
   # Empty array is safely expanded with ${arr[@]+...} under `set -u`.
   CODEX_ARGS=()
+  # Model: 단일 출처의 CODE_MODEL 을 -m 으로 전달. 비어있으면 생략하여
+  # codex 기본 모델로 graceful degrade (codex-models.sh 부재 등).
+  if [ -n "$CODE_MODEL" ]; then
+    CODEX_ARGS+=(-m "$CODE_MODEL")
+  fi
+  # Effort: [EFFORT:] 마커(변경 규모 기반 자동 판정) 우선. 마커가 없을 때만
+  # 단일 출처의 CODE_EFFORT 를 폴백 기본값으로 적용.
+  if [ -z "$REIN_EFFORT" ] && [ -n "$CODE_EFFORT" ]; then
+    REIN_EFFORT="$CODE_EFFORT"
+  fi
   if [ -n "$REIN_EFFORT" ]; then
     CODEX_ARGS+=(--config "model_reasoning_effort=\"$REIN_EFFORT\"")
   fi
@@ -947,12 +1007,25 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     CODEX_RC=$?
     # Best-effort: emit output so caller can see what went wrong.
     printf '%s\n' "$CODEX_OUT"
+    # Fail-soft: 모델 거부면 sonnet fallback 으로 새지 말고(잘못된 모델을
+    # 숨기지 않도록) 전용 exit 3 + 단일 출처 수정 안내.
+    if _detect_model_error "$CODEX_OUT"; then
+      _emit_model_failsoft "CODE_MODEL" "$CODE_MODEL"
+      exit 3
+    fi
     echo "ERROR: [codex-review] codex invocation failed (exit $CODEX_RC)." >&2
     exit "$CODEX_RC"
   fi
 
   # Emit codex output unchanged for the caller.
   printf '%s\n' "$CODEX_OUT"
+
+  # Fail-soft (방어): codex 가 exit 0 으로 와도 출력에 모델 거부가 섞였으면
+  # 통과 표시(.codex-reviewed)를 만들지 않고 단일 출처 수정을 안내한다.
+  if _detect_model_error "$CODEX_OUT"; then
+    _emit_model_failsoft "CODE_MODEL" "$CODE_MODEL"
+    exit 3
+  fi
 
   # Parse verdict.
   VERDICT=$(_parse_verdict "$CODEX_OUT")

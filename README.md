@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.4.5** (2026-06-05) — First-session onboarding + automatic git facts in session state. A freshly installed repo shows a short one-time onboarding note on its first session, and core gate block messages now tell you the next step (not just why you were blocked). Session state no longer hand-writes git facts (branch / committed-pushed status / change count / latest tag): a hook reads them straight from git every session start/stop and shows them in an auto block (`.rein/state/git-snapshot.md`, an uncommitted temp file; local git only, no network), so the recorded state can't drift from reality. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.4.6** (2026-06-08) — codex model names live in one file. Previously codex review/ask skills hard-coded model names in several places, so when codex renamed a model the dead name lingered and reviews failed silently. Now model names are managed in a single file (`plugins/rein-core/config/codex-models.sh`), split by role (code review vs analysis), and a model-rejection fail-soft points you to the exact entry to update when codex renames a model — and won't let a review pass under a broken model. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 
