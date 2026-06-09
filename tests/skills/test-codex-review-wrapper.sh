@@ -843,20 +843,78 @@ FINAL_VERDICT: PASS"
   return 0
 }
 
-test_parse_verdict_multiple_final_verdict_lines_first_match_wins() {
-  # A-LowPrio (2026-05-23): codex 응답에 FINAL_VERDICT 라인이 둘 이상이면
-  # parser 는 첫 매치만 채택한다 (Stage 1 의 `grep ... | head -1` 계약).
-  # 순서: 'FINAL_VERDICT: PASS' 가 먼저, 'FINAL_VERDICT: REJECT' 가 나중.
-  # 기대: 첫 매치 PASS 채택 → wrapper exit 0 (REJECT 의 exit 2 가 아님).
-  # 회귀 방지 — first-match 계약이 깨지면 두 번째 REJECT 가 verdict 를
-  # 뒤집어 exit 2 가 되어 본 테스트가 즉시 실패한다.
+test_parse_verdict_multiple_final_verdict_lines_last_match_wins() {
+  # B3 (2026-06-09): codex 응답에 FINAL_VERDICT 라인이 둘 이상이면 parser 는
+  # 마지막(tail) 매치를 채택한다 (Stage 1 의 `grep ... | tail -1` 계약).
+  # 근거: envelope 규칙이 codex 에게 "응답 끝에 FINAL_VERDICT" 를 지시하므로
+  # 진짜 결론은 응답 끝 라인이다. 본문 앞쪽 FINAL_VERDICT 는 인용/예시 노이즈.
+  # 순서: 'FINAL_VERDICT: PASS' 가 먼저, 'FINAL_VERDICT: REJECT' 가 나중(끝).
+  # 기대: 마지막 매치 REJECT 채택 → wrapper exit 2 (보수적).
+  # 회귀 방지 — tail-match 계약이 깨져 first-match 로 회귀하면 앞쪽 PASS 가
+  # 채택돼 exit 0 이 되어 본 테스트가 즉시 실패한다.
   _run_wrapper_with_verdict "Detailed analysis follows.
 FINAL_VERDICT: PASS
 Addendum reviewer note below.
 FINAL_VERDICT: REJECT"
 
-  [ "$RUN_WRAPPER_RC" = "0" ] \
-    || fail "복수 FINAL_VERDICT 라인에서 첫 매치 PASS 가 채택되지 않음 (rc=$RUN_WRAPPER_RC, 두 번째 REJECT 가 우선됐을 수 있음)"
+  [ "$RUN_WRAPPER_RC" = "2" ] \
+    || fail "복수 FINAL_VERDICT 라인에서 마지막 매치 REJECT 가 채택되지 않음 (rc=$RUN_WRAPPER_RC, 앞쪽 PASS 가 우선됐을 수 있음)"
+  return 0
+}
+
+test_parse_verdict_body_quoted_verdict_does_not_override_final() {
+  # B3 (2026-06-09): codex 가 리뷰 본문 앞쪽에서 테스트 stub/예시의
+  # FINAL_VERDICT 를 들여써 인용하면, 그 인용을 결론으로 오인하면 안 된다.
+  # 진짜 결론은 envelope 규칙대로 응답 끝의 FINAL_VERDICT 라인이다.
+  # body 앞쪽: 들여쓴 인용 '  FINAL_VERDICT: PASS' (예시 코드 인용).
+  # 끝: 실제 결론 'FINAL_VERDICT: NEEDS-FIX'.
+  # 기대: tail-match 로 NEEDS-FIX 채택 → wrapper exit 1.
+  # 현재(first-match) 버그: 들여쓴 인용 PASS 가 첫 매치로 채택 → exit 0.
+  _run_wrapper_with_verdict "Reviewing the test fixture which contains:
+  FINAL_VERDICT: PASS
+That quoted line is the fixture's expected stub, not my verdict.
+The actual change has an unhandled edge case.
+FINAL_VERDICT: NEEDS-FIX"
+
+  [ "$RUN_WRAPPER_RC" = "1" ] \
+    || fail "본문 앞쪽 인용 FINAL_VERDICT: PASS 가 끝의 실제 NEEDS-FIX 를 덮음 (rc=$RUN_WRAPPER_RC, 기대=1)"
+  return 0
+}
+
+test_codex_nonzero_exit_propagates() {
+  # B2 (2026-06-09): codex 가 비모델(일반) 실패로 exit≠0 이면 wrapper 는
+  # 동일한 non-zero exit code 를 전파해야 한다. 현재 버그(`if ! CMD; then
+  # RC=$?`)는 `$?` 가 `! CMD`(항상 0)를 캡처해 exit 0 으로 성공 위장한다.
+  # fake codex: 비모델 실패 (FAKE_CODEX_EXIT=37) + 모델거부 패턴 없는 일반
+  # 실패 문구 (invalid_request_error / model_not_found / "is not supported"
+  # 미포함, FINAL_VERDICT 라인도 없음 → fail-soft exit 3 분기로 안 빠짐).
+  # 기대: wrapper RC=37. 현재 버그=0.
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-06-09-b2.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-06-09-b2.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  local capture_file="$SANDBOX/.fake-codex-prompt-capture.txt"
+  local stdin_file="$SANDBOX/.stdin-in.txt"
+  local tmp_stdout tmp_stderr
+  tmp_stdout=$(mktemp)
+  tmp_stderr=$(mktemp)
+  printf '%s' "code review please" > "$stdin_file"
+  (
+    cd "$SANDBOX"
+    export CODEX_BIN="$FAKE_CODEX"
+    export FAKE_CODEX_CAPTURE="$capture_file"
+    export FAKE_CODEX_EXIT=37
+    export FAKE_CODEX_VERDICT="codex: stream error: connection reset by peer
+retrying... gave up after 3 attempts."
+    bash "$SANDBOX/scripts/rein-codex-review.sh" --non-interactive \
+      < "$stdin_file" > "$tmp_stdout" 2> "$tmp_stderr"
+  )
+  local rc=$?
+  rm -f "$tmp_stdout" "$tmp_stderr" "$stdin_file"
+
+  [ "$rc" = "37" ] \
+    || fail "codex 비모델 실패(exit 37)가 전파되지 않음 (rc=$rc, 기대=37 — 현재 버그는 exit 0 으로 성공 위장)"
   return 0
 }
 
@@ -1210,6 +1268,462 @@ test_g8_3_code_review_still_uses_tier2_fallback() {
 }
 
 # ------------------------------------------------------------
+# B4 (2026-06-09): _changed_files must prefer the WORKING TREE (staged +
+# unstaged) over an unrelated committed range.
+#
+# Reproduction of the stale-review-context bug: rein's review-before-commit
+# flow stages the real subject (uncommitted) and runs /codex-review. But
+# _changed_files used `git diff --name-only <DIFF_BASE>..HEAD` FIRST and only
+# fell back to --cached when that committed range was empty. When an unrelated
+# file was already committed (so DIFF_BASE..HEAD is non-empty), the wrapper
+# reviewed that unrelated committed file and never looked at the staged
+# subject — the envelope's changed_files slot listed the wrong file.
+#
+# Fix: union of staged (--cached) + unstaged (working tree), and degrade to
+# the committed range (DIFF_BASE..HEAD) ONLY when the working tree is clean
+# (PR flow, everything already committed). Comment above _changed_files is
+# updated to match.
+#
+# RED (pre-fix): staged subject missing from the changed_files slot; the
+# unrelated committed file is listed instead.
+# GREEN (post-fix): staged subject present; unrelated committed file absent
+# from the changed_files slot.
+# ------------------------------------------------------------
+test_changed_files_prefers_staged_over_committed_range() {
+  # Arrange: minimal DoD context so the envelope assembles cleanly (the slot
+  # under test is independent of the DoD, but a real DoD avoids the high-gap
+  # path muddying the assertion).
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-06-09-b4.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-06-09-b4.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  # (a) Commit an UNRELATED file so DIFF_BASE..HEAD (HEAD~1..HEAD) is
+  #     non-empty. No .codex-reviewed stamp exists → _resolve_diff_base
+  #     resolves to HEAD~1, and `git diff HEAD~1..HEAD` lists this file.
+  ( cd "$SANDBOX" \
+      && echo "unrelated committed content" > unrelated-committed.txt \
+      && git add unrelated-committed.txt \
+      && git commit -q -m "unrelated: prior committed change" )
+
+  # (b) Stage the REAL review subject (uncommitted, staged) — this is what
+  #     rein's review-before-commit flow actually puts in front of the
+  #     reviewer.
+  ( cd "$SANDBOX" \
+      && echo "the actual change under review" > real-staged-subject.txt \
+      && git add real-staged-subject.txt )
+
+  # Act: code-review mode (no spec-review prefix → spec-review scoping at
+  # lines 321-327 is bypassed, so _changed_files governs the slot).
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  [ -f "$RUN_WRAPPER_PROMPT_FILE" ] || fail "fake-codex did not capture prompt"
+
+  # Extract the changed_files slot block from the envelope so we assert on the
+  # actual review subject list, not an incidental mention elsewhere.
+  local cf_block
+  cf_block=$(awk '/^changed_files \(/,/^$/' "$RUN_WRAPPER_PROMPT_FILE")
+
+  # The staged subject MUST be the reviewed file.
+  printf '%s' "$cf_block" | grep -qF "real-staged-subject.txt" \
+    || fail "staged review subject missing from changed_files slot (committed range wrongly preferred over staged)"
+
+  # The unrelated committed file MUST NOT be the review subject.
+  printf '%s' "$cf_block" | grep -qF "unrelated-committed.txt" \
+    && fail "unrelated committed file leaked into changed_files slot (stale review context)"
+  return 0
+}
+
+# ------------------------------------------------------------
+# B4 negative-side: when the working tree is CLEAN (PR flow, all changes
+# already committed), _changed_files MUST degrade to the committed range so
+# a normal PR review still sees its diff. The fix must not regress this.
+# ------------------------------------------------------------
+test_changed_files_degrades_to_committed_range_when_working_tree_clean() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-06-09-b4b.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-06-09-b4b.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  # Commit a file so HEAD~1..HEAD is non-empty, then leave the working tree
+  # clean (nothing staged/unstaged) — the PR-review situation.
+  ( cd "$SANDBOX" \
+      && echo "committed pr change" > pr-committed-change.txt \
+      && git add pr-committed-change.txt \
+      && git commit -q -m "feat: a committed pr change" )
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  [ -f "$RUN_WRAPPER_PROMPT_FILE" ] || fail "fake-codex did not capture prompt"
+
+  local cf_block
+  cf_block=$(awk '/^changed_files \(/,/^$/' "$RUN_WRAPPER_PROMPT_FILE")
+
+  # Clean working tree → committed range is the only source; the committed
+  # file must appear so PR review is not blinded.
+  printf '%s' "$cf_block" | grep -qF "pr-committed-change.txt" \
+    || fail "committed file missing from changed_files when working tree is clean (PR flow degrade broke)"
+  return 0
+}
+
+# ------------------------------------------------------------
+# B5 (2026-06-09): claim_sources must follow the review subject. In
+# working_tree mode (staged ∪ unstaged non-empty) the HEAD commit is almost
+# always an unrelated prior commit (rein's review-before-commit flow). Using
+# its message as the claim source pollutes the Claim Audit with an unrelated
+# claim. The fix decides a `review_subject` once and, in working_tree mode,
+# skips the HEAD commit message and uses the DoD title (PR env stays top
+# priority). This is the claim-comparison counterpart of B4's file-list fix.
+#
+# RED (pre-fix): claim_sources carries `head_commit=` with the unrelated HEAD
+# message; the DoD title is absent.
+# GREEN (post-fix): claim_sources carries the DoD title; the unrelated HEAD
+# commit message is absent.
+# ------------------------------------------------------------
+test_claim_sources_uses_dod_not_head_in_working_tree_mode() {
+  # Arrange: DoD context (its first heading is the title the fix should use).
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-06-09-b5.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-06-09-b5.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  # (a) Commit an UNRELATED change whose message must NOT become the claim
+  #     source. The marker string is unique so we can assert its absence.
+  ( cd "$SANDBOX" \
+      && echo "unrelated content" > unrelated-persona.txt \
+      && git add unrelated-persona.txt \
+      && git commit -q -m "unrelated persona commit MARKER_B5_HEAD" )
+
+  # (b) Stage the REAL review subject so the wrapper is in working_tree mode.
+  ( cd "$SANDBOX" \
+      && echo "the actual change under review" > real-staged-b5.txt \
+      && git add real-staged-b5.txt )
+
+  # Act: code-review mode (no spec-review prefix), no PR env → claim_sources
+  # falls through the env branch and must pick the review-subject source.
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  [ -f "$RUN_WRAPPER_PROMPT_FILE" ] || fail "fake-codex did not capture prompt"
+
+  # Extract the claim_sources slot block so we assert on its contents only.
+  local cs_block
+  cs_block=$(awk '/^claim_sources:/,/^---$/' "$RUN_WRAPPER_PROMPT_FILE")
+
+  # The unrelated HEAD commit message MUST NOT be the claim source.
+  printf '%s' "$cs_block" | grep -qF "MARKER_B5_HEAD" \
+    && fail "unrelated HEAD commit message leaked into claim_sources in working_tree mode (stale claim context)"
+
+  # The DoD title MUST be the claim source instead.
+  printf '%s' "$cs_block" | grep -qF "dod_title=" \
+    || fail "claim_sources did not fall back to dod_title in working_tree mode"
+  return 0
+}
+
+# ------------------------------------------------------------
+# B5 negative-side: when the working tree is CLEAN (PR flow / commit_range
+# mode) and no PR env is set, claim_sources MUST still use the HEAD commit
+# message — the committed change IS the review subject. The fix must not
+# regress this.
+# ------------------------------------------------------------
+test_claim_sources_uses_head_in_commit_range_mode() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-06-09-b5b.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-06-09-b5b.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  # Commit a change and leave the working tree clean → commit_range mode. The
+  # committed message IS the review subject, so claim_sources should use it.
+  ( cd "$SANDBOX" \
+      && echo "committed pr content" > pr-committed-b5b.txt \
+      && git add pr-committed-b5b.txt \
+      && git commit -q -m "feat: pr change MARKER_B5_RANGE" )
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  [ -f "$RUN_WRAPPER_PROMPT_FILE" ] || fail "fake-codex did not capture prompt"
+
+  local cs_block
+  cs_block=$(awk '/^claim_sources:/,/^---$/' "$RUN_WRAPPER_PROMPT_FILE")
+
+  # Clean working tree → HEAD commit message is the legitimate claim source.
+  printf '%s' "$cs_block" | grep -qF "MARKER_B5_RANGE" \
+    || fail "HEAD commit message missing from claim_sources in commit_range mode (PR flow degrade broke)"
+  return 0
+}
+
+# ------------------------------------------------------------
+# B6 (2026-06-09): the changed_files slot LABEL must reflect the review
+# subject. In working_tree mode the slot lists staged+unstaged files, but the
+# label was hardcoded `changed_files (<DIFF_BASE>..HEAD):` — claiming a
+# committed range it is not actually showing. The fix makes the label
+# mode-aware (working tree / committed range / spec review subject).
+#
+# RED (pre-fix): the label shows the `..HEAD` committed-range form even though
+# the content is working-tree files.
+# GREEN (post-fix): the label shows `working tree`.
+# ------------------------------------------------------------
+test_changed_files_label_reflects_working_tree_mode() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-06-09-b6.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-06-09-b6.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  # Make the working tree dirty (staged) → working_tree mode.
+  ( cd "$SANDBOX" \
+      && echo "the actual change under review" > real-staged-b6.txt \
+      && git add real-staged-b6.txt )
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  [ -f "$RUN_WRAPPER_PROMPT_FILE" ] || fail "fake-codex did not capture prompt"
+
+  # The changed_files slot label must say "working tree", not a committed range.
+  grep -qE "^changed_files \(working tree" "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "changed_files label does not reflect working tree mode (got committed-range label for dirty tree)"
+
+  # The label MUST NOT show the committed-range `..HEAD` form in this mode.
+  grep -qE "^changed_files \(.*\.\.HEAD\):" "$RUN_WRAPPER_PROMPT_FILE" \
+    && fail "changed_files label still shows committed range (..HEAD) while content is working-tree files"
+  return 0
+}
+
+# ------------------------------------------------------------
+# B6 negative-side: when the working tree is CLEAN (PR flow / commit_range
+# mode) the label MUST keep the committed-range `<DIFF_BASE>..HEAD` form so a
+# PR reviewer sees the diff range it is actually being shown.
+# ------------------------------------------------------------
+test_changed_files_label_reflects_commit_range_mode() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-06-09-b6b.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-06-09-b6b.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  # Commit a change, leave working tree clean → commit_range mode.
+  ( cd "$SANDBOX" \
+      && echo "committed pr change" > pr-committed-b6b.txt \
+      && git add pr-committed-b6b.txt \
+      && git commit -q -m "feat: pr change for label test" )
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  [ -f "$RUN_WRAPPER_PROMPT_FILE" ] || fail "fake-codex did not capture prompt"
+
+  # Clean tree → committed-range label must be present.
+  grep -qE "^changed_files \(.*\.\.HEAD\):" "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "changed_files label lost committed-range form in commit_range mode (PR flow degrade broke)"
+  grep -qE "^changed_files \(working tree" "$RUN_WRAPPER_PROMPT_FILE" \
+    && fail "working-tree label leaked into a clean-tree (commit_range) review"
+  return 0
+}
+
+# ------------------------------------------------------------
+# B5-cont (2026-06-09): the Claim Audit slot's claim-source-priority
+# INSTRUCTION TEXT (slot 4, sub-item 4) must match the actual _claim_sources
+# logic, which is REVIEW_SUBJECT-aware (B5). The instruction was hardcoded
+# `PR title/body > HEAD commit > DoD/plan top > "unavailable"` — the old fixed
+# order. After the B5 logic change, working_tree mode skips HEAD commit and
+# uses the DoD title, so the static instruction tells a future reviewer the
+# wrong priority and would false-flag the intended working_tree=DoD behavior
+# as a "priority violation". The instruction must be built mode-aware (like
+# B6's CHANGED_FILES_LABEL) so the policy text and the runtime behavior agree.
+#
+# RED (pre-fix): in working_tree mode the instruction still shows the
+# `HEAD commit` priority (mode-blind static text).
+# GREEN (post-fix): working_tree-mode instruction reflects the DoD priority and
+# does NOT list HEAD commit ahead of the DoD.
+# ------------------------------------------------------------
+
+# Extract the slot-4 (Claim Audit) claim-source-priority instruction block
+# from the captured envelope. The instruction begins at the numbered
+# "Claim source 우선순위" sub-item and runs through its (possibly wrapped)
+# header lines onto the priority-chain line, stopping at the first blank line
+# that ends the sub-item (before "5. Evidence freshness").
+_claim_priority_instruction_block() {
+  awk '
+    /Claim source[ ]?우선순위/ {grab=1}
+    grab && /^[[:space:]]*$/ {grab=0}
+    grab {print}
+  ' "$1"
+}
+
+test_claim_source_priority_note_reflects_working_tree_mode() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-06-09-b5c.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-06-09-b5c.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  # Make the working tree dirty (staged) → working_tree mode.
+  ( cd "$SANDBOX" \
+      && echo "the actual change under review" > real-staged-b5c.txt \
+      && git add real-staged-b5c.txt )
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  [ -f "$RUN_WRAPPER_PROMPT_FILE" ] || fail "fake-codex did not capture prompt"
+
+  # Isolate the actual priority CHAIN line (the one with `>` arrows) so the
+  # assertions key off the real priority order, not incidental prose.
+  local chain
+  chain=$(_claim_priority_instruction_block "$RUN_WRAPPER_PROMPT_FILE" | grep -F '>')
+  [ -n "$chain" ] \
+    || fail "claim-source-priority chain line not found in envelope slot 4"
+
+  # In working_tree mode the chain MUST reflect the DoD priority (the actual
+  # _claim_sources behavior: PR env > DoD title, HEAD skipped).
+  printf '%s' "$chain" | grep -qiF "DoD" \
+    || fail "working_tree claim-priority chain does not list the DoD basis"
+
+  # And the chain MUST NOT carry the old hardcoded 'HEAD commit >' priority arrow
+  # — that is the mode-blind text that contradicts B5's working_tree logic.
+  printf '%s' "$chain" | grep -qiF "HEAD commit >" \
+    && fail "working_tree claim-priority chain still lists 'HEAD commit >' (mode-blind static text contradicting B5)"
+  return 0
+}
+
+# ------------------------------------------------------------
+# B5-cont negative-side: in commit_range mode (clean working tree, PR flow)
+# the committed change IS the review subject, so the instruction text MUST
+# keep listing the `HEAD commit` priority. The mode-aware fix must not drop it.
+# ------------------------------------------------------------
+test_claim_source_priority_note_reflects_commit_range_mode() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-06-09-b5cb.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-06-09-b5cb.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  # Commit a change, leave working tree clean → commit_range mode.
+  ( cd "$SANDBOX" \
+      && echo "committed pr change" > pr-committed-b5cb.txt \
+      && git add pr-committed-b5cb.txt \
+      && git commit -q -m "feat: pr change for claim-priority text test" )
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  [ -f "$RUN_WRAPPER_PROMPT_FILE" ] || fail "fake-codex did not capture prompt"
+
+  # Isolate the actual priority CHAIN line (the one with `>` arrows).
+  local chain
+  chain=$(_claim_priority_instruction_block "$RUN_WRAPPER_PROMPT_FILE" | grep -F '>')
+  [ -n "$chain" ] \
+    || fail "claim-source-priority chain line not found in envelope slot 4"
+
+  # Commit_range mode: the HEAD commit message is the legitimate claim source,
+  # so the chain MUST keep the 'HEAD commit >' priority arrow.
+  printf '%s' "$chain" | grep -qiF "HEAD commit >" \
+    || fail "commit_range claim-priority chain lost the 'HEAD commit >' priority (mode-aware fix dropped it for PR flow)"
+  return 0
+}
+
+# ------------------------------------------------------------
+# B5-spec (Round 5, 2026-06-09): in spec-review mode the claim-source
+# INSTRUCTION TEXT (slot 4, sub-item 4) tells the reviewer
+# `PR title/body > (no claim sources available)` — the HEAD-revision message
+# is intentionally skipped (a fresh spec review has no commit diff to anchor a
+# claim on; G8-3 already forces diff_base=N/A and SAD_PATH=""). But
+# _claim_sources only branched on `working_tree`; the `spec` subject fell
+# through to the generic `git log -1 --pretty=%B` tail and emitted
+# `head_commit=` with the unrelated HEAD message. The instruction text (skip
+# HEAD) and the runtime logic (use HEAD) contradicted each other.
+#
+# RED (pre-fix): claim_sources carries `head_commit=` with the unrelated HEAD
+# message; the explicit no-source sentinel is absent.
+# GREEN (post-fix): claim_sources skips HEAD entirely — no `head_commit=`, no
+# unrelated HEAD message — and emits the `(no claim sources available)`
+# sentinel, matching the spec-mode instruction text.
+# ------------------------------------------------------------
+test_claim_sources_spec_mode_skips_head() {
+  # Arrange: a fresh design under review. Commit an UNRELATED change first so
+  # HEAD carries a message that must NOT leak into the claim sources.
+  seed_design "docs/specs/2026-06-09-spec-claim.md" "S1 S2"
+  ( cd "$SANDBOX" \
+      && echo "unrelated content" > unrelated-spec-head.txt \
+      && git add unrelated-spec-head.txt \
+      && git commit -q -m "unrelated commit MARKER_SPEC_HEAD" )
+  # Deliberately NO .active-dod marker (fresh spec review has no related DoD;
+  # G8-3 keeps SAD_PATH="" in spec mode, so dod_title is not a source either).
+
+  # Act: spec-review mode (design) + no PR env → claim_sources must follow the
+  # spec subject and skip the HEAD commit message.
+  run_wrapper "[NON_INTERACTIVE] spec review for design: docs/specs/2026-06-09-spec-claim.md" \
+              --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  [ -f "$RUN_WRAPPER_PROMPT_FILE" ] || fail "fake-codex did not capture prompt"
+
+  # Isolate the claim_sources slot block.
+  local cs_block
+  cs_block=$(awk '/^claim_sources:/,/^---$/' "$RUN_WRAPPER_PROMPT_FILE")
+
+  # The unrelated HEAD commit message MUST NOT leak in (text says skip HEAD).
+  printf '%s' "$cs_block" | grep -qF "MARKER_SPEC_HEAD" \
+    && fail "unrelated HEAD commit message leaked into claim_sources in spec-review mode (text says skip HEAD, logic used it)"
+
+  # The `head_commit=` source line itself MUST be absent in spec mode.
+  printf '%s' "$cs_block" | grep -qF "head_commit=" \
+    && fail "claim_sources emitted head_commit= in spec-review mode (HEAD must be skipped)"
+
+  # The explicit no-source sentinel MUST be present (matches the spec-mode
+  # instruction text `PR title/body > (no claim sources available)`).
+  printf '%s' "$cs_block" | grep -qF "(no claim sources available)" \
+    || fail "claim_sources did not emit the no-source sentinel in spec-review mode"
+  return 0
+}
+
+# ------------------------------------------------------------
+# B5-spec negative-side: a spec review WITH PR env set must still surface the
+# PR claim (PR title/body stays top priority in every mode). The spec branch
+# must not swallow an explicit PR claim.
+# ------------------------------------------------------------
+test_claim_sources_spec_mode_keeps_pr_env() {
+  seed_design "docs/specs/2026-06-09-spec-claim-pr.md" "S1"
+  ( cd "$SANDBOX" \
+      && echo "unrelated content" > unrelated-spec-head-pr.txt \
+      && git add unrelated-spec-head-pr.txt \
+      && git commit -q -m "unrelated commit MARKER_SPEC_HEAD_PR" )
+
+  # Run with PR env set — the explicit PR claim must win in spec mode too.
+  local capture_file="$SANDBOX/.fake-codex-prompt-capture.txt"
+  local stdin_file="$SANDBOX/.stdin-in.txt"
+  local tmp_stdout tmp_stderr
+  tmp_stdout=$(mktemp); tmp_stderr=$(mktemp)
+  printf '%s' "[NON_INTERACTIVE] spec review for design: docs/specs/2026-06-09-spec-claim-pr.md" > "$stdin_file"
+  (
+    cd "$SANDBOX"
+    export CODEX_BIN="$FAKE_CODEX"
+    export FAKE_CODEX_CAPTURE="$capture_file"
+    export REIN_PR_TITLE="MARKER_SPEC_PR_TITLE"
+    export REIN_PR_BODY="some pr body"
+    bash "$SANDBOX/scripts/rein-codex-review.sh" --non-interactive < "$stdin_file" \
+      > "$tmp_stdout" 2> "$tmp_stderr"
+  )
+  RUN_WRAPPER_RC=$?
+  RUN_WRAPPER_ERR=$(cat "$tmp_stderr")
+  rm -f "$tmp_stdout" "$tmp_stderr" "$stdin_file"
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  [ -f "$capture_file" ] || fail "fake-codex did not capture prompt"
+
+  local cs_block
+  cs_block=$(awk '/^claim_sources:/,/^---$/' "$capture_file")
+
+  # The PR title MUST be the claim source even in spec mode.
+  printf '%s' "$cs_block" | grep -qF "MARKER_SPEC_PR_TITLE" \
+    || fail "PR title missing from claim_sources in spec-review mode (PR env must stay top priority)"
+  # The unrelated HEAD message MUST still be absent.
+  printf '%s' "$cs_block" | grep -qF "MARKER_SPEC_HEAD_PR" \
+    && fail "unrelated HEAD commit message leaked into spec-review claim_sources even with PR env set"
+  return 0
+}
+
+# ------------------------------------------------------------
 # Main
 # ------------------------------------------------------------
 
@@ -1237,8 +1751,11 @@ main() {
   run_test test_parse_verdict_recognizes_final_verdict_line_in_body
   run_test test_parse_verdict_falls_back_to_first_line_keyword_when_no_final_verdict
   run_test test_parse_verdict_final_verdict_line_overrides_first_line_keyword
-  run_test test_parse_verdict_multiple_final_verdict_lines_first_match_wins
+  run_test test_parse_verdict_multiple_final_verdict_lines_last_match_wins
+  run_test test_parse_verdict_body_quoted_verdict_does_not_override_final
   run_test test_parse_verdict_no_keyword_returns_needs_fix
+  # B2 exit-code 누수 회귀 방지 (2026-06-09)
+  run_test test_codex_nonzero_exit_propagates
   # Plugin self-containment hotfix (2026-05-12)
   run_test test_wrapper_plugin_layout_user_repo_without_claude_dir_uses_bundled_lib
   # BUG-WRAP-SOURCE: fail-closed on missing/unreadable/invalid lib (2026-05-29)
@@ -1253,6 +1770,21 @@ main() {
   # Fresh spec-review unrelated active-DoD fallback (G8-3, 2026-05-23)
   run_test test_g8_3_fresh_spec_review_ignores_unrelated_active_dod
   run_test test_g8_3_code_review_still_uses_tier2_fallback
+  # B4 stale review context: working tree preferred over committed range (2026-06-09)
+  run_test test_changed_files_prefers_staged_over_committed_range
+  run_test test_changed_files_degrades_to_committed_range_when_working_tree_clean
+  # B5 claim_sources review-subject consistency (2026-06-09)
+  run_test test_claim_sources_uses_dod_not_head_in_working_tree_mode
+  run_test test_claim_sources_uses_head_in_commit_range_mode
+  # B6 changed_files label review-subject consistency (2026-06-09)
+  run_test test_changed_files_label_reflects_working_tree_mode
+  run_test test_changed_files_label_reflects_commit_range_mode
+  # B5-cont claim-source-priority instruction text review-subject consistency (2026-06-09)
+  run_test test_claim_source_priority_note_reflects_working_tree_mode
+  run_test test_claim_source_priority_note_reflects_commit_range_mode
+  # B5-spec claim_sources spec-mode HEAD skip — text/logic consistency (Round 5, 2026-06-09)
+  run_test test_claim_sources_spec_mode_skips_head
+  run_test test_claim_sources_spec_mode_keeps_pr_env
   summary
 }
 

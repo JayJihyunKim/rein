@@ -113,6 +113,45 @@ if [ ! -r "$_select_active_dod_lib" ] || \
 fi
 . "$_select_active_dod_lib"
 
+# ---- Load codex model single-source-of-truth. -------------------------
+#
+# 모델명은 plugins/rein-core/config/codex-models.sh 한 곳에서 관리한다
+# (DoD codex-model-profile-routing). 래퍼는 CODE_MODEL / CODE_EFFORT 를
+# 읽어 codex 호출에 반영한다. 파일 부재/미정의 시 CODE_MODEL 은 빈
+# 문자열로 두고 -m 을 생략 → codex 기본 모델로 graceful degrade.
+#
+# 경로 해석은 location-agnostic — 이 스크립트는 두 위치에 byte-identical
+# 사본으로 존재한다(plugin SSOT `plugins/rein-core/scripts/` + 메인테이너
+# repo fallback `scripts/`, test-plugin-scripts-bundle.sh 가 동일성 강제).
+# 따라서 *같은* 코드가 두 레이아웃 모두에서 SSOT 를 찾아야 한다:
+#   - plugin 위치: $_script_dir/../config (plugins/rein-core/scripts → plugins/rein-core/config)
+#   - repo 루트 위치: $_script_dir/../plugins/rein-core/config (scripts → plugins/rein-core/config)
+#   - 설치 사용자: $CLAUDE_PLUGIN_ROOT/config (설정 시에만 시도)
+# 첫 readable 후보에서 source 후 break. 모두 부재면 CODE_MODEL 빈 채 degrade.
+CODE_MODEL=""
+CODE_EFFORT=""
+# Candidates built into a real array so each element survives whitespace in the
+# install path (B-quote, Round 5 2026-06-09): the earlier `for ... in` list used
+# `${CLAUDE_PLUGIN_ROOT:+"…"}` UNQUOTED, so a CLAUDE_PLUGIN_ROOT containing a
+# space word-split into multiple bogus candidates (and the real path was never
+# tried). The CLAUDE_PLUGIN_ROOT candidate is appended only when the variable is
+# set+non-empty, preserving the "try only when configured" semantics.
+_codex_models_candidates=(
+  "$_script_dir/../config/codex-models.sh"
+  "$_script_dir/../plugins/rein-core/config/codex-models.sh"
+)
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _codex_models_candidates+=("$CLAUDE_PLUGIN_ROOT/config/codex-models.sh")
+fi
+for _codex_models_conf in "${_codex_models_candidates[@]}"; do
+  if [ -r "$_codex_models_conf" ]; then
+    # shellcheck source=/dev/null
+    . "$_codex_models_conf"
+    break
+  fi
+done
+unset _codex_models_candidates
+
 # ---- Parse CLI options + read stdin prompt. ---------------------------
 
 NON_INTERACTIVE=0
@@ -270,22 +309,100 @@ _resolve_commit_iso() {
 DIFF_BASE_ISO=$(_resolve_commit_iso "$DIFF_BASE")
 HEAD_ISO=$(_resolve_commit_iso "HEAD")
 
-# 4b. Changed files vs. diff base. We prefer --cached first (staged), then
-# merged with working-tree unstaged so we capture everything the reviewer
-# might touch. For simplicity here we use `git diff --name-only <base>..HEAD`
-# plus unstaged changes against HEAD. Failures degrade to empty list.
+# 4b. Changed files. We prefer the WORKING TREE first: the union of staged
+# (--cached) and unstaged (working-tree) changes, deduplicated. This matches
+# rein's review-before-commit flow, where the real review subject is staged
+# (uncommitted) — reviewing it is the whole point of the gate. Only when the
+# working tree is CLEAN (PR flow: everything already committed) do we degrade
+# to the committed range `<DIFF_BASE>..HEAD`, so a PR review still sees its
+# diff. The previous order put the committed range first; when an unrelated
+# file was already committed (DIFF_BASE..HEAD non-empty) the wrapper reviewed
+# that stale range and never looked at the staged subject (B4, 2026-06-09).
+# Failures degrade to an empty list.
 _changed_files() {
-  local out
-  out=$(git -C "$PROJECT_DIR" diff --name-only "$DIFF_BASE"..HEAD 2>/dev/null || true)
-  if [ -z "$out" ]; then
-    out=$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null || true)
-  fi
-  if [ -z "$out" ]; then
-    out=$(git -C "$PROJECT_DIR" diff --name-only 2>/dev/null || true)
+  local staged unstaged worktree out
+  staged=$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null || true)
+  unstaged=$(git -C "$PROJECT_DIR" diff --name-only 2>/dev/null || true)
+  # Union of staged + unstaged, drop blank lines, dedup (stable order).
+  worktree=$(printf '%s\n%s\n' "$staged" "$unstaged" \
+    | grep -v '^$' | awk '!seen[$0]++' || true)
+  if [ -n "$worktree" ]; then
+    out="$worktree"
+  else
+    # Working tree clean → degrade to the committed range (PR flow).
+    out=$(git -C "$PROJECT_DIR" diff --name-only "$DIFF_BASE"..HEAD 2>/dev/null || true)
   fi
   printf '%s' "$out"
 }
 CHANGED_FILES=$(_changed_files)
+
+# Review subject mode (B5/B6, 2026-06-09 — codex-ask D: bounded consistency
+# fix). Decide ONCE what this review is actually about, then make every
+# downstream slot follow it: the changed_files label, the claim_sources
+# comparison basis, and (via CLAIM_SOURCES) the freshness hints. This closes
+# the structural mismatch where rein's review-before-commit flow stages the
+# real subject (uncommitted) while HEAD is an unrelated prior commit — using
+# HEAD as the claim/label basis produced false NEEDS-FIX and (when staged
+# claims were never compared) false PASS.
+#
+#   - spec        : spec-review mode (the reviewed document is the subject).
+#   - working_tree: the working tree is dirty (staged ∪ unstaged non-empty).
+#                   This is rein's review-before-commit flow; the staged diff
+#                   is the subject, NOT HEAD.
+#   - commit_range: working tree clean (PR flow) → <DIFF_BASE>..HEAD is the
+#                   subject (a normal post-commit / PR review).
+#
+# The working_tree vs commit_range split mirrors _changed_files's own
+# preference (working tree first, committed range as the clean-tree degrade)
+# so the label, claim source, and file list never disagree.
+_resolve_review_subject() {
+  local staged unstaged worktree
+  staged=$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null || true)
+  unstaged=$(git -C "$PROJECT_DIR" diff --name-only 2>/dev/null || true)
+  worktree=$(printf '%s\n%s\n' "$staged" "$unstaged" | grep -v '^$' || true)
+  if [ -n "$worktree" ]; then
+    printf 'working_tree'
+  else
+    printf 'commit_range'
+  fi
+}
+if [ "$REIN_REVIEW_MODE" = "spec-review" ]; then
+  REVIEW_SUBJECT="spec"
+else
+  REVIEW_SUBJECT=$(_resolve_review_subject)
+fi
+
+# changed_files slot label — reflects REVIEW_SUBJECT so the reviewer is never
+# told it is looking at a committed range when the content is the working tree
+# (B6). Built here as a variable so the envelope heredoc just substitutes it.
+case "$REVIEW_SUBJECT" in
+  working_tree) CHANGED_FILES_LABEL="working tree — staged+unstaged" ;;
+  spec)         CHANGED_FILES_LABEL="spec review subject" ;;
+  *)            CHANGED_FILES_LABEL="${DIFF_BASE}..HEAD" ;;
+esac
+
+# Claim Audit sub-item 4 instruction — the claim-source PRIORITY that the slot
+# tells the reviewer to apply. It MUST match _claim_sources's actual,
+# REVIEW_SUBJECT-aware behavior (B5); a static order would tell the reviewer to
+# false-flag the intended mode behavior as a priority violation. Built here as
+# a variable (same pattern as CHANGED_FILES_LABEL above) so the otherwise
+# single-quoted SLOTS heredoc just substitutes the right line.
+#   - working_tree: staged diff is the subject; HEAD is an unrelated prior
+#     commit, so it is intentionally NOT a claim source (PR env > DoD title).
+#   - commit_range: the committed change IS the subject (HEAD commit > DoD).
+#   - spec: spec-review keeps SAD_PATH="" / no commit diff, so only the PR env
+#     (if any) and the explicit no-source sentinel apply.
+case "$REVIEW_SUBJECT" in
+  working_tree)
+    CLAIM_SOURCE_PRIORITY_NOTE='PR title/body > DoD/plan top > (no claim sources available)  [working tree: the HEAD-revision message is intentionally skipped — the staged diff, not the prior commit, is the subject]'
+    ;;
+  spec)
+    CLAIM_SOURCE_PRIORITY_NOTE='PR title/body > (no claim sources available)  [spec review: no commit diff to anchor a claim]'
+    ;;
+  *)
+    CLAIM_SOURCE_PRIORITY_NOTE='PR title/body > HEAD commit > DoD/plan top > (pre-commit) "unavailable"  [commit range: committed change is the subject]'
+    ;;
+esac
 
 # G8-3 (2026-05-23): in spec-review mode the reviewed document is the only
 # subject of the review. Scope changed_files to it (parsed from the marker)
@@ -527,11 +644,55 @@ if [ -n "$SAD_PATH" ]; then
   COVERS=$(_parse_dod_covers "$SAD_PATH" 2>/dev/null || true)
 fi
 
-# 4h. Claim sources — REIN_PR_TITLE/REIN_PR_BODY env > HEAD commit > DoD
-# title + plan Goal. We degrade gracefully — claim source is best-effort.
+# 4h. Claim sources — follows REVIEW_SUBJECT (B5, 2026-06-09). Priority:
+#   1. REIN_PR_TITLE/REIN_PR_BODY env — explicit PR claim, always top priority.
+#   2. review subject basis:
+#        - working_tree: the staged diff is the subject, NOT HEAD. HEAD is
+#          almost always an unrelated prior commit in rein's review-before-
+#          commit flow, so using its message poisons the Claim Audit (false
+#          NEEDS-FIX, and false PASS when the real staged claim is never
+#          compared). Use the DoD (work-definition) title instead; if no DoD,
+#          emit the explicit "(no claim sources available)" sentinel rather
+#          than the unrelated HEAD message.
+#        - spec: a fresh spec review has NO commit diff to anchor a claim on
+#          (G8-3 forces diff_base=N/A, SAD_PATH=""). HEAD is an unrelated prior
+#          commit, so it is intentionally skipped — emit the explicit
+#          "(no claim sources available)" sentinel. This matches the spec-mode
+#          instruction text (CLAIM_SOURCE_PRIORITY_NOTE); the prior code had no
+#          spec branch and fell through to the HEAD-commit tail, contradicting
+#          that text (B5-spec, Round 5 2026-06-09).
+#        - commit_range: keep the prior order (HEAD commit > DoD). For a
+#          clean-tree / PR review the committed change IS the subject, so its
+#          message is the right claim source.
+# We degrade gracefully — claim source is best-effort.
 _claim_sources() {
   if [ -n "${REIN_PR_TITLE:-}" ] || [ -n "${REIN_PR_BODY:-}" ]; then
     printf 'title=%s\nbody=%s\n' "${REIN_PR_TITLE:-}" "${REIN_PR_BODY:-}"
+    return 0
+  fi
+  if [ "${REVIEW_SUBJECT:-commit_range}" = "spec" ]; then
+    # Spec-review subject (B5-spec, Round 5 2026-06-09): a fresh design/plan
+    # review has NO commit diff to anchor a claim on. G8-3 already forces
+    # diff_base=N/A and keeps SAD_PATH="" (no related DoD yet). The HEAD commit
+    # is an unrelated prior change; reading its message would contradict the
+    # spec-mode instruction text ("PR title/body > (no claim sources
+    # available)" — HEAD skipped) and poison the Claim Audit with an unrelated
+    # claim. PR env was already handled above (top priority in every mode), so
+    # here the only correct output is the explicit no-source sentinel.
+    printf '(no claim sources available)\n'
+    return 0
+  fi
+  if [ "${REVIEW_SUBJECT:-commit_range}" = "working_tree" ]; then
+    # Staged subject: do NOT read the (unrelated) HEAD commit message. DoD
+    # title is the claim basis; fall through to the explicit no-source sentinel
+    # when there is no DoD.
+    if [ -n "$SAD_PATH" ]; then
+      local title
+      title=$(head -1 "$SAD_PATH" 2>/dev/null | sed 's/^#[[:space:]]*//')
+      printf 'dod_title=%s\n' "$title"
+      return 0
+    fi
+    printf '(no claim sources available)\n'
     return 0
   fi
   local head_msg
@@ -765,8 +926,14 @@ Required review sections (모두 응답에 포함해야 한다):
       - plan matrix 의 deferred 행 "위치/사유" 가 PR/commit claim 과 일치하는가?
       - changelog 에 언급된 항목인데 matrix 에 없으면 "claim vs tracking drift" High.
 
-   4. Claim source 우선순위 (Spec A GI-codex-review-context-assembly 에서 주입):
-      PR title/body > HEAD commit > DoD/plan top > (pre-commit) "unavailable"
+   4. Claim source 우선순위 (Spec A GI-codex-review-context-assembly 에서 주입,
+      현재 review subject 모드에 맞춰 동적 생성 — B5):
+SLOTS
+  # The priority line is REVIEW_SUBJECT-aware (B5). Emitted outside the
+  # single-quoted heredoc so $CLAIM_SOURCE_PRIORITY_NOTE expands; the 6-space
+  # indent matches the surrounding slot-4 sub-items.
+  printf '      %s\n' "$CLAIM_SOURCE_PRIORITY_NOTE"
+  cat <<'SLOTS'
 
    5. Evidence freshness
 
@@ -826,7 +993,7 @@ ${COVERS:-(none)}
 scope_items (from design):
 ${SCOPE_ITEMS:-(none)}
 
-changed_files (${DIFF_BASE}..HEAD):
+changed_files (${CHANGED_FILES_LABEL}):
 ${CHANGED_FILES:-(none)}
 
 claim_sources:
@@ -845,8 +1012,13 @@ CODEX_BIN="${CODEX_BIN:-codex}"
 #
 # Stage 1: dedicated `FINAL_VERDICT: <keyword>` line (envelope 가 출력 형식
 #          섹션에서 codex 에게 명시 지시; parser 가 line-anchored 로 가장
-#          우선 매칭). REJECT > NEEDS-FIX > PASS 우선순위는 head -1 의 단일
-#          매치 라인 안에서만 결정 — 파일 안 첫 FINAL_VERDICT 라인이 verdict.
+#          우선 매칭). REJECT > NEEDS-FIX > PASS 우선순위는 tail -1 의 단일
+#          매치 라인 안에서만 결정 — 마지막(tail) FINAL_VERDICT 라인이
+#          verdict 다. envelope 규칙이 codex 에게 "응답 끝에 FINAL_VERDICT" 를
+#          지시하므로 진짜 결론은 응답 끝의 라인이고, 본문 앞쪽에 인용/예시로
+#          섞인 FINAL_VERDICT(예: 테스트 stub 인용)는 결론이 아니다
+#          (B3, 2026-06-09 — first-match 가 인용 노이즈를 결론으로 오인하던
+#          버그의 근본 수정).
 #
 # Stage 2: legacy first-position keyword on any line (backward-compat —
 #          transition 기간에 envelope 지시 도달 전후 응답 패턴 동시 지원).
@@ -864,7 +1036,7 @@ _parse_verdict() {
   # within the matched line (each line carries exactly one keyword anyway).
   fv_line=$(printf '%s' "$out" \
     | grep -iE '^[[:space:]]*FINAL_VERDICT:[[:space:]]*(REJECT|NEEDS[-_ ]?FIX|PASS)\b' \
-    | head -1 || true)
+    | tail -1 || true)
   if [ -n "$fv_line" ]; then
     if printf '%s' "$fv_line" | grep -qiE 'REJECT\b'; then
       printf 'REJECT'; return 0
@@ -891,6 +1063,42 @@ _parse_verdict() {
 _invoke_codex() {
   # Use `exec` subcommand by default (same as SKILL.md examples).
   "$CODEX_BIN" exec "$@" || return $?
+}
+
+# ---- Model fail-soft (DoD codex-model-profile-routing). ---------------
+#
+# codex 가 요청 모델을 모르면 (upstream rename 등) exit≠0 + JSON
+# invalid_request_error / "... is not supported when using Codex" 를 낸다
+# (2026-06-08 실측). 이 경우 sonnet fallback 으로 넘기면 잘못된 모델을
+# 영구히 못 쓰고 문제만 숨겨지므로, 전용 종료 코드 3 으로 신호하고
+# 단일 출처(codex-models.sh) 수정을 안내한다 (SKILL.md §4 참조).
+
+# _detect_model_error <output> → 0(true) if codex rejected the model.
+# codex/OpenAI 의 모델 거부 메시지 변형을 포괄한다:
+#   - invalid_request_error : OpenAI JSON 에러 타입(모델/요청 설정 거부)
+#   - model_not_found / "model not found" : 모델 미존재
+#   - "is not supported when using ..." : ChatGPT 계정 등에서 모델 미지원(실측)
+#   - "is not supported by this (api|model)" : API/모델 미지원 변형
+# 정상 리뷰 본문 오탐을 줄이려고 일반 "is not supported" 단독은 매칭하지 않는다.
+_detect_model_error() {
+  local out="${1:-}"
+  # 오탐 방지: 정상 리뷰 출력은 FINAL_VERDICT 라인을 포함한다. codex 가 모델
+  # 거부로 응답 자체를 생성하지 못하면 verdict 가 없고 ERROR JSON 만 남는다.
+  # 따라서 verdict 가 있으면 — 리뷰 본문이 거부 문구를 단지 인용/논의한 경우
+  # 포함 — 모델 거부가 아니다. (이 가드가 없으면 fail-soft 자체를 리뷰할 때
+  # 본문의 패턴 언급을 거부로 오인해 정상 PASS 가 차단된다.)
+  if printf '%s' "$out" | grep -qE '^[[:space:]]*FINAL_VERDICT:'; then
+    return 1
+  fi
+  printf '%s' "$out" | grep -qiE 'invalid_request_error|model_not_found|model not found|is not supported when using|is not supported by this (api|model)'
+}
+
+# _emit_model_failsoft <role-var-name> <model-value>
+_emit_model_failsoft() {
+  local role_var="${1:-CODE_MODEL}" model_val="${2:-}"
+  echo "ERROR: [codex-review] codex 가 요청한 모델을 거부했습니다 — 모델명이 변경되었을 수 있습니다." >&2
+  echo "  현재 ${role_var}=\"${model_val}\"" >&2
+  echo "  → plugins/rein-core/config/codex-models.sh 의 ${role_var} 를 codex 의 최신 모델명으로 수정하세요." >&2
 }
 
 # ---- Stamp writer (Task 6.3 Step 3). ----------------------------------
@@ -939,20 +1147,50 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   #   REIN_EFFORT → --config model_reasoning_effort="<level>" (TOML-quoted).
   # Empty array is safely expanded with ${arr[@]+...} under `set -u`.
   CODEX_ARGS=()
+  # Model: 단일 출처의 CODE_MODEL 을 -m 으로 전달. 비어있으면 생략하여
+  # codex 기본 모델로 graceful degrade (codex-models.sh 부재 등).
+  if [ -n "$CODE_MODEL" ]; then
+    CODEX_ARGS+=(-m "$CODE_MODEL")
+  fi
+  # Effort: [EFFORT:] 마커(변경 규모 기반 자동 판정) 우선. 마커가 없을 때만
+  # 단일 출처의 CODE_EFFORT 를 폴백 기본값으로 적용.
+  if [ -z "$REIN_EFFORT" ] && [ -n "$CODE_EFFORT" ]; then
+    REIN_EFFORT="$CODE_EFFORT"
+  fi
   if [ -n "$REIN_EFFORT" ]; then
     CODEX_ARGS+=(--config "model_reasoning_effort=\"$REIN_EFFORT\"")
   fi
   # Feed envelope on stdin. Args forwarded to `codex exec` via _invoke_codex.
-  if ! CODEX_OUT=$(printf '%s' "$ENVELOPE" | _invoke_codex ${CODEX_ARGS[@]+"${CODEX_ARGS[@]}"} 2>&1); then
-    CODEX_RC=$?
+  # B2 (2026-06-09): capture codex 의 *실제* exit code. 이전 `if ! CMD; then
+  # CODEX_RC=$?` 는 `$?` 가 `! CMD`(항상 0)를 캡처해 codex 비모델 실패에도
+  # exit 0 으로 성공 위장했다. 여기서는 `$()` 를 단독 평가하고 `|| CODEX_RC=$?`
+  # 로 codex 의 종료 코드를 그대로 받는다 (`set -e` 가 non-zero `$()` 에서
+  # 스크립트를 죽이지 않도록 `||` 로 분리. pipefail 이라 _invoke_codex 의
+  # return $? 가 파이프 exit status 로 전파된다).
+  CODEX_RC=0
+  CODEX_OUT=$(printf '%s' "$ENVELOPE" | _invoke_codex ${CODEX_ARGS[@]+"${CODEX_ARGS[@]}"} 2>&1) || CODEX_RC=$?
+  if [ "$CODEX_RC" -ne 0 ]; then
     # Best-effort: emit output so caller can see what went wrong.
     printf '%s\n' "$CODEX_OUT"
+    # Fail-soft: 모델 거부면 sonnet fallback 으로 새지 말고(잘못된 모델을
+    # 숨기지 않도록) 전용 exit 3 + 단일 출처 수정 안내.
+    if _detect_model_error "$CODEX_OUT"; then
+      _emit_model_failsoft "CODE_MODEL" "$CODE_MODEL"
+      exit 3
+    fi
     echo "ERROR: [codex-review] codex invocation failed (exit $CODEX_RC)." >&2
     exit "$CODEX_RC"
   fi
 
   # Emit codex output unchanged for the caller.
   printf '%s\n' "$CODEX_OUT"
+
+  # Fail-soft (방어): codex 가 exit 0 으로 와도 출력에 모델 거부가 섞였으면
+  # 통과 표시(.codex-reviewed)를 만들지 않고 단일 출처 수정을 안내한다.
+  if _detect_model_error "$CODEX_OUT"; then
+    _emit_model_failsoft "CODE_MODEL" "$CODE_MODEL"
+    exit 3
+  fi
 
   # Parse verdict.
   VERDICT=$(_parse_verdict "$CODEX_OUT")

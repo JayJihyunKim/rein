@@ -93,6 +93,22 @@ for RULE in code-style security testing operating-sequence routing-map response-
   fi
 done
 
+# persona injection (PP-9, PP-10): active preset only — O(1), no full scan.
+# The loader (--persona) prints the VALIDATED active preset name when
+# enabled, nothing when disabled. Injection position is AFTER response-tone
+# ("tone applied last"); note this is ORDER ONLY — precedence authority lives
+# in the preset body text (PP-10), not in injection position.
+# graceful degrade: loader absent / empty output (disabled) / file absent ->
+# silent skip, SessionStart envelope stays intact.
+PERSONA=""
+if [ -f "$LOADER" ]; then
+  PERSONA=$(python3 "$LOADER" --persona || true)
+fi
+if [ -n "$PERSONA" ]; then
+  PERSONA_FILE="$RULES_DIR/persona/${PERSONA}.md"
+  [ -f "$PERSONA_FILE" ] && CONTENT+="$(cat "$PERSONA_FILE")"$'\n\n'
+fi
+
 # Empty CONTENT (no defaults available, no overrides) — exit silently.
 if [ -z "$CONTENT" ]; then
   exit 0

@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.4.7** (2026-06-09) — code review and document (design/plan) review now run on a single model (`gpt-5.5`). v1.4.6 consolidated codex model names into one file and split them by role (code review vs analysis); this release unifies code and document review onto one model. The role variables are kept for a possible future re-split, with the same value for now. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.5.0** (2026-06-09) — adds a swappable assistant persona (default `boss-ace`, on by default, opt out with `enabled: false` in `.rein/policy/persona.yaml`) that styles tone only while keeping warnings, gate blocks, and operational detail strict (response rules always win). Also fixes several integrity defects in the codex code-review gate: a failed codex run is no longer treated as a pass, a quoted verdict in the review body is no longer mistaken for the conclusion, and the actual uncommitted change is reviewed instead of an unrelated prior commit. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

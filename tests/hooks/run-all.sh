@@ -78,7 +78,9 @@ for test_file in \
   "$SCRIPT_DIR/test-onboarding-primer.sh" \
   "$SCRIPT_DIR/test-teach-forward-gates.sh" \
   "$SCRIPT_DIR/test-git-snapshot.sh" \
-  "$SCRIPT_DIR/test-routing-map-emit.sh"
+  "$SCRIPT_DIR/test-routing-map-emit.sh" \
+  "$SCRIPT_DIR/test-session-start-persona-inject.sh" \
+  "$SCRIPT_DIR/../integration/test-governance-e2e.sh"
 do
   echo ""
   echo "######## $(basename "$test_file") ########"

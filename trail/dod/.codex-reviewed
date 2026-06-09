@@ -1,11 +1,7 @@
-reviewer: self-review
-timestamp: 2026-06-09T00:53:40
-cycle: codex-review-model-unify-gpt55
-scope: code 3 files (codex PASS) + release version/docs 5 files (self-review)
-files_reviewed: 8
-review_round: 2
-fallback_reason: none
-resolution: passed
-remaining_issues: none
-prior_reviewer: codex
-prior_max_severity: low
+reviewed_at: 2026-06-09T08:46:17Z
+reviewer: codex
+diff_base: baec1d10e8ce2bfaec603ebe92425bad9b893f0a
+verdict: PASS
+cycle: 2026-06-09-codex-review-wrapper-sync
+scope: wrapper-generated
+active_dod: trail/dod/dod-2026-06-09-codex-review-wrapper-sync.md

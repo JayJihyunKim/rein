@@ -11,9 +11,12 @@
 # Design (Spec A §4.1): 2-tier selection.
 #
 #   Tier 1 — explicit marker (blocking authority):
-#     trail/dod/.active-dod exists AND has a valid `path=<…>` that resolves
-#     to a DoD with `## 범위 연결`. Invalid markers fall through to Tier 2
-#     and log to trail/incidents/invalid-active-dod-marker.log.
+#     trail/dod/.active-dod exists AND has a valid `path=<…>` that is
+#     project-contained and resolves to an existing DoD. `## 범위 연결` is
+#     NOT required — it is an optional coverage section written only for
+#     plan-linked DoDs. Invalid markers (no path= / containment failure /
+#     target missing) fall through to Tier 2 and log to
+#     trail/incidents/invalid-active-dod-marker.log.
 #
 #   Tier 2 — advisory fallback (non-blocking authority):
 #     Most recent DoD under trail/dod/ that has `## 범위 연결`, tie-broken
@@ -160,7 +163,7 @@ select_active_dod() {
   if [ -f "$marker" ]; then
     local marker_path
     marker_path=$(grep '^path=' "$marker" 2>/dev/null | head -1 | sed 's/^path=//')
-    # GE-1: containment is checked BEFORE the -f / range-link checks so a marker
+    # GE-1: containment is checked BEFORE the -f existence check so a marker
     # pointing outside the project (absolute / .. / metachars / symlink escape)
     # never reaches Tier 1 blocking authority. CWD == PROJECT_DIR (callers cd
     # before invoking), so $PWD is the containment root.
@@ -174,10 +177,13 @@ select_active_dod() {
     elif [ ! -f "$marker_path" ]; then
       _sad_log_invalid_marker "marker target does not exist: $marker_path"
       # fall through to Tier 2
-    elif ! _sad_dod_has_range_link "$marker_path"; then
-      _sad_log_invalid_marker "marker target missing '## 범위 연결': $marker_path"
-      # fall through to Tier 2
     else
+      # The marker is written by post-edit-dod-routing-check on routing approval,
+      # independent of plan linkage. `## 범위 연결` is an OPTIONAL coverage section
+      # (design-plan-coverage.md) checked separately by the coverage validator —
+      # it is NOT a qualifier for active-DoD selection. Honoring the marker for any
+      # contained, existing DoD prevents label pollution + Tier-0 commit blocks when
+      # the active work is a plan-less DoD (active-dod-marker-trust).
       tier="1"
       path="$marker_path"
       reason="marker-blocking"

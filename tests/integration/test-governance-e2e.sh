@@ -53,12 +53,18 @@ sandbox_init() {
   mkdir -p "$SANDBOX/docs/specs"
   mkdir -p "$SANDBOX/docs/plans"
 
-  # Copy hooks + libs
-  cp "$REAL_PROJECT_DIR/.claude/hooks/pre-edit-dod-gate.sh" \
+  # Copy hooks + libs. Source dir: `.claude/hooks` (legacy dev overlay) preferred,
+  # else plugin SSOT `plugins/rein-core/hooks` — Option C Phase 3 removed the dev
+  # overlay so the plugin tree is the single source. Same fallback as
+  # tests/hooks/lib/test-harness.sh; the sandbox TARGET layout stays
+  # `.claude/hooks/` because the hooks resolve their lib via a relative path.
+  local HOOKS_SRC="$REAL_PROJECT_DIR/.claude/hooks"
+  [ -d "$HOOKS_SRC/lib" ] || HOOKS_SRC="$REAL_PROJECT_DIR/plugins/rein-core/hooks"
+  cp "$HOOKS_SRC/pre-edit-dod-gate.sh" \
      "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh"
-  cp "$REAL_PROJECT_DIR/.claude/hooks/pre-bash-test-commit-gate.sh" \
+  cp "$HOOKS_SRC/pre-bash-test-commit-gate.sh" \
      "$SANDBOX/.claude/hooks/pre-bash-test-commit-gate.sh"
-  cp -R "$REAL_PROJECT_DIR/.claude/hooks/lib/." \
+  cp -R "$HOOKS_SRC/lib/." \
         "$SANDBOX/.claude/hooks/lib/"
   chmod +x "$SANDBOX/.claude/hooks"/*.sh
 
@@ -227,10 +233,16 @@ test_tier1_unknown_id_blocks_edit_and_commit() {
     || fail "tier1 unknown ID should create .dod-coverage-mismatch"
 
   # Now pre-bash-test-commit-gate must refuse commit while the marker exists.
+  # The DoD carries an unknown covers ID → coverage validator FAIL → P2 deny,
+  # emitted as a JSON deny (exit 0 + stdout permissionDecision:deny) per the
+  # json-deny migration — NOT exit 2. Mirrors test-pre-bash-test-commit-gate.sh
+  # assert_json_deny("COVERAGE_MISMATCH").
   run_bash_guard 'git commit -m "feat: integration test"'
-  [ "$GUARD_RC" = "2" ] || fail "bash-guard should block with marker (exit=$GUARD_RC, stderr=$GUARD_STDERR)"
-  echo "$GUARD_STDERR" | grep -qF ".dod-coverage-mismatch" \
-    || fail "bash-guard stderr missing .dod-coverage-mismatch reference"
+  [ "$GUARD_RC" = "0" ] || fail "bash-guard JSON-deny path should exit 0 (exit=$GUARD_RC, stderr=$GUARD_STDERR)"
+  echo "$GUARD_STDOUT" | grep -qF '"permissionDecision": "deny"' \
+    || fail "bash-guard should JSON-deny with marker (stdout=$GUARD_STDOUT)"
+  echo "$GUARD_STDOUT" | grep -qF "COVERAGE_MISMATCH" \
+    || fail "bash-guard JSON deny missing COVERAGE_MISMATCH reason-code"
 }
 
 # ------------------------------------------------------------

@@ -1,9 +1,10 @@
-reviewed_at: 2026-06-09T00:47:47Z
+reviewed_at: 2026-06-09T08:31:59Z
 reviewer: security-reviewer
 security_level: standard
 user_level: auto
 verdict: PASS
-scope: codex-review-model-unify-gpt55
-active_dod: trail/dod/dod-2026-06-09-codex-review-model-unify-gpt55.md
-files_reviewed: plugins/rein-core/config/codex-models.sh, plugins/rein-core/agents/spec-writer.md, plugins/rein-core/agents/plan-writer.md
+scope: codex-review-wrapper-sync
+active_dod: trail/dod/dod-2026-06-09-codex-review-wrapper-sync.md
+files_reviewed: plugins/rein-core/scripts/rein-codex-review.sh, scripts/rein-codex-review.sh, tests/skills/test-codex-review-wrapper.sh
 findings: none
+notes: B1 config multi-path source — candidates are static script-relative paths plus optional CLAUDE_PLUGIN_ROOT (trusted env from Claude Code), array build is whitespace/glob-safe (quoted elements, no word-split), sourced files are config not external input. B2 exit-code propagation reduces fail-open risk (security improvement). B5 claim-source trust-boundary change (HEAD->DoD in working_tree mode) is review-integrity-positive and injection-safe — verified empirically that malicious DoD title with $(), backticks, ;, ../ is inert literal text in the envelope (no eval; single-pass heredoc expansion). claim-source-iso-hints extractor still rejects traversal/metachar tokens. Two copies sha256-identical (test-plugin-scripts-bundle enforces). 45/45 wrapper tests + bundle sync test green.

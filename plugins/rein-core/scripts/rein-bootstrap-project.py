@@ -48,6 +48,20 @@ POLICY_RULES_TEMPLATE = """# .rein/policy/rules.yaml
 # prompt rules for this repo. Empty file = use plugin defaults.
 """
 
+POLICY_PERSONA_TEMPLATE = """# .rein/policy/persona.yaml
+#
+# Persona layer — applies a character/tone preset on top of the response
+# rules. The response rules (plain language, no internal IDs, cold warnings)
+# ALWAYS win; persona only adds a tone layer above them.
+#
+# To opt out, set enabled to false:
+#   enabled: false
+#
+# Default (this file absent OR a parse error) = {enabled: true, preset: boss-ace}.
+enabled: true
+preset: boss-ace
+"""
+
 INDEX_TEMPLATE = """# trail/index.md
 
 > Rein 프로젝트 상태 — 매 세션 종료 시 갱신.
@@ -200,6 +214,7 @@ def bootstrap(project_dir: Path, scope: str, version: str) -> tuple[Path, bool]:
     policy_dir.mkdir(parents=True, exist_ok=True)
     write_text_if_missing(policy_dir / "hooks.yaml", POLICY_HOOKS_TEMPLATE)
     write_text_if_missing(policy_dir / "rules.yaml", POLICY_RULES_TEMPLATE)
+    write_text_if_missing(policy_dir / "persona.yaml", POLICY_PERSONA_TEMPLATE)
 
     for subdir in TRAIL_SUBDIRS:
         target = trail_dir / subdir

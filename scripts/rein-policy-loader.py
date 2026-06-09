@@ -17,6 +17,7 @@ Resolution order (relative to current working directory):
     .rein/policy/hooks.yaml   — hook toggles
     .rein/policy/rules.yaml   — prompt-only rule body overrides
 """
+import re
 import sys
 from pathlib import Path
 
@@ -69,6 +70,17 @@ UMBRELLA_KEYS = {
     "pre-bash-safety-guard": "pre-bash-guard",
     "pre-bash-test-commit-gate": "pre-bash-guard",
 }
+
+
+# Registered persona presets — single source of truth for membership
+# validation (PP-3). Adding a preset means adding its name here AND creating
+# rules/persona/<name>.md. A name that passes the format allowlist but is not
+# listed here is downgraded to the default preset (fail-safe) so the hook
+# never points at a missing rules/persona/<typo>.md (which would silently
+# skip persona injection entirely).
+KNOWN_PERSONA_PRESETS = {"boss-ace"}
+PERSONA_NAME_RE = re.compile(r"^[a-z0-9-]+$")
+DEFAULT_PERSONA = "boss-ace"
 
 
 def _normalize_enabled(raw):
@@ -242,6 +254,53 @@ def get_meta_check_policy() -> str:
     return "auto"
 
 
+def get_persona() -> tuple[bool, str]:
+    """Return (enabled, preset) for the active persona layer.
+
+    Reads .rein/policy/persona.yaml's top-level {enabled, preset}.
+    Fail-open at every error path: missing file, PyYAML absent, parse
+    error, non-dict top-level, missing/non-bool `enabled`, missing/invalid
+    `preset` all yield (True, DEFAULT_PERSONA). Only an explicit
+    `enabled: false` disables. The returned preset name is ALWAYS validated
+    (format allowlist ^[a-z0-9-]+$ AND membership in KNOWN_PERSONA_PRESETS);
+    any failure downgrades to DEFAULT_PERSONA (PP-3).
+
+    Scope ID: PP-2, PP-3
+    """
+    if yaml is None:
+        return (True, DEFAULT_PERSONA)
+    policy_path = Path(".rein/policy/persona.yaml")
+    if not policy_path.exists():
+        return (True, DEFAULT_PERSONA)
+    try:
+        data = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    except Exception:
+        print(
+            f"warning: failed to parse {policy_path} - using default persona",
+            file=sys.stderr,
+        )
+        return (True, DEFAULT_PERSONA)
+    if not isinstance(data, dict):
+        return (True, DEFAULT_PERSONA)
+    enabled = False if data.get("enabled") is False else True
+    preset = _validate_persona_name(data.get("preset"))
+    return (enabled, preset)
+
+
+def _validate_persona_name(raw) -> str:
+    """Return a trusted preset name, downgrading to DEFAULT_PERSONA on any
+    validation failure (PP-3): non-str, empty, format violation
+    (path traversal / substitution chars), or not in KNOWN_PERSONA_PRESETS."""
+    if not isinstance(raw, str):
+        return DEFAULT_PERSONA
+    candidate = raw.strip()
+    if not candidate or not PERSONA_NAME_RE.match(candidate):
+        return DEFAULT_PERSONA
+    if candidate not in KNOWN_PERSONA_PRESETS:
+        return DEFAULT_PERSONA
+    return candidate
+
+
 def get_all_rule_overrides() -> dict:
     """Return all rule overrides as {rule_name: override_body}.
 
@@ -258,7 +317,7 @@ def get_all_rule_overrides() -> dict:
 def main() -> int:
     if len(sys.argv) < 2:
         print(
-            "usage: rein-policy-loader.py <hook-name> | --rule-override <rule-name> | --meta-check-policy",
+            "usage: rein-policy-loader.py <hook-name> | --rule-override <rule-name> | --meta-check-policy | --persona",
             file=sys.stderr,
         )
         return 0  # fail-open - never block a hook due to internal usage error
@@ -277,6 +336,15 @@ def main() -> int:
         # G3 Phase 2 Task 2.1: print effective meta-check policy
         # ('true' | 'false' | 'auto') to stdout, always exit 0.
         sys.stdout.write(get_meta_check_policy())
+        return 0
+
+    if sys.argv[1] == "--persona":
+        # PP-4: print the validated active preset name (one line) when enabled,
+        # nothing when disabled. Always exit 0 so the hook never breaks the
+        # SessionStart envelope.
+        enabled, preset = get_persona()
+        if enabled:
+            sys.stdout.write(preset)
         return 0
 
     # Default mode: hook toggle query (Task 2.7).

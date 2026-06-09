@@ -78,6 +78,44 @@ else
 fi
 rm -rf "$S"
 
+# ---- Test 1b (active-dod-marker-trust): marker → plan-less DoD (no '## 범위 연결')
+# must still be honored as Tier 1. The marker is written on routing approval
+# regardless of plan linkage; '## 범위 연결' is an OPTIONAL coverage section
+# (design-plan-coverage.md), not an active-DoD qualifier. Regression for label
+# pollution + Tier-0 commit block when the active work is a plan-less DoD.
+echo "### Test 1b: tier1_마커_planless_dod_신뢰"
+S=$(_mksandbox)
+# Active work: a plan-less DoD with NO '## 범위 연결' section.
+cat > "$S/trail/dod/dod-2026-06-09-planless.md" <<'EOF'
+# DoD planless
+## 범위
+small fix, no plan
+## 라우팅 추천
+approved_by_user: true
+EOF
+# An OLDER plan-linked DoD a buggy selector would fall through to (Tier 2).
+cat > "$S/trail/dod/dod-2026-06-04-planbased.md" <<'EOF'
+# old plan-based dod
+## 범위 연결
+plan ref: docs/plans/old.md
+covers: [O1]
+EOF
+touch -d '2026-06-04 10:00:00' "$S/trail/dod/dod-2026-06-04-planbased.md" 2>/dev/null \
+  || touch -t 202606041000 "$S/trail/dod/dod-2026-06-04-planbased.md"
+cat > "$S/trail/dod/.active-dod" <<'EOF'
+path=trail/dod/dod-2026-06-09-planless.md
+pinned_by=test
+EOF
+result=$(_run_select "$S")
+tier=$(printf '%s' "$result" | cut -f1)
+path=$(printf '%s' "$result" | cut -f2)
+if [ "$tier" = "1" ] && [ "$path" = "trail/dod/dod-2026-06-09-planless.md" ]; then
+  _pass "marker → plan-less DoD honored as Tier 1 → tier=$tier path=$path"
+else
+  _fail "marker plan-less DoD should be Tier 1, got tier=$tier path=$path (bug: fell through to old plan-based DoD)"
+fi
+rm -rf "$S"
+
 # ---- Test 2: Tier 2 — no marker, use latest DoD with 범위 연결.
 echo "### Test 2: tier2_마커없음_advisory"
 S=$(_mksandbox)
