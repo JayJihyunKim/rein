@@ -1,9 +1,0 @@
-reviewed_at: 2026-06-09T00:47:47Z
-reviewer: security-reviewer
-security_level: standard
-user_level: auto
-verdict: PASS
-scope: codex-review-model-unify-gpt55
-active_dod: trail/dod/dod-2026-06-09-codex-review-model-unify-gpt55.md
-files_reviewed: plugins/rein-core/config/codex-models.sh, plugins/rein-core/agents/spec-writer.md, plugins/rein-core/agents/plan-writer.md
-findings: none
