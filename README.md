@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.4.6** (2026-06-08) — codex model names live in one file. Previously codex review/ask skills hard-coded model names in several places, so when codex renamed a model the dead name lingered and reviews failed silently. Now model names are managed in a single file (`plugins/rein-core/config/codex-models.sh`), split by role (code review vs analysis), and a model-rejection fail-soft points you to the exact entry to update when codex renames a model — and won't let a review pass under a broken model. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.4.7** (2026-06-09) — code review and document (design/plan) review now run on a single model (`gpt-5.5`). v1.4.6 consolidated codex model names into one file and split them by role (code review vs analysis); this release unifies code and document review onto one model. The role variables are kept for a possible future re-split, with the same value for now. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

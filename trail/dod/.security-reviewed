@@ -1,9 +1,9 @@
-reviewed_at: 2026-06-08T08:49:57Z
+reviewed_at: 2026-06-09T00:47:47Z
 reviewer: security-reviewer
 security_level: standard
 user_level: auto
 verdict: PASS
-scope: codex-model-profile-routing
-active_dod: trail/dod/dod-2026-06-08-codex-model-profile-routing.md
-files_reviewed: plugins/rein-core/config/codex-models.sh, plugins/rein-core/scripts/rein-codex-review.sh, plugins/rein-core/skills/codex-ask/SKILL.md, plugins/rein-core/skills/codex-review/SKILL.md, tests/skills/test-codex-model-failsoft.sh
+scope: codex-review-model-unify-gpt55
+active_dod: trail/dod/dod-2026-06-09-codex-review-model-unify-gpt55.md
+files_reviewed: plugins/rein-core/config/codex-models.sh, plugins/rein-core/agents/spec-writer.md, plugins/rein-core/agents/plan-writer.md
 findings: none

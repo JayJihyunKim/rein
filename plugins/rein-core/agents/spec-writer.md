@@ -91,7 +91,7 @@ Skill tool 로 `codex-review` 호출:
   Validate technical soundness, scope coverage, and brainstorm alignment.
   ```
 - ⚠️ **첫 줄에 리뷰 지시문을 붙이지 말 것.** 첫 줄은 `spec review for design:` prefix 뒤에 경로만 와야 한다. 지시문을 첫 줄에 같이 쓰면 wrapper(`rein-codex-review.sh`) 가 prefix 뒤 전체를 경로로 오염 파싱한다. 그래서 지시문은 반드시 둘째 줄로 분리한다.
-- skill 이 default (gpt-5.4 / high / read-only) 로 codex exec 실행.
+- skill 이 default (gpt-5.5 / high / read-only) 로 codex exec 실행.
 - 결과 verdict 캡처 (PASS / NEEDS-FIX / REJECT).
 
 **CRITICAL — stamp 분리**: 이 자동 spec review 호출은 codex-review skill §6.6 의 "Spec review 서브플로우" 로 분기되어야 한다.
@@ -112,7 +112,7 @@ Skill tool 로 `codex-review` 호출:
    [ -f "$MARK_SCRIPT" ] || MARK_SCRIPT="scripts/rein-mark-spec-reviewed.sh"
    bash "$MARK_SCRIPT" <spec-path> codex-gpt-<model>-<effort>-automated
    ```
-   reviewer 문자열의 `-automated` suffix 는 trail 추적 시 수동/자동 구분 (예: `codex-gpt-5.4-high-automated`).
+   reviewer 문자열의 `-automated` suffix 는 trail 추적 시 수동/자동 구분 (예: `codex-gpt-5.5-high-automated`).
 2. handoff to `plan-writer` (다음 단계 = spec → plan).
 
 **NEEDS-FIX 또는 REJECT**:

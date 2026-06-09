@@ -129,7 +129,7 @@ validator 통과 직후 다음 수행:
 Skill tool 로 `codex-review` 호출:
 
 - prompt: `[NON_INTERACTIVE] spec review for plan: <plan-path>. Validate scope coverage and implementation feasibility.`
-- skill 이 default (gpt-5.4 / high / read-only) 로 codex exec 실행
+- skill 이 default (gpt-5.5 / high / read-only) 로 codex exec 실행
 - 결과 verdict 캡처 (PASS / NEEDS-FIX / REJECT)
 
 **CRITICAL — stamp 분리**: 이 spec review 호출은 codex-review skill §6.6 의 "Spec review 서브플로우" 로 분기되어야 한다.
@@ -145,7 +145,7 @@ Skill tool 로 `codex-review` 호출:
 
 1. Bash tool 로 stamp 생성:
    ```bash
-   bash scripts/rein-mark-spec-reviewed.sh <plan-path> codex-gpt-5.4-high-automated
+   bash scripts/rein-mark-spec-reviewed.sh <plan-path> codex-gpt-5.5-high-automated
    ```
    reviewer 문자열의 `-automated` suffix 는 trail 추적 시 수동/자동 구분.
 2. handoff to `subagent-driven-development` (또는 `superpowers:executing-plans`).
@@ -205,7 +205,7 @@ codex CLI 실행 실패 (에러/타임아웃) 시 codex-review skill 의 Sonnet 
 **자동 경로 (PASS 시)**:
 ```
 Plan complete: <plan 경로>
-Spec review: PASS (codex-gpt-5.4-high-automated)
+Spec review: PASS (codex-gpt-5.5-high-automated)
 Stamp created: trail/dod/.spec-reviews/<hash>.reviewed
 Next (자동 경로): subagent-driven-development 로 plan 실행
 ```
