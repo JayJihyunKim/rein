@@ -1,7 +1,0 @@
-reviewed_at: 2026-06-11T07:08:50Z
-reviewer: codex
-diff_base: 952161c7b04010c69c84732743c799bc02f44450
-verdict: PASS
-cycle: 2026-06-11-envelope-subject-consistency
-scope: wrapper-generated
-active_dod: trail/dod/dod-2026-06-11-envelope-subject-consistency.md
