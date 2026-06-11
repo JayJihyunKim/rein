@@ -1,46 +1,47 @@
 #!/usr/bin/env bash
-# tests/hooks/test-session-start-persona-inject.sh — Persona preset Phase 2 Task 2.2
+# tests/hooks/test-session-start-persona-inject.sh — persona isolation (PT-3/PT-11)
 #
-# Functional regression test for the persona injection block in
-# plugins/rein-core/hooks/session-start-rules.sh (PP-13).
+# Functional regression test for the DEDICATED persona SessionStart hook
+# plugins/rein-core/hooks/session-start-persona.sh.
 #
-# The hook, after concatenating the 6 default rule bodies, probes the loader
-# (`python3 rein-policy-loader.py --persona`). When persona is enabled the
-# loader prints the VALIDATED active preset name; the hook then appends
-# `${CLAUDE_PLUGIN_ROOT}/rules/persona/<preset>.md` to additionalContext.
-# Injection happens AFTER response-tone ("tone applied last") — but that is
-# ORDER ONLY; precedence authority lives in the preset body text (PP-10).
+# Persona used to be appended to session-start-rules.sh's single envelope and
+# got truncated when that envelope overflowed the per-hook cap. PT-3 moved it
+# into its own hook with its own envelope + size budget. This hook probes the
+# loader (`python3 rein-policy-loader.py --persona`): when persona is enabled it
+# emits a SessionStart envelope carrying ${CLAUDE_PLUGIN_ROOT}/rules/persona/
+# <preset>.md; when disabled it emits nothing.
 #
-# Assertions (all drive the real hook via stdout envelope -> additionalContext):
-#   (a) enabled:true, preset:boss-ace -> boss-ace.md body present.
-#   (b) enabled:false               -> boss-ace.md body ABSENT (opt-out).
+# Assertions (drive the real persona hook via stdout envelope):
+#   (a) enabled:true, preset:boss-ace -> own envelope with boss-ace.md body.
+#   (b) enabled:false               -> EMPTY stdout (no envelope; opt-out).
 #   (c) unknown preset (mentor)      -> downgraded to default boss-ace, body
 #                                       present (PP-3 membership fail-safe).
-#   (d) persona body sits AFTER response-tone body (response-tone marker index
-#       < persona marker index) (PP-9 order).
+#   (d) hooks.json registers session-start-persona.sh AFTER session-start-
+#       rules.sh ("tone applied last" ordering — replaces the old same-envelope
+#       order check now that persona is a separate hook).
 #   (e) persona.yaml absent          -> default ON, boss-ace.md body present
-#                                       (PP-2 fail-open default-ON).
+#                                       (fail-open default-ON).
 #
-# Scope ID: PP-13
+# Scope ID: PT-11 (was PP-13)
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-HOOK="$PROJECT_DIR/plugins/rein-core/hooks/session-start-rules.sh"
+HOOK="$PROJECT_DIR/plugins/rein-core/hooks/session-start-persona.sh"
 PLUGIN_ROOT="$PROJECT_DIR/plugins/rein-core"
 LOADER="$PLUGIN_ROOT/scripts/rein-policy-loader.py"
 BOSS_ACE="$PLUGIN_ROOT/rules/persona/boss-ace.md"
+HOOKS_JSON="$PLUGIN_ROOT/hooks/hooks.json"
 
 [ -f "$HOOK" ]     || { echo "FAIL: $HOOK missing" >&2; exit 1; }
 [ -x "$HOOK" ]     || { echo "FAIL: $HOOK is not executable" >&2; exit 1; }
 [ -f "$LOADER" ]   || { echo "FAIL: $LOADER missing" >&2; exit 1; }
-[ -f "$BOSS_ACE" ] || { echo "FAIL: $BOSS_ACE missing (Wave 1 bossace-rule)" >&2; exit 1; }
+[ -f "$BOSS_ACE" ] || { echo "FAIL: $BOSS_ACE missing" >&2; exit 1; }
 
-# Fingerprints — substrings unique to each body file. Kept literal so a body
-# rewrite that drops these markers fails loudly (and is fixed deliberately).
+# Fingerprint — substring unique to boss-ace.md. Kept literal so a body rewrite
+# that drops it fails loudly (and is fixed deliberately).
 PERSONA_FINGERPRINT="# Persona: boss-ace"   # boss-ace.md heading
-TONE_FINGERPRINT="# Response Tone"          # response-tone.md heading
 
 TMP_ROOT="$(mktemp -d "/tmp/test-session-start-persona-XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -48,7 +49,7 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 fail() { echo "FAIL: $1" >&2; exit 1; }
 ok()   { echo "  ok: $1"; }
 
-# Run the hook from a given workdir so the loader reads that workdir's
+# Run the persona hook from a given workdir so the loader reads that workdir's
 # .rein/policy/persona.yaml. Capture stdout + stderr separately. Echo rc.
 run_hook() {
   local workdir="$1"
@@ -62,7 +63,7 @@ run_hook() {
   echo "$rc"
 }
 
-# Extract additionalContext (string) from envelope JSON.
+# Extract additionalContext (string) from envelope JSON; empty when no envelope.
 extract_ctx() {
   local stdout_file="$1"
   python3 -c '
@@ -79,7 +80,7 @@ sys.stdout.write(ctx if isinstance(ctx, str) else "")
 }
 
 # -----------------------------------------------------------------------------
-# (a) enabled:true, preset:boss-ace -> boss-ace body present.
+# (a) enabled:true, preset:boss-ace -> own envelope with boss-ace body present.
 # -----------------------------------------------------------------------------
 A_DIR="$TMP_ROOT/A"
 mkdir -p "$A_DIR/.rein/policy"
@@ -91,15 +92,15 @@ A_OUT="$A_DIR/stdout"; A_ERR="$A_DIR/stderr"
 rc="$(run_hook "$A_DIR" "$A_OUT" "$A_ERR")"
 [ "$rc" = "0" ] || { cat "$A_ERR" >&2; fail "(a): hook rc=$rc, expected 0"; }
 A_CTX="$(extract_ctx "$A_OUT")"
-[ -n "$A_CTX" ] || fail "(a): additionalContext is empty"
+[ -n "$A_CTX" ] || fail "(a): additionalContext is empty (persona envelope expected)"
 case "$A_CTX" in
   *"$PERSONA_FINGERPRINT"*) : ;;
   *) fail "(a): boss-ace body absent when enabled:true preset:boss-ace" ;;
 esac
-ok "(a) enabled:true preset:boss-ace -> boss-ace body injected"
+ok "(a) enabled:true preset:boss-ace -> own envelope with boss-ace body"
 
 # -----------------------------------------------------------------------------
-# (b) enabled:false -> boss-ace body ABSENT (opt-out).
+# (b) enabled:false -> EMPTY stdout (no envelope; opt-out).
 # -----------------------------------------------------------------------------
 B_DIR="$TMP_ROOT/B"
 mkdir -p "$B_DIR/.rein/policy"
@@ -110,18 +111,8 @@ YAML
 B_OUT="$B_DIR/stdout"; B_ERR="$B_DIR/stderr"
 rc="$(run_hook "$B_DIR" "$B_OUT" "$B_ERR")"
 [ "$rc" = "0" ] || { cat "$B_ERR" >&2; fail "(b): hook rc=$rc, expected 0"; }
-B_CTX="$(extract_ctx "$B_OUT")"
-[ -n "$B_CTX" ] || fail "(b): additionalContext is empty (6 default rules expected)"
-case "$B_CTX" in
-  *"$PERSONA_FINGERPRINT"*)
-    fail "(b): boss-ace body present despite enabled:false (opt-out broken)" ;;
-esac
-# Sanity: the 6 default rules are still emitted (only persona is suppressed).
-case "$B_CTX" in
-  *"$TONE_FINGERPRINT"*) : ;;
-  *) fail "(b): response-tone body missing — opt-out suppressed too much" ;;
-esac
-ok "(b) enabled:false -> boss-ace body suppressed, default rules intact"
+[ -s "$B_OUT" ] && fail "(b): persona hook emitted output despite enabled:false (opt-out broken)"
+ok "(b) enabled:false -> empty stdout (opt-out)"
 
 # -----------------------------------------------------------------------------
 # (c) unknown preset (mentor) -> downgraded to default boss-ace (PP-3).
@@ -144,30 +135,27 @@ esac
 ok "(c) unknown preset 'mentor' -> downgraded to boss-ace, body injected"
 
 # -----------------------------------------------------------------------------
-# (d) persona body sits AFTER response-tone body (PP-9 order).
-#     Reuse the enabled:true context from (a).
+# (d) hooks.json registers persona hook AFTER rules hook ("tone applied last").
+#     Replaces the old same-envelope order check now that persona is its own
+#     SessionStart hook (PT-5).
 # -----------------------------------------------------------------------------
-python3 - "$A_OUT" "$TONE_FINGERPRINT" "$PERSONA_FINGERPRINT" <<'PY' || fail "(d): persona body not positioned after response-tone"
+python3 - "$HOOKS_JSON" <<'PY' || fail "(d): persona hook not registered after rules hook in hooks.json"
 import json, sys
-out_path, tone_fp, persona_fp = sys.argv[1], sys.argv[2], sys.argv[3]
-with open(out_path, "r", encoding="utf-8") as fh:
-    ctx = (json.load(fh).get("hookSpecificOutput") or {}).get("additionalContext", "")
-tone_idx = ctx.find(tone_fp)
-persona_idx = ctx.find(persona_fp)
-if tone_idx < 0:
-    print(f"FAIL (d): response-tone marker not found in additionalContext", file=sys.stderr)
-    sys.exit(1)
-if persona_idx < 0:
-    print(f"FAIL (d): persona marker not found in additionalContext", file=sys.stderr)
-    sys.exit(1)
-if not (tone_idx < persona_idx):
-    print(f"FAIL (d): persona marker (idx={persona_idx}) is not AFTER response-tone (idx={tone_idx})", file=sys.stderr)
-    sys.exit(1)
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    hooks = json.load(fh)
+ss = [h["command"].split("/")[-1]
+      for grp in hooks["hooks"]["SessionStart"] for h in grp["hooks"]]
+if "session-start-persona.sh" not in ss:
+    print(f"FAIL (d): persona hook not in SessionStart: {ss}", file=sys.stderr); sys.exit(1)
+if "session-start-rules.sh" not in ss:
+    print(f"FAIL (d): rules hook not in SessionStart: {ss}", file=sys.stderr); sys.exit(1)
+if not (ss.index("session-start-rules.sh") < ss.index("session-start-persona.sh")):
+    print(f"FAIL (d): persona not after rules: {ss}", file=sys.stderr); sys.exit(1)
 PY
-ok "(d) persona body positioned after response-tone (order preserved)"
+ok "(d) hooks.json: persona hook registered after rules hook"
 
 # -----------------------------------------------------------------------------
-# (e) persona.yaml absent -> default ON, boss-ace body present (PP-2).
+# (e) persona.yaml absent -> default ON, boss-ace body present (fail-open).
 # -----------------------------------------------------------------------------
 E_DIR="$TMP_ROOT/E"
 mkdir -p "$E_DIR"
@@ -183,4 +171,4 @@ case "$E_CTX" in
 esac
 ok "(e) persona.yaml absent -> default ON, boss-ace body injected"
 
-echo "test-session-start-persona-inject: OK (5 asserts: enabled/opt-out/downgrade/order/default-ON)"
+echo "test-session-start-persona-inject: OK (5 asserts: enabled/opt-out/downgrade/hook-order/default-ON)"

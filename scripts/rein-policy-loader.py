@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Load .rein/policy/{hooks,rules}.yaml and answer policy queries.
 
-Two CLI modes:
+CLI modes:
     rein-policy-loader.py <hook-name>
         Hook toggle (Task 2.7). Exit 0 if enabled, 1 if disabled.
     rein-policy-loader.py --rule-override <rule-name>
         Rule override (Task 2.8). Print override body to stdout if defined,
         else print nothing. Always exit 0.
+    rein-policy-loader.py --turn-brief
+        Per-turn brief (PT-7). Emit the complete UserPromptSubmit envelope
+        (answer-only + response-tone + persona summaries, optional bootstrap
+        prepend via env REIN_TURN_BRIEF_PREPEND) in ONE process. Always exit 0.
 
 Fail-open: every error path (missing file, malformed yaml, missing key,
 unexpected shape, missing PyYAML) returns the most permissive default — never
@@ -17,6 +21,8 @@ Resolution order (relative to current working directory):
     .rein/policy/hooks.yaml   — hook toggles
     .rein/policy/rules.yaml   — prompt-only rule body overrides
 """
+import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -301,6 +307,64 @@ def _validate_persona_name(raw) -> str:
     return candidate
 
 
+def _read_text_or_empty(path: Path) -> str:
+    """Read a file's text, returning '' on any error (fail-open)."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+
+def get_turn_brief() -> str:
+    """Assemble the per-turn UserPromptSubmit additionalContext body in ONE
+    process (PT-7).
+
+    Composition (separated by '\\n\\n---\\n\\n'):
+        [optional prepend] + answer-only summary + response-tone summary
+        + persona summary (only when the persona layer is enabled)
+
+    The answer-only summary is the ONLY hard requirement; response-tone and
+    persona are optional and skipped when absent. The optional prepend comes
+    from env REIN_TURN_BRIEF_PREPEND (the hook's bash-computed bootstrap
+    advisory) so a single Python process can both compose the body AND
+    json-encode the envelope — no second spawn (PT-8 perf contract).
+
+    Fail-open at every path: CLAUDE_PLUGIN_ROOT unset/empty, or the answer-only
+    summary missing/unreadable, yields ''. All reads are guarded. Files are
+    read under the trusted CLAUDE_PLUGIN_ROOT, so no path-traversal surface.
+
+    Scope ID: PT-7
+    """
+    root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if not root:
+        return ""
+    short_dir = Path(root) / "rules" / "short"
+
+    answer_only = _read_text_or_empty(short_dir / "answer-only-summary.md")
+    if not answer_only.strip():
+        return ""  # hard requirement absent -> no-op (fail-open)
+
+    parts = [answer_only.rstrip("\n")]
+
+    response_tone = _read_text_or_empty(short_dir / "response-tone-summary.md")
+    if response_tone.strip():
+        parts.append(response_tone.rstrip("\n"))
+
+    enabled, _preset = get_persona()
+    if enabled:
+        persona = _read_text_or_empty(short_dir / "persona-summary.md")
+        if persona.strip():
+            parts.append(persona.rstrip("\n"))
+
+    body = "\n\n---\n\n".join(parts)
+
+    prepend = os.environ.get("REIN_TURN_BRIEF_PREPEND", "")
+    if prepend.strip():
+        body = prepend.rstrip("\n") + "\n---\n\n" + body
+
+    return body
+
+
 def get_all_rule_overrides() -> dict:
     """Return all rule overrides as {rule_name: override_body}.
 
@@ -317,7 +381,7 @@ def get_all_rule_overrides() -> dict:
 def main() -> int:
     if len(sys.argv) < 2:
         print(
-            "usage: rein-policy-loader.py <hook-name> | --rule-override <rule-name> | --meta-check-policy | --persona",
+            "usage: rein-policy-loader.py <hook-name> | --rule-override <rule-name> | --meta-check-policy | --persona | --turn-brief",
             file=sys.stderr,
         )
         return 0  # fail-open - never block a hook due to internal usage error
@@ -345,6 +409,23 @@ def main() -> int:
         enabled, preset = get_persona()
         if enabled:
             sys.stdout.write(preset)
+        return 0
+
+    if sys.argv[1] == "--turn-brief":
+        # PT-7: emit the COMPLETE per-turn UserPromptSubmit envelope in one
+        # process. get_turn_brief() composes the body (answer-only +
+        # response-tone + persona summaries, with optional bootstrap prepend
+        # via env); empty body -> no-op (no envelope). Always exit 0 so the
+        # hook never breaks the turn.
+        body = get_turn_brief()
+        if body:
+            envelope = {
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": body,
+                }
+            }
+            sys.stdout.write(json.dumps(envelope) + "\n")
         return 0
 
     # Default mode: hook toggle query (Task 2.7).

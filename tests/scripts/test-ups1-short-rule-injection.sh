@@ -52,16 +52,28 @@ check "background-jobs-summary ≤ 600 B (실측 ${BG_SIZE} B)" \
 check "response-tone-summary ≤ 1300 B (실측 ${TONE_SIZE} B — 번역 테이블·보고 구조·질문 형식 4 항목 포함이라 더 큼)" \
   "[ ${TONE_SIZE} -le 1300 ]"
 
-# 3. user-prompt-submit-rules.sh — short summary inject + full body 미참조
-check "user-prompt-submit-rules.sh 가 short/answer-only-summary 참조" \
-  'grep -q "rule_inject_body short/answer-only-summary" plugins/rein-core/hooks/user-prompt-submit-rules.sh'
-# negative: full body 인자 "answer-only-mode;" (semicolon 까지) 가 사라졌는지
-check "user-prompt-submit-rules.sh 가 full answer-only-mode 미참조" \
-  '! grep -qE "rule_inject_body answer-only-mode([^-]|$)" plugins/rein-core/hooks/user-prompt-submit-rules.sh'
-check "user-prompt-submit-rules.sh 가 short/response-tone-summary 참조 (communication-improve, 2026-05-28)" \
-  'grep -q "rule_inject_body short/response-tone-summary" plugins/rein-core/hooks/user-prompt-submit-rules.sh'
-check "user-prompt-submit-rules.sh 가 full response-tone 매 turn inject 안 함 (session-start 가 전담)" \
-  '! grep -qE "rule_inject_body response-tone([^-]|$)" plugins/rein-core/hooks/user-prompt-submit-rules.sh'
+# 3. user-prompt-submit-rules.sh — single-spawn --turn-brief delegation (PT-8).
+#    The hook no longer calls rule_inject_body per rule; the loader's
+#    --turn-brief mode composes answer-only + response-tone + persona summaries
+#    AND json-encodes the envelope in ONE process. (Body markers are verified
+#    by tests/scripts/test-policy-loader-turn-brief.sh.)
+check "user-prompt-submit-rules.sh 가 --turn-brief 위임 (PT-8)" \
+  'grep -q -- "--turn-brief" plugins/rein-core/hooks/user-prompt-submit-rules.sh'
+# negative: per-rule rule_inject_body 호출이 사라졌는지 (주석 언급은 슬래시/규칙명 없음)
+check "user-prompt-submit-rules.sh 가 per-rule rule_inject_body 미호출" \
+  '! grep -qE "rule_inject_body (short/|answer-only|response-tone)" plugins/rein-core/hooks/user-prompt-submit-rules.sh'
+check "user-prompt-submit-rules.sh 가 inline python3 -c json 미사용 (단일 spawn)" \
+  '! grep -q "python3 -c" plugins/rein-core/hooks/user-prompt-submit-rules.sh'
+check "persona-summary.md 존재 (--turn-brief 매턴 nudge, PT-6)" \
+  '[ -f plugins/rein-core/rules/short/persona-summary.md ]'
+check "persona-summary ≤ 600 B" \
+  '[ "$(wc -c < plugins/rein-core/rules/short/persona-summary.md | tr -d " ")" -le 600 ]'
+# Trust boundary (codex code-review HIGH): an INHERITED REIN_TURN_BRIEF_PREPEND
+# must NOT leak into the per-turn envelope. The hook is the sole legitimate
+# source of the prepend; it sets the var explicitly (empty when no bootstrap
+# guidance), overriding any inherited value.
+check "user-prompt-submit-rules.sh 가 상속 REIN_TURN_BRIEF_PREPEND 미누출" \
+  'CTX=$(CLAUDE_PLUGIN_ROOT="$REPO_ROOT/plugins/rein-core" REIN_TURN_BRIEF_PREPEND="INHERITED_BAD_PREPEND" bash plugins/rein-core/hooks/user-prompt-submit-rules.sh 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)[\"hookSpecificOutput\"][\"additionalContext\"])"); ! printf "%s" "$CTX" | grep -q "INHERITED_BAD_PREPEND"'
 
 # 4. pre-tool-use-bash-rules.sh — short summary inject + full body 미참조
 check "pre-tool-use-bash-rules.sh 가 short/background-jobs-summary 참조" \

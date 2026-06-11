@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.5.0** (2026-06-09) — adds a swappable assistant persona (default `boss-ace`, on by default, opt out with `enabled: false` in `.rein/policy/persona.yaml`) that styles tone only while keeping warnings, gate blocks, and operational detail strict (response rules always win). Also fixes several integrity defects in the codex code-review gate: a failed codex run is no longer treated as a pass, a quoted verdict in the review body is no longer mistaken for the conclusion, and the actual uncommitted change is reviewed instead of an unrelated prior commit. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.5.1** (2026-06-11) — fixes the v1.5.0 persona never actually activating. At session start the injected rules + persona grew into one block large enough to be truncated, so the persona and some operating-rule text never reached the assistant. Session start now injects short rule summaries (full bodies read on demand) and the persona is split into its own delivery so it always lands and stays present each turn — tone only, with warnings and gate blocks kept strict. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

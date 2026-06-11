@@ -33,11 +33,13 @@ LOADER="$PLUGIN_ROOT/scripts/rein-policy-loader.py"
 [ -x "$HOOK" ] || { echo "FAIL: $HOOK is not executable" >&2; exit 1; }
 [ -f "$LOADER" ] || { echo "FAIL: $LOADER missing" >&2; exit 1; }
 
-# Default rule body fingerprints — substrings unique to each default file.
-# Used to assert "default body present" or "default body REPLACED (absent)".
-DEFAULT_FINGERPRINT_CODE_STYLE="# Code Style Rules"
-DEFAULT_FINGERPRINT_SECURITY="# Security Rules"
-DEFAULT_FINGERPRINT_TESTING="# Testing Rules"
+# Default-injected fingerprints — substrings unique to each rule's SHORT
+# summary (PT-2: session-start now injects `rules/short/<rule>-summary.md` as
+# the default, replaced by the policy override when one is present). Used to
+# assert "default summary present" or "summary REPLACED by override (absent)".
+DEFAULT_FINGERPRINT_CODE_STYLE="# Code Style — quick rule"
+DEFAULT_FINGERPRINT_SECURITY="# Security — quick rule"
+DEFAULT_FINGERPRINT_TESTING="# Testing — quick rule"
 
 TMP_ROOT="$(mktemp -d "/tmp/test-policy-rules-override-XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT

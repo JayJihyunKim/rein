@@ -58,6 +58,7 @@ for test_file in \
   "$SCRIPT_DIR/test-pln1-execution-strategy.sh" \
   "$SCRIPT_DIR/test-wave-scheduler-and-parent-delta.sh" \
   "$SCRIPT_DIR/test-policy-loader-persona.sh" \
+  "$SCRIPT_DIR/test-policy-loader-turn-brief.sh" \
   "$SCRIPT_DIR/../integration/test-slash-command-namespace.sh"
 do
   echo ""

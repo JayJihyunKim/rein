@@ -1,7 +1,7 @@
-reviewed_at: 2026-06-09T08:46:17Z
+reviewed_at: 2026-06-11T04:13:23Z
 reviewer: codex
-diff_base: baec1d10e8ce2bfaec603ebe92425bad9b893f0a
+diff_base: af76551566fbbcd0957d2b1ba5e9bfd2cba4b0c4
 verdict: PASS
-cycle: 2026-06-09-codex-review-wrapper-sync
+cycle: 2026-06-11-persona-injection-truncation-fix
 scope: wrapper-generated
-active_dod: trail/dod/dod-2026-06-09-codex-review-wrapper-sync.md
+active_dod: trail/dod/dod-2026-06-11-persona-injection-truncation-fix.md

@@ -1,20 +1,28 @@
 #!/usr/bin/env bash
 # Plugin SessionStart hook — emit prompt-only rules to additionalContext.
 #
-# Reads 4 rule body files from
-#   ${CLAUDE_PLUGIN_ROOT}/rules/{code-style,security,testing,operating-sequence}.md
+# For each of the 6 prompt-only rules (code-style, security, testing,
+# operating-sequence, routing-map, response-tone) it injects the SHORT
+# "행동 강령" summary from ${CLAUDE_PLUGIN_ROOT}/rules/short/<rule>-summary.md,
 # concatenates them (separated by `\n\n`), JSON-encodes the result, and prints
 # a single SessionStart envelope to stdout:
 #
 #   {"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":<concatenated>}}
 #
+# Summaries (not full bodies) keep this hook's output ~4KB, under the platform
+# per-hook cap (10,000 chars). Full bodies (~22KB combined) overflowed the cap
+# and truncated the envelope tail (the persona/rule-loss bug, PT-2). Full
+# bodies remain in plugin source for on-demand Read.
+#
 # Per-rule policy override (Phase 2 Task 2.8):
 #   For each rule, if `.rein/policy/rules.yaml` defines
-#   `<rule>: { override: <body> }`, the override BODY REPLACES the default
-#   rule body in the concatenation. Replace, not append. Per-rule, not
-#   all-or-nothing. Fail-open on every error: missing yaml, malformed
-#   yaml, missing PyYAML, or any unexpected shape falls back to the
-#   default body for that rule (Plan Tasks 2.9 + 2.10).
+#   `<rule>: { override: <body> }`, the override BODY REPLACES the summary in
+#   the concatenation (power-user opt-in; user owns the override's size).
+#   Replace, not append. Per-rule, not all-or-nothing. Fail-open on every
+#   error: missing yaml, malformed yaml, missing PyYAML, or any unexpected
+#   shape falls back to the summary (then full body) for that rule. When the
+#   summary file is missing, the full body is the fallback so a missing
+#   summary degrades to old behaviour rather than dropping the rule.
 #
 # Graceful degrade: when the rules dir does not exist (e.g. plugin layout
 # regression or a partial install), exit 0 silently with no envelope —
@@ -83,31 +91,34 @@ for RULE in code-style security testing operating-sequence routing-map response-
   fi
 
   if [ -n "$OVERRIDE" ]; then
-    # Override body replaces the default for this rule.
+    # Override body replaces the default for this rule (power-user opt-in;
+    # the user owns the override's size). Overrides bypass summarization.
     CONTENT+="$OVERRIDE"$'\n\n'
   else
-    # No override → fall back to bundled default body.
+    # No override → inject the SHORT summary (PT-2). Full rule bodies are
+    # ~22KB combined and overflow the per-hook cap (10,000 chars), which
+    # truncates the tail of the envelope (the original persona/rule-loss
+    # bug). The "행동 강령" summary keeps this hook's output ~4KB, safely
+    # under the cap, while full bodies stay in plugin source for on-demand
+    # Read. Fall back to the full body only if the summary file is missing,
+    # so a missing summary degrades to the old behaviour instead of dropping
+    # the rule entirely.
+    SUMMARY_FILE="$RULES_DIR/short/${RULE}-summary.md"
     RULE_FILE="$RULES_DIR/${RULE}.md"
-    [ -f "$RULE_FILE" ] || continue
-    CONTENT+="$(cat "$RULE_FILE")"$'\n\n'
+    if [ -f "$SUMMARY_FILE" ]; then
+      CONTENT+="$(cat "$SUMMARY_FILE")"$'\n\n'
+    elif [ -f "$RULE_FILE" ]; then
+      CONTENT+="$(cat "$RULE_FILE")"$'\n\n'
+    else
+      continue
+    fi
   fi
 done
 
-# persona injection (PP-9, PP-10): active preset only — O(1), no full scan.
-# The loader (--persona) prints the VALIDATED active preset name when
-# enabled, nothing when disabled. Injection position is AFTER response-tone
-# ("tone applied last"); note this is ORDER ONLY — precedence authority lives
-# in the preset body text (PP-10), not in injection position.
-# graceful degrade: loader absent / empty output (disabled) / file absent ->
-# silent skip, SessionStart envelope stays intact.
-PERSONA=""
-if [ -f "$LOADER" ]; then
-  PERSONA=$(python3 "$LOADER" --persona || true)
-fi
-if [ -n "$PERSONA" ]; then
-  PERSONA_FILE="$RULES_DIR/persona/${PERSONA}.md"
-  [ -f "$PERSONA_FILE" ] && CONTENT+="$(cat "$PERSONA_FILE")"$'\n\n'
-fi
+# persona injection moved to its own SessionStart hook (PT-3, PT-4):
+# session-start-persona.sh emits the persona in a SEPARATE envelope so it has
+# its own per-hook size budget and survives regardless of how this rules block
+# grows. hooks.json runs it AFTER this hook ("tone applied last" ordering).
 
 # Empty CONTENT (no defaults available, no overrides) — exit silently.
 if [ -z "$CONTENT" ]; then

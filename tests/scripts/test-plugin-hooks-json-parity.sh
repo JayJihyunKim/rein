@@ -72,14 +72,18 @@ settings_path, hooks_path = sys.argv[1], sys.argv[2]
 # Current entries:
 #   - session-start-bootstrap.sh: prompts for repo-local Rein bootstrap when
 #     the plugin is enabled in an uninitialized git repo.
-#   - session-start-rules.sh: emits SessionStart additionalContext envelope
-#     with the 3 prompt-only rules (code-style, security, testing). rein-dev
-#     itself loads these via @import in .claude/CLAUDE.md, so settings.json
-#     does NOT register the hook. End-user plugin installs DO need the hook
-#     to receive the same rule content. (Plan §Phase 2 Task 2.1.)
+#   - session-start-rules.sh: emits a SessionStart additionalContext envelope
+#     with the 6 prompt-only rule summaries (code-style, security, testing,
+#     operating-sequence, routing-map, response-tone). rein-dev itself loads
+#     these via @import in .claude/CLAUDE.md, so settings.json does NOT register
+#     the hook. End-user plugin installs DO need the hook. (Plan §Phase 2.)
+#   - session-start-persona.sh: emits the active persona preset in its own
+#     SessionStart envelope (PT-3). Same plugin-only rationale as the rules
+#     hook — conditional/opt-out, registered only in the plugin hooks.json.
 PLUGIN_ONLY_BASENAMES = {
     "session-start-bootstrap.sh",
     "session-start-rules.sh",
+    "session-start-persona.sh",
     "post-agent-review-trigger.sh",
 }
 

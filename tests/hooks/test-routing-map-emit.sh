@@ -83,15 +83,16 @@ if not isinstance(ctx, str) or not ctx:
     print("FAIL: additionalContext missing or empty", file=sys.stderr)
     sys.exit(1)
 
-# (b) Substring check — last line of routing-map.md
-marker = "> 상세: plugins/rein-core/rules/routing-procedure.md"
+# (b) Substring check — routing-map SUMMARY header (PT-2: session-start injects
+#     `rules/short/routing-map-summary.md`, not the full body).
+marker = "# Routing Map — quick rule"
 if marker not in ctx:
-    print(f"FAIL: additionalContext missing routing-map marker: {marker!r}", file=sys.stderr)
+    print(f"FAIL: additionalContext missing routing-map summary marker: {marker!r}", file=sys.stderr)
     print(f"----- additionalContext (last 500 chars) -----\n{ctx[-500:]}", file=sys.stderr)
     sys.exit(1)
 
-# (c) Order check — code-style header precedes routing-map marker
-cs_idx = ctx.find("# Code Style Rules")
+# (c) Order check — code-style summary header precedes routing-map summary
+cs_idx = ctx.find("# Code Style — quick rule")
 rm_idx = ctx.find(marker)
 if cs_idx < 0:
     print("FAIL: code-style header not found in envelope", file=sys.stderr)
@@ -103,5 +104,5 @@ if not (cs_idx < rm_idx):
     )
     sys.exit(1)
 
-print("test-routing-map-emit: OK (byte<=900, marker present, code-style precedes routing-map)")
+print("test-routing-map-emit: OK (body byte<=900, summary marker present, code-style precedes routing-map)")
 PY

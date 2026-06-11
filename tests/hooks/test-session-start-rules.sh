@@ -92,11 +92,16 @@ if not isinstance(ctx, str) or not ctx:
     print(f"FAIL: additionalContext expected non-empty string (got {type(ctx).__name__} len={len(ctx) if isinstance(ctx, str) else 0})", file=sys.stderr)
     sys.exit(1)
 
-# Each of the 3 rules contributes a recognisable substring.
+# Each of the 6 rules contributes its SHORT summary (PT-2: session-start injects
+# `rules/short/<rule>-summary.md`, not the full body). Markers are the summary
+# headers — unique to the summaries, absent from the full bodies.
 required_substrings = [
-    ("code-style.md", "# Code Style Rules"),
-    ("security.md",   "# Security Rules"),
-    ("testing.md",    "# Testing Rules"),
+    ("code-style-summary.md",          "# Code Style — quick rule"),
+    ("security-summary.md",            "# Security — quick rule"),
+    ("testing-summary.md",             "# Testing — quick rule"),
+    ("operating-sequence-summary.md",  "# Operating Sequence — quick rule"),
+    ("routing-map-summary.md",         "# Routing Map — quick rule"),
+    ("response-tone-summary.md",       "# Response Tone — per-turn quick rule"),
 ]
 missing = [name for name, frag in required_substrings if frag not in ctx]
 if missing:

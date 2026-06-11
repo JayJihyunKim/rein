@@ -104,12 +104,12 @@ except Exception as exc:
     print(raw, file=sys.stderr)
     sys.exit(1)
 ctx = payload.get("hookSpecificOutput", {}).get("additionalContext", "")
-# Substrings unique to each default rule body (sourced from
-# plugins/rein-core/skills/rules-prompt/{code-style,security,testing}.md).
+# Substrings unique to each rule's SHORT summary (PT-2: malformed rules.yaml
+# fails open to the default-injected summaries, not the full bodies).
 required = [
-    "Code Style Rules",   # code-style.md heading
-    "Testing Rules",      # testing.md heading
-    "secrets/**",         # security.md frontmatter path glob
+    "Code Style — quick rule",   # code-style-summary.md heading
+    "Testing — quick rule",      # testing-summary.md heading
+    "Security — quick rule",     # security-summary.md heading
 ]
 missing = [r for r in required if r not in ctx]
 if missing:

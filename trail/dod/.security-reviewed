@@ -1,10 +1,10 @@
-reviewed_at: 2026-06-09T08:31:59Z
-reviewer: security-reviewer
-security_level: standard
-user_level: auto
-verdict: PASS
-scope: codex-review-wrapper-sync
-active_dod: trail/dod/dod-2026-06-09-codex-review-wrapper-sync.md
-files_reviewed: plugins/rein-core/scripts/rein-codex-review.sh, scripts/rein-codex-review.sh, tests/skills/test-codex-review-wrapper.sh
-findings: none
-notes: B1 config multi-path source — candidates are static script-relative paths plus optional CLAUDE_PLUGIN_ROOT (trusted env from Claude Code), array build is whitespace/glob-safe (quoted elements, no word-split), sourced files are config not external input. B2 exit-code propagation reduces fail-open risk (security improvement). B5 claim-source trust-boundary change (HEAD->DoD in working_tree mode) is review-integrity-positive and injection-safe — verified empirically that malicious DoD title with $(), backticks, ;, ../ is inert literal text in the envelope (no eval; single-pass heredoc expansion). claim-source-iso-hints extractor still rejects traversal/metachar tokens. Two copies sha256-identical (test-plugin-scripts-bundle enforces). 45/45 wrapper tests + bundle sync test green.
+verdict=PASS
+active_dod=trail/dod/dod-2026-06-11-persona-injection-truncation-fix.md
+cycle=2026-06-11-persona-injection-truncation-fix
+security_level=standard
+reviewer=security-reviewer
+reviewed=2026-06-11T03:11:28
+mechanism=rein-security-reviewer
+files_reviewed=plugins/rein-core/hooks/session-start-persona.sh,plugins/rein-core/hooks/user-prompt-submit-rules.sh,plugins/rein-core/scripts/rein-policy-loader.py,scripts/rein-policy-loader.py
+findings=none
+notes=Path-traversal closed (preset name validated by ^[a-z0-9-]+ allowlist + KNOWN_PERSONA_PRESETS membership, downgrade to boss-ace; verified ../etc/passwd and shell-meta inputs both downgrade). Env-var injection vector closed (REIN_TURN_BRIEF_PREPEND set explicitly on loader invocation shadows stale inherited value; verified no leak). Turn-brief file reads stay under trusted CLAUDE_PLUGIN_ROOT (no user-derived path segments). JSON envelope encoded via json.dumps (no injection). Fail-open paths emit empty stdout / safe defaults, never an attacker-controlled file. Bootstrap guidance text is static heredoc; only resolved_real (realpath of project_dir) is interpolated and is not attacker-injectable into context beyond a benign path string.
