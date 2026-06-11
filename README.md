@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.5.1** (2026-06-11) — fixes the v1.5.0 persona never actually activating. At session start the injected rules + persona grew into one block large enough to be truncated, so the persona and some operating-rule text never reached the assistant. Session start now injects short rule summaries (full bodies read on demand) and the persona is split into its own delivery so it always lands and stays present each turn — tone only, with warnings and gate blocks kept strict. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.5.2** (2026-06-11) — pre-commit code review no longer raises blocking "design mismatch" warnings based on a guessed (possibly unrelated) task document — guessed context is now honestly marked advisory, and valid task markers are no longer wrongly deleted at session start (the root cause of the guessing). Also seals two review-tool reliability holes, including one where a very large design-review request could be misclassified as a code review and wrongly mark the code gate as passed. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

@@ -211,14 +211,23 @@ REIN_REVIEW_MODE="code-review"  # default
 # Used in spec-review mode to scope changed_files to the document itself
 # (G8-3, 2026-05-23) instead of letting `git diff` infer unrelated files.
 SPEC_REVIEW_SUBJECT=""
-if printf '%s' "$PROMPT_BODY" | head -1 | grep -qE "$SPEC_REVIEW_PLAN_RE"; then
+# D2 (2026-06-11, Round 2 High): first line via pure-bash parameter expansion.
+# The previous `printf "$PROMPT_BODY" | head -1 | grep -q` chain was the same
+# pipefail/SIGPIPE class as D1 — `head -1` exits after the first line, so a
+# prompt larger than the pipe buffer SIGPIPEs printf (141) and the if-condition
+# goes false DESPITE a marker match. Worst case: a large spec-review prompt is
+# misclassified as code-review and writes the code-gate stamp (.codex-reviewed)
+# — gate pollution. Parameter expansion has no pipeline (no SIGPIPE window);
+# the downstream grep/sed then run on a single small line.
+PROMPT_FIRST_LINE="${PROMPT_BODY%%$'\n'*}"
+if printf '%s' "$PROMPT_FIRST_LINE" | grep -qE "$SPEC_REVIEW_PLAN_RE"; then
   REIN_REVIEW_MODE="spec-review"
-  SPEC_REVIEW_SUBJECT=$(printf '%s' "$PROMPT_BODY" | head -1 \
+  SPEC_REVIEW_SUBJECT=$(printf '%s' "$PROMPT_FIRST_LINE" \
     | sed -E 's/^\[NON_INTERACTIVE\][[:space:]]+spec review for plan:[[:space:]]*//' \
     | sed -E 's/[[:space:]]+$//')
-elif printf '%s' "$PROMPT_BODY" | head -1 | grep -qE "$SPEC_REVIEW_DESIGN_RE"; then
+elif printf '%s' "$PROMPT_FIRST_LINE" | grep -qE "$SPEC_REVIEW_DESIGN_RE"; then
   REIN_REVIEW_MODE="spec-review"
-  SPEC_REVIEW_SUBJECT=$(printf '%s' "$PROMPT_BODY" | head -1 \
+  SPEC_REVIEW_SUBJECT=$(printf '%s' "$PROMPT_FIRST_LINE" \
     | sed -E 's/^\[NON_INTERACTIVE\][[:space:]]+spec review for design:[[:space:]]*//' \
     | sed -E 's/[[:space:]]+$//')
 fi
@@ -372,6 +381,41 @@ else
   REVIEW_SUBJECT=$(_resolve_review_subject)
 fi
 
+# ENV-SUBJ A2/A3 (2026-06-11): the ISO slots follow REVIEW_SUBJECT. Before this,
+# head_iso was ALWAYS the HEAD commit time — but in working_tree mode the staged
+# diff (not HEAD) is the subject, and in spec mode there is no commit diff at
+# all, so reporting a real HEAD time invited the reviewer to anchor freshness
+# judgments on an unrelated prior commit. diff_base_iso stays real in
+# working_tree mode (the base commit time is truthful information; its USE is
+# qualified by the freshness-mode note below), but in spec mode the generic
+# "(unavailable)" sentinel is replaced with an explicit reason.
+case "$REVIEW_SUBJECT" in
+  working_tree)
+    HEAD_ISO="(N/A: working-tree review — HEAD is not the subject)"
+    ;;
+  spec)
+    DIFF_BASE_ISO="(N/A: spec review has no commit diff)"
+    HEAD_ISO="(N/A: spec review has no commit diff)"
+    ;;
+esac
+
+# ENV-SUBJ A5 (2026-06-11): the Claim Audit evidence-freshness rule compares
+# per-file last-commit ISO against diff_base_iso. That comparison only means
+# "stale" when the subject IS a commit range. For working_tree the subject is
+# uncommitted (a file committed before diff_base can be the live claim source),
+# and for spec there is no commit diff — in both, the HIGH flag must not apply.
+case "$REVIEW_SUBJECT" in
+  working_tree)
+    FRESHNESS_MODE_NOTE='[review subject = working tree (uncommitted)] diff_base 는 staged/unstaged 변경의 기준점이 아니다 — stale-evidence HIGH flag 비적용, advisory 기록만.'
+    ;;
+  spec)
+    FRESHNESS_MODE_NOTE='[review subject = spec] commit diff 없음 — freshness 비교 전체 skip.'
+    ;;
+  *)
+    FRESHNESS_MODE_NOTE=''
+    ;;
+esac
+
 # changed_files slot label — reflects REVIEW_SUBJECT so the reviewer is never
 # told it is looking at a committed range when the content is the working tree
 # (B6). Built here as a variable so the envelope heredoc just substitutes it.
@@ -442,6 +486,24 @@ else
   SAD_PATH=$(printf '%s' "$SAD_LINE" | cut -f2)
   SAD_PATH_DISPLAY="$SAD_PATH"
   SAD_REASON=$(printf '%s' "$SAD_LINE" | cut -f3)
+fi
+
+# ENV-SUBJ A4 (2026-06-11): the selector itself declares Tier 2 as "advisory
+# fallback / non-blocking authority" (select-active-dod.sh header) — it is a
+# most-recent-mtime GUESS made without an explicit marker. The envelope used to
+# erase that confidence level: Tier-2 DoD context (plan_ref/design_ref/covers/
+# scope_items) fed the Design Alignment slot with the same blocking authority
+# as a Tier-1 marker, so an unrelated DoD produced false MISSING/CONTRADICTS
+# against the staged diff. Propagate the tier honestly: qualify the display and
+# demote DoD-derived findings to advisory when (and only when) tier=2. Tier 1
+# (explicit marker) and spec-mode N/A keep the full blocking policy.
+SAD_TIER_DISPLAY="$SAD_TIER"
+TIER2_DESIGN_ADVISORY_NOTE=""
+TIER2_CLAIM_ADVISORY_NOTE=""
+if [ "$SAD_TIER" = "2" ]; then
+  SAD_TIER_DISPLAY="2 (advisory fallback guess — unconfirmed for this change)"
+  TIER2_DESIGN_ADVISORY_NOTE='   [Tier 2 advisory guess] active DoD 는 명시 marker 없이 최신-mtime 추측으로 선택됐다 — 이 DoD 유래 컨텍스트(plan_ref/design_ref/covers/scope_items)는 현재 변경과 무관한 작업의 것일 수 있다. 본 slot 의 MISSING/CONTRADICTS 는 blocking 근거로 쓰지 말고 "advisory (Tier 2 guess)" Low 로만 보고하라. 이 slot 단독으로 FINAL_VERDICT 를 NEEDS-FIX 로 승격하지 마라.'
+  TIER2_CLAIM_ADVISORY_NOTE='      [Tier 2 advisory guess] sub-item 2 의 "active DoD covers 존재" 확인은 추측 DoD 기준이다 — 부재/불일치를 High 근거로 쓰지 말고 advisory 기록만.'
 fi
 
 # ---- Shared path resolver (H1, 2026-04-22 retro-review-sweep). --------
@@ -834,6 +896,15 @@ Required review sections (모두 응답에 포함해야 한다):
    - 기존 코드리뷰 체크 (look-ahead, 타입, 경계, resource leak 등)
 
 2. Design Alignment  [Spec B policy]
+SLOTS
+  # ENV-SUBJ A4: Tier-2 fallback context is a guess — demote to advisory.
+  # Emitted between the single-quoted heredocs so the $-note expands; empty
+  # (Tier 1 / spec N/A) emits nothing and the slot text is byte-identical to
+  # the pre-A4 envelope.
+  if [ -n "$TIER2_DESIGN_ADVISORY_NOTE" ]; then
+    printf '%s\n' "$TIER2_DESIGN_ADVISORY_NOTE"
+  fi
+  cat <<'SLOTS'
    각 active DoD covers 의 Scope ID 에 대해 아래 4 status 중 하나로 분류 + 근거 제시:
 
    - MATCH: 해당 ID 가 기술한 entity/direction/scenario 가 diff 의 코드 변경 또는
@@ -933,10 +1004,21 @@ SLOTS
   # single-quoted heredoc so $CLAIM_SOURCE_PRIORITY_NOTE expands; the 6-space
   # indent matches the surrounding slot-4 sub-items.
   printf '      %s\n' "$CLAIM_SOURCE_PRIORITY_NOTE"
+  # ENV-SUBJ A4: Tier-2 covers must not back a High claim-audit finding.
+  if [ -n "$TIER2_CLAIM_ADVISORY_NOTE" ]; then
+    printf '%s\n' "$TIER2_CLAIM_ADVISORY_NOTE"
+  fi
   cat <<'SLOTS'
 
    5. Evidence freshness
 
+SLOTS
+  # ENV-SUBJ A5: the staleness comparison is only meaningful when the subject
+  # is a commit range — qualify (working_tree) or skip (spec) otherwise.
+  if [ -n "$FRESHNESS_MODE_NOTE" ]; then
+    printf '      %s\n' "$FRESHNESS_MODE_NOTE"
+  fi
+  cat <<'SLOTS'
       context block 의 claim_source_iso_hints 각 항목에 대해 last-commit ISO 를
       diff_base_iso 와 비교:
 
@@ -978,10 +1060,11 @@ SLOTS
 ---
 Context:
 
+review_subject: ${REVIEW_SUBJECT}
 diff_base: ${DIFF_BASE}
 diff_base_iso: ${DIFF_BASE_ISO}
 head_iso: ${HEAD_ISO}
-active_dod_tier: ${SAD_TIER}
+active_dod_tier: ${SAD_TIER_DISPLAY}
 active_dod_path: ${SAD_PATH_DISPLAY}
 active_dod_reason: ${SAD_REASON}
 plan_ref: ${PLAN_REF:-(none)}
@@ -1047,11 +1130,15 @@ _parse_verdict() {
     fi
   fi
   # Stage 2: legacy first-position keyword on any line.
-  if printf '%s' "$out" | grep -qiE '^[[:space:]]*REJECT\b'; then
+  # D1 (2026-06-11): `grep -q` 금지 — pipefail + 대용량 $out 에서 -q 조기종료가
+  # printf SIGPIPE(141)를 유발해 "매치했는데도" 조건이 거짓이 된다 (_detect_
+  # model_error 의 동일 결함 클래스). 키워드가 출력 앞부분일수록(legacy 첫 줄
+  # verdict 가 정확히 그 형태) 오판으로 NEEDS-FIX 강등. 전 입력 소비로 수정.
+  if printf '%s' "$out" | grep -iE '^[[:space:]]*REJECT\b' >/dev/null 2>&1; then
     printf 'REJECT'
-  elif printf '%s' "$out" | grep -qiE '^[[:space:]]*NEEDS[-_ ]?FIX\b'; then
+  elif printf '%s' "$out" | grep -iE '^[[:space:]]*NEEDS[-_ ]?FIX\b' >/dev/null 2>&1; then
     printf 'NEEDS-FIX'
-  elif printf '%s' "$out" | grep -qiE '^[[:space:]]*PASS\b'; then
+  elif printf '%s' "$out" | grep -iE '^[[:space:]]*PASS\b' >/dev/null 2>&1; then
     printf 'PASS'
   else
     # Stage 3: unknown → NEEDS-FIX.
@@ -1087,10 +1174,17 @@ _detect_model_error() {
   # 따라서 verdict 가 있으면 — 리뷰 본문이 거부 문구를 단지 인용/논의한 경우
   # 포함 — 모델 거부가 아니다. (이 가드가 없으면 fail-soft 자체를 리뷰할 때
   # 본문의 패턴 언급을 거부로 오인해 정상 PASS 가 차단된다.)
-  if printf '%s' "$out" | grep -qE '^[[:space:]]*FINAL_VERDICT:'; then
+  #
+  # D1 (2026-06-11): `grep -q` 금지 — 본 스크립트는 pipefail 이므로 -q 의
+  # 조기종료가 대용량 $out 을 쓰던 printf 에 SIGPIPE(141)를 일으켜 파이프라인
+  # status 가 141 이 되고, if 조건이 "매치했는데도" 거짓이 되어 가드 전체가
+  # 무력화된다 (출력 앞부분의 envelope verdict-양식 인용 + 출력 > pipe buffer
+  # 일 때 실측 재발 — 본 사이클 Round 1 self-review). -q 없는 grep 은 전 입력을
+  # 소비하므로 조기종료가 없다. 출력은 /dev/null 로 버린다.
+  if printf '%s' "$out" | grep -E '^[[:space:]]*FINAL_VERDICT:' >/dev/null 2>&1; then
     return 1
   fi
-  printf '%s' "$out" | grep -qiE 'invalid_request_error|model_not_found|model not found|is not supported when using|is not supported by this (api|model)'
+  printf '%s' "$out" | grep -iE 'invalid_request_error|model_not_found|model not found|is not supported when using|is not supported by this (api|model)' >/dev/null 2>&1
 }
 
 # _emit_model_failsoft <role-var-name> <model-value>

@@ -1,7 +1,7 @@
-reviewed_at: 2026-06-11T04:13:23Z
+reviewed_at: 2026-06-11T07:08:50Z
 reviewer: codex
-diff_base: af76551566fbbcd0957d2b1ba5e9bfd2cba4b0c4
+diff_base: 952161c7b04010c69c84732743c799bc02f44450
 verdict: PASS
-cycle: 2026-06-11-persona-injection-truncation-fix
+cycle: 2026-06-11-envelope-subject-consistency
 scope: wrapper-generated
-active_dod: trail/dod/dod-2026-06-11-persona-injection-truncation-fix.md
+active_dod: trail/dod/dod-2026-06-11-envelope-subject-consistency.md

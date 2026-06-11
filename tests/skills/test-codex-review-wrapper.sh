@@ -1260,8 +1260,10 @@ test_g8_3_code_review_still_uses_tier2_fallback() {
   # Code-review mode must still adopt the Tier-2 DoD (no spec-review N/A).
   grep -qF "dod-2026-05-23-cr-fallback.md" "$RUN_WRAPPER_PROMPT_FILE" \
     || fail "code-review Tier-2 fallback regressed (DoD not adopted)"
-  grep -qE "^active_dod_tier: 2$" "$RUN_WRAPPER_PROMPT_FILE" \
-    || fail "code-review active_dod_tier no longer reports Tier 2"
+  # ENV-SUBJ A4 (2026-06-11): tier 2 is still adopted but the display now
+  # carries the advisory-guess qualifier (confidence propagation).
+  grep -qE "^active_dod_tier: 2 \(advisory fallback guess" "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "code-review active_dod_tier no longer reports Tier 2 (with advisory qualifier)"
   grep -qF "(N/A for fresh spec review)" "$RUN_WRAPPER_PROMPT_FILE" \
     && fail "spec-review N/A sentinel leaked into code-review envelope"
   return 0
@@ -1785,7 +1787,213 @@ main() {
   # B5-spec claim_sources spec-mode HEAD skip — text/logic consistency (Round 5, 2026-06-09)
   run_test test_claim_sources_spec_mode_skips_head
   run_test test_claim_sources_spec_mode_keeps_pr_env
+  # ENV-SUBJ envelope review-subject consistency A1~A5 (2026-06-11)
+  run_test test_envelope_declares_commit_range_subject_with_real_head_iso
+  run_test test_envelope_working_tree_subject_neutralizes_head_iso
+  run_test test_envelope_spec_subject_iso_explicit_na
+  run_test test_tier2_dod_context_marked_advisory_not_blocking
+  run_test test_tier1_dod_context_keeps_blocking_policy
+  run_test test_freshness_rule_qualified_in_working_tree_mode
+  run_test test_freshness_rule_strict_in_commit_range_mode
+  # D1 fail-soft guard SIGPIPE 무력화 회귀 (2026-06-11)
+  run_test test_model_failsoft_guard_survives_large_output_with_early_verdict_echo
+  # D2 모드 감지 SIGPIPE 무력화 회귀 (2026-06-11, Round 2 High)
+  run_test test_spec_mode_detection_survives_large_prompt
   summary
+}
+
+# ------------------------------------------------------------
+# ENV-SUBJ (2026-06-11): envelope review-subject consistency — A1~A5.
+# 계약: envelope 의 모든 모드 의존 슬롯(review_subject 선언, head_iso,
+# diff_base_iso, active DoD 컨텍스트 권위, freshness 비교)이 REVIEW_SUBJECT
+# 를 정직하게 따른다. Tier 2(추측) DoD 컨텍스트는 advisory 로 강등 — blocking
+# Design Alignment 근거로 승격 금지.
+# ------------------------------------------------------------
+
+# A1+A2: clean tree (commit_range) → review_subject 선언 + head_iso 실값.
+test_envelope_declares_commit_range_subject_with_real_head_iso() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-04-21-t.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-04-21-t.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  grep -qE '^review_subject: commit_range$' "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "envelope missing 'review_subject: commit_range' declaration"
+  grep -qE '^head_iso: [0-9]{4}-[0-9]{2}-[0-9]{2}T' "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "head_iso not a real ISO in commit_range mode"
+  return 0
+}
+
+# A1+A2: dirty tree (working_tree) → head_iso 는 명시 N/A (HEAD 는 subject 아님).
+test_envelope_working_tree_subject_neutralizes_head_iso() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-04-21-t.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-04-21-t.md" > "$SANDBOX/trail/dod/.active-dod"
+  # tracked 파일을 commit 후 수정 → unstaged 변경 = working_tree 모드.
+  echo "v1" > "$SANDBOX/src.txt"
+  ( cd "$SANDBOX" && git add src.txt && git commit -qm "add src" )
+  echo "v2" >> "$SANDBOX/src.txt"
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  grep -qE '^review_subject: working_tree$' "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "envelope missing 'review_subject: working_tree' declaration"
+  grep -qF 'head_iso: (N/A: working-tree review' "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "head_iso not neutralized in working_tree mode (HEAD is not the subject)"
+  return 0
+}
+
+# A3: spec 모드 → review_subject=spec + ISO 쌍 명시 N/A + freshness skip 안내.
+test_envelope_spec_subject_iso_explicit_na() {
+  seed_design "docs/specs/2026-06-11-d.md" "A1"
+
+  run_wrapper "[NON_INTERACTIVE] spec review for design: docs/specs/2026-06-11-d.md" \
+    --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  grep -qE '^review_subject: spec$' "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "envelope missing 'review_subject: spec' declaration"
+  grep -qF 'diff_base_iso: (N/A: spec review has no commit diff)' "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "spec diff_base_iso not explicit N/A (generic '(unavailable)' is ambiguous)"
+  grep -qF 'head_iso: (N/A: spec review has no commit diff)' "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "spec head_iso not explicit N/A"
+  grep -qF 'freshness 비교 전체 skip' "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "spec freshness skip qualifier missing"
+  return 0
+}
+
+# A4: Tier 2 (marker 없는 추측 fallback) → DoD 컨텍스트 advisory 강등 표기.
+test_tier2_dod_context_marked_advisory_not_blocking() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-04-21-guess.md" "docs/plans/foo-plan.md" "A1"
+  # marker 없음 → Tier 2. dirty tree (실제 사고 형태: staged 작업 + 추측 DoD).
+  echo "v1" > "$SANDBOX/src.txt"
+  ( cd "$SANDBOX" && git add src.txt && git commit -qm "add src" )
+  echo "v2" >> "$SANDBOX/src.txt"
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  grep -qF 'active_dod_tier: 2 (advisory fallback guess' "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "tier display not qualified as advisory guess"
+  grep -qF '[Tier 2 advisory guess]' "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "Design Alignment advisory note missing for Tier 2 context"
+  return 0
+}
+
+# A4 negative: Tier 1 (명시 marker) → advisory 강등 노트 부재, blocking 정책 유지.
+test_tier1_dod_context_keeps_blocking_policy() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-04-21-t.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-04-21-t.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  grep -qF '[Tier 2 advisory guess]' "$RUN_WRAPPER_PROMPT_FILE" \
+    && fail "advisory note leaked into Tier-1 envelope (blocking policy must stay intact)"
+  grep -qE '^active_dod_tier: 1$' "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "Tier-1 tier display altered"
+  return 0
+}
+
+# A5: working_tree → freshness HIGH flag 비적용 qualifier 존재.
+test_freshness_rule_qualified_in_working_tree_mode() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-04-21-t.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-04-21-t.md" > "$SANDBOX/trail/dod/.active-dod"
+  echo "v1" > "$SANDBOX/src.txt"
+  ( cd "$SANDBOX" && git add src.txt && git commit -qm "add src" )
+  echo "v2" >> "$SANDBOX/src.txt"
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  grep -qF 'stale-evidence HIGH flag 비적용' "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "working_tree freshness qualifier missing (stale-evidence HIGH must not apply)"
+  return 0
+}
+
+# D1 (2026-06-11): fail-soft 가드 SIGPIPE 무력화 회귀.
+# pipefail 아래서 `printf <대용량> | grep -q` 는 grep 조기종료 → printf SIGPIPE(141)
+# → if 조건 전체 거짓 → FINAL_VERDICT 가드 skip → 본문에 인용된 에러패턴을 모델
+# 거부로 오인해 exit 3 (PASS 인데 stamp 미생성). 실측 재현: 본 사이클 Round 1
+# self-review (wrapper 가 자기 소스의 에러패턴 주석을 리뷰 본문에 인용).
+# 시나리오: 출력 앞부분에 verdict 양식 줄(envelope 인용) + ~800KB filler + 끝부분
+# 에러패턴 인용 + 진짜 FINAL_VERDICT: PASS → wrapper 는 exit 0 + stamp 생성이 정답.
+test_model_failsoft_guard_survives_large_output_with_early_verdict_echo() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-04-21-t.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-04-21-t.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  # 대용량 payload 는 env var 로 못 싣는다 (ARG_MAX) — 파일로 전달.
+  local payload_file="$SANDBOX/.fake-codex-payload.txt"
+  {
+    printf '  FINAL_VERDICT: <PASS|NEEDS-FIX|REJECT>\n'
+    yes 'filler line to push output far past the pipe buffer for the sigpipe window' | head -20000
+    printf 'quoted wrapper source: invalid_request_error / model_not_found detection patterns\n'
+    printf 'All checks clean.\n'
+    printf 'FINAL_VERDICT: PASS\n'
+  } > "$payload_file"
+
+  FAKE_CODEX_VERDICT_FILE="$payload_file" run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC — fail-soft guard defeated by SIGPIPE/pipefail (expected PASS exit 0)"
+  [ -f "$SANDBOX/trail/dod/.codex-reviewed" ] \
+    || fail "stamp not created despite FINAL_VERDICT: PASS in large output"
+  return 0
+}
+
+# D2 (2026-06-11, Round 2 High): 모드 감지 SIGPIPE 무력화 회귀.
+# `printf <대용량 prompt> | head -1 | grep -q` 도 D1 과 동일 클래스 — head -1
+# 조기종료가 printf SIGPIPE(141)를 유발, pipefail 아래서 첫 줄이 spec marker 와
+# "매치했는데도" 조건이 거짓 → spec 리뷰가 code-review 로 오분류. 최악의 결과:
+# spec 리뷰가 코드 게이트 stamp(.codex-reviewed)를 생성 (규율 구멍).
+# 시나리오: spec marker 첫 줄 + ~1.5MB 본문 → spec-review 모드 유지(stamp 미생성
+# + spec N/A 표기)가 정답.
+test_spec_mode_detection_survives_large_prompt() {
+  seed_design "docs/specs/2026-06-11-big.md" "A1"
+
+  local big_prompt
+  big_prompt="[NON_INTERACTIVE] spec review for design: docs/specs/2026-06-11-big.md
+$(yes 'large prompt body line to exceed the pipe buffer for the sigpipe window' | head -20000)"
+
+  run_wrapper "$big_prompt" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  # spec-review 모드 증거: active DoD 가 spec N/A sentinel 로 표기.
+  grep -qF "(N/A for fresh spec review)" "$RUN_WRAPPER_PROMPT_FILE" \
+    || fail "spec marker missed on large prompt — mode misclassified as code-review (SIGPIPE)"
+  # 규율 핵심: spec 리뷰는 코드 게이트 stamp 를 절대 만들지 않는다.
+  [ -f "$SANDBOX/trail/dod/.codex-reviewed" ] \
+    && fail "spec review created .codex-reviewed stamp (code-gate pollution)"
+  return 0
+}
+
+# A5 negative: commit_range → qualifier 부재 (기존 strict 비교 유지).
+test_freshness_rule_strict_in_commit_range_mode() {
+  seed_design "docs/specs/foo-design.md" "A1"
+  seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
+  seed_dod "trail/dod/dod-2026-04-21-t.md" "docs/plans/foo-plan.md" "A1"
+  echo "path=trail/dod/dod-2026-04-21-t.md" > "$SANDBOX/trail/dod/.active-dod"
+
+  run_wrapper "code review please" --non-interactive
+
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  grep -qF 'stale-evidence HIGH flag 비적용' "$RUN_WRAPPER_PROMPT_FILE" \
+    && fail "freshness qualifier leaked into commit_range mode (strict rule must stay)"
+  grep -qF 'freshness 비교 전체 skip' "$RUN_WRAPPER_PROMPT_FILE" \
+    && fail "spec skip qualifier leaked into commit_range mode"
+  return 0
 }
 
 main "$@"

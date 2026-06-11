@@ -71,10 +71,15 @@ fi
 
 echo "### Test 8: Evidence-freshness degrade marker (anchor-based extraction)"
 # Extract Claim Audit slot heredoc block using anchors: from `4. Claim Audit `
-# header (column 0) to the `SLOTS` heredoc terminator (column 0). This
-# isolates slot-internal text from other (unavailable) usages like
+# header (column 0) to the slot-region end marker `응답 출력 형식` (column 0).
+# This isolates slot-internal text from other (unavailable) usages like
 # _resolve_commit_iso fallback that lives above the heredoc.
-slot_block=$(awk '/^4\. Claim Audit /,/^SLOTS$/' "$WRAPPER")
+# ENV-SUBJ (2026-06-11): end anchor 를 `^SLOTS$` 에서 교체 — B5(2026-06-09)부터
+# slot 4 가 동적 주입(printf)을 위해 여러 heredoc 으로 분할되어 첫 SLOTS
+# 종결자가 sub-item 4 직후에 와 freshness 텍스트(sub-item 5)가 추출 범위 밖
+# 으로 빠졌다 (latent fail — skills 묶음이 CI 미등록이라 미관측). 영역 종료
+# 표식 기준이면 이후 분할이 늘어도 추출이 안정적이다.
+slot_block=$(awk '/^4\. Claim Audit /,/^응답 출력 형식/' "$WRAPPER")
 if printf '%s' "$slot_block" | grep -qE "ISO = \(unavailable\)"; then
   _pass "'(unavailable)' degrade 문구가 Claim Audit slot 내부에 명시"
 else

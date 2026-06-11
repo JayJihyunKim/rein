@@ -5,14 +5,19 @@
 #
 # Scope IDs covered:
 #   - session-start-removes-dangling-active-dod-when-target-file-missing
-#   - session-start-removes-active-dod-when-target-lacks-range-link-section
+#   - session-start-preserves-active-dod-when-target-lacks-range-link-section
+#     (2026-06-11 envelope-subject-consistency C1: selector Tier 1 marker-trust
+#      계약(2026-06-09, `## 범위 연결` 불요)과 정합 — 이전 "lacks section → remove"
+#      조건이 멀쩡한 marker 를 세션마다 삭제해 Tier 2 추측 오선택을 유발)
 #   - session-start-removes-active-dod-when-target-archived-by-inbox-or-daily-exact-match
 #   - session-start-rejects-and-removes-active-dod-when-path-violates-containment
 #   - active-dod-marker-uses-first-path-line-only
 #
 # Scenarios:
 #   1. target file missing → remove + log
-#   2. target lacks `## 범위 연결` → remove + log
+#   2. target lacks `## 범위 연결` → PRESERVE (marker-trust; C1 2026-06-11)
+#   2b. target lacks section BUT archived (inbox exact match) → remove + log
+#       (archived check 가 section-less DoD 에도 도달 — C1 로 새로 열린 경로)
 #   3a. archived inbox exact match → remove + log
 #   3b. archived daily exact match (`# foo`) → remove + log
 #   3c-3g. negative — suffix-substring 5 cases → preserve marker
@@ -83,8 +88,11 @@ else
 fi
 rm -rf "$S"
 
-# ---- Test 2: target lacks `## 범위 연결`.
-echo "### Test 2: cleanup_removes_marker_when_target_lacks_range_link"
+# ---- Test 2: target lacks `## 범위 연결` → PRESERVE (C1, 2026-06-11).
+# selector Tier 1 은 2026-06-09 marker-trust 수정으로 섹션 유무와 무관하게
+# marker 를 인정한다. 청소부가 같은 조건으로 marker 를 지우면 정상 marker 가
+# 세션 시작마다 사라져 Tier 2 추측(무관 DoD)으로 강등된다 — 보존이 정답.
+echo "### Test 2: cleanup_preserves_marker_when_target_lacks_range_link"
 S=$(_mksandbox)
 cat > "$S/trail/dod/dod-2026-04-01-nolink.md" <<'EOF'
 # DoD without range link
@@ -92,11 +100,30 @@ some content but no required section
 EOF
 _write_marker "$S" "path=trail/dod/dod-2026-04-01-nolink.md"
 _call_hook "$S"
-if [ ! -f "$S/trail/dod/.active-dod" ] && \
-   grep -q "target lacks ## 범위 연결" "$S/trail/incidents/active-dod-cleanup.log" 2>/dev/null; then
-  _pass "marker removed + log 'lacks ## 범위 연결'"
+if [ -f "$S/trail/dod/.active-dod" ] && \
+   ! grep -q "target lacks" "$S/trail/incidents/active-dod-cleanup.log" 2>/dev/null; then
+  _pass "marker preserved (plan-less DoD, marker-trust)"
 else
-  _fail "marker still present or log missing"
+  _fail "marker removed or 'target lacks' logged — cleanup contradicts selector Tier 1 contract"
+fi
+rm -rf "$S"
+
+# ---- Test 2b: section-less DoD that IS archived → still removed.
+# C1 이 섹션 조건을 제거하면서 archived 검사가 section-less DoD 에도 도달한다.
+echo "### Test 2b: cleanup_removes_sectionless_marker_when_archived_inbox_exact_match"
+S=$(_mksandbox)
+cat > "$S/trail/dod/dod-2026-04-01-nolinkarch.md" <<'EOF'
+# DoD without range link (archived)
+no required section here
+EOF
+echo "completion record" > "$S/trail/inbox/2026-04-01-nolinkarch.md"
+_write_marker "$S" "path=trail/dod/dod-2026-04-01-nolinkarch.md"
+_call_hook "$S"
+if [ ! -f "$S/trail/dod/.active-dod" ] && \
+   grep -q "archived: matching inbox" "$S/trail/incidents/active-dod-cleanup.log" 2>/dev/null; then
+  _pass "section-less archived marker removed (inbox match)"
+else
+  _fail "archived check did not reach section-less DoD"
 fi
 rm -rf "$S"
 

@@ -88,11 +88,16 @@ find "$PROJECT_DIR/.claude/cache" -maxdepth 1 -type f \
   -mmin +60 -delete 2>/dev/null || true
 
 # ---- 묶음 C Phase 3: `.active-dod` cleanup ----------------------------
-# 4 categories trigger removal (각각 incident log 기록):
+# 3 categories trigger removal (각각 incident log 기록):
 #   (a) path security violation (containment / traversal / metachars / empty)
 #   (b) target file missing
-#   (c) target lacks `## 범위 연결`
-#   (d) target archived (matching inbox or daily completion record — exact match)
+#   (c) target archived (matching inbox or daily completion record — exact match)
+# ENV-SUBJ C1 (2026-06-11): 이전의 "target lacks `## 범위 연결` → remove" 조건은
+# 제거됐다. selector Tier 1 은 2026-06-09 marker-trust 수정으로 섹션 유무와
+# 무관하게 marker 를 인정하는데, 청소부만 옛 조건을 유지해 plan-less DoD 의
+# 정상 marker 를 세션 시작마다 삭제 → selector 가 Tier 2 최신-mtime 추측으로
+# 강등되어 무관 DoD 가 리뷰/라벨에 주입되는 근본 원인이었다 (두 소비자의
+# marker 수용 계약 불일치). archived 검사는 이제 섹션 없는 DoD 에도 도달한다.
 # Path validation 은 file -f / grep / glob 검사 보다 **선행** (Task 3.4).
 # `path=` 첫 줄만 채택 (Task 3.5 first-line contract; head -1).
 # POSIX-portable shell glob + case (find -regex GNU/BSD 비대칭 회피).
@@ -114,8 +119,6 @@ if [ -f "$ACTIVE_MARKER" ]; then
     :  # containment failed — REMOVE_REASON holds the reason
   elif [ ! -f "$PROJECT_DIR/$TARGET_PATH" ]; then
     REMOVE_REASON="target file missing"
-  elif ! grep -qE '^## 범위 연결' "$PROJECT_DIR/$TARGET_PATH" 2>/dev/null; then
-    REMOVE_REASON="target lacks ## 범위 연결"
   else
     # Archived check: same slug in inbox or daily — EXACT match only.
     SLUG=$(basename "$TARGET_PATH" .md | sed -E 's/^dod-[0-9]{4}-[0-9]{2}-[0-9]{2}-//')
