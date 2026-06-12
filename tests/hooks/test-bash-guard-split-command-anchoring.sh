@@ -150,6 +150,38 @@ test_compound_git_commit_triggers_review_gate() {
   assert_json_deny "CODEX_STAMP_MISSING" "&& 뒤 실제 git commit 은 차단되어야 함"
 }
 
+# ------------------------------------------------------------
+# GMF-1 (docs/specs/2026-06-12-gate-misfire-fixes.md §3.1): canonical
+# "git commit" SSOT — multi-space + git global-option forms now drive the
+# commit gate (true-positive), while mentions stay non-matching. This is the
+# cross-consumer regression: the same shared model that the classifier /
+# dispatcher use also governs the gate-internal command_invokes.
+# ------------------------------------------------------------
+
+# git -C . commit (global option between git and commit) 은 실제 커밋 → 차단.
+test_canonical_git_dash_C_commit_triggers_review_gate() {
+  _seed_dod_no_stamps
+  local input='{"tool_input":{"command":"git -C . commit -m \"feat: x\""},"tool_result":{}}'
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  assert_json_deny "CODEX_STAMP_MISSING" "git -C . commit 은 실제 커밋 — 차단되어야 함"
+}
+
+# git  commit (더블스페이스) 도 실제 커밋 → 차단.
+test_canonical_git_double_space_commit_triggers_review_gate() {
+  _seed_dod_no_stamps
+  local input='{"tool_input":{"command":"git  commit -m \"feat: x\""},"tool_result":{}}'
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  assert_json_deny "CODEX_STAMP_MISSING" "git  commit (더블스페이스) 은 실제 커밋 — 차단되어야 함"
+}
+
+# git commit-graph write 은 다른 서브커맨드 — 차단 금지 (shell-token 경계).
+test_git_commit_graph_mention_not_blocked() {
+  _seed_dod_no_stamps
+  local input='{"tool_input":{"command":"git commit-graph write"},"tool_result":{}}'
+  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  assert_not_blocked "git commit-graph write 은 commit 게이트 대상 아님 (shell-token 경계)"
+}
+
 # ============================================================
 # Suite C: .env 읽기 분류기 [P8]
 # ============================================================
@@ -334,6 +366,10 @@ main() {
   run_test test_pytest_invocation_not_blocked_by_review_gate           pre-bash-test-commit-gate.sh
   run_test test_env_prefixed_pytest_not_blocked_by_review_gate         pre-bash-test-commit-gate.sh
   run_test test_compound_git_commit_triggers_review_gate               pre-bash-test-commit-gate.sh
+  # Suite B (GMF-1) — canonical commit SSOT cross-consumer regression
+  run_test test_canonical_git_dash_C_commit_triggers_review_gate       pre-bash-test-commit-gate.sh
+  run_test test_canonical_git_double_space_commit_triggers_review_gate pre-bash-test-commit-gate.sh
+  run_test test_git_commit_graph_mention_not_blocked                   pre-bash-test-commit-gate.sh
   # Suite C — .env 읽기 분류기 (→ safety-guard)
   run_test test_cat_env_example_is_not_blocked                         pre-bash-safety-guard.sh
   run_test test_echo_mentioning_env_read_is_not_blocked                pre-bash-safety-guard.sh

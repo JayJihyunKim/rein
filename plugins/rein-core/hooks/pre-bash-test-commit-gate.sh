@@ -31,17 +31,15 @@
 # 분류 근거: docs/specs/2026-05-17-hook-message-assistant-tone.md §1
 # 주의: exit 1 은 non-blocking error (통과됨). 차단은 exit 0+JSON deny 또는 exit 2
 
-# --- Policy toggle (plugin mode only) ---
-# .rein/policy/hooks.yaml can disable this hook via `<hook-name>: false` or
-# `{ <hook-name>: { enabled: false } }`. The loader also honours the legacy
-# umbrella key `pre-bash-guard` (rein-policy-loader.py UMBRELLA_KEYS) so a
-# project that disabled the old single hook keeps both halves disabled.
-# Requires plugin mode (${CLAUDE_PLUGIN_ROOT} set). Skipped otherwise.
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" ]; then
-  if ! python3 "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" "pre-bash-test-commit-gate"; then
-    exit 0  # disabled by user policy
-  fi
-fi
+# --- Policy toggle moved below the python resolver (GMF-4) ---
+# The policy-toggle block used to live HERE (top of file) and hard-coded
+# `python3`. When python3 was absent (127) or a Windows stub (49), the
+# `if ! python3 <loader>; then exit 0` form treated interpreter-absence as a
+# user policy disable and silently turned the gate OFF (fail-open). GMF-4
+# (docs/specs/2026-06-12-gate-misfire-fixes.md §3.4) moves the policy check
+# to AFTER bg_resolve_python_or_die (which already exit-2s on interpreter
+# absence) and calls the loader via "${PYTHON_RUNNER[@]}", so a missing
+# interpreter never disables the gate. See the policy block after [I1].
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=./lib/portable.sh
@@ -72,6 +70,24 @@ if ! . "$SCRIPT_DIR/lib/bash-guard-infra.sh" 2>/dev/null; then
   exit 2
 fi
 
+# canonical git subcommand token model (SSOT) — GMF-1/GMF-2. Of the three
+# model consumers (classifier / dispatcher / this gate) this gate is the only
+# HARD-FAIL consumer: a missing/corrupt lib or empty $GIT_COMMIT_ERE/
+# $GIT_MERGE_ERE is an integrity defect → exit 2 (fail-closed). Passing an
+# empty ERE to command_invokes makes the matcher untrustworthy (per-environment
+# error / match-all / misclassification) — an empty $GIT_MERGE_ERE could exempt
+# EVERY command (fail-open) and an empty $GIT_COMMIT_ERE could drop the commit
+# check. So we hard-fail before any empty ERE reaches the body below.
+# (bash-guard-infra / safety-guard are NOT touched: safety-guard does not use
+# these ERE constants — its P10 GIT_COMMIT_PREFIX is out of scope — so sourcing
+# the model there would couple safety-guard to a lib it never reads.)
+if ! { [ -f "$SCRIPT_DIR/lib/git-subcommand-model.sh" ] \
+       && . "$SCRIPT_DIR/lib/git-subcommand-model.sh" \
+       && [ -n "${GIT_COMMIT_ERE:-}" ] && [ -n "${GIT_MERGE_ERE:-}" ]; }; then
+  echo "[rein] The commit gate cannot run because its git-subcommand token model (lib/git-subcommand-model.sh) could not be loaded — it may be missing or corrupt. Run 'rein update' to repair the installation." >&2
+  exit 2
+fi
+
 # [I6] infra integrity — load + verify the JSON deny emitter (exit 2 on fail).
 bg_infra_init "$SCRIPT_DIR"
 
@@ -79,6 +95,30 @@ INPUT=$(cat)
 
 # [I1] infra integrity — resolve python3 (exit 2 on fail).
 bg_resolve_python_or_die
+
+# --- Policy toggle (plugin mode only) — GMF-4 resolver-after form ---
+# .rein/policy/hooks.yaml can disable this hook via `<hook-name>: false` or
+# `{ <hook-name>: { enabled: false } }`. The loader also honours the legacy
+# umbrella key `pre-bash-guard` (rein-policy-loader.py UMBRELLA_KEYS) so a
+# project that disabled the old single hook keeps both halves disabled.
+# Requires plugin mode (${CLAUDE_PLUGIN_ROOT} set). Skipped otherwise.
+#
+# GMF-4 contract: bg_resolve_python_or_die above already exit-2s (fail-closed)
+# when the interpreter is absent, so reaching here means PYTHON_RUNNER is a
+# real interpreter. We call the loader through it and distinguish:
+#   rc == 1        → loader ran cleanly + reported "disabled" → exit 0 (OFF)
+#   rc == 0        → enabled → fall through to the gate body (active)
+#   rc ∉ {0,1}     → loader crash / OS fault → fail-closed (gate active)
+# Interpreter-absence can no longer reach this block, so it never disables
+# the gate.
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" ]; then
+  "${PYTHON_RUNNER[@]}" "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" "pre-bash-test-commit-gate"
+  _pol_rc=$?
+  if [ "$_pol_rc" -eq 1 ]; then
+    exit 0  # loader ran cleanly + disabled by user policy
+  fi
+  # rc 0 = enabled (continue); rc ∉ {0,1} = loader call failure → fail-closed.
+fi
 
 # [I2] infra integrity — parse tool_input.command (exit 2 on parse failure).
 # Called WITHOUT command substitution so its fail-close reaches the top level;
@@ -93,7 +133,17 @@ fi
 # --- merge/rebase/am commit 은 메시지 포맷 검증에서 면제 ---
 # merge/rebase 는 메시지를 자동 생성하므로 Conventional Commits 검증 대상이
 # 아니다. 면제는 stamp/coverage gate 보다 앞서야 한다 — 그 commit 들도 통과.
-if echo "$COMMAND" | grep -qE "git (merge|rebase|am)"; then
+# GMF-2 (docs/specs/2026-06-12-gate-misfire-fixes.md §3.2): 이전의 비앵커
+# substring grep (`echo "$COMMAND" | grep -qE "git (merge|rebase|am)"`) 은
+# 커밋 *메시지* 안에 든 리터럴 `git merge`/`git rebase`/`git am` substring 까지
+# 매칭해, 그 *일반 커밋* 을 진짜 merge 로 오인하고 전 검사를 통째로 면제했다
+# (false-negative). canonical $GIT_MERGE_ERE 를 command_invokes 로 소비하면
+# clause-start 앵커가 첫 서브커맨드만 본다 — 글로벌 옵션 skip 후 첫 non-옵션
+# 토큰이 merge/rebase/am 일 때만 면제. `-m "...git merge..."` 의 메시지 본문
+# substring 은 비매칭(첫 서브커맨드는 commit). $GIT_MERGE_ERE 는 GMF-1 신설
+# lib (git-subcommand-model.sh, 위에서 hard-fail source 됨) 의 SSOT 정의를
+# 소비만 한다 — 여기서 재정의하지 않는다.
+if command_invokes "$GIT_MERGE_ERE"; then
   exit 0
 fi
 
@@ -545,7 +595,12 @@ flush_plan_coverage_dirty() {
 # mirrored in hooks.json `if` entries (one entry per pattern) so the script
 # only spawns on these commands; here it also re-classifies for the in-script
 # coverage-marker scan. `git commit` is the hard gate (spec R6).
-if command_invokes "pytest|jest|vitest|mocha|npm run test|npm test|yarn test|pnpm test|python -m pytest|npx jest|npx vitest|git commit|bash tests/"; then
+# GMF-1: `git commit` split out of the alternation into its own canonical
+# matcher — embedding the ERE inside the literal alternation would mis-order
+# alternation precedence. The canonical $GIT_COMMIT_ERE skips git global
+# options + multi-space and closes `commit` on a shell-token boundary.
+if command_invokes "pytest|jest|vitest|mocha|npm run test|npm test|yarn test|pnpm test|python -m pytest|npx jest|npx vitest|bash tests/" \
+   || command_invokes "$GIT_COMMIT_ERE"; then
   # X3.B.2: flush plan-coverage dirty list BEFORE legacy marker scan.
   flush_plan_coverage_dirty
   flush_rc=$?
@@ -602,7 +657,8 @@ fi
 # 별개 discipline 으로 위에서 그대로 유지된다.
 
 # --- Codex 리뷰 stamp 검사 (git commit 시) ([P3]~[P6]) ---
-if command_invokes "git commit"; then
+# GMF-1: canonical $GIT_COMMIT_ERE (was literal "git commit").
+if command_invokes "$GIT_COMMIT_ERE"; then
   if ! check_review_stamp "committing"; then
     exit 2
   fi
@@ -617,7 +673,8 @@ fi
 # - conventional commits scope 표기법 허용: type(scope)?: description
 # 추출 로직 자체는 lib/extract-commit-msg.py 에 분리 (bash 의
 # $(cmd <<HEREDOC) + `|| true` 파서 한계를 피하기 위함).
-if command_invokes "git commit"; then
+# GMF-1: canonical $GIT_COMMIT_ERE (was literal "git commit").
+if command_invokes "$GIT_COMMIT_ERE"; then
   EXTRACT_SCRIPT="$SCRIPT_DIR/lib/extract-commit-msg.py"
   # Helper 누락은 fail-open 으로 두지 않는다. heredoc 우회와 같은 silent
   # bypass 를 막기 위해, helper 가 없거나 python3 가 동작하지 않으면 BLOCK.

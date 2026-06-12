@@ -1,10 +1,10 @@
 verdict=PASS
-active_dod=trail/dod/dod-2026-06-11-envelope-subject-consistency.md
-cycle=2026-06-11-envelope-subject-consistency
+active_dod=trail/dod/dod-2026-06-12-gate-misfire-fixes.md
+cycle=2026-06-12-gate-misfire-fixes
 security_level=standard
 reviewer=security-reviewer
-reviewed=2026-06-11T07:11:30
+reviewed=2026-06-12T06:29:55
 mechanism=rein-security-reviewer
-files_reviewed=scripts/rein-codex-review.sh,plugins/rein-core/scripts/rein-codex-review.sh,plugins/rein-core/hooks/session-start-load-trail.sh,tests/fixtures/fake-codex.sh
+files_reviewed=plugins/rein-core/hooks/lib/git-subcommand-model.sh,plugins/rein-core/hooks/lib/bash-classifier.sh,plugins/rein-core/hooks/pre-bash-dispatcher.sh,plugins/rein-core/hooks/pre-bash-test-commit-gate.sh,plugins/rein-core/hooks/pre-edit-dod-gate.sh,plugins/rein-core/hooks/pre-bash-safety-guard.sh
 findings=none
-notes=C1 keeps GE-1 containment first (no path-traversal weakening; section-check removal is a correctness improvement, marker writer already inside trust boundary). A4 notes are single-quoted static literals (no prompt-injection surface growth; REVIEW_SUBJECT fixed 3-value set). D1/D2 restore fail-closed behavior (SIGPIPE fail-open guard defeat fixed; anchored marker regex unchanged, stdin first-line control = caller privilege, not a new surface). fake-codex FILE input is test-fixture-only (outside plugin ship scope, env control implies test-process control already). Standard-level 9-item sweep clean.
+notes=GMF-1~4 gate false-negative fixes. ReDoS-safe (grep -E POSIX ERE, linear on pathological input). No injection (untrusted COMMAND to grep via stdin, literal patterns). GMF-3 notice marker name is SHA-only suffix under fixed trail/dod (no path traversal). GMF-4 fail-closed correct (policy block after resolver; rc1=disable, rc0=active, rc-other=fail-closed-active; interpreter-absent exits at resolver). Shared lib sourced from trusted SCRIPT_DIR; load-failure fail-closed. Standard-level sweep clean, no blocking findings.

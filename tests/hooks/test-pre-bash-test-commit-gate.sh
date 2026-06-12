@@ -131,12 +131,271 @@ test_p7_commit_msg_format_blocks() {
   assert_json_deny "COMMIT_MSG_FORMAT" "P7 bad commit message format should emit JSON deny"
 }
 
+# ============================================================
+# GMF-1 (docs/specs/2026-06-12-gate-misfire-fixes.md §3.1): canonical
+# "git commit" recognition inside the gate. The old literal `command_invokes
+# "git commit"` missed multi-space + git global-option forms, so the inner
+# stamp/format checks were skipped on them. These verify the canonical model
+# now drives those forms into the P5 stamp check (DoD present, no stamps).
+# ============================================================
+
+# RED → GREEN: git -C . commit must enter the stamp check.
+test_gmf1_git_dash_C_commit_enters_stamp_check() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git -C . commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "CODEX_STAMP_MISSING" "git -C . commit must enter the codex stamp check"
+}
+
+# RED → GREEN: double-space between git and commit.
+test_gmf1_git_double_space_commit_enters_stamp_check() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git  commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "CODEX_STAMP_MISSING" "git  commit (double space) must enter the codex stamp check"
+}
+
+# RED → GREEN: git -c <kv> commit.
+test_gmf1_git_dash_c_kv_commit_enters_stamp_check() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git -c user.name=x commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "CODEX_STAMP_MISSING" "git -c user.name=x commit must enter the codex stamp check"
+}
+
+# RED → GREEN: git --git-dir=.git commit.
+test_gmf1_git_gitdir_commit_enters_stamp_check() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git --git-dir=.git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "CODEX_STAMP_MISSING" "git --git-dir=.git commit must enter the codex stamp check"
+}
+
+# GREEN (over-match 0): git commit-graph write is a different subcommand —
+# stamps absent, but it must NOT be gated (passes, no JSON deny).
+test_gmf1_git_commit_graph_not_gated() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git commit-graph write"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "git commit-graph write must NOT enter the commit gate (shell-token boundary)"
+}
+
+# GREEN (over-match 0): git config commit.gpgsign — commit is config's arg.
+test_gmf1_git_config_commit_arg_not_gated() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git config commit.gpgsign true"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "git config commit.gpgsign must NOT enter the commit gate"
+}
+
+# GREEN (over-match 0): allowlist-outside option is conservative non-match.
+test_gmf1_git_bogus_option_commit_not_gated() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git --bogus commit"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "git --bogus commit (allowlist-outside) must NOT enter the commit gate"
+}
+
+# GMF-1 / Task 1.6 (codex R2 HIGH): the gate hard-fails (exit 2) when the
+# canonical git-subcommand-model lib is missing — a missing/empty ERE must not
+# reach command_invokes (which would make the matcher untrustworthy / leak).
+test_gmf1_missing_git_model_lib_fails_closed() {
+  _seed_dod_and_stamps
+  rm -f "$SANDBOX/.claude/hooks/lib/git-subcommand-model.sh"
+  local input='{"tool_input":{"command":"git commit -m \"feat: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_exit 2 "missing git-subcommand-model lib should fail closed (exit 2)"
+  assert_stderr_contains "[rein]"
+}
+
+# ============================================================
+# GMF-2 (docs/specs/2026-06-12-gate-misfire-fixes.md §3.2): merge/rebase/am
+# exemption precision. The old `echo "$COMMAND" | grep -qE "git (merge|rebase|
+# am)"` was an unanchored substring match, so a *normal* commit whose MESSAGE
+# embedded the literal `git merge`/`git rebase`/`git am` string was wrongly
+# exempted (whole commit skipped all stamp/coverage/format checks = false-
+# negative). The fix consumes GMF-1's canonical $GIT_MERGE_ERE via
+# command_invokes (clause-start anchored) so only a real merge/rebase/am
+# subcommand is exempted; a literal mention inside `-m "..."` is not.
+# ============================================================
+
+# RED → GREEN: a normal commit whose message contains the literal "git merge"
+# substring must NOT be exempted — it must enter the stamp check (DoD present,
+# no stamps → P5).
+test_gmf2_commit_msg_literal_git_merge_not_exempted() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git commit -m \"fix: document git merge behavior\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "CODEX_STAMP_MISSING" "commit with literal 'git merge' in message must NOT be exempted (enters stamp check)"
+}
+
+# RED → GREEN: same for a literal "git rebase" substring in the message.
+test_gmf2_commit_msg_literal_git_rebase_not_exempted() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git commit -m \"chore: simplify git rebase docs\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "CODEX_STAMP_MISSING" "commit with literal 'git rebase' in message must NOT be exempted (enters stamp check)"
+}
+
+# GREEN (exemption preserved): a real merge is exempted from all gates even
+# without stamps (auto-generated message, no edit→review flow). DoD present +
+# no stamps would otherwise P5-block a commit; a real merge must pass.
+test_gmf2_real_merge_still_exempted() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git merge --no-ff feature/x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "real git merge --no-ff must remain exempted (no new block)"
+}
+
+# GREEN (exemption preserved): real rebase.
+test_gmf2_real_rebase_still_exempted() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git rebase main"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "real git rebase must remain exempted"
+}
+
+# GREEN (exemption preserved): real am.
+test_gmf2_real_am_still_exempted() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git am < patch"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "real git am must remain exempted"
+}
+
+# GREEN (exemption preserved): merge with a leading global option — global
+# option skip then first subcommand = merge → exempted.
+test_gmf2_git_dash_C_merge_still_exempted() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git -C . merge feature/x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "git -C . merge (global-option skip) must remain exempted"
+}
+
+# GREEN (behavior unchanged): a commit message with the bare word "merge"
+# (no literal "git merge") was never exempted by the old grep and must still
+# enter the stamp check after the fix.
+test_gmf2_commit_msg_bare_merge_word_enters_gate() {
+  _seed_dod_only
+  local input='{"tool_input":{"command":"git commit -m \"fix: resolve merge conflict\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "CODEX_STAMP_MISSING" "commit with bare word 'merge' in message must enter the stamp check (unchanged)"
+}
+
 # Negative: a well-formed commit with stamps + no markers passes.
 test_good_commit_passes() {
   _seed_dod_and_stamps
   local input='{"tool_input":{"command":"git commit -m \"feat: well formed\""},"tool_result":{}}'
   run_hook "$HOOK" "$input"
   assert_pass "well-formed git commit with stamps should pass"
+}
+
+# ============================================================
+# GMF-4 (docs/specs/2026-06-12-gate-misfire-fixes.md §3.4): policy-toggle
+# fail-open seal. The old top-of-file block hard-coded `python3` and did
+# `if ! python3 <loader>; then exit 0`. When python3 is absent (127) or a
+# Windows stub (49), `! <nonzero>` is true → the gate fell to exit 0 (OFF),
+# mistaking interpreter-absence for a user policy disable. The fix moves the
+# policy check AFTER the resolver (bg_resolve_python_or_die already exit-2s on
+# interpreter absence) and calls the loader via "${PYTHON_RUNNER[@]}",
+# distinguishing loader rc==1 (user disable → exit 0) from rc∉{0,1} / absence
+# (fail-closed → gate active).
+#
+# These run the hook in a manual subshell (like the I1 tests) so we can export
+# CLAUDE_PLUGIN_ROOT + curate PATH. _seed_policy_loader drops a loader script
+# into $SANDBOX/.claude/scripts/ (CLAUDE_PLUGIN_ROOT=$SANDBOX/.claude).
+# ============================================================
+
+# _seed_policy_loader RC — write a stub rein-policy-loader.py that exits RC.
+# (Deterministic: isolates the gate's rc-handling contract from the real
+# loader's yaml parsing, which is out of GMF-4's scope.)
+_seed_policy_loader() {
+  local rc="$1"
+  mkdir -p "$SANDBOX/.claude/scripts"
+  cat > "$SANDBOX/.claude/scripts/rein-policy-loader.py" <<PY
+import sys
+sys.exit($rc)
+PY
+}
+
+# _run_hook_plugin_env [extra-setup] — run HOOK with CLAUDE_PLUGIN_ROOT set,
+# under a missing-python PATH if MISSING_PY=1, else the real PATH. Captures
+# exit into HOOK_EXIT and combined output into HOOK_STDERR (stdout+stderr).
+_run_hook_missing_python() {
+  local stdin_json="$1"
+  local out rc
+  out=$(
+    with_missing_python
+    printf '%s' "$stdin_json" \
+      | CLAUDE_PLUGIN_ROOT="$SANDBOX/.claude" \
+        REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
+        bash "$SANDBOX/.claude/hooks/$HOOK" 2>&1
+    printf '_RC=%s\n' "$?"
+    cleanup_fakes
+  )
+  HOOK_EXIT=$(printf '%s' "$out" | awk -F= '/^_RC=/{print $2}' | tail -1)
+  HOOK_STDERR=$(printf '%s' "$out" | grep -v '^_RC=' || true)
+}
+
+_run_hook_real_python() {
+  local stdin_json="$1"
+  local tmp_out tmp_err
+  tmp_out=$(mktemp); tmp_err=$(mktemp)
+  printf '%s' "$stdin_json" \
+    | CLAUDE_PLUGIN_ROOT="$SANDBOX/.claude" \
+      REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
+      bash "$SANDBOX/.claude/hooks/$HOOK" >"$tmp_out" 2>"$tmp_err"
+  HOOK_EXIT=$?
+  HOOK_STDOUT=$(cat "$tmp_out")
+  HOOK_STDERR=$(cat "$tmp_err")
+  rm -f "$tmp_out" "$tmp_err"
+}
+
+# RED → GREEN: python3 absent + CLAUDE_PLUGIN_ROOT set + loader present must
+# NOT drop to exit 0 (OFF). The resolver fail-closes (exit 2); the stamp-less
+# commit stays gated. Current code: `! python3` (127) → exit 0 → red.
+test_gmf4_python_absent_does_not_disable_gate() {
+  _seed_dod_only
+  _seed_policy_loader 0   # loader would say "enabled", but python is absent
+  _run_hook_missing_python '{"tool_input":{"command":"git commit -m \"feat: x\""}}'
+  [ "$HOOK_EXIT" != "0" ] \
+    || fail "GMF-4 python absent must NOT disable the gate (got exit 0 = fail-open)"
+  [ "$HOOK_EXIT" = "2" ] \
+    || fail "GMF-4 python absent should fail closed via resolver (expected exit 2, got: $HOOK_EXIT)"
+}
+
+# GREEN: python3 present + policy DISABLE (loader rc 1) → gate OFF (exit 0).
+test_gmf4_policy_disable_exits_zero() {
+  _seed_dod_only          # stamps absent → would P5-block if the gate ran
+  _seed_policy_loader 1   # loader says "disabled"
+  _run_hook_real_python '{"tool_input":{"command":"git commit -m \"feat: x\""}}'
+  [ "$HOOK_EXIT" = "0" ] \
+    || fail "GMF-4 policy disable (loader rc1) should exit 0 (got: $HOOK_EXIT; stderr: $HOOK_STDERR)"
+  [ -z "$HOOK_STDOUT" ] \
+    || fail "GMF-4 policy disable should emit no JSON deny (stdout: $HOOK_STDOUT)"
+}
+
+# GREEN: python3 present + policy ENABLE (loader rc 0) → gate body runs. With a
+# DoD + no stamps, the body P5-blocks (JSON deny) — proving the gate entered.
+test_gmf4_policy_enable_enters_body() {
+  _seed_dod_only
+  _seed_policy_loader 0   # loader says "enabled"
+  _run_hook_real_python '{"tool_input":{"command":"git commit -m \"feat: x\""}}'
+  assert_json_deny "CODEX_STAMP_MISSING" "GMF-4 policy enable should enter the gate body (P5 stamp check)"
+}
+
+# GREEN: loader CRASH (rc∉{0,1}, e.g. rc 3) with python present → fail-closed,
+# gate active (must not mistake a loader crash for a user disable).
+test_gmf4_loader_crash_fails_closed() {
+  _seed_dod_only
+  _seed_policy_loader 3   # loader crashed
+  _run_hook_real_python '{"tool_input":{"command":"git commit -m \"feat: x\""}}'
+  [ "$HOOK_EXIT" != "0" ] || {
+    # exit 0 ONLY acceptable if it is a JSON deny (gate entered + blocked).
+    printf '%s' "$HOOK_STDOUT" | grep -q '"permissionDecision"' \
+      || fail "GMF-4 loader crash (rc3) must not disable the gate (got bare exit 0)"
+  }
+  assert_json_deny "CODEX_STAMP_MISSING" "GMF-4 loader crash should fall through to the gate body (P5)"
 }
 
 # ============================================================
@@ -264,7 +523,29 @@ main() {
   run_test test_p3_review_pending_no_stamp_blocks               "$HOOK"
   run_test test_p4_code_edited_after_review_blocks              "$HOOK"
   run_test test_p7_commit_msg_format_blocks                     "$HOOK"
+  # GMF-1 canonical commit recognition inside the gate
+  run_test test_gmf1_git_dash_C_commit_enters_stamp_check       "$HOOK"
+  run_test test_gmf1_git_double_space_commit_enters_stamp_check "$HOOK"
+  run_test test_gmf1_git_dash_c_kv_commit_enters_stamp_check    "$HOOK"
+  run_test test_gmf1_git_gitdir_commit_enters_stamp_check       "$HOOK"
+  run_test test_gmf1_git_commit_graph_not_gated                 "$HOOK"
+  run_test test_gmf1_git_config_commit_arg_not_gated            "$HOOK"
+  run_test test_gmf1_git_bogus_option_commit_not_gated          "$HOOK"
+  run_test test_gmf1_missing_git_model_lib_fails_closed         "$HOOK"
+  # GMF-2 merge/rebase/am exemption precision
+  run_test test_gmf2_commit_msg_literal_git_merge_not_exempted  "$HOOK"
+  run_test test_gmf2_commit_msg_literal_git_rebase_not_exempted "$HOOK"
+  run_test test_gmf2_real_merge_still_exempted                  "$HOOK"
+  run_test test_gmf2_real_rebase_still_exempted                 "$HOOK"
+  run_test test_gmf2_real_am_still_exempted                     "$HOOK"
+  run_test test_gmf2_git_dash_C_merge_still_exempted            "$HOOK"
+  run_test test_gmf2_commit_msg_bare_merge_word_enters_gate     "$HOOK"
   run_test test_good_commit_passes                              "$HOOK"
+  # GMF-4 policy-toggle fail-open seal
+  run_test test_gmf4_python_absent_does_not_disable_gate        "$HOOK"
+  run_test test_gmf4_policy_disable_exits_zero                  "$HOOK"
+  run_test test_gmf4_policy_enable_enters_body                  "$HOOK"
+  run_test test_gmf4_loader_crash_fails_closed                  "$HOOK"
   run_test test_p2_coverage_mismatch_blocks                     "$HOOK"
   # Paired infra points I3-I5
   run_test test_i3_coverage_marker_unidentifiable_fails_closed  "$HOOK"

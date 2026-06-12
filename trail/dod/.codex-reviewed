@@ -1,7 +1,7 @@
-reviewed_at: 2026-06-11T07:08:50Z
+reviewed_at: 2026-06-12T06:40:20Z
 reviewer: codex
-diff_base: 952161c7b04010c69c84732743c799bc02f44450
+diff_base: b0a61012e2208af4d6962477de7be2a6572f2a35
 verdict: PASS
-cycle: 2026-06-11-envelope-subject-consistency
+cycle: 2026-06-12-gate-misfire-fixes
 scope: wrapper-generated
-active_dod: trail/dod/dod-2026-06-11-envelope-subject-consistency.md
+active_dod: trail/dod/dod-2026-06-12-gate-misfire-fixes.md

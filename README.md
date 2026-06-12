@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.5.2** (2026-06-11) — pre-commit code review no longer raises blocking "design mismatch" warnings based on a guessed (possibly unrelated) task document — guessed context is now honestly marked advisory, and valid task markers are no longer wrongly deleted at session start (the root cause of the guessing). Also seals two review-tool reliability holes, including one where a very large design-review request could be misclassified as a code review and wrongly mark the code gate as passed. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.5.3** (2026-06-12) — seals four cases where the gates silently failed to fire for an honest agent: commit forms like `git -C <dir> commit` or double-spaced `git  commit` no longer skip review/security checks, a commit message merely mentioning "git merge" no longer bypasses them, the "design before code" requirement now covers more languages/layouts (Go `internal`/`cmd`, root-level source) instead of a few directory names, and the gates stay on (fail-closed) when Python isn't directly available. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

@@ -466,6 +466,96 @@ test_p10_no_env_present_commit_am_passes() {
 }
 
 # ============================================================
+# GMF-4 (docs/specs/2026-06-12-gate-misfire-fixes.md §3.4): policy-toggle
+# fail-open seal. Same fix as the test/commit gate — the old top block
+# hard-coded `python3` and `if ! python3 <loader>; then exit 0`, so an absent
+# interpreter (127) or Windows stub (49) silently turned the always-on safety
+# guard OFF. The fix moves the policy check after bg_resolve_python_or_die and
+# calls the loader via "${PYTHON_RUNNER[@]}", distinguishing loader rc==1
+# (user disable → exit 0) from rc∉{0,1} / absence (fail-closed → gate active).
+# Gate-active here is proven via P10 (.env present + git commit -am).
+# ============================================================
+
+_seed_policy_loader() {
+  local rc="$1"
+  mkdir -p "$SANDBOX/.claude/scripts"
+  cat > "$SANDBOX/.claude/scripts/rein-policy-loader.py" <<PY
+import sys
+sys.exit($rc)
+PY
+}
+
+_run_hook_missing_python() {
+  local stdin_json="$1"
+  local out
+  out=$(
+    with_missing_python
+    printf '%s' "$stdin_json" \
+      | CLAUDE_PLUGIN_ROOT="$SANDBOX/.claude" \
+        REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
+        bash "$SANDBOX/.claude/hooks/$HOOK" 2>&1
+    printf '_RC=%s\n' "$?"
+    cleanup_fakes
+  )
+  HOOK_EXIT=$(printf '%s' "$out" | awk -F= '/^_RC=/{print $2}' | tail -1)
+  HOOK_STDERR=$(printf '%s' "$out" | grep -v '^_RC=' || true)
+}
+
+_run_hook_real_python() {
+  local stdin_json="$1"
+  local tmp_out tmp_err
+  tmp_out=$(mktemp); tmp_err=$(mktemp)
+  printf '%s' "$stdin_json" \
+    | CLAUDE_PLUGIN_ROOT="$SANDBOX/.claude" \
+      REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
+      bash "$SANDBOX/.claude/hooks/$HOOK" >"$tmp_out" 2>"$tmp_err"
+  HOOK_EXIT=$?
+  HOOK_STDOUT=$(cat "$tmp_out")
+  HOOK_STDERR=$(cat "$tmp_err")
+  rm -f "$tmp_out" "$tmp_err"
+}
+
+# RED → GREEN: python3 absent must not disable the always-on safety guard.
+test_gmf4_python_absent_does_not_disable_gate() {
+  touch "$SANDBOX/.env"
+  _seed_policy_loader 0
+  _run_hook_missing_python '{"tool_input":{"command":"git commit -am \"feat: x\""}}'
+  [ "$HOOK_EXIT" != "0" ] \
+    || fail "GMF-4 python absent must NOT disable the safety guard (got exit 0 = fail-open)"
+  [ "$HOOK_EXIT" = "2" ] \
+    || fail "GMF-4 python absent should fail closed via resolver (expected exit 2, got: $HOOK_EXIT)"
+}
+
+# GREEN: python present + policy DISABLE (loader rc 1) → guard OFF (exit 0),
+# even with .env + git commit -am that would otherwise P10-block.
+test_gmf4_policy_disable_exits_zero() {
+  touch "$SANDBOX/.env"
+  _seed_policy_loader 1
+  _run_hook_real_python '{"tool_input":{"command":"git commit -am \"feat: x\""}}'
+  [ "$HOOK_EXIT" = "0" ] \
+    || fail "GMF-4 policy disable (loader rc1) should exit 0 (got: $HOOK_EXIT; stderr: $HOOK_STDERR)"
+  [ -z "$HOOK_STDOUT" ] \
+    || fail "GMF-4 policy disable should emit no JSON deny (stdout: $HOOK_STDOUT)"
+}
+
+# GREEN: python present + policy ENABLE (loader rc 0) → guard body runs and
+# P10-blocks the .env auto-add commit (proves the guard entered).
+test_gmf4_policy_enable_enters_body() {
+  touch "$SANDBOX/.env"
+  _seed_policy_loader 0
+  _run_hook_real_python '{"tool_input":{"command":"git commit -am \"feat: x\""}}'
+  assert_json_deny "ENV_COMMIT_AM_BLOCKED" "GMF-4 policy enable should enter the guard body (P10)"
+}
+
+# GREEN: loader CRASH (rc 3) with python present → fail-closed, guard active.
+test_gmf4_loader_crash_fails_closed() {
+  touch "$SANDBOX/.env"
+  _seed_policy_loader 3
+  _run_hook_real_python '{"tool_input":{"command":"git commit -am \"feat: x\""}}'
+  assert_json_deny "ENV_COMMIT_AM_BLOCKED" "GMF-4 loader crash should fall through to the guard body (P10)"
+}
+
+# ============================================================
 # [P11] destructive git
 # ============================================================
 test_p11_destructive_git_blocks() {
@@ -596,6 +686,11 @@ main() {
   run_test test_p10_no_env_present_commit_am_passes       "$HOOK"
   run_test test_p11_destructive_git_blocks                "$HOOK"
   run_test test_plain_ls_passes                           "$HOOK"
+  # GMF-4 policy-toggle fail-open seal
+  run_test test_gmf4_python_absent_does_not_disable_gate  "$HOOK"
+  run_test test_gmf4_policy_disable_exits_zero            "$HOOK"
+  run_test test_gmf4_policy_enable_enters_body            "$HOOK"
+  run_test test_gmf4_loader_crash_fails_closed            "$HOOK"
   # Allocation boundary — safety guard must NOT enforce the test/commit gate
   run_test test_safety_guard_does_not_enforce_commit_gate "$HOOK"
   # Common infra (I1·I2·I6)

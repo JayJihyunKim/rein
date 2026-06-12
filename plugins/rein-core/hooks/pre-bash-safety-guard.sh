@@ -21,17 +21,15 @@
 # 분류 근거: docs/specs/2026-05-17-hook-message-assistant-tone.md §1
 # 주의: exit 1 은 non-blocking error (통과됨). 차단은 exit 0+JSON deny 또는 exit 2
 
-# --- Policy toggle (plugin mode only) ---
-# .rein/policy/hooks.yaml can disable this hook via `<hook-name>: false` or
-# `{ <hook-name>: { enabled: false } }`. The loader also honours the legacy
-# umbrella key `pre-bash-guard` (rein-policy-loader.py UMBRELLA_KEYS) so a
-# project that disabled the old single hook keeps both halves disabled.
-# Requires plugin mode (${CLAUDE_PLUGIN_ROOT} set). Skipped otherwise.
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" ]; then
-  if ! python3 "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" "pre-bash-safety-guard"; then
-    exit 0  # disabled by user policy
-  fi
-fi
+# --- Policy toggle moved below the python resolver (GMF-4) ---
+# The policy-toggle block used to live HERE (top of file) and hard-coded
+# `python3`. When python3 was absent (127) or a Windows stub (49), the
+# `if ! python3 <loader>; then exit 0` form treated interpreter-absence as a
+# user policy disable and silently turned this always-on safety guard OFF
+# (fail-open). GMF-4 (docs/specs/2026-06-12-gate-misfire-fixes.md §3.4) moves
+# the policy check to AFTER bg_resolve_python_or_die (which already exit-2s on
+# interpreter absence) and calls the loader via "${PYTHON_RUNNER[@]}", so a
+# missing interpreter never disables the guard. See the policy block after [I1].
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=./lib/portable.sh
@@ -62,6 +60,30 @@ INPUT=$(cat)
 
 # [I1] infra integrity — resolve python3 (exit 2 on fail).
 bg_resolve_python_or_die
+
+# --- Policy toggle (plugin mode only) — GMF-4 resolver-after form ---
+# .rein/policy/hooks.yaml can disable this hook via `<hook-name>: false` or
+# `{ <hook-name>: { enabled: false } }`. The loader also honours the legacy
+# umbrella key `pre-bash-guard` (rein-policy-loader.py UMBRELLA_KEYS) so a
+# project that disabled the old single hook keeps both halves disabled.
+# Requires plugin mode (${CLAUDE_PLUGIN_ROOT} set). Skipped otherwise.
+#
+# GMF-4 contract: bg_resolve_python_or_die above already exit-2s (fail-closed)
+# when the interpreter is absent, so reaching here means PYTHON_RUNNER is a
+# real interpreter. We call the loader through it and distinguish:
+#   rc == 1        → loader ran cleanly + reported "disabled" → exit 0 (OFF)
+#   rc == 0        → enabled → fall through to the guard body (active)
+#   rc ∉ {0,1}     → loader crash / OS fault → fail-closed (guard active)
+# Interpreter-absence can no longer reach this block, so it never disables
+# the always-on safety guard.
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" ]; then
+  "${PYTHON_RUNNER[@]}" "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" "pre-bash-safety-guard"
+  _pol_rc=$?
+  if [ "$_pol_rc" -eq 1 ]; then
+    exit 0  # loader ran cleanly + disabled by user policy
+  fi
+  # rc 0 = enabled (continue); rc ∉ {0,1} = loader call failure → fail-closed.
+fi
 
 # [I2] infra integrity — parse tool_input.command (exit 2 on parse failure).
 # Called WITHOUT command substitution so its fail-close reaches the top level;

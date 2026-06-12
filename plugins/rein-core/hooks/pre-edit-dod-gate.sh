@@ -5,16 +5,15 @@
 #
 # Exit code: 0=허용, 2=차단
 
-# --- Policy toggle (plugin mode only) ---
-# .rein/policy/hooks.yaml can disable a hook via `<hook-name>: false`
-# or `{ <hook-name>: { enabled: false } }`.
-# Plugin mode: ${CLAUDE_PLUGIN_ROOT} is set, loader is invoked.
-# Non-plugin runtime: env unset, check is skipped (preserves pre-policy behavior).
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" ]; then
-  if ! python3 "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" "pre-edit-dod-gate"; then
-    exit 0  # disabled by user policy
-  fi
-fi
+# --- Policy toggle moved below the python resolver (GMF-4) ---
+# The policy-toggle block used to live HERE (top of file) and hard-coded
+# `python3`. When python3 was absent (127) or a Windows stub (49), the
+# `if ! python3 <loader>; then exit 0` form treated interpreter-absence as a
+# user policy disable and silently turned the DoD gate OFF (fail-open). GMF-4
+# (docs/specs/2026-06-12-gate-misfire-fixes.md §3.4) moves the policy check to
+# AFTER resolve_python (which already fail-closes rc 10/11/12 → exit 2) and
+# calls the loader via "${PYTHON_RUNNER[@]}", so a missing interpreter never
+# disables the gate. See the policy block after the resolver below.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=./lib/portable.sh
@@ -154,6 +153,30 @@ if [ "$rc" -ne 0 ]; then
   exit 2
 fi
 
+# --- Policy toggle (plugin mode only) — GMF-4 resolver-after form ---
+# .rein/policy/hooks.yaml can disable a hook via `<hook-name>: false`
+# or `{ <hook-name>: { enabled: false } }`.
+# Plugin mode: ${CLAUDE_PLUGIN_ROOT} is set, loader is invoked.
+# Non-plugin runtime: env unset, check is skipped (preserves pre-policy behavior).
+#
+# GMF-4 contract: resolve_python above already fail-closed (exit 2) on rc
+# 10/11/12 (interpreter absent / Windows stub / launch failure), so reaching
+# here means PYTHON_RUNNER is a real interpreter. We call the loader through it
+# and distinguish:
+#   rc == 1        → loader ran cleanly + reported "disabled" → exit 0 (OFF)
+#   rc == 0        → enabled → fall through to the gate body (active)
+#   rc ∉ {0,1}     → loader crash / OS fault → fail-closed (gate active)
+# Interpreter-absence can no longer reach this block, so it never disables
+# the gate.
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" ]; then
+  "${PYTHON_RUNNER[@]}" "${CLAUDE_PLUGIN_ROOT}/scripts/rein-policy-loader.py" "pre-edit-dod-gate"
+  _pol_rc=$?
+  if [ "$_pol_rc" -eq 1 ]; then
+    exit 0  # loader ran cleanly + disabled by user policy
+  fi
+  # rc 0 = enabled (continue); rc ∉ {0,1} = loader call failure → fail-closed.
+fi
+
 FILE_PATH=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" --field tool_input.file_path --default '')
 EXTRACT_RC=$?
 
@@ -248,36 +271,107 @@ case "$FILE_PATH" in
     ;;
 esac
 
-# --- 소스 디렉토리 한정 gate ---
+# --- 소스 판정 gate (GMF-3: 디렉토리 화이트리스트 + 소스 확장자 화이트리스트) ---
+# spec/plan §3.3. 판정 순서(우선순위)는 tightening-only 를 보장하도록 고정:
+#   (1) generated/vendored 제외 — source-dir *앞* (산출물/벤더링은 source-dir
+#       안에 있어도 비소스. 예: vendor/foo/lib/x.go, src/generated/api.ts)
+#   (2) 기존 디렉토리(source-dir) 화이트리스트 — 변경 없음 (불완화)
+#   (3) doc/data/lock 확장자 제외 — source-dir *뒤* (source-dir 내부 파일은
+#       이미 (2)에서 IS_SOURCE=true 확정되어 이 단계에 도달하지 않음 → 기존
+#       차단 불완화. 루트 config.json 등 source-dir 밖만 통과)
+#   (4) 소스 확장자 화이트리스트 (additive) — 디렉토리로 안 잡힌 소스 파일
+# NONSOURCE_DECIDED=true 는 (1) generated/vendored 가 후속 판정을 덮어쓰지 못하게
+# 막는 결정 플래그. EXT_SOURCE_HIT=true 는 (4) 확장자로 새로 소스가 됐음을 표시
+# (디렉토리 매칭과 구분 — 안내 메시지 trigger).
 IS_SOURCE=false
+NONSOURCE_DECIDED=false
+EXT_SOURCE_HIT=false
+
+# (1) generated/vendored 제외 — source-dir 판정보다 앞. 매칭 시 비소스 확정.
 case "$FILE_PATH" in
-  # 일반 소스 경로 (사용자 프로젝트 코드). `*/hooks/*` 가 `.claude/hooks/*` 도 잡음.
-  */src/*|*/app/*|*/services/*|*/apps/*|*/lib/*|*/components/*|*/hooks/*|*/store/*|*/types/*|*/models/*|*/schemas/*|*/repositories/*|*/routers/*|*/alembic/*|*/scripts/*|scripts/*)
-    IS_SOURCE=true
-    ;;
-  # rein-internal source — branch-strategy.md 의 main 포함 경로.
-  # 사용자 repo 로 복사되므로 편집 시 DoD 필수.
-  */.claude/rules/*|*/.claude/skills/*|*/.claude/agents/*|*/.claude/workflows/*)
-    IS_SOURCE=true
-    ;;
-  # rein-dev 메인테이너 환경에서만 존재하는 paths. 일반 사용자 repo 에는
-  # 이들 파일이 없으므로 자연 무동작 (case 가 매치되지 않음). hint 보존 목적.
-  */.claude/CLAUDE.md|*/.claude/orchestrator.md|*/.claude/settings.json)
-    IS_SOURCE=true
-    ;;
-  # AGENTS.md at any depth (repo root 또는 subdir 모두).
-  */AGENTS.md|AGENTS.md)
-    IS_SOURCE=true
-    ;;
-  # .gitignore — main 포함. tracking 정책 변경 가능.
-  */.gitignore|.gitignore)
-    IS_SOURCE=true
-    ;;
+  */node_modules/*|*/vendor/*|*/dist/*|*/build/*|*/.next/*|*/generated/*|*/__generated__/*|*/__pycache__/*)
+    NONSOURCE_DECIDED=true ;;
+  *.min.js|*.generated.*|*_pb2.py|*.pb.go)
+    NONSOURCE_DECIDED=true ;;
 esac
+
+# (2) 기존 디렉토리 화이트리스트 — generated/vendored 가 아닐 때만 평가 (불완화).
+if [ "$NONSOURCE_DECIDED" != true ]; then
+  case "$FILE_PATH" in
+    # 일반 소스 경로 (사용자 프로젝트 코드). `*/hooks/*` 가 `.claude/hooks/*` 도 잡음.
+    */src/*|*/app/*|*/services/*|*/apps/*|*/lib/*|*/components/*|*/hooks/*|*/store/*|*/types/*|*/models/*|*/schemas/*|*/repositories/*|*/routers/*|*/alembic/*|*/scripts/*|scripts/*)
+      IS_SOURCE=true
+      ;;
+    # rein-internal source — branch-strategy.md 의 main 포함 경로.
+    # 사용자 repo 로 복사되므로 편집 시 DoD 필수.
+    */.claude/rules/*|*/.claude/skills/*|*/.claude/agents/*|*/.claude/workflows/*)
+      IS_SOURCE=true
+      ;;
+    # rein-dev 메인테이너 환경에서만 존재하는 paths. 일반 사용자 repo 에는
+    # 이들 파일이 없으므로 자연 무동작 (case 가 매치되지 않음). hint 보존 목적.
+    */.claude/CLAUDE.md|*/.claude/orchestrator.md|*/.claude/settings.json)
+      IS_SOURCE=true
+      ;;
+    # AGENTS.md at any depth (repo root 또는 subdir 모두).
+    */AGENTS.md|AGENTS.md)
+      IS_SOURCE=true
+      ;;
+    # .gitignore — main 포함. tracking 정책 변경 가능.
+    */.gitignore|.gitignore)
+      IS_SOURCE=true
+      ;;
+  esac
+fi
+
+# (3) doc/data/lock 확장자 제외 — source-dir *뒤*. 디렉토리로 안 잡힌(=source-dir
+#     밖) 파일이 문서/데이터/락이면 비소스로 통과. source-dir 내부 파일은 (2)에서
+#     이미 IS_SOURCE=true 라 여기 안 옴 → src/schema.json 등 기존 차단 불완화.
+if [ "$IS_SOURCE" != true ] && [ "$NONSOURCE_DECIDED" != true ]; then
+  case "$FILE_PATH" in
+    *.md|*.txt|*.rst|*.adoc) NONSOURCE_DECIDED=true ;;
+    *.json|*.yaml|*.yml|*.toml|*.ini|*.csv|*.xml|*.env) NONSOURCE_DECIDED=true ;;
+    *.lock|*.sum) NONSOURCE_DECIDED=true ;;  # Cargo.lock / poetry.lock / go.sum / *-lock.yaml(=*.yaml)
+  esac
+fi
+
+# (4) 소스 확장자 화이트리스트 (additive) — 위 어느 단계로도 결정 안 된 파일.
+#     §3.3.b 확정 목록. 목록 누락은 보수적 실패(통과 = 게이트 약하게) — 안전 방향.
+if [ "$IS_SOURCE" != true ] && [ "$NONSOURCE_DECIDED" != true ]; then
+  case "$FILE_PATH" in
+    *.go|*.rs|*.py|*.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.java|*.kt|*.kts|*.scala|*.c|*.h|*.cpp|*.cc|*.cxx|*.hpp|*.hh|*.rb|*.php|*.sh|*.bash|*.swift|*.m|*.mm|*.cs|*.ex|*.exs|*.erl|*.hs|*.clj|*.cljs|*.lua|*.dart|*.pl|*.pm|*.r|*.R|*.jl|*.zig|*.ml|*.mli|*.fs|*.fsx|*.groovy)
+      IS_SOURCE=true; EXT_SOURCE_HIT=true ;;
+    Dockerfile|*/Dockerfile|Makefile|*/Makefile|*.mk)
+      IS_SOURCE=true; EXT_SOURCE_HIT=true ;;
+  esac
+fi
 
 if [ "$IS_SOURCE" = false ]; then
   exit 0
 fi
+
+# GMF-3 안내 메시지 헬퍼 (파일경로당 1회). 디렉토리가 아닌 *소스 확장자* 로 새로
+# IS_SOURCE=true 가 되어 DoD 미충족으로 차단되는 경우에만, "이 파일이 이제 DoD 를
+# 요구하는 이유"(= 디렉토리 화이트리스트가 아니라 소스 확장자로 판정됨 + 정책
+# 토글로 끌 수 있음) 를 stderr 로 안내한다. 억제 단위 = 정규화된 파일 경로
+# (per-path marker `trail/dod/.ext-source-notice-<sha>`). 디렉토리 매칭
+# (EXT_SOURCE_HIT=false) 차단은 기존 동작이므로 안내 없음. 통과(exit 0) 경로에서는
+# 호출하지 않는다(plan §3.4 — marker 생성은 차단 시점에만).
+# best-effort: PYTHON_RUNNER 실패/hash 실패 시 안내만 skip(차단 결정과 독립).
+emit_ext_source_notice() {
+  [ "$EXT_SOURCE_HIT" = true ] || return 0
+  local _ext_sha _ext_marker _ext_token
+  _ext_sha=$("${PYTHON_RUNNER[@]}" -c '
+import hashlib, sys
+print(hashlib.sha1(sys.argv[1].encode("utf-8")).hexdigest()[:12])
+' "$FILE_PATH" 2>/dev/null)
+  [ -n "$_ext_sha" ] || return 0
+  _ext_marker="$DOD_DIR/.ext-source-notice-$_ext_sha"
+  [ -f "$_ext_marker" ] && return 0
+  _ext_token="${FILE_PATH##*.}"
+  echo "[rein] 이 파일은 소스 확장자(.$_ext_token)로 판정되어 DoD 를 요구합니다 (디렉토리 화이트리스트가 아닌 확장자 기준). 정책 토글로 끌 수 있습니다." >&2
+  mkdir -p "$DOD_DIR" 2>/dev/null
+  touch "$_ext_marker" 2>/dev/null
+}
 
 # --- Governance stage (Plan A §6, GI-governance-stage-config) ---
 # Fail-closed on malformed / unknown stage: "silent Stage 1 downgrade" is a
@@ -897,6 +991,8 @@ if [ "$DOD_FOUND" = true ]; then
   touch "$SRC_EDIT_MARKER" 2>/dev/null
   exit 0
 else
+  # GMF-3: 확장자-소스로 새로 차단되는 경우 "DoD 요구 이유" 안내(파일경로당 1회).
+  emit_ext_source_notice
   echo "[rein] Source files cannot be edited yet because there is no active task record. To proceed:" >&2
   echo "  1) Create trail/dod/dod-$(date +%Y-%m-%d)-<slug>.md describing what this task changes." >&2
   echo "  2) Add a '## 라우팅 추천' section with a user-approval line (the routing gate will require it next)." >&2

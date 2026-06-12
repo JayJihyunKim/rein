@@ -28,6 +28,8 @@ source "$SCRIPT_DIR/lib/test-harness.sh"
 
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CLASSIFIER_LIB="$PROJECT_ROOT/plugins/rein-core/hooks/lib/bash-classifier.sh"
+# GMF-1: canonical git subcommand model SSOT, sourced by classifier/dispatcher.
+GIT_MODEL_LIB="$PROJECT_ROOT/plugins/rein-core/hooks/lib/git-subcommand-model.sh"
 
 # ============================================================
 # Suite 1: classify_bash_command() unit tests
@@ -144,6 +146,90 @@ test_classifier_substring_false_positive_avoided() {
   assert_eq "0 0" "$result" "git commitfoo (no space) must not match 'git commit' classifier"
 }
 
+# ------------------------------------------------------------
+# GMF-1 (docs/specs/2026-06-12-gate-misfire-fixes.md §3.1): canonical
+# "git commit" detection SSOT. The old `"git commit" | "git commit "*`
+# case missed multi-space + git global-option forms. These exercise the
+# new shared lib/git-subcommand-model.sh matcher.
+# ------------------------------------------------------------
+
+# RED → GREEN: git -C <path> commit (global option between git and commit).
+test_classifier_git_commit_dash_C_needs_test_commit_gate() {
+  local result
+  result=$(_classify "git -C . commit -m 'x'")
+  assert_eq "1 0" "$result" "git -C . commit must classify as commit (TC gate)"
+}
+
+# RED → GREEN: double-space between git and commit.
+test_classifier_git_commit_double_space_needs_test_commit_gate() {
+  local result
+  result=$(_classify "git  commit -m 'x'")
+  assert_eq "1 0" "$result" "git  commit (double space) must classify as commit"
+}
+
+# RED → GREEN: git -c <kv> commit.
+test_classifier_git_commit_dash_c_kv_needs_test_commit_gate() {
+  local result
+  result=$(_classify "git -c user.name=x commit -m 'x'")
+  assert_eq "1 0" "$result" "git -c user.name=x commit must classify as commit"
+}
+
+# RED → GREEN: git --git-dir=.git commit.
+test_classifier_git_commit_gitdir_needs_test_commit_gate() {
+  local result
+  result=$(_classify "git --git-dir=.git commit")
+  assert_eq "1 0" "$result" "git --git-dir=.git commit must classify as commit"
+}
+
+# GREEN (over-match 0): config subcommand whose arg mentions commit.
+test_classifier_git_config_commit_arg_not_gated() {
+  local result
+  result=$(_classify "git config commit.gpgsign true")
+  assert_eq "0 0" "$result" "git config commit.gpgsign must NOT classify as commit"
+}
+
+# GREEN (over-match 0): echo mention of git commit is not an invocation.
+test_classifier_echo_git_commit_mention_not_gated() {
+  local result
+  result=$(_classify 'echo "git commit"')
+  assert_eq "0 0" "$result" "echo \"git commit\" mention must NOT classify as commit"
+}
+
+# GREEN (over-match 0): grep mention (clause-start anchor excludes it).
+test_classifier_grep_git_commit_mention_not_gated() {
+  local result
+  result=$(_classify "grep git commit -m x")
+  assert_eq "0 0" "$result" "grep git commit -m x mention must NOT classify as commit"
+}
+
+# GREEN (over-match 0): commit-graph is a different subcommand (shell-token boundary).
+test_classifier_git_commit_graph_not_gated() {
+  local result
+  result=$(_classify "git commit-graph write")
+  assert_eq "0 0" "$result" "git commit-graph write must NOT classify as commit (shell-token boundary)"
+}
+
+# GREEN (over-match 0): committer-foo bogus token.
+test_classifier_git_committer_foo_not_gated() {
+  local result
+  result=$(_classify "git committer-foo")
+  assert_eq "0 0" "$result" "git committer-foo must NOT classify as commit"
+}
+
+# GREEN (over-match 0): allowlist-outside option is conservative non-match.
+test_classifier_git_bogus_option_commit_not_gated() {
+  local result
+  result=$(_classify "git --bogus commit")
+  assert_eq "0 0" "$result" "git --bogus commit (allowlist-outside option) must NOT classify as commit"
+}
+
+# GREEN (over-match 0): unknown short option likewise.
+test_classifier_git_dash_Z_commit_not_gated() {
+  local result
+  result=$(_classify "git -Z commit")
+  assert_eq "0 0" "$result" "git -Z commit (allowlist-outside option) must NOT classify as commit"
+}
+
 test_classifier_jest_with_args_needs_test_commit_only() {
   # jest is in TC list (via "jest "*) but only with trailing args. The bash-rules
   # list does NOT include jest (the original hooks.json had pytest/npm/yarn/pnpm
@@ -192,6 +278,9 @@ _seed_dispatcher() {
   chmod +x "$SANDBOX/.claude/hooks/pre-bash-dispatcher.sh"
   mkdir -p "$SANDBOX/.claude/hooks/lib"
   cp "$CLASSIFIER_LIB" "$SANDBOX/.claude/hooks/lib/bash-classifier.sh"
+  # GMF-1: classifier + dispatcher both source the canonical git subcommand
+  # model. Without it the fail-closed default keeps the commit gate ON.
+  cp "$GIT_MODEL_LIB" "$SANDBOX/.claude/hooks/lib/git-subcommand-model.sh" 2>/dev/null || true
 }
 
 # _run_dispatcher <command-json>
@@ -503,6 +592,89 @@ test_dispatcher_command_extraction_failure_runs_conservative_gates() {
     "extraction failure: test-commit-gate must fire (TC=1 default, classifier never called)"
 }
 
+test_dispatcher_git_dash_C_commit_invokes_tc_gate() {
+  # GMF-1: git -C . commit (global option) must drive the test-commit gate via
+  # the canonical model — the old classifier/_SM_CLASS pattern missed it.
+  _seed_dispatcher
+  _seed_stub_hook "pre-tool-use-bash-bootstrap-gate.sh" 0
+  _seed_stub_hook "pre-bash-safety-guard.sh" 0
+  _seed_stub_hook "pre-bash-test-commit-gate.sh" 0
+  _seed_stub_hook "pre-tool-use-bash-rules.sh" 0
+
+  _run_dispatcher '{"tool_input":{"command":"git -C . commit -m foo"}}'
+
+  assert_exit 0 "git -C . commit (stubs pass) should pass"
+  local got
+  got=$(_invocations_line)
+  assert_eq "pre-tool-use-bash-bootstrap-gate.sh pre-bash-safety-guard.sh pre-bash-test-commit-gate.sh" "$got" \
+    "git -C . commit: test-commit-gate must fire (canonical model)"
+}
+
+test_dispatcher_git_config_commit_arg_does_not_invoke_tc_gate() {
+  # GMF-1 over-match 0: `git config commit.gpgsign` is a config subcommand;
+  # the test-commit gate must NOT fire (no false positive).
+  _seed_dispatcher
+  _seed_stub_hook "pre-tool-use-bash-bootstrap-gate.sh" 0
+  _seed_stub_hook "pre-bash-safety-guard.sh" 0
+  _seed_stub_hook "pre-bash-test-commit-gate.sh" 0
+  _seed_stub_hook "pre-tool-use-bash-rules.sh" 0
+
+  _run_dispatcher '{"tool_input":{"command":"git config commit.gpgsign true"}}'
+
+  assert_exit 0 "git config commit.gpgsign should pass"
+  local got
+  got=$(_invocations_line)
+  assert_eq "pre-tool-use-bash-bootstrap-gate.sh pre-bash-safety-guard.sh" "$got" \
+    "git config commit.gpgsign: test-commit-gate must NOT fire (over-match 0)"
+}
+
+test_dispatcher_missing_git_model_lib_fails_closed_on_git_commit() {
+  # GMF-1 / Task 1.6 (codex R2 HIGH): if the canonical git-subcommand-model
+  # lib is absent, classifier + dispatcher must fail CLOSED — a command holding
+  # a `commit` token conservatively drives the test-commit gate rather than
+  # silently leaking. Verifies neither the classifier (_GIT_MODEL_OK=0 path)
+  # nor _SM_CLASS drops the commit gate.
+  _seed_dispatcher
+  rm -f "$SANDBOX/.claude/hooks/lib/git-subcommand-model.sh"
+  _seed_stub_hook "pre-tool-use-bash-bootstrap-gate.sh" 0
+  _seed_stub_hook "pre-bash-safety-guard.sh" 0
+  _seed_stub_hook "pre-bash-test-commit-gate.sh" 0
+  _seed_stub_hook "pre-tool-use-bash-rules.sh" 0
+
+  _run_dispatcher '{"tool_input":{"command":"git -C . commit -m foo"}}'
+
+  assert_exit 0 "missing git model lib (stubs pass) should still pass"
+  local got
+  got=$(_invocations_line)
+  assert_eq "pre-tool-use-bash-bootstrap-gate.sh pre-bash-safety-guard.sh pre-bash-test-commit-gate.sh" "$got" \
+    "missing git model lib: test-commit-gate must fire (fail-closed, commit token present)"
+}
+
+test_dispatcher_broken_git_model_lib_fails_closed_on_git_commit() {
+  # GMF-1 / Task 1.6: a corrupt model lib (source rc!=0 / matcher undefined)
+  # must also fail closed. Overwrite with a stub that omits git_clause_invokes
+  # and errors at the end so _GIT_MODEL_OK stays 0.
+  _seed_dispatcher
+  cat > "$SANDBOX/.claude/hooks/lib/git-subcommand-model.sh" <<'BROKEN'
+#!/bin/bash
+# Broken model lib: no git_clause_invokes, ends with non-zero rc.
+GIT_COMMIT_ERE=""
+false
+BROKEN
+  _seed_stub_hook "pre-tool-use-bash-bootstrap-gate.sh" 0
+  _seed_stub_hook "pre-bash-safety-guard.sh" 0
+  _seed_stub_hook "pre-bash-test-commit-gate.sh" 0
+  _seed_stub_hook "pre-tool-use-bash-rules.sh" 0
+
+  _run_dispatcher '{"tool_input":{"command":"git commit -m foo"}}'
+
+  assert_exit 0 "broken git model lib (stubs pass) should still pass"
+  local got
+  got=$(_invocations_line)
+  assert_eq "pre-tool-use-bash-bootstrap-gate.sh pre-bash-safety-guard.sh pre-bash-test-commit-gate.sh" "$got" \
+    "broken git model lib: test-commit-gate must fire (fail-closed)"
+}
+
 test_dispatcher_special_char_command_safely_passed_through() {
   # Codex review note: printf '%s' "$INPUT" | bash hook does not evaluate
   # backticks/$()/$VAR inside INPUT. Verify by sending a JSON command field
@@ -548,6 +720,18 @@ run_test test_classifier_bash_tests_needs_test_commit_only
 run_test test_classifier_leading_whitespace_handled
 run_test test_classifier_substring_false_positive_avoided
 run_test test_classifier_jest_with_args_needs_test_commit_only
+# GMF-1 canonical commit detection (classifier unit)
+run_test test_classifier_git_commit_dash_C_needs_test_commit_gate
+run_test test_classifier_git_commit_double_space_needs_test_commit_gate
+run_test test_classifier_git_commit_dash_c_kv_needs_test_commit_gate
+run_test test_classifier_git_commit_gitdir_needs_test_commit_gate
+run_test test_classifier_git_config_commit_arg_not_gated
+run_test test_classifier_echo_git_commit_mention_not_gated
+run_test test_classifier_grep_git_commit_mention_not_gated
+run_test test_classifier_git_commit_graph_not_gated
+run_test test_classifier_git_committer_foo_not_gated
+run_test test_classifier_git_bogus_option_commit_not_gated
+run_test test_classifier_git_dash_Z_commit_not_gated
 
 # Suite 2 — dispatcher integration (uses sandbox)
 run_test test_dispatcher_safe_command_invokes_only_always_run
@@ -566,6 +750,11 @@ run_test test_dispatcher_missing_bootstrap_gate_fails_closed
 run_test test_dispatcher_partial_classifier_source_failure_runs_conservative_gates
 run_test test_dispatcher_absent_command_field_runs_conservative_gates
 run_test test_dispatcher_command_extraction_failure_runs_conservative_gates
+# GMF-1 canonical commit detection (dispatcher integration + fail-closed)
+run_test test_dispatcher_git_dash_C_commit_invokes_tc_gate
+run_test test_dispatcher_git_config_commit_arg_does_not_invoke_tc_gate
+run_test test_dispatcher_missing_git_model_lib_fails_closed_on_git_commit
+run_test test_dispatcher_broken_git_model_lib_fails_closed_on_git_commit
 run_test test_dispatcher_special_char_command_safely_passed_through
 
 summary

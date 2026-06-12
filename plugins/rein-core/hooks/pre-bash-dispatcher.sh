@@ -106,6 +106,19 @@ if [ -f "$SCRIPT_DIR/lib/bash-classifier.sh" ]; then
     SOURCE_OK=1
   fi
 fi
+
+# --- canonical git subcommand token model SSOT (GMF-1) ---
+#
+# Shared with the classifier + the gate-internal command_invokes. The classifier
+# may have already sourced it (pure definition — re-source is idempotent); we
+# re-source here so the _SM_CLASS commit detection below uses the SAME matcher
+# even if the classifier source above failed. fail-closed (codex R2 HIGH):
+# _GIT_MODEL_OK=0 → a `commit` token conservatively classifies as commit.
+_GIT_MODEL_OK=0
+if [ -f "$SCRIPT_DIR/lib/git-subcommand-model.sh" ] && . "$SCRIPT_DIR/lib/git-subcommand-model.sh" 2>/dev/null \
+   && declare -F git_clause_invokes >/dev/null 2>&1; then
+  _GIT_MODEL_OK=1
+fi
 if [ "$SOURCE_OK" = "1" ] \
    && declare -F classify_bash_command >/dev/null 2>&1 \
    && [ "$COMMAND_EXTRACTED" = "1" ]; then
@@ -131,7 +144,15 @@ if [ -f "$SCRIPT_DIR/lib/state-machine.sh" ]; then
     # CLASS_NEEDS_TC would inherit that defect).
     _SM_CLASS=""
     if [ -n "$COMMAND" ]; then
-      if echo "$COMMAND" | grep -qE '(^|[^a-zA-Z_])git[[:space:]]+commit\b'; then
+      # Commit detection via canonical SSOT matcher (GMF-1) — skips git global
+      # options + multi-space + shell-token boundary, the forms the old
+      # `git[[:space:]]+commit\b` grep missed (`git -C . commit`, `git  commit`).
+      if [ "$_GIT_MODEL_OK" = 1 ] && git_clause_invokes "$GIT_COMMIT_ERE" "$COMMAND"; then
+        _SM_CLASS="commit"
+      elif [ "$_GIT_MODEL_OK" != 1 ] && printf '%s' "$COMMAND" | grep -q 'commit'; then
+        # Model load failed = fail-closed. A `commit` token present → classify as
+        # commit so the state-machine drain does not bypass the commit gate.
+        # over-trigger is the safe direction.
         _SM_CLASS="commit"
       elif echo "$COMMAND" | grep -qE '(^|[^a-zA-Z_])(pytest|jest|vitest|mocha)\b' \
            || echo "$COMMAND" | grep -qE 'npm[[:space:]]+(run[[:space:]]+)?test\b' \
