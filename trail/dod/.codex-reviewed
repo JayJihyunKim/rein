@@ -1,7 +1,0 @@
-reviewed_at: 2026-06-15T08:49:49Z
-reviewer: codex
-diff_base: f37356949c106d82c20ca8244f39ad82e0e540aa
-verdict: PASS
-cycle: 2026-06-15-automode-doc-fix-metacheck-untracked
-scope: wrapper-generated
-active_dod: trail/dod/dod-2026-06-15-automode-doc-fix-metacheck-untracked.md
