@@ -1,10 +1,14 @@
-verdict=PASS
-active_dod=trail/dod/dod-2026-06-12-gate-misfire-fixes.md
-cycle=2026-06-12-gate-misfire-fixes
-security_level=standard
 reviewer=security-reviewer
-reviewed=2026-06-12T06:29:55
-mechanism=rein-security-reviewer
-files_reviewed=plugins/rein-core/hooks/lib/git-subcommand-model.sh,plugins/rein-core/hooks/lib/bash-classifier.sh,plugins/rein-core/hooks/pre-bash-dispatcher.sh,plugins/rein-core/hooks/pre-bash-test-commit-gate.sh,plugins/rein-core/hooks/pre-edit-dod-gate.sh,plugins/rein-core/hooks/pre-bash-safety-guard.sh
-findings=none
-notes=GMF-1~4 gate false-negative fixes. ReDoS-safe (grep -E POSIX ERE, linear on pathological input). No injection (untrusted COMMAND to grep via stdin, literal patterns). GMF-3 notice marker name is SHA-only suffix under fixed trail/dod (no path traversal). GMF-4 fail-closed correct (policy block after resolver; rc1=disable, rc0=active, rc-other=fail-closed-active; interpreter-absent exits at resolver). Shared lib sourced from trusted SCRIPT_DIR; load-failure fail-closed. Standard-level sweep clean, no blocking findings.
+reviewed=2026-06-15T00:00:00Z
+security_level=standard
+user_level=auto
+dod=trail/dod/dod-2026-06-15-automode-doc-fix-metacheck-untracked.md
+verdict=PASS
+mechanism=llm-security-review
+scope=MCU-1 mtime-window untracked filter in post-edit-meta-check.sh (diff lines 129-199)
+files_reviewed=plugins/rein-core/hooks/post-edit-meta-check.sh
+threat_model=honest-agent-discipline + adversarial filenames/mtime
+checks=command-injection,path-traversal,mtime-injection,anchor-trust,info-disclosure,fail-open-direction
+findings=0 critical, 0 high, 0 medium; 2 informational (non-blocking)
+evidence=adversarial filename test (spaces/$()/.. treated as literals, no exec); set -e safe on -lt false branch; non-numeric mtime scrubbed before arithmetic; test suite 16 fixtures GREEN incl F14/F15/F16; bash -n OK
+notes=fail-open is correct posture for advisory non-blocking gate; anchor mtime tamper is out-of-scope under honest-agent threat model (agent could edit DoD hint set directly anyway)

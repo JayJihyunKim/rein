@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.5.3** (2026-06-12) — seals four cases where the gates silently failed to fire for an honest agent: commit forms like `git -C <dir> commit` or double-spaced `git  commit` no longer skip review/security checks, a commit message merely mentioning "git merge" no longer bypasses them, the "design before code" requirement now covers more languages/layouts (Go `internal`/`cmd`, root-level source) instead of a few directory names, and the gates stay on (fail-closed) when Python isn't directly available. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.5.4** (2026-06-15) — corrects the auto-mode guidance (turning auto-mode on silences only incident-related session-end blocks; the trail-record check still fires, so you still update your work log before ending a session) and removes a false "changed-file count doesn't match the task definition" warning that long-abandoned, un-versioned files used to trigger on every edit — now only files actually created this session are considered. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

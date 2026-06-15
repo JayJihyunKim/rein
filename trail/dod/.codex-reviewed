@@ -1,7 +1,7 @@
-reviewed_at: 2026-06-12T06:40:20Z
+reviewed_at: 2026-06-15T08:49:49Z
 reviewer: codex
-diff_base: b0a61012e2208af4d6962477de7be2a6572f2a35
+diff_base: f37356949c106d82c20ca8244f39ad82e0e540aa
 verdict: PASS
-cycle: 2026-06-12-gate-misfire-fixes
+cycle: 2026-06-15-automode-doc-fix-metacheck-untracked
 scope: wrapper-generated
-active_dod: trail/dod/dod-2026-06-12-gate-misfire-fixes.md
+active_dod: trail/dod/dod-2026-06-15-automode-doc-fix-metacheck-untracked.md

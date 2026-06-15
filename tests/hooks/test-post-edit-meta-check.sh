@@ -391,6 +391,94 @@ rm -rf "$F11"
 # ---------- Fixture 12: INBOX-ZERO-RECORDED (covered by F8) ---------------
 echo "OK [F12-INBOX-ZERO-RECORDED-covered-by-F8]"
 
+# ---------- Fixture 14: ABANDONED-UNTRACKED-EXCLUDED (MCU-1) ----------------
+# untracked union 에 mtime-window 필터를 추가하기 전에는 .gitignore 에 안 걸린
+# 오래 방치된 untracked 파일(예: abandoned.parquet)이 D 집합에 들어가 매 편집마다
+# false-positive mismatch 를 유발한다. 앵커(trail/incidents/.session-start-line)의
+# mtime 을 세션 시작 시각으로 잡고, 그보다 오래된 untracked 는 제외한다.
+#
+# Fixture 구성:
+#   - DoD '## 변경 파일' = "- fresh.txt" (이번 세션 작업으로 등재)
+#   - 앵커를 "now"로 touch
+#   - abandoned.parquet: 앵커보다 1시간 과거 mtime (방치 파일) → 제외돼야 함
+#   - fresh.txt: 앵커 이후(now) mtime, 새 Write 파일 → 잡혀야 함 (단 hint 에 등재돼 mismatch 0)
+#   - extra-new.txt: 앵커 이후 mtime, hint 미등재 새 Write → mismatch 1 로 잡혀야 함
+#
+# 기대: mismatch_count == 1 (extra-new.txt 만). 현행 코드는 abandoned.parquet 까지
+#       세서 mismatch_count == 2 → 이 단언이 먼저 실패(재현).
+F14=$(mktemp -d "/tmp/meta-f14-XXXXXX")
+make_project "$F14"
+write_dod_with_hint "$F14" "- fresh.txt"
+# DoD + active-dod 마커도 untracked 이므로 seed-commit 으로 working tree 정리.
+(cd "$F14" && git add -A >/dev/null 2>&1 && git commit -q -m "seed-fixture" >/dev/null 2>&1)
+# 앵커를 지금으로 생성.
+mkdir -p "$F14/trail/incidents"
+: > "$F14/trail/incidents/.session-start-line"
+ANCHOR_EPOCH=$(date +%s)
+# abandoned 파일: 앵커보다 1시간 과거 mtime. touch -t 로 과거 시각 지정.
+echo "old data" > "$F14/abandoned.parquet"
+OLD_STAMP=$(python3 -c 'import time;print(time.strftime("%Y%m%d%H%M.%S", time.localtime(time.time()-3600)))')
+touch -t "${OLD_STAMP%.*}" "$F14/abandoned.parquet" 2>/dev/null || touch -d "@$((ANCHOR_EPOCH-3600))" "$F14/abandoned.parquet" 2>/dev/null || true
+# fresh.txt + extra-new.txt: 앵커 이후 (현재) mtime — 새 Write 파일들.
+sleep 1
+echo "fresh" > "$F14/fresh.txt"
+echo "extra new" > "$F14/extra-new.txt"
+OUT=$(run_hook "$F14" 2>&1 || true)
+MC=$(inbox_mismatch_field "$F14" 1)
+assert_eq "F14-ABANDONED-EXCLUDED-mismatch-1" "1" "$MC"
+if printf '%s' "$OUT" | grep -q "extra-new.txt"; then
+  echo "OK [F14-ABANDONED-EXCLUDED-mentions-extra-new.txt]"
+else
+  echo "FAIL [F14-ABANDONED-EXCLUDED-mentions-extra-new.txt]: expected 'extra-new.txt' in advisory, got: $OUT" >&2
+  FAILED=$((FAILED+1))
+fi
+if printf '%s' "$OUT" | grep -q "abandoned.parquet"; then
+  echo "FAIL [F14-ABANDONED-EXCLUDED-no-abandoned]: abandoned.parquet leaked into advisory: $OUT" >&2
+  FAILED=$((FAILED+1))
+else
+  echo "OK [F14-ABANDONED-EXCLUDED-no-abandoned]"
+fi
+rm -rf "$F14"
+
+# ---------- Fixture 15: NEW-WRITE-INCLUDED (MCU-1 regression) ---------------
+# mtime-window 필터가 새 Write 탐지를 절대 죽이지 않는지 회귀 보장. 앵커 present
+# 상황에서 앵커 이후 mtime 의 새 untracked 는 여전히 D 에 들어가 mismatch 로 잡혀야 함.
+F15=$(mktemp -d "/tmp/meta-f15-XXXXXX")
+make_project "$F15"
+write_dod_with_hint "$F15" "- a.txt"
+(cd "$F15" && git add -A >/dev/null 2>&1 && git commit -q -m "seed-fixture" >/dev/null 2>&1)
+mkdir -p "$F15/trail/incidents"
+: > "$F15/trail/incidents/.session-start-line"
+sleep 1
+echo "new" > "$F15/newly-written.txt"
+OUT=$(run_hook "$F15" 2>&1 || true)
+MC=$(inbox_mismatch_field "$F15" 1)
+assert_eq "F15-NEW-WRITE-INCLUDED-mismatch-1" "1" "$MC"
+if printf '%s' "$OUT" | grep -q "newly-written.txt"; then
+  echo "OK [F15-NEW-WRITE-INCLUDED-mentions-newly-written.txt]"
+else
+  echo "FAIL [F15-NEW-WRITE-INCLUDED-mentions-newly-written.txt]: expected 'newly-written.txt', got: $OUT" >&2
+  FAILED=$((FAILED+1))
+fi
+rm -rf "$F15"
+
+# ---------- Fixture 16: NO-ANCHOR-FAIL-OPEN (MCU-1 fail-open) ---------------
+# 앵커 파일이 없으면 mtime-window 를 적용할 수 없으므로 fail-open — 현행대로
+# 전체 untracked 를 D 에 포함한다 (새 Write 탐지 기능을 절대 잃지 않는다).
+# old + new 양쪽 모두 잡혀 mismatch_count == 2 여야 함.
+F16=$(mktemp -d "/tmp/meta-f16-XXXXXX")
+make_project "$F16"
+write_dod_with_hint "$F16" "- a.txt"
+(cd "$F16" && git add -A >/dev/null 2>&1 && git commit -q -m "seed-fixture" >/dev/null 2>&1)
+# 앵커 파일을 일부러 만들지 않는다 (fail-open 경로).
+echo "old" > "$F16/old-abandoned.txt"
+touch -t "${OLD_STAMP%.*}" "$F16/old-abandoned.txt" 2>/dev/null || touch -d "@$(( $(date +%s) - 3600 ))" "$F16/old-abandoned.txt" 2>/dev/null || true
+echo "new" > "$F16/new-write.txt"
+OUT=$(run_hook "$F16" 2>&1 || true)
+MC=$(inbox_mismatch_field "$F16" 1)
+assert_eq "F16-NO-ANCHOR-FAIL-OPEN-mismatch-2" "2" "$MC"
+rm -rf "$F16"
+
 # ---------- Fixture 13: PERF (20-run p95, smoke) ---------------------------
 # G3-perf-NFR cycle (2026-05-27) updated this fixture:
 #   - Original spec target 150ms was unachievable (Python cold-start +
@@ -429,4 +517,4 @@ if [ "$FAILED" -gt 0 ]; then
   echo "test-post-edit-meta-check: FAIL ($FAILED assertion(s))" >&2
   exit 1
 fi
-echo "test-post-edit-meta-check: OK (13 fixtures covered)"
+echo "test-post-edit-meta-check: OK (16 fixtures covered)"

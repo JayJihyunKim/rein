@@ -126,6 +126,78 @@ fi
 # a brand-new path also surfaces (codex Round 1 Medium).
 DIFF_RAW=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE git diff --name-only HEAD 2>/dev/null || true)
 UNTRACKED=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE git ls-files --others --exclude-standard 2>/dev/null || true)
+
+# MCU-1: untracked mtime-window filter. The raw `ls-files --others` set mixes
+# "files Write-created this session" (the path we want to surface) with
+# "long-abandoned untracked files the user never .gitignored" (e.g. *.parquet,
+# screens_ref/, key_meaning.png). The latter triggers a false-positive mismatch
+# advisory on EVERY edit. We keep only untracked files whose mtime is at or
+# after the session-start anchor (trail/incidents/.session-start-line stamp,
+# written once per session by session-start-load-trail.sh). Files older than
+# the anchor are abandoned and dropped.
+#
+# fail-open (CRITICAL): if the anchor is absent or its mtime is unreadable, we
+# keep the WHOLE untracked set (current behavior) so the new-Write detection is
+# never silently lost. The anchor stamp itself is always excluded from D — it is
+# a hook-managed marker, not user work (it is tracked in the rein repo so
+# ls-files --others normally omits it, but a freshly-rewritten stamp in a fresh
+# sandbox can surface as untracked).
+META_ANCHOR="trail/incidents/.session-start-line"
+ANCHOR_EPOCH=""
+if [ -f "$META_ANCHOR" ]; then
+  if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/portable.sh" ]; then
+    # shellcheck source=./lib/portable.sh
+    . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/portable.sh" 2>/dev/null || true
+  fi
+  if declare -F portable_mtime_epoch >/dev/null 2>&1; then
+    ANCHOR_EPOCH=$(portable_mtime_epoch "$META_ANCHOR" 2>/dev/null || true)
+  else
+    # portable.sh unavailable → inline BSD/GNU stat fallback. set -e safe via || true.
+    case "$(uname 2>/dev/null || echo unknown)" in
+      Darwin) ANCHOR_EPOCH=$(stat -f %m "$META_ANCHOR" 2>/dev/null || true) ;;
+      *)      ANCHOR_EPOCH=$(stat -c %Y "$META_ANCHOR" 2>/dev/null || true) ;;
+    esac
+  fi
+  # Non-numeric / 0 → treat as unreadable (fail-open).
+  case "$ANCHOR_EPOCH" in
+    ''|0|*[!0-9]*) ANCHOR_EPOCH="" ;;
+  esac
+fi
+
+if [ -n "$UNTRACKED" ]; then
+  UNTRACKED_FILTERED=""
+  while IFS= read -r _u; do
+    [ -n "$_u" ] || continue
+    # Always exclude the anchor stamp itself — hook-managed marker, not work.
+    [ "$_u" = "$META_ANCHOR" ] && continue
+    if [ -n "$ANCHOR_EPOCH" ] && [ -f "$_u" ]; then
+      _fe=""
+      if declare -F portable_mtime_epoch >/dev/null 2>&1; then
+        _fe=$(portable_mtime_epoch "$_u" 2>/dev/null || true)
+      else
+        case "$(uname 2>/dev/null || echo unknown)" in
+          Darwin) _fe=$(stat -f %m "$_u" 2>/dev/null || true) ;;
+          *)      _fe=$(stat -c %Y "$_u" 2>/dev/null || true) ;;
+        esac
+      fi
+      case "$_fe" in
+        ''|*[!0-9]*) _fe="" ;;
+      esac
+      # fail-open per-file: unreadable mtime → keep the file. Otherwise drop
+      # files older than the session-start anchor (abandoned untracked).
+      if [ -n "$_fe" ] && [ "$_fe" -lt "$ANCHOR_EPOCH" ]; then
+        continue
+      fi
+    fi
+    if [ -n "$UNTRACKED_FILTERED" ]; then
+      UNTRACKED_FILTERED="$UNTRACKED_FILTERED"$'\n'"$_u"
+    else
+      UNTRACKED_FILTERED="$_u"
+    fi
+  done <<< "$UNTRACKED"
+  UNTRACKED="$UNTRACKED_FILTERED"
+fi
+
 if [ -n "$UNTRACKED" ]; then
   if [ -n "$DIFF_RAW" ]; then
     DIFF_RAW="$DIFF_RAW"$'\n'"$UNTRACKED"

@@ -1,6 +1,6 @@
 ---
 name: auto-mode-off
-description: 자동모드 marker (.rein/auto-mode.flag) 를 끈다. 자율 cycle 종료 후 호출. marker 제거 이후 모든 rein hook 의 incident advisory 와 session-end block 이 정상 발화로 돌아간다.
+description: 자동모드 marker (.rein/auto-mode.flag) 를 끈다. 자율 cycle 종료 후 호출. marker 제거 이후 모든 rein hook 의 incident 관련 advisory 와 incident 종료 차단이 정상 발화로 돌아간다 (inbox/index 작업증거 종료 차단은 자동모드와 무관하게 항상 발동).
 ---
 
 # Skill: auto-mode-off
