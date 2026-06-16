@@ -1,7 +1,0 @@
-reviewed_at: 2026-06-16T05:34:14Z
-reviewer: codex
-diff_base: 58234ce653762658d91ae52533a4c631f473ec73
-verdict: PASS
-cycle: 2026-06-16-session-followups
-scope: wrapper-generated
-active_dod: trail/dod/dod-2026-06-16-session-followups.md
