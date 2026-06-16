@@ -1,14 +1,15 @@
 reviewer=security-reviewer
-reviewed=2026-06-15T00:00:00Z
+reviewed=2026-06-16T05:36:45Z
 security_level=standard
 user_level=auto
-dod=trail/dod/dod-2026-06-15-automode-doc-fix-metacheck-untracked.md
+cycle=2026-06-16-session-followups
 verdict=PASS
 mechanism=llm-security-review
-scope=MCU-1 mtime-window untracked filter in post-edit-meta-check.sh (diff lines 129-199)
-files_reviewed=plugins/rein-core/hooks/post-edit-meta-check.sh
-threat_model=honest-agent-discipline + adversarial filenames/mtime
-checks=command-injection,path-traversal,mtime-injection,anchor-trust,info-disclosure,fail-open-direction
-findings=0 critical, 0 high, 0 medium; 2 informational (non-blocking)
-evidence=adversarial filename test (spaces/$()/.. treated as literals, no exec); set -e safe on -lt false branch; non-numeric mtime scrubbed before arithmetic; test suite 16 fixtures GREEN incl F14/F15/F16; bash -n OK
-notes=fail-open is correct posture for advisory non-blocking gate; anchor mtime tamper is out-of-scope under honest-agent threat model (agent could edit DoD hint set directly anyway)
+scope=v1.5.5 release version bump (plugin.json/rein.sh/CHANGELOG/README)
+files_reviewed=plugins/rein-core/.claude-plugin/plugin.json,scripts/rein.sh,CHANGELOG.md,README.md,README.ko.md
+threat_model=honest-agent-discipline (adversarial 우회 하드닝은 위협모델 밖)
+checks=hardcoded-secret,injection,path-traversal,sensitive-info-logging,tls-https
+findings=0 critical, 0 high, 0 medium, 0 informational
+notes=릴리스 표면 전용 변경 — 버전 문자열 2곳(plugin.json version 1.5.4→1.5.5, rein.sh VERSION 1.5.4→1.5.5) + 문서 3곳(CHANGELOG v1.5.5 항목, README/README.ko 최신 릴리스 줄). 이 묶음의 실제 코드(M1~M4 + 세션 후속)는 동일 cycle 의 직전 보안리뷰(reviewed 2026-06-16T05:19:44Z)에서 PASS. 이번 변경은 실행 코드 경로 무변경.
+evidence=(1) plugin.json/rein.sh 변경은 순수 버전 리터럴 한 글자(4→5)뿐 — secret/주입/경로/권한 surface 무관, TEMPLATE_REPO 등 기존 라인 불변; (2) README 변경 라인은 사용자 가시 문장(릴리스 요약)뿐, 코드/명령 없음; (3) CHANGELOG 신규 12줄은 v1.5.5 user-facing 설명 산문 — 명령/경로/시크릿 비포함; (4) 추가 라인 전수 grep(AKIA/AIza/PRIVATE KEY/password=/secret=/api_key=/token=/user:pass@) → NO_SECRET_PATTERNS_IN_ADDED_LINES; (5) standard 9개 검사 항목 전부 N/A — 변경에 SQL/XSS/해싱/역직렬화/path/TLS 코드 경로 없음
+freshness=이 stamp 의 reviewed(2026-06-16T05:36:45Z)는 코드 stamp(.codex-reviewed) reviewed_at(2026-06-16T05:34:14Z)보다 신선, cycle(2026-06-16-session-followups)은 코드 stamp cycle 과 정확히 일치 (M2: 보안 ≥ 코드 + cycle 일치)

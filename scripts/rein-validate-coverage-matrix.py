@@ -37,6 +37,26 @@ MATRIX_HEADING = "## Design 범위 커버리지 매트릭스"
 SCOPE_ITEMS_HEADING = "## Scope Items"
 RANGE_LINK_HEADING = "## 범위 연결"
 
+
+def _heading_matches(line: str, heading: str) -> bool:
+    """True if ``line`` is ``heading``, tolerating an optional ``N. `` numeric
+    prefix after the ``##`` marker. spec-writer naturally numbers section
+    headings (``## 3. Scope Items``); accepting the numbered form removes the
+    recurring need to hand-normalize specs before validation (2026-06-16 session
+    follow-up). The strict unnumbered form still matches.
+    """
+    stripped = line.strip()
+    if stripped == heading:
+        return True
+    m = re.match(r"^(#+)\s+(.*\S)\s*$", heading)
+    if not m:
+        return False
+    hashes, title = m.group(1), m.group(2)
+    return (
+        re.match(rf"^{re.escape(hashes)}\s+\d+\.\s+{re.escape(title)}\s*$", stripped)
+        is not None
+    )
+
 # Plan's design_ref appears in either the blockquote form `> design ref:` or
 # the top-level form `Design Reference:` per docs/specs/2026-04-21-governance-
 # integrity-design.md §5. Both must resolve identically (H1 parity — wrapper
@@ -46,9 +66,9 @@ DESIGN_REF_RE = re.compile(
     re.IGNORECASE,
 )
 MATRIX_ROW_RE = re.compile(
-    r"^\|\s*(?P<id>[A-Za-z0-9_\-]+)\s*\|\s*(?P<status>implemented|deferred)\s*\|\s*(?P<loc>.+?)\s*\|\s*$"
+    r"^\|\s*`?(?P<id>[A-Za-z0-9_\-]+)`?\s*\|\s*(?P<status>implemented|deferred)\s*\|\s*(?P<loc>.+?)\s*\|\s*$"
 )
-SCOPE_ROW_RE = re.compile(r"^\|\s*(?P<id>[A-Za-z0-9_\-]+)\s*\|\s*.+?\s*\|\s*$")
+SCOPE_ROW_RE = re.compile(r"^\|\s*`?(?P<id>[A-Za-z0-9_\-]+)`?\s*\|\s*.+?\s*\|\s*$")
 COVERS_RE = re.compile(r"^covers:\s*\[(?P<ids>.*?)\]\s*$", re.MULTILINE)
 
 # DoD-specific: exact line shapes inside the '## 범위 연결' section.
@@ -145,7 +165,7 @@ def parse_scope_id_version(design_path: Path) -> str:
 # 포함될 때 해당 DoD 체크박스를 필수화한다.
 
 SCOPE_KIND_ROW_RE = re.compile(
-    r"^\|\s*(?P<id>[A-Za-z0-9_\-]+)\s*\|\s*(?P<kind>[A-Za-z0-9_\-]+)\s*\|\s*.+?\s*\|\s*$"
+    r"^\|\s*`?(?P<id>[A-Za-z0-9_\-]+)`?\s*\|\s*`?(?P<kind>[A-Za-z0-9_\-]+)`?\s*\|\s*.+?\s*\|\s*$"
 )
 
 
@@ -161,7 +181,7 @@ def parse_kind_from_scope_items(design_path: Path) -> dict[str, str]:
     in_section = False
     result: dict[str, str] = {}
     for line in lines:
-        if line.strip() == SCOPE_ITEMS_HEADING:
+        if _heading_matches(line, SCOPE_ITEMS_HEADING):
             in_section = True
             continue
         if in_section and line.startswith("## "):
@@ -615,7 +635,7 @@ def parse_scope_ids_from_design(design_path: Path) -> set[str] | None:
     ids: set[str] = set()
     in_section = False
     for line in lines:
-        if line.strip() == SCOPE_ITEMS_HEADING:
+        if _heading_matches(line, SCOPE_ITEMS_HEADING):
             in_section = True
             continue
         if in_section and line.startswith("## "):
@@ -639,7 +659,7 @@ def parse_plan(plan_path: Path) -> dict:
 
     matrix_start = None
     for i, line in enumerate(lines):
-        if line.strip() == MATRIX_HEADING:
+        if _heading_matches(line, MATRIX_HEADING):
             matrix_start = i
             break
     if matrix_start is None:

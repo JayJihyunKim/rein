@@ -100,8 +100,27 @@ _seed_review_stamps() {
      "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
   seed_dod "dod-2026-04-21-marker-test.md"
   seed_inbox "2026-04-21-marker-test.md"
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
-  touch "$SANDBOX/trail/dod/.security-reviewed"
+  # M2/M3 (docs/specs/2026-06-16-review-stamp-freshness.md): an empty `touch`
+  # stamp is now fail-closed (code stamp needs a PASS verdict + parseable time;
+  # security stamp must be fresher + same cycle + PASS). Write content-rich
+  # stamps with a shared cycle so the gate reaches whichever downstream check a
+  # test perturbs, instead of blocking at the code-stamp dual-read.
+  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
+reviewed_at: 2026-06-16T01:00:00Z
+reviewer: codex
+diff_base: N/A
+verdict: PASS
+cycle: marker-test
+scope: wrapper-generated
+STAMP
+  cat > "$SANDBOX/trail/dod/.security-reviewed" <<'STAMP'
+reviewer=security-reviewer
+reviewed=2026-06-16T02:00:00Z
+security_level=standard
+cycle=marker-test
+verdict=PASS
+mechanism=llm-security-review
+STAMP
 }
 
 # Scenario 1: only .coverage-mismatch exists (empty) → exit 2.
@@ -347,10 +366,27 @@ test_json_deny_p2_coverage_mismatch_failing_target() {
   printf '%s\n' "$SANDBOX/docs/plans/failing-plan.md" \
     > "$SANDBOX/trail/dod/.coverage-mismatch"
   # Also seed stamps/dod/inbox so the only blocking gate is the coverage marker.
+  # Content-rich stamps (spec 2026-06-16): an empty `touch` stamp now fail-closes
+  # at the M2/M3 review-stamp check — but coverage runs first, so content-rich
+  # stamps keep the coverage marker the sole blocker regardless of check order.
   seed_dod "dod-2026-04-21-p2-test.md"
   seed_inbox "2026-04-21-p2-test.md"
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
-  touch "$SANDBOX/trail/dod/.security-reviewed"
+  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
+reviewed_at: 2026-06-16T01:00:00Z
+reviewer: codex
+diff_base: N/A
+verdict: PASS
+cycle: p2-test
+scope: wrapper-generated
+STAMP
+  cat > "$SANDBOX/trail/dod/.security-reviewed" <<'STAMP'
+reviewer=security-reviewer
+reviewed=2026-06-16T02:00:00Z
+security_level=standard
+cycle=p2-test
+verdict=PASS
+mechanism=llm-security-review
+STAMP
 
   local input='{"tool_input":{"command":"git commit -m \"feat: p2-test\""},"tool_result":{}}'
   run_hook "pre-bash-test-commit-gate.sh" "$input"
@@ -414,7 +450,16 @@ test_json_deny_p6_security_stamp_missing() {
      "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
   seed_dod "dod-2026-04-21-p6-test.md"
   seed_inbox "2026-04-21-p6-test.md"
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
+  # Content-rich PASS code stamp (spec 2026-06-16) so the gate reaches P6 instead
+  # of fail-closing at the M3 code-stamp dual-read on an empty `touch` stamp.
+  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
+reviewed_at: 2026-06-16T01:00:00Z
+reviewer: codex
+diff_base: N/A
+verdict: PASS
+cycle: p6-test
+scope: wrapper-generated
+STAMP
   # Explicitly no .security-reviewed.
 
   local input='{"tool_input":{"command":"git commit -m \"feat: p6-test\""},"tool_result":{}}'

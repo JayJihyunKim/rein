@@ -904,6 +904,328 @@ test_orphan_non_retro_mtime_allow_preserved() {
 }
 
 # =================================================================
+# M1 — .skip-spec-gate ONE-SHOT CONSUMPTION + fail-closed
+#
+# Bug: the spec gate skipped its whole body when .skip-spec-gate existed but
+# never removed the marker (no rm -f), so a "one-shot" bypass became a permanent
+# off-switch (contrast .skip-stop-gate which is consumed on match). Fix: consume
+# the marker (rm -f) BEFORE skipping, verify removal, and fail-closed (run the
+# gate normally) if removal can't be proven.
+# =================================================================
+
+test_skip_spec_gate_consumed_after_one_edit() {
+  # Case A: .skip-spec-gate + unreviewed spec (pending, no reviewed).
+  # ① first source edit allowed (exit 0) AND the marker is deleted;
+  # ② a second edit under the same unreviewed-spec state is blocked (exit 2).
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/specs"
+  touch "$SANDBOX/specs/api-design.md"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(printf '%s' "$SANDBOX/specs/api-design.md" | shasum 2>/dev/null | cut -c1-16 || printf 'abc123def456')
+  {
+    echo "path=$SANDBOX/specs/api-design.md"
+    echo "created=$(date -u +%Y-%m-%dT%H:%M:%S)"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.pending"
+
+  touch "$SANDBOX/trail/dod/.skip-spec-gate"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+
+  # ① first edit: bypass applies → allowed, marker consumed.
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "first edit with .skip-spec-gate should be allowed"
+  # `! -e` (not `! -f`): proof must reject ANY remaining path type, matching the
+  # hook's fail-closed proof.
+  [ ! -e "$SANDBOX/trail/dod/.skip-spec-gate" ] || fail "marker must be consumed (removed) after first edit"
+  # honest-audit: the bypass log records a real "consumed" outcome.
+  assert_file_contains "trail/incidents/auto-mode-bypass.log" "skip-spec-gate consumed"
+
+  # ② second edit: marker gone, unreviewed spec still present → blocked.
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "second edit must be blocked (one-shot bypass already consumed)"
+}
+
+test_skip_spec_gate_fail_closed_when_unremovable() {
+  # Case B: marker can't be removed (made a non-empty directory so `rm -f`
+  # fails) + unreviewed spec → fail-closed: gate runs normally and blocks.
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/specs"
+  touch "$SANDBOX/specs/api-design.md"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(printf '%s' "$SANDBOX/specs/api-design.md" | shasum 2>/dev/null | cut -c1-16 || printf 'abc123def456')
+  {
+    echo "path=$SANDBOX/specs/api-design.md"
+    echo "created=$(date -u +%Y-%m-%dT%H:%M:%S)"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.pending"
+
+  # Make .skip-spec-gate a non-empty directory → `rm -f` (no -r) cannot remove it.
+  mkdir -p "$SANDBOX/trail/dod/.skip-spec-gate/keep"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "must fail-closed (block) when .skip-spec-gate cannot be removed"
+  # honest-audit: a fail-closed path must NOT claim "consumed"; it records the
+  # consume_failed outcome instead (codex R1 Medium).
+  assert_file_contains "trail/incidents/auto-mode-bypass.log" "consume_failed"
+  assert_file_not_contains "trail/incidents/auto-mode-bypass.log" "skip-spec-gate consumed"
+}
+
+# =================================================================
+# M4 — spec-review GENERATOR fail-open conservative marker
+#
+# Bug (M4): post-edit-spec-review-gate.sh has THREE fail-open paths that
+# `exit 0` silently when it cannot resolve python / parse JSON:
+#   (1) non-cache python unresolved (L34-38)
+#   (2) JSON parse failure          (L57-60)
+#   (3) cache-path python unresolved (L71-78)
+# A silent skip means an unreviewed spec edit produces NO .pending marker,
+# so the next source edit is not blocked (fail-open). Fix (routing pattern):
+# each fail-open path drops a generic conservative marker
+# (trail/dod/.spec-review-gen-failed) recording cause=, and the success path
+# auto-heals it (rm -f). pre-edit-dod-gate.sh glob-blocks on the marker, with
+# a one-shot consume-on-use bypass (trail/dod/.skip-spec-gen-gate).
+# =================================================================
+
+# Marker / bypass token contract (spec §6.4 / plan Task 2.1-2.3).
+M4_GEN_MARKER="trail/dod/.spec-review-gen-failed"
+M4_BYPASS_MARKER="trail/dod/.skip-spec-gen-gate"
+
+# Run the post-edit hook with a curated PATH that hides python entirely, so
+# resolve_python fails (rc=10). Mirrors run_hook but lets us shadow PATH for
+# the child only, leaving the harness shell's PATH intact.
+_m4_run_post_edit_no_python() {
+  # $1=stdin JSON. Extra env (e.g. cache vars) passed via the caller's env.
+  local stdin_json="$1"
+  local tmp_out tmp_err curated tool src
+  curated=$(mktemp -d "/tmp/m4-nopy-XXXXXX")
+  # Symlink the coreutils the hook + python-runner.sh need, but NO python*.
+  for tool in uname tr mktemp cat chmod cp rm grep printf awk sed \
+              head tail cut env dirname basename find ls touch mv \
+              date readlink realpath bash sh sleep sort wc shasum sha1sum; do
+    src=$(command -v "$tool" 2>/dev/null || true)
+    [ -n "$src" ] && ln -sf "$src" "$curated/$tool"
+  done
+  tmp_out=$(mktemp); tmp_err=$(mktemp)
+  printf '%s' "$stdin_json" | \
+    PATH="$curated" REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
+    bash "$SANDBOX/.claude/hooks/post-edit-spec-review-gate.sh" \
+    > "$tmp_out" 2> "$tmp_err"
+  HOOK_EXIT=$?
+  HOOK_STDOUT=$(cat "$tmp_out"); HOOK_STDERR=$(cat "$tmp_err")
+  rm -f "$tmp_out" "$tmp_err"; rm -rf "$curated"
+  return 0
+}
+
+test_m4_noncache_python_unresolved_creates_marker() {
+  # Path (1): non-cache + python missing → resolve_python fails → must drop
+  # the conservative marker, then exit 0 (silent — does not revert the write).
+  seed_dod "dod-2026-04-13-test.md"
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/specs/api-design.md"},
+    "tool_result": {}
+  }'
+  _m4_run_post_edit_no_python "$input"
+  [ "$HOOK_EXIT" -eq 0 ] || fail "post-edit must exit 0 on python-unresolved (silent)"
+  assert_file_exists "$M4_GEN_MARKER"
+  assert_file_contains "$M4_GEN_MARKER" "cause=noncache-python"
+}
+
+test_m4_json_parse_failure_creates_marker() {
+  # Path (2): python present but extract-hook-json.py exits non-zero → JSON
+  # parse failure branch → conservative marker + exit 0.
+  seed_dod "dod-2026-04-13-test.md"
+  # Replace the sandbox extractor with a stub that always fails.
+  cat > "$SANDBOX/.claude/hooks/lib/extract-hook-json.py" <<'PYEOF'
+import sys
+sys.exit(3)
+PYEOF
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/specs/api-design.md"},
+    "tool_result": {}
+  }'
+  run_hook "post-edit-spec-review-gate.sh" "$input"
+  assert_exit 0 "post-edit must exit 0 on JSON parse failure (silent)"
+  assert_file_exists "$M4_GEN_MARKER"
+  assert_file_contains "$M4_GEN_MARKER" "cause=json-parse"
+}
+
+test_m4_cache_path_python_unresolved_creates_marker() {
+  # Path (3): cache active (FILE_PATHS supplied) but python missing so the
+  # cache-path resolve_python (for path normalize) fails → conservative
+  # marker + exit 0.
+  seed_dod "dod-2026-04-13-test.md"
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/specs/api-design.md"},
+    "tool_result": {}
+  }'
+  local tmp_out tmp_err curated tool src input_file
+  curated=$(mktemp -d "/tmp/m4-nopy-XXXXXX")
+  for tool in uname tr mktemp cat chmod cp rm grep printf awk sed \
+              head tail cut env dirname basename find ls touch mv \
+              date readlink realpath bash sh sleep sort wc shasum sha1sum; do
+    src=$(command -v "$tool" 2>/dev/null || true)
+    [ -n "$src" ] && ln -sf "$src" "$curated/$tool"
+  done
+  input_file=$(mktemp)
+  printf '%s' "$input" > "$input_file"
+  tmp_out=$(mktemp); tmp_err=$(mktemp)
+  PATH="$curated" REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
+    REIN_HOOK_INPUT_CACHE=1 \
+    REIN_HOOK_INPUT_FILE="$input_file" \
+    REIN_HOOK_FILE_PATHS="$SANDBOX/specs/api-design.md" \
+    REIN_HOOK_FILE_PATH="$SANDBOX/specs/api-design.md" \
+    bash "$SANDBOX/.claude/hooks/post-edit-spec-review-gate.sh" \
+    < /dev/null > "$tmp_out" 2> "$tmp_err"
+  HOOK_EXIT=$?
+  rm -f "$tmp_out" "$tmp_err" "$input_file"; rm -rf "$curated"
+  [ "$HOOK_EXIT" -eq 0 ] || fail "cache-path python-unresolved must exit 0 (silent)"
+  assert_file_exists "$M4_GEN_MARKER"
+  assert_file_contains "$M4_GEN_MARKER" "cause=cache-python"
+}
+
+test_m4_success_path_autoheals_marker() {
+  # Normal input (python OK, JSON OK) → no marker created, AND any pre-existing
+  # conservative marker is auto-healed (rm -f), mirroring routing-check.
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# Spec" > "$spec_file"
+  # Pre-seed a stale conservative marker from an earlier failed run.
+  mkdir -p "$SANDBOX/trail/dod"
+  printf 'cause=noncache-python\ncreated=2026-01-01T00:00:00Z\n' \
+    > "$SANDBOX/$M4_GEN_MARKER"
+
+  local input='{
+    "tool_input": {"file_path": "'$spec_file'"},
+    "tool_result": {}
+  }'
+  run_hook "post-edit-spec-review-gate.sh" "$input"
+  assert_exit 0 "post-edit must succeed on normal input"
+  assert_file_missing "$M4_GEN_MARKER"
+}
+
+test_m4_non_spec_edit_does_not_autoheal_marker() {
+  # codex integration-review R1 High regression: a successful NON-canonical edit
+  # (e.g. a source file allowed through by a .skip-spec-gen-gate bypass) must NOT
+  # auto-heal the conservative marker — else the spec missed during the failure
+  # window stays untracked and M4 fail-open reopens. Auto-heal is narrowed to
+  # canonical-spec reprocessing only.
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/trail/dod"
+  printf 'cause=noncache-python\ncreated=2026-01-01T00:00:00Z\n' \
+    > "$SANDBOX/$M4_GEN_MARKER"
+
+  # Non-canonical source file, python OK, JSON OK → producer succeeds but no
+  # canonical spec is processed.
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  run_hook "post-edit-spec-review-gate.sh" "$input"
+  assert_exit 0 "post-edit must succeed on a non-spec edit"
+  assert_file_exists "$M4_GEN_MARKER"  # marker must persist (not auto-healed)
+}
+
+# =================================================================
+# M4 — spec-review CONSUMER glob-block + one-shot bypass consume
+# =================================================================
+
+test_m4_consumer_blocks_when_marker_present() {
+  # Conservative marker present → next source edit blocked (exit 2).
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/trail/dod"
+  printf 'cause=json-parse\ncreated=2026-06-16T00:00:00Z\n' \
+    > "$SANDBOX/$M4_GEN_MARKER"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "should block when spec-review-gen-failed marker present"
+}
+
+test_m4_consumer_allows_when_marker_absent() {
+  # No conservative marker → edit allowed (no false block).
+  seed_dod "dod-2026-04-13-test.md"
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "should allow when no spec-review-gen-failed marker"
+}
+
+test_m4_bypass_consumed_after_one_edit() {
+  # Conservative marker + bypass marker → ① first edit allowed AND bypass
+  # consumed; ② second edit (bypass gone, marker still present) → re-blocked.
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/trail/dod"
+  printf 'cause=noncache-python\ncreated=2026-06-16T00:00:00Z\n' \
+    > "$SANDBOX/$M4_GEN_MARKER"
+  printf 'reason=manual override\n' > "$SANDBOX/$M4_BYPASS_MARKER"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  # ① bypass applies → allowed, bypass consumed.
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "first edit with .skip-spec-gen-gate should be allowed"
+  [ ! -e "$SANDBOX/$M4_BYPASS_MARKER" ] || fail "bypass marker must be consumed after first edit"
+  # ② bypass gone, conservative marker remains → re-blocked.
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "second edit must be re-blocked (one-shot bypass consumed)"
+}
+
+test_m4_bypass_fail_closed_when_unremovable() {
+  # 통합 보안리뷰 INFO-1: bypass marker 가 제거 불가(비어있지 않은 디렉토리)면
+  # rm -f 가 실패 → 제거 증명(`[ ! -e ]`) 불가 → fail-closed(차단). M1 패턴 일관.
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/trail/dod"
+  printf 'cause=json-parse\ncreated=2026-06-16T00:00:00Z\n' > "$SANDBOX/$M4_GEN_MARKER"
+  # bypass 를 비어있지 않은 디렉토리로 → `rm -f`(no -r) 가 제거 못 함.
+  mkdir -p "$SANDBOX/$M4_BYPASS_MARKER/keep"
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "must fail-closed (block) when bypass marker cannot be removed"
+}
+
+test_m4_bypass_reason_sanitized_in_stderr() {
+  # 통합 보안리뷰 INFO-2: bypass reason 의 제어문자(터미널 이스케이프)는 stderr
+  # echo 전에 제거돼야 한다. 출력 가능한 텍스트는 보존.
+  seed_dod "dod-2026-04-13-test.md"
+  mkdir -p "$SANDBOX/trail/dod"
+  printf 'cause=json-parse\ncreated=2026-06-16T00:00:00Z\n' > "$SANDBOX/$M4_GEN_MARKER"
+  # reason 에 ESC(\033) 제어문자 주입.
+  printf 'reason=evil\033[31mRED\n' > "$SANDBOX/$M4_BYPASS_MARKER"
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  local err
+  err=$(REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" 2>&1 >/dev/null)
+  if printf '%s' "$err" | LC_ALL=C grep -q "$(printf '\033')"; then
+    fail "ESC control char must be stripped from bypass reason echo"
+  fi
+  printf '%s' "$err" | grep -q "evil" || fail "sanitized reason should retain printable text"
+}
+
+# =================================================================
 # RUN ALL TESTS
 # =================================================================
 
@@ -952,5 +1274,23 @@ run_test test_orphan_retro_commit_after_review_blocks post-edit-spec-review-gate
 run_test test_orphan_retro_untracked_blocks post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
 run_test test_orphan_non_retro_mtime_block_preserved post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
 run_test test_orphan_non_retro_mtime_allow_preserved post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+
+# M1 — .skip-spec-gate one-shot consumption + fail-closed
+run_test test_skip_spec_gate_consumed_after_one_edit post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_skip_spec_gate_fail_closed_when_unremovable post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+
+# M4 — generator fail-open conservative marker (3 paths + auto-heal)
+run_test test_m4_noncache_python_unresolved_creates_marker post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_m4_json_parse_failure_creates_marker post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_m4_cache_path_python_unresolved_creates_marker post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_m4_success_path_autoheals_marker post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_m4_non_spec_edit_does_not_autoheal_marker post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+
+# M4 — consumer glob-block + one-shot bypass consume
+run_test test_m4_consumer_blocks_when_marker_present post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_m4_consumer_allows_when_marker_absent post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_m4_bypass_consumed_after_one_edit post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_m4_bypass_fail_closed_when_unremovable post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_m4_bypass_reason_sanitized_in_stderr post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
 
 summary

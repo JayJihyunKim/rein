@@ -85,9 +85,28 @@ user_level에 따라 피드백 상세도를 조절한다:
 - "이 경우엔 괜찮아" 류 응답 → advanced로 상향
 
 ### 6. Stamp 생성
-리뷰 완료 후:
+리뷰 완료 후, **내용이 있는(content-rich) 표식** 을 작성한다. 빈 `touch` 표식은
+커밋 게이트의 신선도 비교(코드 리뷰보다 같거나 신선 + 같은 cycle + 통과 판정)에서
+파싱 불가로 처리돼 fail-closed 차단된다. 따라서 아래 표준 필드를 반드시 포함한다
+(구분자는 `=`, 코드 리뷰 표식의 `: ` 와 다름 — 스키마 divergence 는 의도된 것).
+
+표준 최소 3필드 (커밋 게이트가 소비):
+- `reviewed=<ISO-8601 UTC, 예: 2026-06-16T02:00:00Z>` — 리뷰 완료 시각.
+- `cycle=<dod-slug>` — 현재 active DoD 의 slug (`dod-` 접두사 제거, 코드 리뷰 표식의
+  `cycle:` 과 동일 값이어야 신선도 비교를 통과한다).
+- `verdict=PASS` — 보안 리뷰 통과 시 `PASS`. 통과가 아니면 표식을 쓰지 않거나
+  `verdict=NEEDS-FIX` 로 명시한다 (게이트가 PASS 아닌 표식을 차단).
+
+작성 예시 (기존 content-rich 필드와 일관):
 ```bash
-touch trail/dod/.security-reviewed
+cat > trail/dod/.security-reviewed <<STAMP
+reviewer=security-reviewer
+reviewed=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+security_level=<base|standard|strict>
+cycle=<dod-slug>
+verdict=PASS
+mechanism=llm-security-review
+STAMP
 ```
 
 ## 완료 기준
@@ -96,7 +115,7 @@ touch trail/dod/.security-reviewed
 [ ] 해당 레벨의 규칙 파일을 로드했다
 [ ] 변경된 소스 코드 파일을 모두 리뷰했다
 [ ] 발견된 취약점에 대해 user_level에 맞는 피드백을 제공했다
-[ ] trail/dod/.security-reviewed stamp를 생성했다
+[ ] trail/dod/.security-reviewed stamp를 표준 3필드(reviewed=/cycle=/verdict=PASS) 를 포함한 content-rich 형태로 생성했다 (빈 touch 금지)
 ```
 
 ## 사용자 보고 방식

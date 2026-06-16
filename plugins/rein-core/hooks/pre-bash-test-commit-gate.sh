@@ -88,6 +88,81 @@ if ! { [ -f "$SCRIPT_DIR/lib/git-subcommand-model.sh" ] \
   exit 2
 fi
 
+# --- Review-stamp parser + ISO normalize helpers (M2/M3, spec 2026-06-16) ---
+# These are pure, side-effect-free helpers consumed by check_review_stamp()'s
+# P5 (M3 code-stamp dual-read) and P6 (M2 security-stamp freshness) areas. They
+# are defined HERE — before the body's stdin read / resolver calls — so the
+# REIN_GATE_SOURCE_ONLY guard below can expose them to unit tests without
+# running the gate. The schema divergence is deliberate (spec §2.3): the code
+# stamp uses `: ` separators, the security stamp uses `=` — so the separator is
+# a parameter rather than a hard-coded assumption.
+
+# _parse_stamp_field FILE KEY SEP
+#   Extract the value of KEY<SEP>... from FILE's first matching line.
+#   SEP is the literal separator after the key (": " for the code stamp,
+#   "=" for the security stamp). Trailing whitespace is stripped. Prints the
+#   value to stdout; prints nothing (empty = fail-closed sentinel) when the
+#   file is absent, the key is absent, or the value is empty. Always rc 0 —
+#   callers treat an empty result as the fail-closed condition (§6.3).
+_parse_stamp_field() {
+  local file="$1" key="$2" sep="$3"
+  [ -f "$file" ] || return 0
+  # Anchor the key at line start; match the literal separator; capture the rest.
+  # `head -1` keeps only the first occurrence. sed strips the "key+sep" prefix
+  # and any trailing whitespace. The separator may contain a space (": "), so we
+  # match the key followed by optional spaces + the separator's non-space core.
+  local line val
+  line=$(grep -m1 -E "^[[:space:]]*${key}[[:space:]]*${sep%% *}" "$file" 2>/dev/null) || return 0
+  [ -n "$line" ] || return 0
+  # Remove everything up to and including the first separator occurrence.
+  case "$sep" in
+    ": ")
+      val=$(printf '%s' "$line" | sed -E "s/^[[:space:]]*${key}[[:space:]]*:[[:space:]]*//")
+      ;;
+    "=")
+      val=$(printf '%s' "$line" | sed -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//")
+      ;;
+    *)
+      val=$(printf '%s' "$line" | sed -E "s/^[[:space:]]*${key}[[:space:]]*${sep}[[:space:]]*//")
+      ;;
+  esac
+  # Strip trailing whitespace.
+  val=$(printf '%s' "$val" | sed -E 's/[[:space:]]+$//')
+  printf '%s' "$val"
+}
+
+# _normalize_iso TS
+#   Normalize an ISO-8601 UTC timestamp for lexicographic comparison: unify the
+#   trailing `Z` (the security stamp may use a `Z`-less +%Y-%m-%dT%H:%M:%S
+#   variant, spec §6.2) by stripping it, so `...T02:00:00Z` and `...T02:00:00`
+#   compare equal. Validates the shape `YYYY-MM-DDTHH:MM:SS` (with optional
+#   trailing Z); non-ISO input → no stdout + rc 1 (fail-closed sentinel) so a
+#   garbage value can never produce a comparable string that passes freshness.
+_normalize_iso() {
+  local ts="$1"
+  # Strip a single trailing Z if present.
+  ts="${ts%Z}"
+  # Must match YYYY-MM-DDTHH:MM:SS exactly (date + 'T' + time, second res).
+  case "$ts" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9])
+      printf '%s' "$ts"
+      return 0
+      ;;
+    *)
+      # Fail-closed: non-ISO → no comparable value.
+      return 1
+      ;;
+  esac
+}
+
+# REIN_GATE_SOURCE_ONLY — when set, expose the helper functions to a sourcing
+# test harness WITHOUT running the gate body (no stdin read, no resolver, no
+# deny). Unit tests for the pure helpers above (Task 1.1) use this; production
+# never sets it. `return` is valid because the hook is being sourced.
+if [ -n "${REIN_GATE_SOURCE_ONLY:-}" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 # [I6] infra integrity — load + verify the JSON deny emitter (exit 2 on fail).
 bg_infra_init "$SCRIPT_DIR"
 
@@ -187,11 +262,6 @@ check_review_stamp() {
     fi
   fi
 
-  # --- escalated_to_human 감지 시 경고 (차단하지 않음) ---
-  if grep -q "resolution: escalated_to_human" "$REVIEW_STAMP" 2>/dev/null; then
-    echo "WARNING: 코드 리뷰가 사람 에스컬레이션 상태입니다. 수동 확인 후 진행하세요." >&2
-  fi
-
   # --- Codex 리뷰 stamp 검사 ---
   # 시간 기반 TTL 은 제거 — .review-pending 비교가 "코드 변경 후 재리뷰" 를 정확히 담당한다
   if [ ! -f "$REVIEW_STAMP" ]; then
@@ -201,10 +271,57 @@ check_review_stamp() {
     exit "$rc"
   fi
 
-  # --- 보안 리뷰 stamp 검사 ([P6] — RT-1) ---
+  # --- M3: 코드 표식 통과 판정 dual-read (spec 2026-06-16 §4.2) ---
+  # 존재 검사(P5)만으로는 NEEDS-FIX / escalated_to_human / 손삽입 표식이 통과한다.
+  # 통과 판정을 dual-read 로 검증한다:
+  #   verdict: 라인이 있으면 그 값으로 판정 (PASS 만 통과).
+  #   verdict: 부재 시 legacy resolution: 으로 판정 (passed 만 통과).
+  #   둘 다 부재 / 파싱 불가 → fail-closed(차단).
+  # 시각도 reviewed_at:(신) 또는 legacy timestamp:(구) 중 하나 파싱 가능해야 한다.
+  # 둘 다 파싱 불가 → fail-closed(차단). 기존 escalated 경고(차단 안 함)는 dual-read
+  # 의 fail-closed 와 모순이므로 차단으로 격상된다 (escalated_to_human 는 verdict 없고
+  # resolution≠passed → 자동 차단). 기존 .review-pending 신선도 비교는 위에서 유지된다.
+  _codex_verdict=$(_parse_stamp_field "$REVIEW_STAMP" "verdict" ": ")
+  _codex_resolution=$(_parse_stamp_field "$REVIEW_STAMP" "resolution" ": ")
+  _code_pass=false
+  if [ -n "$_codex_verdict" ]; then
+    # verdict: present — sole authority. PASS only.
+    [ "$_codex_verdict" = "PASS" ] && _code_pass=true
+  elif [ -n "$_codex_resolution" ]; then
+    # legacy resolution: fallback (verdict absent). passed only.
+    [ "$_codex_resolution" = "passed" ] && _code_pass=true
+  fi
+  # 시각 파싱 가능성: reviewed_at:(신) 또는 legacy timestamp:(구) 중 하나라도
+  # ISO 정규화 통과해야 한다. 둘 다 파싱 불가 → fail-closed.
+  _codex_reviewed_raw=$(_parse_stamp_field "$REVIEW_STAMP" "reviewed_at" ": ")
+  _codex_ts_legacy=$(_parse_stamp_field "$REVIEW_STAMP" "timestamp" ": ")
+  _codex_reviewed_norm=""
+  if [ -n "$_codex_reviewed_raw" ]; then
+    _codex_reviewed_norm=$(_normalize_iso "$_codex_reviewed_raw") || _codex_reviewed_norm=""
+  fi
+  if [ -z "$_codex_reviewed_norm" ] && [ -n "$_codex_ts_legacy" ]; then
+    _codex_reviewed_norm=$(_normalize_iso "$_codex_ts_legacy") || _codex_reviewed_norm=""
+  fi
+  if [ "$_code_pass" != true ] || [ -z "$_codex_reviewed_norm" ]; then
+    # [P5b] policy block — JSON deny. 통과 판정 실패(NEEDS-FIX / escalated /
+    # 판정필드 부재) 또는 시각 파싱 불가 → fail-closed.
+    deny_emit "The recorded codex review is not a PASS (verdict not PASS / escalated / unreadable). Re-run /codex-review and record a PASS before ${context}." "CODE_REVIEW_NOT_PASSED" "$COMMAND"; rc=$?
+    log_block "코드 리뷰 통과 판정 실패 (${context})" "$COMMAND"
+    exit "$rc"
+  fi
+
+  # --- 보안 리뷰 stamp 검사 ([P6] — RT-1 + M2, spec 2026-06-16 §4.1/§4.4) ---
+  # 면제 우선 분기 (§4.4): light-tier+approved (Tier 1 active-dod) 면제가 성립하면
+  # M2 신선도/verdict 비교 자체를 skip 하고 P6 부재 차단도 skip 한다. 면제는
+  # "이 작업은 보안 표식이 없어도 정상" 을 의미하므로 신선도 비교 대상이 없다.
+  #
+  # 면제 미성립 시:
+  #   보안 표식 부재 → 기존 P6 차단 (SECURITY_STAMP_MISSING).
+  #   보안 표식 존재 → M2 비교 (신선도 + cycle 일치 + verdict=PASS).
+  #
   # Skip ONLY when the active DoD's ## 라우팅 추천 YAML has BOTH:
   #   security_tier: light   AND   approved_by_user: true
-  # Fail-closed: absent DoD, unparseable YAML, Tier 0, any other value → require stamp.
+  # Fail-closed: absent DoD, unparseable YAML, Tier 0/2, any other value → require stamp.
   # .codex-reviewed (P5) is NEVER skipped regardless of security_tier.
   #
   # DoD selection uses the canonical select_active_dod resolver (already sourced
@@ -212,74 +329,138 @@ check_review_stamp() {
   # stale-DoD bypass: a glob last-match over dod-*.md could pick an alphabetically-
   # later stale DoD with security_tier:light even when .active-dod marker points at
   # a standard-tier DoD. select_active_dod honours Tier 1 (explicit marker) first,
-  # then Tier 2 (mtime-latest with ## 범위 연결). Tier 0 → fail-closed (require stamp).
+  # then Tier 2 (mtime-latest with ## 범위 연결). Tier 0/2 → fail-closed (require stamp).
+  #
+  # NOTE (Task 1.3): the exemption is computed UNCONDITIONALLY (not only when the
+  # stamp is absent) so a present-but-stale stamp under a light+approved DoD is
+  # also exempted from M2 — the exemption is about the work, not the stamp.
   _security_tier_skip=false
-  if [ ! -f "$SECURITY_STAMP" ]; then
-    # Resolve the active DoD via the canonical selector. select_active_dod reads
-    # relative paths (trail/dod/.active-dod, trail/dod/*.md) so we must anchor to
-    # PROJECT_DIR — same pattern used in the .dod-coverage-mismatch branch above.
-    _active_dod=""
-    if command -v select_active_dod >/dev/null 2>&1; then
-      _sad=$(cd "$PROJECT_DIR" && select_active_dod 2>/dev/null) || _sad=""
-      _sad_tier=$(printf '%s' "$_sad" | cut -f1)
-      _sad_path=$(printf '%s' "$_sad" | cut -f2)
-      # B1 (v1.3.4): accept ONLY Tier 1 (explicit .active-dod marker —
-      # "blocking authority" per lib/select-active-dod.sh). Tier 2 is the
-      # advisory mtime-latest fallback ("non-blocking authority") and must
-      # NOT authorise skipping the security stamp, which is itself a blocking
-      # decision. This aligns with the coverage-marker self-heal path below,
-      # which already trusts ONLY Tier 1. A real approved DoD always carries an
-      # .active-dod marker (auto-written by post-edit-dod-routing-check), so
-      # the legitimate light-tier skip stays Tier 1. Tier 0/2, empty path, or
-      # missing file → fail-closed (require stamp).
-      if [ "$_sad_tier" = "1" ] && [ -n "$_sad_path" ]; then
-        # select_active_dod returns repo-relative path; anchor to PROJECT_DIR.
-        _sad_abs="$PROJECT_DIR/$_sad_path"
-        [ -f "$_sad_abs" ] && _active_dod="$_sad_abs"
-      fi
+  # Resolve the active DoD via the canonical selector. select_active_dod reads
+  # relative paths (trail/dod/.active-dod, trail/dod/*.md) so we must anchor to
+  # PROJECT_DIR — same pattern used in the .dod-coverage-mismatch branch above.
+  _active_dod=""
+  if command -v select_active_dod >/dev/null 2>&1; then
+    _sad=$(cd "$PROJECT_DIR" && select_active_dod 2>/dev/null) || _sad=""
+    _sad_tier=$(printf '%s' "$_sad" | cut -f1)
+    _sad_path=$(printf '%s' "$_sad" | cut -f2)
+    # B1 (v1.3.4): accept ONLY Tier 1 (explicit .active-dod marker —
+    # "blocking authority" per lib/select-active-dod.sh). Tier 2 is the
+    # advisory mtime-latest fallback ("non-blocking authority") and must
+    # NOT authorise skipping the security stamp, which is itself a blocking
+    # decision. This aligns with the coverage-marker self-heal path below,
+    # which already trusts ONLY Tier 1. A real approved DoD always carries an
+    # .active-dod marker (auto-written by post-edit-dod-routing-check), so
+    # the legitimate light-tier skip stays Tier 1. Tier 0/2, empty path, or
+    # missing file → fail-closed (require stamp).
+    if [ "$_sad_tier" = "1" ] && [ -n "$_sad_path" ]; then
+      # select_active_dod returns repo-relative path; anchor to PROJECT_DIR.
+      _sad_abs="$PROJECT_DIR/$_sad_path"
+      [ -f "$_sad_abs" ] && _active_dod="$_sad_abs"
     fi
-    # If select_active_dod is unavailable or returned Tier 0 / empty / absent file,
-    # _active_dod remains empty and we fall through to the fail-closed deny below.
+  fi
+  # If select_active_dod is unavailable or returned Tier 0 / empty / absent file,
+  # _active_dod remains empty and we fall through to the fail-closed deny below.
 
-    if [ -n "$_active_dod" ] && [ -f "$_active_dod" ]; then
-      # Section-scoped extraction (codex review R2 HIGH fix): security_tier and
-      # approved_by_user MUST be read only from inside the `## 라우팅 추천`
-      # section. A global grep also matches an out-of-section `security_tier:
-      # light` placed anywhere in the DoD (prose, examples, 비범위 notes, a
-      # second section) — a fail-open bypass. awk emits only routing-section
-      # body lines; an absent section yields an empty string → both values
-      # stay empty → fail-closed (no skip).
-      _routing_section=$(awk '
-        /^## / { in_routing = ($0 ~ /^## 라우팅 추천/) }
-        in_routing { print }
-      ' "$_active_dod" 2>/dev/null)
-      # Only accept exactly "light" (trimmed); anything else → fail-closed.
-      _st_raw=$(printf '%s\n' "$_routing_section" \
-                | grep -m1 '^[[:space:]]*security_tier:[[:space:]]*' \
-                | sed 's/^[[:space:]]*security_tier:[[:space:]]*//' \
-                | tr -d '[:space:]"'"'"'' \
-                | head -c 20)
-      # Extract approved_by_user: must be exactly "true" (trimmed).
-      _approved_raw=$(printf '%s\n' "$_routing_section" \
-                      | grep -m1 '^[[:space:]]*approved_by_user:[[:space:]]*' \
-                      | sed 's/^[[:space:]]*approved_by_user:[[:space:]]*//' \
-                      | tr -d '[:space:]"'"'"'' \
-                      | head -c 10)
+  if [ -n "$_active_dod" ] && [ -f "$_active_dod" ]; then
+    # Section-scoped extraction (codex review R2 HIGH fix): security_tier and
+    # approved_by_user MUST be read only from inside the `## 라우팅 추천`
+    # section. A global grep also matches an out-of-section `security_tier:
+    # light` placed anywhere in the DoD (prose, examples, 비범위 notes, a
+    # second section) — a fail-open bypass. awk emits only routing-section
+    # body lines; an absent section yields an empty string → both values
+    # stay empty → fail-closed (no skip).
+    _routing_section=$(awk '
+      /^## / { in_routing = ($0 ~ /^## 라우팅 추천/) }
+      in_routing { print }
+    ' "$_active_dod" 2>/dev/null)
+    # Only accept exactly "light" (trimmed); anything else → fail-closed.
+    _st_raw=$(printf '%s\n' "$_routing_section" \
+              | grep -m1 '^[[:space:]]*security_tier:[[:space:]]*' \
+              | sed 's/^[[:space:]]*security_tier:[[:space:]]*//' \
+              | tr -d '[:space:]"'"'"'' \
+              | head -c 20)
+    # Extract approved_by_user: must be exactly "true" (trimmed).
+    _approved_raw=$(printf '%s\n' "$_routing_section" \
+                    | grep -m1 '^[[:space:]]*approved_by_user:[[:space:]]*' \
+                    | sed 's/^[[:space:]]*approved_by_user:[[:space:]]*//' \
+                    | tr -d '[:space:]"'"'"'' \
+                    | head -c 10)
 
-      if [ "$_st_raw" = "light" ] && [ "$_approved_raw" = "true" ]; then
-        _security_tier_skip=true
-      fi
+    if [ "$_st_raw" = "light" ] && [ "$_approved_raw" = "true" ]; then
+      _security_tier_skip=true
     fi
-
-    if [ "$_security_tier_skip" = "false" ]; then
-      # [P6] policy block — JSON deny. HIGH-2: exit directly.
-      deny_emit "The security review has not been recorded yet. Run the security-reviewer agent after codex review — this creates the security review record that rein requires before committing." "SECURITY_STAMP_MISSING" "$COMMAND"; rc=$?
-      log_block "보안 리뷰 미실행 (${context})" "$COMMAND"
-      exit "$rc"
-    fi
-    # security_tier: light + approved_by_user: true → P6 skipped (RT-1)
   fi
 
+  # 면제 성립 → M2 비교 + P6 부재 차단 둘 다 skip (§4.4).
+  if [ "$_security_tier_skip" = true ]; then
+    return 0
+  fi
+
+  # 면제 미성립 + 보안 표식 부재 → 기존 P6 차단.
+  if [ ! -f "$SECURITY_STAMP" ]; then
+    # [P6] policy block — JSON deny. HIGH-2: exit directly.
+    deny_emit "The security review has not been recorded yet. Run the security-reviewer agent after codex review — this creates the security review record that rein requires before committing." "SECURITY_STAMP_MISSING" "$COMMAND"; rc=$?
+    log_block "보안 리뷰 미실행 (${context})" "$COMMAND"
+    exit "$rc"
+  fi
+
+  # --- M2: 보안 표식 신선도 + cycle + verdict 비교 (§4.1) ---
+  # 면제 미성립 + 보안 표식 존재. 통과 조건 (모두 충족):
+  #   security_reviewed >= codex_reviewed (정규화 후 lexicographic)
+  #   AND security_cycle == codex_cycle (양쪽 non-empty)
+  #   AND security verdict == PASS
+  # 차단:
+  #   보안이 더 오래됨 / cycle 불일치 / 어느 한쪽 빈 cycle / 시각 파싱불가
+  #     → SECURITY_REVIEW_STALE (§6.3 fail-closed 포함)
+  #   보안 verdict != PASS → SECURITY_REVIEW_NOT_PASSED
+  # 스키마 divergence (§2.3): 보안 표식 `=` 구분자, 코드 표식 `: ` 구분자 — 각자 파싱.
+  _sec_reviewed_raw=$(_parse_stamp_field "$SECURITY_STAMP" "reviewed" "=")
+  _sec_cycle=$(_parse_stamp_field "$SECURITY_STAMP" "cycle" "=")
+  _sec_verdict=$(_parse_stamp_field "$SECURITY_STAMP" "verdict" "=")
+  _codex_cycle=$(_parse_stamp_field "$REVIEW_STAMP" "cycle" ": ")
+  # 코드 표식 시각: M3 가 이미 _codex_reviewed_norm 으로 정규화/검증함 (PASS 못하면
+  # 위에서 이미 차단). 여기서는 보안 표식 시각만 정규화하면 된다.
+  _sec_reviewed_norm=""
+  if [ -n "$_sec_reviewed_raw" ]; then
+    _sec_reviewed_norm=$(_normalize_iso "$_sec_reviewed_raw") || _sec_reviewed_norm=""
+  fi
+
+  # verdict 검사 (M3 대칭). 보안 verdict 가 PASS 아니면 NOT_PASSED.
+  # 단 verdict 가 빈값/부재이면 fail-closed → STALE 로 분류 (§6.3: verdict 부재 차단).
+  if [ -n "$_sec_verdict" ] && [ "$_sec_verdict" != "PASS" ]; then
+    # [P6b] policy block — JSON deny.
+    deny_emit "The recorded security review is not a PASS (verdict not PASS). Re-run the security-reviewer agent and record a PASS before ${context}." "SECURITY_REVIEW_NOT_PASSED" "$COMMAND"; rc=$?
+    log_block "보안 리뷰 통과 판정 실패 (${context})" "$COMMAND"
+    exit "$rc"
+  fi
+
+  # fail-closed 사유들 (전부 STALE):
+  #   - 보안 시각 파싱 불가 (빈 touch / 비-ISO)
+  #   - 보안 verdict 빈값/부재 (§6.3)
+  #   - 빈 cycle (어느 한쪽) — equality 가 빈값끼리 오통과 방지
+  #   - cycle 불일치
+  #   - 보안이 코드보다 오래됨
+  _stale=false
+  if [ -z "$_sec_reviewed_norm" ]; then
+    _stale=true                                   # 보안 시각 파싱 불가
+  elif [ -z "$_sec_verdict" ]; then
+    _stale=true                                   # 보안 verdict 부재/빈값
+  elif [ -z "$_sec_cycle" ] || [ -z "$_codex_cycle" ]; then
+    _stale=true                                   # 빈 cycle (한쪽이라도)
+  elif [ "$_sec_cycle" != "$_codex_cycle" ]; then
+    _stale=true                                   # cycle 불일치
+  elif [ "$_sec_reviewed_norm" \< "$_codex_reviewed_norm" ]; then
+    _stale=true                                   # 보안이 코드보다 오래됨
+  fi
+
+  if [ "$_stale" = true ]; then
+    # [P6c] policy block — JSON deny: 보안 표식이 코드 표식보다 오래됐거나 cycle
+    # 불일치/빈값/파싱불가 → 이전 사이클 통과가 새 코드에 stale-적용되는 것을 차단.
+    deny_emit "The recorded security review is stale relative to the codex review (older, different cycle, empty cycle, or unreadable). Re-run the security-reviewer agent after the latest codex review before ${context}." "SECURITY_REVIEW_STALE" "$COMMAND"; rc=$?
+    log_block "보안 리뷰 stale (${context})" "$COMMAND"
+    exit "$rc"
+  fi
+  # security >= code + cycle 일치 non-empty + verdict=PASS → P6 통과.
 
   return 0
 }

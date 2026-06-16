@@ -67,8 +67,281 @@ _seed_dod_only() {
 }
 _seed_dod_and_stamps() {
   seed_dod "dod-2026-05-19-tc-gate-test.md"
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
-  touch "$SANDBOX/trail/dod/.security-reviewed"
+  # M2/M3 (spec 2026-06-16): an empty `touch` stamp is now fail-closed. The
+  # shared helper writes content-rich stamps that PASS the new contract (code
+  # stamp verdict: PASS + fresh; security stamp fresher + same cycle + PASS) so
+  # each downstream test exercises ONLY the gate it perturbs.
+  _write_code_stamp     "2026-06-16T01:00:00Z" "2026-05-19-tc-gate-test" "PASS" "skip" "skip"
+  _write_security_stamp "2026-06-16T02:00:00Z" "2026-05-19-tc-gate-test" "PASS"
+}
+
+# ============================================================
+# M2/M3 (docs/specs/2026-06-16-review-stamp-freshness.md) — review stamp
+# freshness + content binding. The commit gate now (M2) compares the security
+# stamp's reviewed=/cycle=/verdict= against the code stamp's reviewed_at:/cycle:
+# and (M3) reads the code stamp's PASS verdict via dual-read.
+#
+# Stamp schema divergence (spec §2.3): the security stamp uses `=` separators
+# (reviewed=/cycle=/verdict=); the code stamp uses `: ` separators
+# (reviewed_at:/cycle:/verdict:). Each is parsed by its own schema.
+# ============================================================
+
+# Write a content-rich code stamp (.codex-reviewed, `: ` separator).
+# Args: $1=reviewed_at (ISO or "skip"), $2=cycle (or "skip"),
+#       $3=verdict (or "skip"), $4=resolution legacy field (or "skip"),
+#       $5=legacy timestamp (or "skip")
+_write_code_stamp() {
+  local rat="$1" cyc="$2" ver="$3" res="$4" ts="$5"
+  local f="$SANDBOX/trail/dod/.codex-reviewed"
+  : > "$f"
+  [ "$rat" != "skip" ] && printf 'reviewed_at: %s\n' "$rat" >> "$f"
+  [ "$ts"  != "skip" ] && printf 'timestamp: %s\n' "$ts" >> "$f"
+  printf 'reviewer: codex\n' >> "$f"
+  printf 'diff_base: N/A\n' >> "$f"
+  [ "$ver" != "skip" ] && printf 'verdict: %s\n' "$ver" >> "$f"
+  [ "$res" != "skip" ] && printf 'resolution: %s\n' "$res" >> "$f"
+  [ "$cyc" != "skip" ] && printf 'cycle: %s\n' "$cyc" >> "$f"
+  printf 'scope: wrapper-generated\n' >> "$f"
+}
+
+# Write a content-rich security stamp (.security-reviewed, `=` separator).
+# Args: $1=reviewed (ISO or "skip"), $2=cycle (or "skip"), $3=verdict (or "skip")
+_write_security_stamp() {
+  local rev="$1" cyc="$2" ver="$3"
+  local f="$SANDBOX/trail/dod/.security-reviewed"
+  : > "$f"
+  printf 'reviewer=security-reviewer\n' >> "$f"
+  [ "$rev" != "skip" ] && printf 'reviewed=%s\n' "$rev" >> "$f"
+  printf 'security_level=standard\n' >> "$f"
+  [ "$cyc" != "skip" ] && printf 'cycle=%s\n' "$cyc" >> "$f"
+  [ "$ver" != "skip" ] && printf 'verdict=%s\n' "$ver" >> "$f"
+  printf 'mechanism=llm-security-review\n' >> "$f"
+}
+
+# Seed a standard (non-light) DoD + both content-rich stamps where the code
+# stamp is PASS and the security stamp is fresh + same cycle + PASS, so the
+# *only* gate that can fire is the one a test deliberately perturbs.
+_seed_dod_and_rich_stamps() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp     "2026-06-16T01:00:00Z" "2026-05-19-tc-gate-test" "PASS" "skip" "skip"
+  _write_security_stamp "2026-06-16T02:00:00Z" "2026-05-19-tc-gate-test" "PASS"
+}
+
+# ------------------------------------------------------------
+# Task 1.1 — parser + ISO normalization, exercised BEHAVIORALLY through the gate.
+#
+# (codex integration-review R1 Medium) The earlier direct-source unit tests were
+# false-green: sourcing the hook recomputes SCRIPT_DIR from $0, so the lib loads
+# fail and the hook exits before the helpers are defined — the assertions ran
+# against a stale HOOK_EXIT and passed without testing anything. The helper
+# contracts are instead verified through the full `git commit` gate, which is the
+# path that actually consumes them (rein prefers behavioral hook tests):
+#   - trailing-Z unification: security `...Z` vs code `...` (no Z), same instant
+#     + same cycle + PASS → commit passes (proves the two formats normalize equal)
+#   - non-ISO fail-closed: a garbled security `reviewed=` → block (sentinel never
+#     yields a comparable value that could pass freshness)
+#   - missing field fail-closed: a security stamp without `verdict=` → block
+# ------------------------------------------------------------
+
+test_t11_normalize_z_mixed_compares_equal() {
+  # security reviewed= carries trailing Z, code reviewed_at= does not; same
+  # instant + same cycle + PASS. If normalize unifies Z, security>=code holds → pass.
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp     "2026-06-16T02:00:00"  "tc-cycle" "PASS" "skip" "skip"
+  _write_security_stamp "2026-06-16T02:00:00Z" "tc-cycle" "PASS"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "T1.1 normalize unifies trailing Z (mixed Z/no-Z equal instant → pass)"
+}
+
+test_t11_non_iso_security_ts_fails_closed() {
+  # Garbled security reviewed= (non-ISO) must fail-closed (block), never compare
+  # as fresh. Standard-tier DoD so P6 is active.
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp "2026-06-16T01:00:00Z" "tc-cycle" "PASS" "skip" "skip"
+  mkdir -p "$SANDBOX/trail/dod"
+  printf 'reviewed=not-a-timestamp\ncycle=tc-cycle\nverdict=PASS\n' \
+    > "$SANDBOX/trail/dod/.security-reviewed"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_REVIEW_STALE" "T1.1 non-ISO security timestamp → fail-closed (STALE)"
+}
+
+test_t11_missing_verdict_field_fails_closed() {
+  # security stamp without verdict= → parser returns empty → fail-closed (block).
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp "2026-06-16T01:00:00Z" "tc-cycle" "PASS" "skip" "skip"
+  mkdir -p "$SANDBOX/trail/dod"
+  printf 'reviewed=2026-06-16T02:00:00Z\ncycle=tc-cycle\n' \
+    > "$SANDBOX/trail/dod/.security-reviewed"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_REVIEW_STALE" "T1.1 missing verdict= in security stamp → fail-closed (STALE)"
+}
+
+# ------------------------------------------------------------
+# Task 1.2 — M2 security stamp freshness + cycle + verdict (P6 area).
+# Driven through the gate via `git commit` (standard-tier DoD → P6 active).
+# ------------------------------------------------------------
+
+# (M2-1) security < code (cycle matches) → SECURITY_REVIEW_STALE.
+test_m2_security_older_than_code_blocks() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp     "2026-06-16T05:00:00Z" "tc-cycle" "PASS" "skip" "skip"
+  _write_security_stamp "2026-06-16T01:00:00Z" "tc-cycle" "PASS"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_REVIEW_STALE" "M2 security older than code → SECURITY_REVIEW_STALE"
+}
+
+# (M2-2) security >= code, cycle matches non-empty, verdict=PASS → pass.
+test_m2_security_fresh_same_cycle_pass_passes() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp     "2026-06-16T01:00:00Z" "tc-cycle" "PASS" "skip" "skip"
+  _write_security_stamp "2026-06-16T02:00:00Z" "tc-cycle" "PASS"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "M2 security fresh + same cycle + verdict=PASS → commit passes"
+}
+
+# (M2-3) security >= code but cycle mismatch → SECURITY_REVIEW_STALE.
+test_m2_cycle_mismatch_blocks() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp     "2026-06-16T01:00:00Z" "tc-cycle" "PASS" "skip" "skip"
+  _write_security_stamp "2026-06-16T02:00:00Z" "OTHER-cycle" "PASS"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_REVIEW_STALE" "M2 cycle mismatch → SECURITY_REVIEW_STALE"
+}
+
+# (M2-4) both cycles empty → SECURITY_REVIEW_STALE (empty cycle is fail-closed).
+test_m2_both_cycles_empty_blocks() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp     "2026-06-16T01:00:00Z" "skip" "PASS" "skip" "skip"
+  _write_security_stamp "2026-06-16T02:00:00Z" "skip" "PASS"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_REVIEW_STALE" "M2 both cycles empty → SECURITY_REVIEW_STALE (no oops-equal pass)"
+}
+
+# (M2-5) security verdict=NEEDS-FIX though fresh + same cycle → NOT_PASSED.
+test_m2_security_verdict_not_pass_blocks() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp     "2026-06-16T01:00:00Z" "tc-cycle" "PASS" "skip" "skip"
+  _write_security_stamp "2026-06-16T02:00:00Z" "tc-cycle" "NEEDS-FIX"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_REVIEW_NOT_PASSED" "M2 security verdict=NEEDS-FIX → SECURITY_REVIEW_NOT_PASSED"
+}
+
+# (M2-6) empty (touch'd) security stamp, standard-tier (not exempt) → fail-closed.
+test_m2_empty_security_stamp_fails_closed() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp "2026-06-16T01:00:00Z" "tc-cycle" "PASS" "skip" "skip"
+  touch "$SANDBOX/trail/dod/.security-reviewed"   # empty / touch-only
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  # exit 0 + deny; reason is STALE (unparseable security reviewed → stale).
+  assert_exit 0 "M2 empty security stamp → JSON deny path exits 0"
+  printf '%s' "$HOOK_STDOUT" | grep -q '"permissionDecision"' \
+    || fail "M2 empty security stamp must emit JSON deny (fail-closed), got: $HOOK_STDOUT"
+}
+
+# (M2-7) security reviewed not ISO (fresh-looking junk) → fail-closed STALE.
+test_m2_security_reviewed_non_iso_fails_closed() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp     "2026-06-16T01:00:00Z" "tc-cycle" "PASS" "skip" "skip"
+  _write_security_stamp "garbage-not-iso" "tc-cycle" "PASS"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_REVIEW_STALE" "M2 non-ISO security reviewed → fail-closed SECURITY_REVIEW_STALE"
+}
+
+# ------------------------------------------------------------
+# Task 1.5 — M3 code stamp PASS dual-read (P5 area).
+# verdict: preferred, else legacy resolution:. Time must parse via
+# reviewed_at: (new) or legacy timestamp: (old).
+# ------------------------------------------------------------
+
+# (M3-1) verdict: PASS → pass.
+test_m3_verdict_pass_passes() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp     "2026-06-16T01:00:00Z" "tc-cycle" "PASS" "skip" "skip"
+  _write_security_stamp "2026-06-16T02:00:00Z" "tc-cycle" "PASS"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "M3 verdict: PASS → commit passes"
+}
+
+# (M3-2) verdict: NEEDS-FIX → CODE_REVIEW_NOT_PASSED.
+test_m3_verdict_needs_fix_blocks() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp     "2026-06-16T01:00:00Z" "tc-cycle" "NEEDS-FIX" "skip" "skip"
+  _write_security_stamp "2026-06-16T02:00:00Z" "tc-cycle" "PASS"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "CODE_REVIEW_NOT_PASSED" "M3 verdict: NEEDS-FIX → CODE_REVIEW_NOT_PASSED"
+}
+
+# (M3-3) resolution: escalated_to_human (no verdict) → blocked (escalation格上).
+test_m3_escalated_blocks() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp     "2026-06-16T01:00:00Z" "tc-cycle" "skip" "escalated_to_human" "skip"
+  _write_security_stamp "2026-06-16T02:00:00Z" "tc-cycle" "PASS"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "CODE_REVIEW_NOT_PASSED" "M3 resolution: escalated_to_human → blocked (escalated upgraded to block)"
+}
+
+# (M3-4) legacy resolution: passed (no verdict) → pass.
+test_m3_legacy_resolution_passed_passes() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  # No verdict:, only legacy resolution: passed + legacy timestamp:.
+  _write_code_stamp     "skip" "tc-cycle" "skip" "passed" "2026-06-16T01:00:00Z"
+  _write_security_stamp "2026-06-16T02:00:00Z" "tc-cycle" "PASS"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "M3 legacy resolution: passed (verdict absent) → commit passes"
+}
+
+# (M3-5) neither verdict: nor resolution: → fail-closed.
+test_m3_no_verdict_field_blocks() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp     "2026-06-16T01:00:00Z" "tc-cycle" "skip" "skip" "skip"
+  _write_security_stamp "2026-06-16T02:00:00Z" "tc-cycle" "PASS"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "CODE_REVIEW_NOT_PASSED" "M3 no verdict:/resolution: field → fail-closed block"
+}
+
+# (M3-6) both time fields unparseable (verdict PASS) → fail-closed.
+test_m3_time_unparseable_blocks() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  # verdict PASS but no reviewed_at: and no timestamp: → time parse impossible.
+  _write_code_stamp     "skip" "tc-cycle" "PASS" "skip" "skip"
+  _write_security_stamp "2026-06-16T02:00:00Z" "tc-cycle" "PASS"
+  local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "CODE_REVIEW_NOT_PASSED" "M3 no parseable time field → fail-closed block"
+}
+
+# ------------------------------------------------------------
+# Task 1.4 — security-reviewer.md instruction must be content-rich.
+# Doc verification: the standalone `touch trail/dod/.security-reviewed`
+# instruction must be GONE and the standard 3-field schema must be present.
+# ------------------------------------------------------------
+test_t14_security_reviewer_doc_is_content_rich() {
+  local doc="$REAL_PROJECT_DIR/plugins/rein-core/agents/security-reviewer.md"
+  [ -f "$doc" ] || { fail "T1.4 security-reviewer.md not found at $doc"; return; }
+  # No standalone `touch trail/dod/.security-reviewed` line (the bare touch
+  # instruction is what M2 cannot parse).
+  if grep -Eq '^[[:space:]]*touch[[:space:]]+trail/dod/\.security-reviewed[[:space:]]*$' "$doc"; then
+    fail "T1.4 standalone 'touch trail/dod/.security-reviewed' must be removed"
+  fi
+  # Standard 3 fields present (= separator).
+  grep -q 'reviewed=' "$doc" || fail "T1.4 doc must specify reviewed= field"
+  grep -q 'cycle='    "$doc" || fail "T1.4 doc must specify cycle= field"
+  grep -q 'verdict=PASS' "$doc" || fail "T1.4 doc must specify verdict=PASS field"
 }
 
 # ============================================================
@@ -86,7 +359,8 @@ test_p5_codex_stamp_missing_blocks() {
 # ============================================================
 test_p6_security_stamp_missing_blocks() {
   _seed_dod_only
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
+  # M3: code stamp must be a content-rich PASS so the gate reaches P6 (not P5b).
+  _write_code_stamp "2026-06-16T01:00:00Z" "2026-05-19-tc-gate-test" "PASS" "skip" "skip"
   local input='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
   run_hook "$HOOK" "$input"
   assert_json_deny "SECURITY_STAMP_MISSING" "P6 git commit without security stamp should emit JSON deny"
@@ -520,6 +794,28 @@ main() {
   # Policy block points P2-P7
   run_test test_p5_codex_stamp_missing_blocks                   "$HOOK"
   run_test test_p6_security_stamp_missing_blocks                "$HOOK"
+  # M2/M3 review-stamp-freshness (docs/specs/2026-06-16-review-stamp-freshness.md)
+  # Task 1.1 parser + ISO normalize helpers (source-only).
+  run_test test_t11_normalize_z_mixed_compares_equal            "$HOOK"
+  run_test test_t11_non_iso_security_ts_fails_closed            "$HOOK"
+  run_test test_t11_missing_verdict_field_fails_closed          "$HOOK"
+  # Task 1.2 M2 security stamp freshness + cycle + verdict.
+  run_test test_m2_security_older_than_code_blocks              "$HOOK"
+  run_test test_m2_security_fresh_same_cycle_pass_passes        "$HOOK"
+  run_test test_m2_cycle_mismatch_blocks                        "$HOOK"
+  run_test test_m2_both_cycles_empty_blocks                     "$HOOK"
+  run_test test_m2_security_verdict_not_pass_blocks             "$HOOK"
+  run_test test_m2_empty_security_stamp_fails_closed            "$HOOK"
+  run_test test_m2_security_reviewed_non_iso_fails_closed       "$HOOK"
+  # Task 1.5 M3 code stamp PASS dual-read.
+  run_test test_m3_verdict_pass_passes                          "$HOOK"
+  run_test test_m3_verdict_needs_fix_blocks                     "$HOOK"
+  run_test test_m3_escalated_blocks                             "$HOOK"
+  run_test test_m3_legacy_resolution_passed_passes             "$HOOK"
+  run_test test_m3_no_verdict_field_blocks                     "$HOOK"
+  run_test test_m3_time_unparseable_blocks                     "$HOOK"
+  # Task 1.4 security-reviewer doc content-rich.
+  run_test test_t14_security_reviewer_doc_is_content_rich       "$HOOK"
   run_test test_p3_review_pending_no_stamp_blocks               "$HOOK"
   run_test test_p4_code_edited_after_review_blocks              "$HOOK"
   run_test test_p7_commit_msg_format_blocks                     "$HOOK"

@@ -127,7 +127,17 @@ _seed_fixture() {
   printf 'path=trail/dod/dod-2026-05-19-security-tier-test.md\n' \
     > "$SANDBOX/trail/dod/.active-dod"
   # Codex stamp always present — we're only testing security tier behavior.
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
+  # M3 (spec 2026-06-16): an empty `touch` code stamp is now fail-closed, so we
+  # write a content-rich PASS stamp; the gate then reaches the P6/M2 security
+  # logic under test rather than blocking at the code-stamp dual-read.
+  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
+reviewed_at: 2026-06-16T01:00:00Z
+reviewer: codex
+diff_base: N/A
+verdict: PASS
+cycle: 2026-05-19-security-tier-test
+scope: wrapper-generated
+STAMP
   # Deliberately NO .security-reviewed
 }
 
@@ -300,8 +310,16 @@ DOD
   printf 'path=trail/dod/dod-2026-05-19-aa-standard.md\n' \
     > "$SANDBOX/trail/dod/.active-dod"
 
-  # .codex-reviewed present — P5 is satisfied.
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
+  # .codex-reviewed present (content-rich PASS) — P5/M3 satisfied so the gate
+  # reaches P6 (M3 now fail-closes an empty `touch` stamp).
+  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
+reviewed_at: 2026-06-16T01:00:00Z
+reviewer: codex
+diff_base: N/A
+verdict: PASS
+cycle: regression-test
+scope: wrapper-generated
+STAMP
   # NO .security-reviewed — P6 must block.
 
   run_hook "$HOOK" "$COMMIT_INPUT"
@@ -351,7 +369,15 @@ DOD
   seed_dod "dod-2026-05-19-section-scope-test.md" "$content"
   printf 'path=trail/dod/dod-2026-05-19-section-scope-test.md\n' \
     > "$SANDBOX/trail/dod/.active-dod"
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
+  # Content-rich PASS code stamp so the gate reaches P6 (M3 fail-closes empty).
+  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
+reviewed_at: 2026-06-16T01:00:00Z
+reviewer: codex
+diff_base: N/A
+verdict: PASS
+cycle: section-scope-test
+scope: wrapper-generated
+STAMP
   # NO .security-reviewed — routing section is standard → P6 must block.
   run_hook "$HOOK" "$COMMIT_INPUT"
   assert_json_deny "SECURITY_STAMP_MISSING" \
@@ -374,12 +400,97 @@ test_l_tier2_light_still_requires_security_stamp() {
   local content
   content="$(_dod_content_with_routing "light" "true")"
   seed_dod "dod-2026-05-19-tier2-light-test.md" "$content"
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
+  # Content-rich PASS code stamp so the gate reaches the P6/M2 logic (M3 now
+  # fail-closes an empty `touch` stamp).
+  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
+reviewed_at: 2026-06-16T01:00:00Z
+reviewer: codex
+diff_base: N/A
+verdict: PASS
+cycle: 2026-05-19-tier2-light-test
+scope: wrapper-generated
+STAMP
   # Deliberately NO .active-dod marker → Tier 2 resolution.
   # Deliberately NO .security-reviewed.
   run_hook "$HOOK" "$COMMIT_INPUT"
   assert_json_deny "SECURITY_STAMP_MISSING" \
     "B1(l) Tier 2 (no marker) light+approved → P6 must still BLOCK (Tier 2 is advisory, not blocking authority)"
+}
+
+# ============================================================
+# Case (m): M2 INTERACTION (docs/specs/2026-06-16-review-stamp-freshness.md §4.4)
+#   light-tier + approved + security stamp ABSENT → M2 freshness/verdict compare
+#   is SKIPPED entirely (the exemption means "no security stamp is normal").
+#   This already passes via case (a), but (m) asserts it with a content-rich
+#   PASS code stamp present (so the only thing that could fire is M2) — proving
+#   M2 does not run when the exemption holds.
+# ============================================================
+test_m_light_approved_skips_m2_compare() {
+  _seed_fixture "light" "true"
+  # Code stamp content-rich + fresh + PASS. If M2 ran with the security stamp
+  # absent it would have nothing to compare → must SKIP, not fail-closed.
+  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
+reviewed_at: 2026-06-16T01:00:00Z
+reviewer: codex
+diff_base: N/A
+verdict: PASS
+cycle: 2026-05-19-security-tier-test
+scope: wrapper-generated
+STAMP
+  # Deliberately NO .security-reviewed.
+  run_hook "$HOOK" "$COMMIT_INPUT"
+  assert_pass "RT-1(m) light+approved + no security stamp → M2 compare skipped, commit passes"
+}
+
+# ============================================================
+# Case (n): M2 INTERACTION — light-tier + approved + a STALE security stamp
+#   (security reviewed OLDER than code reviewed_at). The exemption must STILL
+#   pass: when light+approved holds, M2 freshness compare is not applied even
+#   if a (stale) security stamp happens to exist.
+# ============================================================
+test_n_light_approved_stale_security_stamp_still_passes() {
+  _seed_fixture "light" "true"
+  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
+reviewed_at: 2026-06-16T05:00:00Z
+reviewer: codex
+diff_base: N/A
+verdict: PASS
+cycle: 2026-05-19-security-tier-test
+scope: wrapper-generated
+STAMP
+  # Security stamp present but STALE (older) + different cycle — would fail M2.
+  cat > "$SANDBOX/trail/dod/.security-reviewed" <<'STAMP'
+reviewer=security-reviewer
+reviewed=2026-06-16T01:00:00Z
+security_level=standard
+cycle=some-other-cycle
+verdict=PASS
+mechanism=llm-security-review
+STAMP
+  run_hook "$HOOK" "$COMMIT_INPUT"
+  assert_pass "RT-1(n) light+approved + stale security stamp → exemption skips M2, commit passes"
+}
+
+# ============================================================
+# Case (o): M2 INTERACTION — standard-tier + security stamp ABSENT → the
+#   existing P6 SECURITY_STAMP_MISSING block is preserved (M2 only changes the
+#   stamp-PRESENT path; the absent path stays the legacy P6 deny). This overlaps
+#   case (b) but pins the exact reason code under the M2 design.
+# ============================================================
+test_o_standard_absent_security_stamp_still_p6_block() {
+  _seed_fixture "standard" "true"
+  # Content-rich PASS code stamp; security stamp ABSENT.
+  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
+reviewed_at: 2026-06-16T01:00:00Z
+reviewer: codex
+diff_base: N/A
+verdict: PASS
+cycle: 2026-05-19-security-tier-test
+scope: wrapper-generated
+STAMP
+  run_hook "$HOOK" "$COMMIT_INPUT"
+  assert_json_deny "SECURITY_STAMP_MISSING" \
+    "RT-1(o) standard-tier + security stamp absent → P6 SECURITY_STAMP_MISSING preserved"
 }
 
 main() {
@@ -395,6 +506,10 @@ main() {
   run_test test_j_stale_dod_bypass_regression                      "$HOOK"
   run_test test_k_out_of_section_tier_does_not_count               "$HOOK"
   run_test test_l_tier2_light_still_requires_security_stamp        "$HOOK"
+  # M2 interaction (docs/specs/2026-06-16-review-stamp-freshness.md §4.4)
+  run_test test_m_light_approved_skips_m2_compare                  "$HOOK"
+  run_test test_n_light_approved_stale_security_stamp_still_passes "$HOOK"
+  run_test test_o_standard_absent_security_stamp_still_p6_block    "$HOOK"
   summary
 }
 

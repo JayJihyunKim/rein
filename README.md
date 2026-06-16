@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.5.4** (2026-06-15) — corrects the auto-mode guidance (turning auto-mode on silences only incident-related session-end blocks; the trail-record check still fires, so you still update your work log before ending a session) and removes a false "changed-file count doesn't match the task definition" warning that long-abandoned, un-versioned files used to trigger on every edit — now only files actually created this session are considered. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.5.5** (2026-06-16) — closes gaps where review/security checks could pass on stale or non-PASS records: a commit now requires the security review to be at least as fresh as the code review (same work cycle) and the code review to be a real PASS, the spec-review marker generator now fails closed instead of silently passing, the one-shot spec-review bypass is consumed after a single use, and the coverage validator accepts numbered headings and backtick-wrapped IDs (so specs no longer need manual reformatting). ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

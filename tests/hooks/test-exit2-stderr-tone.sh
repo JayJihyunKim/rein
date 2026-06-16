@@ -93,8 +93,25 @@ test_exit2_stderr_tone_pre_bash_test_commit_gate_i3_coverage_marker() {
      "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
   seed_dod "dod-2026-05-18-i3-test.md"
   seed_inbox "2026-05-18-i3-test.md"
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
-  touch "$SANDBOX/trail/dod/.security-reviewed"
+  # Content-rich stamps (docs/specs/2026-06-16-review-stamp-freshness.md): an
+  # empty `touch` stamp now fail-closes at the M2/M3 review-stamp check, so we
+  # write PASS stamps with a shared cycle to reach the infra (I3/I4/I5) path.
+  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
+reviewed_at: 2026-06-16T01:00:00Z
+reviewer: codex
+diff_base: N/A
+verdict: PASS
+cycle: tone-test
+scope: wrapper-generated
+STAMP
+  cat > "$SANDBOX/trail/dod/.security-reviewed" <<'STAMP'
+reviewer=security-reviewer
+reviewed=2026-06-16T02:00:00Z
+security_level=standard
+cycle=tone-test
+verdict=PASS
+mechanism=llm-security-review
+STAMP
   # Empty marker → rc=2 path
   touch "$SANDBOX/trail/dod/.coverage-mismatch"
 
@@ -116,8 +133,25 @@ test_exit2_stderr_tone_pre_bash_test_commit_gate_i4_helper_missing() {
   # so we remove it after setup to simulate the missing-helper path [I4].
   seed_dod "dod-2026-05-18-i4-test.md"
   seed_inbox "2026-05-18-i4-test.md"
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
-  touch "$SANDBOX/trail/dod/.security-reviewed"
+  # Content-rich stamps (docs/specs/2026-06-16-review-stamp-freshness.md): an
+  # empty `touch` stamp now fail-closes at the M2/M3 review-stamp check, so we
+  # write PASS stamps with a shared cycle to reach the infra (I3/I4/I5) path.
+  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
+reviewed_at: 2026-06-16T01:00:00Z
+reviewer: codex
+diff_base: N/A
+verdict: PASS
+cycle: tone-test
+scope: wrapper-generated
+STAMP
+  cat > "$SANDBOX/trail/dod/.security-reviewed" <<'STAMP'
+reviewer=security-reviewer
+reviewed=2026-06-16T02:00:00Z
+security_level=standard
+cycle=tone-test
+verdict=PASS
+mechanism=llm-security-review
+STAMP
   # Remove the helper so I4 fires (sandbox_setup already copied it from lib/).
   rm -f "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
 
@@ -218,8 +252,25 @@ test_exit2_stderr_tone_pre_bash_test_commit_gate_i5_helper_exec_failure() {
   # Seed stamps and DoD so commit passes P3-P6 gates and reaches I5.
   seed_dod "dod-2026-05-18-i5-test.md"
   seed_inbox "2026-05-18-i5-test.md"
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
-  touch "$SANDBOX/trail/dod/.security-reviewed"
+  # Content-rich stamps (docs/specs/2026-06-16-review-stamp-freshness.md): an
+  # empty `touch` stamp now fail-closes at the M2/M3 review-stamp check, so we
+  # write PASS stamps with a shared cycle to reach the infra (I3/I4/I5) path.
+  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
+reviewed_at: 2026-06-16T01:00:00Z
+reviewer: codex
+diff_base: N/A
+verdict: PASS
+cycle: tone-test
+scope: wrapper-generated
+STAMP
+  cat > "$SANDBOX/trail/dod/.security-reviewed" <<'STAMP'
+reviewer=security-reviewer
+reviewed=2026-06-16T02:00:00Z
+security_level=standard
+cycle=tone-test
+verdict=PASS
+mechanism=llm-security-review
+STAMP
   # Replace the helper with a stub that exits 1 to trigger [I5].
   # sandbox_setup already copied the real extract-commit-msg.py from lib/;
   # we overwrite it with a failing stub.

@@ -493,7 +493,48 @@ fi
 SKIP_SPEC_GATE="$PROJECT_DIR/trail/dod/.skip-spec-gate"
 SPEC_REVIEWS_DIR="$PROJECT_DIR/trail/dod/.spec-reviews"
 
-if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]; then
+# M1 (2026-06-16): decide whether to run the spec gate this edit.
+# Default: run iff the .spec-reviews dir exists (gate is active).
+#
+# .skip-spec-gate is advertised as a ONE-SHOT bypass but the old entry test
+# (`[ ! -f "$SKIP_SPEC_GATE" ]`) only *checked* the marker and never removed
+# it, so it became a permanent off-switch — every edit skipped the gate until
+# the file was hand-deleted (root cause: no rm -f, unlike .skip-stop-gate which
+# is consumed on match in stop-session-gate.sh). Fix: when the marker is present
+# AND the gate is active, CONSUME it (rm -f) before skipping, then verify the
+# removal. fail-closed — if removal can't be proven (a remaining dir or any
+# non-regular path: fifo/socket/device), do NOT honor the bypass: run the gate
+# normally. This prevents an un-removable marker from reinstating the
+# permanent-bypass bug.
+RUN_SPEC_GATE=false
+if [ -d "$SPEC_REVIEWS_DIR" ]; then
+  RUN_SPEC_GATE=true
+  if [ -e "$SKIP_SPEC_GATE" ]; then
+    # Consume the one-shot marker, then branch on whether removal is PROVEN.
+    # Proof uses `! -e` (not `! -f && ! -d`): a remaining non-regular path
+    # (fifo/socket/device/dir) must also count as "not consumed" → fail-closed,
+    # else such a marker would reinstate the permanent-bypass bug (codex R1 High).
+    rm -f "$SKIP_SPEC_GATE" 2>/dev/null || true
+    if [ ! -e "$SKIP_SPEC_GATE" ]; then
+      RUN_SPEC_GATE=false   # marker truly consumed → skip the gate this once
+      _bypass_msg="skip-spec-gate consumed (one-shot spec-review bypass)"
+    else
+      # removal not proven → fail-closed: gate stays enforced (RUN_SPEC_GATE=true)
+      _bypass_msg="skip-spec-gate consume_failed; fail_closed (gate enforced)"
+    fi
+    # Audit the actual outcome — log AFTER the result is known so a fail-closed
+    # path never records a false "consumed" (codex R1 Medium, honest-audit model).
+    # fail-soft: logging must never abort the hook.
+    BYPASS_LOG="$PROJECT_DIR/trail/incidents/auto-mode-bypass.log"
+    mkdir -p "$(dirname "$BYPASS_LOG")" 2>/dev/null || true
+    # Match the existing writer to this same log (lib/auto-mode.sh) — both use
+    # `date -u +%FT%TZ` so the shared audit file keeps one timestamp format.
+    printf '%s\t%s\n' "$(date -u +%FT%TZ)" "$_bypass_msg" \
+      >> "$BYPASS_LOG" 2>/dev/null || true
+  fi
+fi
+
+if [ "$RUN_SPEC_GATE" = true ]; then
   UNRESOLVED_SPECS=false
   # Strict ISO 8601 shape shared by SR-1 (.pending vs .reviewed compare) and
   # SR-1.b (orphan .reviewed vs spec mtime compare). Both rein writers use
@@ -795,6 +836,51 @@ if [ "${#MISSING_MARKERS[@]}" -gt 0 ]; then
     echo "  The PostToolUse hook will inject the routing procedure body after the task record is saved." >&2
     echo "  Emergency bypass: echo 'reason=<reason>' > $ROUTING_BYPASS" >&2
     log_block "routing section missing" "$FILE_PATH"
+    exit 2
+  fi
+fi
+
+# (a2) M4 (2026-06-16): spec-review 생성기 fail-open 차단.
+#      post-edit-spec-review-gate.sh 가 python 미해결 / JSON 파싱 실패 시
+#      (편집된 spec 경로를 알 수 없으므로) generic 보수 마커
+#      .spec-review-gen-failed 를 남긴다. 마커가 있으면 미상 spec 변경이
+#      미리뷰 상태일 수 있으므로 보수적으로 차단한다. routing-missing
+#      glob-block 패턴(위 (a))과 동형이되 별도 마커/바이패스를 쓰므로 routing
+#      분기를 침범하지 않는다.
+#
+# 데드락 탈출구: trail/dod/.skip-spec-gen-gate 마커 (reason 기록 후 1회 사용
+#      → 즉시 rm -f 소비, M1 .skip-spec-gate consume-on-use 와 일관).
+SPEC_GEN_BYPASS="$DOD_DIR/.skip-spec-gen-gate"
+SPEC_GEN_MARKER="$DOD_DIR/.spec-review-gen-failed"
+# Sanitize untrusted marker field values before echoing to stderr — strip
+# control chars (incl. terminal escapes that could spoof the log/terminal) and
+# cap length. Mirrors pre-bash-test-commit-gate.sh sanitize_marker_path
+# (2026-06-16 통합 보안리뷰 INFO-2).
+_spec_gen_sanitize() { printf '%s' "$1" | LC_ALL=C tr -d '[:cntrl:]' | cut -c1-200; }
+if [ -e "$SPEC_GEN_MARKER" ]; then
+  if [ -e "$SPEC_GEN_BYPASS" ]; then
+    SPEC_GEN_REASON=$(_spec_gen_sanitize "$(grep '^reason=' "$SPEC_GEN_BYPASS" 2>/dev/null | cut -d= -f2- || echo "unspecified")")
+    # consume-on-use + 제거 증명 (M1 .skip-spec-gate 와 일관, 통합 보안리뷰 INFO-1):
+    # rm 후 `[ ! -e ]` 로 실제 제거를 증명해야 1회 통과를 허용한다. 제거 불가
+    # (디렉토리/특수파일 등)면 fail-closed — un-removable 바이패스가 영구 우회로
+    # 굳는 것을 막는다.
+    rm -f "$SPEC_GEN_BYPASS" 2>/dev/null || true
+    if [ ! -e "$SPEC_GEN_BYPASS" ]; then
+      echo "WARNING: spec-review generator gate 1회성 바이패스 소비 — reason: $SPEC_GEN_REASON" >&2
+      log_block "spec-review gen-failed bypass" "$FILE_PATH"
+      # 제거 증명 성공 → 이번 편집 1회 통과 (아래로 fall through)
+    else
+      echo "[rein] The spec-review bypass marker could not be removed — failing closed (bypass not honored)." >&2
+      log_block "spec-review gen-failed bypass consume failed" "$FILE_PATH"
+      exit 2
+    fi
+  else
+    SPEC_GEN_CAUSE=$(_spec_gen_sanitize "$(grep '^cause=' "$SPEC_GEN_MARKER" 2>/dev/null | head -1 | cut -d= -f2- || echo "unknown")")
+    echo "[rein] The spec-review marker generator failed (cause=$SPEC_GEN_CAUSE)." >&2
+    echo "  An unidentified spec change may be unreviewed, so source edits are blocked conservatively." >&2
+    echo "  Resolve the underlying python / JSON-parse failure, then re-edit the spec so the marker auto-heals." >&2
+    echo "  Emergency bypass (one-shot): echo 'reason=<reason>' > $SPEC_GEN_BYPASS" >&2
+    log_block "spec-review generator failed" "$FILE_PATH"
     exit 2
   fi
 fi

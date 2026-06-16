@@ -12,6 +12,29 @@ PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 DOD_DIR="$PROJECT_DIR/trail/dod"
 SPEC_REVIEWS_DIR="$DOD_DIR/.spec-reviews"
 
+# M4 (2026-06-16): conservative marker for the THREE fail-open paths below.
+# This hook used to `exit 0` silently when it could not resolve python / parse
+# the JSON, so an unreviewed spec edit produced no .pending marker and the next
+# source edit was not blocked (fail-open). Mirroring post-edit-dod-routing-check.sh
+# (L35-43/L49), each fail-open path now drops a single generic conservative
+# marker recording its cause; pre-edit-dod-gate.sh glob-blocks on it. The
+# success path auto-heals the marker (rm -f). The marker is generic (file
+# unknown — we could not resolve which path was edited), so a single token with
+# a `cause=` body distinguishes the three failures.
+SPEC_GEN_FAILED_MARKER="$DOD_DIR/.spec-review-gen-failed"
+
+# write_spec_gen_failed_marker <cause>
+#   cause ∈ {noncache-python, json-parse, cache-python}. Best-effort: marker
+#   creation must never abort the hook (post-hook stays silent/exit 0).
+write_spec_gen_failed_marker() {
+  local cause="$1"
+  mkdir -p "$DOD_DIR" 2>/dev/null || true
+  {
+    echo "cause=$cause"
+    echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$SPEC_GEN_FAILED_MARKER" 2>/dev/null || true
+}
+
 # shellcheck source=./lib/python-runner.sh
 . "$SCRIPT_DIR/lib/python-runner.sh"
 # HK-4: 분할 후 dispatcher 가 처리하던 정책 평가를 각 sub-hook 이 자체 호출.
@@ -30,10 +53,13 @@ fi
 hook_input_load   # 캐시 활성 시 INPUT/FILE_PATHS 채워짐.
 
 if [ "${REIN_HOOK_INPUT_CACHE:-0}" != "1" ]; then
-  # Post-hook: Python 미해결 시 조용히 skip (세션 차단 금지).
+  # Post-hook: Python 미해결 시 조용히 skip (세션 차단 금지). M4: 조용히 통과하면
+  # 미리뷰 spec 변경의 .pending 이 안 생겨 다음 편집이 안 막히므로(fail-open),
+  # exit 0 직전에 보수 마커를 남긴다 (routing-check 패턴).
   resolve_python 2>/dev/null
   rc=$?
   if [ "$rc" -ne 0 ]; then
+    write_spec_gen_failed_marker "noncache-python"
     exit 0
   fi
 
@@ -54,8 +80,10 @@ if [ "${REIN_HOOK_INPUT_CACHE:-0}" != "1" ]; then
   PY_EXIT=$?
 
   # helper 가 실패했으면 세션은 차단하지 않되 사용자가 stderr 로 인지 가능하게 한다.
+  # M4: JSON 파싱 실패도 fail-open 경로 — 보수 마커를 남겨 다음 편집이 막히게 한다.
   if [ "$PY_EXIT" -ne 0 ]; then
     echo "WARNING: post-edit-spec-review-gate JSON 파싱 실패 — marker 미생성" >&2
+    write_spec_gen_failed_marker "json-parse"
     exit 0
   fi
 
@@ -68,14 +96,28 @@ fi
 
 [ -z "$FILE_PATHS" ] && exit 0
 
-# 캐시 경로에서도 path normalize 용 PYTHON_RUNNER 가 필요.
+# 캐시 경로에서도 path normalize 용 PYTHON_RUNNER 가 필요. M4: 여기서 조용히
+# 통과하면 캐시로 받은 spec path 의 .pending 이 안 생기므로(fail-open) 보수
+# 마커를 남긴다.
 if [ -z "${PYTHON_RUNNER[0]:-}" ]; then
   resolve_python 2>/dev/null
   rc=$?
   if [ "$rc" -ne 0 ]; then
+    write_spec_gen_failed_marker "cache-python"
     exit 0
   fi
 fi
+
+# M4: success path reached — python resolved + FILE_PATHS extracted (non-empty,
+# guarded above). Auto-heal of the conservative marker is NOT done here:
+# clearing on ANY successful edit (incl. non-spec source files) would let a
+# `.skip-spec-gen-gate` bypass + a later non-spec edit silently clear the marker
+# while the spec missed during the failure window stays untracked — reopening
+# the M4 fail-open (codex integration-review R1 High). Instead, heal ONLY after a
+# canonical spec/plan is actually reprocessed (pending created) below — proof the
+# producer works for specs again. Until then the marker persists (block again),
+# and the one-shot bypass stays the deliberate escape.
+_healed_canonical_spec=false
 
 # 해시 계산
 compute_hash() {
@@ -148,6 +190,17 @@ while IFS= read -r FILE_PATH; do
 
   echo "NOTICE: spec review pending — $ABS" >&2
   echo "  리뷰 후: rein-mark-spec-reviewed.sh \"$ABS\" codex (plugin bundle 또는 repo scripts/)" >&2
+  # M4: a canonical spec was successfully reprocessed (pending created/refreshed)
+  # → the producer demonstrably works for specs again, so it is safe to clear a
+  # conservative marker left by a prior failed run. Narrowed from the old
+  # top-of-file clear so non-spec edits never auto-heal (codex R1 High).
+  _healed_canonical_spec=true
 done <<< "$FILE_PATHS"
+
+# M4 auto-heal (narrowed): only when a canonical spec/plan was actually
+# reprocessed this run. Non-spec edits leave the marker in place → block again.
+if [ "$_healed_canonical_spec" = true ]; then
+  rm -f "$SPEC_GEN_FAILED_MARKER" 2>/dev/null || true
+fi
 
 exit 0

@@ -70,6 +70,76 @@ test_validator_passes_clean_plan() {
   assert_exit 0 "clean plan should pass"
 }
 
+# --- 2026-06-16 session follow-up: numbered headings + backtick Scope ID cells.
+# spec-writer naturally writes `## 3. Scope Items` and backtick-wrapped IDs;
+# the validator must accept both rather than silently treating the doc as a
+# legacy no-matrix plan (which skipped validation entirely).
+_seed_numbered_backtick_design() {
+  local path="$SANDBOX/$1"
+  mkdir -p "$(dirname "$path")"
+  cat > "$path" <<'MD'
+# Design
+
+## 3. Scope Items
+
+| ID | 설명 |
+|----|------|
+| `B1-foo` | desc of B1 |
+| `B2-bar` | desc of B2 |
+MD
+}
+
+test_validator_accepts_numbered_heading_and_backtick_ids() {
+  _seed_numbered_backtick_design "docs/specs/foo.md"
+  mkdir -p "$SANDBOX/docs/plans"
+  cat > "$SANDBOX/docs/plans/bar.md" <<'MD'
+# Plan
+
+## 2. Design 범위 커버리지 매트릭스
+
+> design ref: docs/specs/foo.md
+
+| Scope ID | 상태 | 위치/사유 |
+|----------|------|----------|
+| `B1-foo` | implemented | Phase 1 |
+| `B2-bar` | implemented | Phase 2 |
+
+## Phase 1
+covers: [B1-foo]
+
+## Phase 2
+covers: [B2-bar]
+MD
+  run_validator_in_sandbox "docs/plans/bar.md"
+  assert_exit 0 "numbered heading + backtick IDs (valid coverage) should pass"
+}
+
+test_validator_engages_on_numbered_heading_uncovered_id() {
+  # Reproduction: before the leniency, a numbered matrix heading was not matched,
+  # so the validator treated the plan as legacy (no matrix) and SKIPPED → exit 0,
+  # silently passing an uncovered implemented ID. Now the matrix is found and the
+  # uncovered ID is caught → exit 2 (validation actually engaged).
+  _seed_numbered_backtick_design "docs/specs/foo.md"
+  mkdir -p "$SANDBOX/docs/plans"
+  cat > "$SANDBOX/docs/plans/bar.md" <<'MD'
+# Plan
+
+## 2. Design 범위 커버리지 매트릭스
+
+> design ref: docs/specs/foo.md
+
+| Scope ID | 상태 | 위치/사유 |
+|----------|------|----------|
+| `B1-foo` | implemented | Phase 1 |
+| `B2-bar` | implemented | Phase 2 |
+
+## Phase 1
+covers: [B1-foo]
+MD
+  run_validator_in_sandbox "docs/plans/bar.md"
+  assert_exit 2 "numbered heading: uncovered implemented ID must still be caught (not skipped)"
+}
+
 test_validator_detects_missing_design_id() {
   seed_design "docs/specs/foo.md" "A1 A2 A3"
   seed_plan_clean "docs/plans/bar.md"
@@ -444,6 +514,8 @@ test_test_commit_gate_blocks_pytest_on_marker() {
 # validator 만 쓰는 테스트는 훅 복사 없이 run_test 로 감쌈.
 # run_test 는 hook-name 인자가 없으면 sandbox 만 세팅하고 끝난다.
 run_test test_validator_passes_clean_plan
+run_test test_validator_accepts_numbered_heading_and_backtick_ids
+run_test test_validator_engages_on_numbered_heading_uncovered_id
 run_test test_validator_detects_missing_design_id
 run_test test_validator_detects_unknown_covers_id
 run_test test_validator_detects_duplicate_matrix_id
