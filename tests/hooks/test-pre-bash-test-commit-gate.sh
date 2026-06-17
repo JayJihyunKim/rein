@@ -790,6 +790,726 @@ test_i6_emitter_unavailable_fails_closed() {
   assert_stderr_contains "[rein]"
 }
 
+# ============================================================
+# SX-* (docs/specs/2026-06-16-commit-gate-security-surface-exempt.md)
+# 보안-surface 면제 — 단독 `git commit`(staging 동반 없음 + allowlist 옵션만)
+# 이고 staged diff 가 전부 허용목록(문서/trail/버전 문자열-only)이면 P6+M2 를
+# 둘 다 skip. 그 외 전부 fail-closed(M2 구멍 재개방 금지).
+#
+# 면제 케이스는 PROJECT_DIR(=SANDBOX)가 실제 git repo 여야 한다 — gate 본문이
+# `git -C "$PROJECT_DIR" diff --cached` / `git show HEAD:...` 를 호출하기 때문.
+# 각 테스트는 sandbox 에 git init + baseline 커밋을 먼저 만들고(HEAD 존재 →
+# plugin.json semantic 비교 가능) 그 위에 변경을 staging 한다.
+# ============================================================
+
+# _sx_git_init_baseline — sandbox 에 git repo + baseline 커밋 생성.
+# baseline 에는 scripts/rein.sh(VERSION="1.5.5") + plugin.json + docs 를 둔다.
+_sx_git_init_baseline() {
+  git -C "$SANDBOX" init -q
+  git -C "$SANDBOX" config user.email "t@example.com"
+  git -C "$SANDBOX" config user.name "t"
+  git -C "$SANDBOX" config commit.gpgsign false
+  mkdir -p "$SANDBOX/scripts" "$SANDBOX/plugins/rein-core/.claude-plugin" "$SANDBOX/docs/specs"
+  printf 'VERSION="1.5.5"\n' > "$SANDBOX/scripts/rein.sh"
+  printf '{\n  "name": "rein",\n  "version": "1.5.5",\n  "description": "x"\n}\n' \
+    > "$SANDBOX/plugins/rein-core/.claude-plugin/plugin.json"
+  printf '# changelog\n' > "$SANDBOX/CHANGELOG.md"
+  printf '# readme\n' > "$SANDBOX/README.md"
+  printf '# spec\n' > "$SANDBOX/docs/specs/x.md"
+  printf 'print("hi")\n' > "$SANDBOX/src_foo.py"
+  printf '# hook\n' > "$SANDBOX/hookfile.sh"
+  git -C "$SANDBOX" add -A
+  git -C "$SANDBOX" commit -q -m "baseline"
+}
+
+# _sx_seed_standard_dod_no_security — standard(비light) DoD + content-rich PASS
+# 코드 표식만(보안 표식 부재). 면제 미성립이면 P6 부재 차단이 정상 동작.
+_sx_seed_standard_dod_no_security() {
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp "2026-06-16T01:00:00Z" "2026-05-19-tc-gate-test" "PASS" "skip" "skip"
+}
+
+# (SX form / TOCTOU) `git add . && git commit` 한 줄 → 면제 미시도(staging 동반).
+test_sx_add_and_commit_one_line_toctou_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"   # docs change (unstaged)
+  local input='{"tool_input":{"command":"git add . && git commit -m \"chore: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX add&&commit one-line (TOCTOU) → fail-closed (security required)"
+}
+
+# (SX form / TOCTOU) `git reset && git commit` → 면제 미시도.
+test_sx_reset_and_commit_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git reset && git commit -m \"chore: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX reset&&commit → fail-closed (security required)"
+}
+
+# (SX form) 단독 `git commit -m` + 사전 staged docs-only + 보안표식 부재 → 통과.
+test_sx_lone_commit_docs_only_exempt_passes() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -m \"chore: docs\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX lone commit, staged docs-only → exempt (passes without security stamp)"
+}
+
+# (SX form) -a / --amend / pathspec / 분리 keyid 자리 pathspec / 미상 옵션 → 미시도.
+test_sx_commit_dash_a_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -a -m \"chore: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX git commit -a → fail-closed"
+}
+
+test_sx_commit_am_combined_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -am \"chore: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX git commit -am (combined) → fail-closed"
+}
+
+test_sx_commit_amend_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit --amend -m \"chore: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX git commit --amend → fail-closed"
+}
+
+test_sx_commit_pathspec_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -m \"chore: x\" CHANGELOG.md"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX git commit <pathspec> → fail-closed (trailing pathspec)"
+}
+
+# (SX form) -S 뒤 분리 토큰은 keyid 로 소비 금지 → pathspec/소스 재검사로 fail.
+test_sx_commit_dash_S_separate_pathspec_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -S src/x.py -m \"chore: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX git commit -S <separate token> → token re-checked as pathspec → fail-closed"
+}
+
+test_sx_commit_unknown_option_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit --foo -m \"chore: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX git commit --foo (unknown option) → fail-closed"
+}
+
+# (SX form) 글로벌 옵션(git -c x=y commit) → 면제 미시도 (글로벌옵션 완화 제거).
+# HOLE FIX (codex integration review, 2026-06-16): a `-c`/`-C`/`--git-dir`/
+# `--work-tree` global option between `git` and `commit` can redirect the
+# committed repo/index away from the inspected index → fail-closed. Exemption
+# is only `git` directly followed by `commit`. (Was: assert_pass.)
+test_sx_commit_global_opt_only_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git -c user.name=x commit -m \"chore: docs\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX git -c user.name=x commit (global opt) → fail-closed (relax removed)"
+}
+
+# (SX form) attached/등호/무인자 서명 + allowlist 옵션, staged docs-only → 통과.
+test_sx_commit_signing_and_allowlist_opts_exempt_passes() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -s -q -v -SABCDEF -m \"chore: docs\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX git commit -s -q -v -SABCDEF -m (attached keyid + allowlist) → exempt passes"
+}
+
+test_sx_commit_gpgsign_equals_exempt_passes() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit --gpg-sign=KEY -m \"chore: docs\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX git commit --gpg-sign=KEY -m (equals keyid) → exempt passes"
+}
+
+# (SX form, codex R1 Med) 여러 단어 메시지(따옴표 보존) → 통과(pathspec 오인 금지).
+test_sx_multiword_message_quoted_exempt_passes() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -m \"chore: release v1.5.6 with spaces\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX multi-word quoted message → exempt passes (spaces not mistaken for pathspec)"
+}
+
+# (SX form, codex R1 Med) 메시지 뒤 진짜 pathspec → 면제 미시도.
+test_sx_message_then_real_pathspec_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -m \"chore: msg\" CHANGELOG.md"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX message then real pathspec → fail-closed"
+}
+
+# ------------------------------------------------------------
+# SX hole-fix (codex integration review, 2026-06-16): fail-open closures.
+#   High — command substitution / subshell TOCTOU: `$(...)`/backtick/`<(...)`/
+#     subshell `(...)` group can run `git add ...` (or anything) BEFORE the
+#     gated `git commit`, staging source under a docs-only staged snapshot →
+#     security-skipped commit. The earlier tokenizer kept `$(...)` inside the
+#     `-m` message token and only counted clauses whose first token is exactly
+#     `git`, so a glued `(git` subshell head went uncounted → wrongly exempt.
+#   Med — effective repo/index mismatch: `-C`/`--git-dir`/`--work-tree`/`-c`
+#     global options + `GIT_*` env prefixes (esp. GIT_INDEX_FILE) let the
+#     committed index/repo differ from the `git -C "$PROJECT_DIR" diff --cached`
+#     the gate inspects → exemption decided against the wrong index.
+# Decision (fail-closed strengthen): exemption is attempted ONLY for a bare
+# in-place single `git commit <allowlist-opts>` clause with NO shell evaluation
+# (`$(`/backtick/`${...}`-as-command/`<(`/`>(`), NO subshell/group, NO env
+# assignment prefix, and NO `git`→`commit` global option (repo/index redirect).
+# Anything else → exemption not attempted (security required).
+# RED (current code wrongly exempts) → GREEN (security required) after fix.
+# ------------------------------------------------------------
+
+# (SX hole — cmd-subst TOCTOU) `$(git add ...)` inside -m message → 면제 미시도.
+test_sx_cmd_subst_in_message_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md   # staged snapshot = docs-only (would-be exempt)
+  local input='{"tool_input":{"command":"git commit -m \"x $(git add src_foo.py)\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX \$(git add ...) in -m message (TOCTOU) → fail-closed (security required)"
+}
+
+# (SX hole — backtick TOCTOU) backtick `git add ...` inside -m message → 미시도.
+test_sx_backtick_in_message_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -m \"x `git add src_foo.py`\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX backtick \`git add ...\` in -m message (TOCTOU) → fail-closed"
+}
+
+# (SX hole — subshell group TOCTOU) `(git add ...); git commit` → 미시도.
+test_sx_subshell_group_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"(git add src_foo.py); git commit -m x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX subshell (git add ...); git commit (TOCTOU) → fail-closed"
+}
+
+# (SX hole — repo redirect) `git -C /other commit` → index 분리 가능 → 미시도.
+test_sx_dash_C_other_repo_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git -C /other commit -m x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX git -C /other commit (repo redirect) → fail-closed"
+}
+
+# (SX hole — repo redirect) `git --git-dir=/x --work-tree=/y commit` → 미시도.
+test_sx_gitdir_worktree_redirect_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git --git-dir=/x --work-tree=/y commit -m x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX git --git-dir/--work-tree commit (repo/index redirect) → fail-closed"
+}
+
+# (SX hole — env prefix) `GIT_INDEX_FILE=/tmp/x git commit` → index 분리 → 미시도.
+test_sx_git_index_file_env_prefix_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"GIT_INDEX_FILE=/tmp/x git commit -m x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX GIT_INDEX_FILE=... git commit (env index redirect) → fail-closed"
+}
+
+# (SX hole — config redirect) `git -c user.email=x commit` → 미시도(글로벌옵션 완화 제거).
+test_sx_dash_c_config_commit_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git -c user.email=x commit -m y"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX git -c user.email=x commit (config redirect) → fail-closed (global-opt relax removed)"
+}
+
+# (SX hole — regression) 평범한 단독 `git commit -m "여러 단어"` (docs-only) → 여전히 통과.
+test_sx_plain_lone_commit_multiword_still_passes() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -m \"chore: release v1.5.6 with several words\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX plain lone git commit (multi-word docs-only) → still exempt (no over-block)"
+}
+
+# ------------------------------------------------------------
+# SX hole-fix R2 (codex integration review R2 High, 2026-06-16): non-git first
+# clause skip. The earlier _sx_command_form_ok counted only clauses whose first
+# token is exactly `git`; a clause whose first token is anything else (a shell
+# builtin wrapper `command`, a `cd`, an `env`/`time`/`nice` wrapper, or any
+# harmless command like `true`/`echo`) was SKIPPED — neither counted as a commit
+# clause nor as an other-git clause. So `command git add s.py; git commit`,
+# `cd /other && git commit`, `env git add s.py; git commit`, and even
+# `true; git commit` all reduced to "exactly one commit clause, zero other-git
+# clauses" and were wrongly exempted. The skipped clause runs at REAL shell
+# execution time (staging source / committing in another repo) under a docs-only
+# staged snapshot the gate inspected → security-skipped commit.
+#
+# 종착 규칙 (final rule): exemption requires the ENTIRE command to be exactly ONE
+# non-empty clause, and that clause is a plain in-place `git commit <allowlist>`.
+# Any second non-empty clause — whatever it is (cd/command/env/git add/true/echo)
+# — → fail-closed. RED (current wrongly exempts) → GREEN (security required).
+# ------------------------------------------------------------
+
+# (SX hole R2 — command wrapper) `command git add s.py; git commit` → 면제 미시도.
+test_sx_command_wrapper_then_commit_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md   # staged snapshot = docs-only (would-be exempt)
+  local input='{"tool_input":{"command":"command git add src_foo.py; git commit -m x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX command git add ...; git commit (builtin wrapper) → fail-closed (security required)"
+}
+
+# (SX hole R2 — cd then commit) `cd /other && git commit` → repo decouple → 미시도.
+test_sx_cd_other_then_commit_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"cd /other && git commit -m x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX cd /other && git commit (repo decouple) → fail-closed"
+}
+
+# (SX hole R2 — env wrapper) `env git add s.py; git commit` → 면제 미시도.
+test_sx_env_wrapper_then_commit_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"env git add src_foo.py; git commit -m x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX env git add ...; git commit (env wrapper) → fail-closed"
+}
+
+# (SX hole R2 — harmless leading cmd) `true; git commit` → 2 clause → 면제 미시도.
+test_sx_true_then_commit_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"true; git commit -m x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX true; git commit (harmless leading cmd, 2 clauses) → fail-closed"
+}
+
+# (SX hole R2 — harmless leading cmd) `echo hi && git commit` → 2 clause → 미시도.
+test_sx_echo_then_commit_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"echo hi && git commit -m x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX echo hi && git commit (harmless leading cmd, 2 clauses) → fail-closed"
+}
+
+# (SX hole R2 — trailing harmless cmd) `git commit -m x; echo done` → 2 clause → 미시도.
+test_sx_commit_then_trailing_cmd_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -m x; echo done"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX git commit -m x; echo done (trailing clause) → fail-closed"
+}
+
+# (SX hole R3 — background control) `git commit -m x &` → 백그라운드 실행은 평범한
+# 전경 commit 이 아님. 후행 `&` 가 separator 라 "clause 1개 + 빈 후행 clause" 로
+# 줄어 면제를 통과하던 fail-open (codex integration review R3 High). `&` 가 토큰에
+# 하나라도 있으면 즉시 fail-closed 여야 한다. RED (이전 면제) → GREEN (보안 요구).
+test_sx_background_commit_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md   # staged snapshot = docs-only (would-be exempt)
+  local input='{"tool_input":{"command":"git commit -m x &"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX git commit -m x & (background control) → fail-closed"
+}
+
+# (SX staged-diff) 사전 staged 2개(docs) → 정확 분류 → 통과.
+test_sx_two_docs_staged_exempt_passes() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# c\n' > "$SANDBOX/CHANGELOG.md"
+  printf '# r\n' > "$SANDBOX/README.md"
+  git -C "$SANDBOX" add CHANGELOG.md README.md
+  local input='{"tool_input":{"command":"git commit -m \"docs: two\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX two docs staged → exempt passes"
+}
+
+# (SX staged-diff) hook.sh → docs/x.md rename → 구 경로 비허용 → 면제 미성립.
+test_sx_rename_hook_to_doc_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  git -C "$SANDBOX" mv hookfile.sh docs/hookfile.md
+  local input='{"tool_input":{"command":"git commit -m \"chore: move\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX rename hook.sh→docs/x.md → old path non-allowed → security required"
+}
+
+# (SX staged-diff) staged 없음 → 빈 출력 → fail-closed.
+test_sx_no_staged_diff_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  # baseline 후 아무것도 staging 안 함 → git diff --cached 빈 출력.
+  local input='{"tool_input":{"command":"git commit -m \"chore: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX no staged diff (empty) → fail-closed"
+}
+
+# (SX staged-diff) PROJECT_DIR 가 git repo 아님 → git diff --cached 실패 → fail-closed.
+test_sx_not_a_git_repo_failclosed() {
+  # git init 하지 않음 → PROJECT_DIR(SANDBOX) 비-repo.
+  _sx_seed_standard_dod_no_security
+  local input='{"tool_input":{"command":"git commit -m \"chore: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX non-git PROJECT_DIR → git diff --cached fails → fail-closed"
+}
+
+# (SX allowlist path) trail 표식 staged → 허용 → 통과.
+test_sx_trail_marker_staged_exempt_passes() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf 'reviewer=security-reviewer\n' > "$SANDBOX/trail/dod/.security-reviewed"
+  git -C "$SANDBOX" add -A trail/dod/.security-reviewed
+  local input='{"tool_input":{"command":"git commit -m \"chore: trail\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX trail/dod/.security-reviewed staged → exempt passes"
+}
+
+# (SX allowlist path) src 단독 staged → 비허용 → 보안 요구.
+test_sx_source_file_staged_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf 'print("x")\n' > "$SANDBOX/src_foo.py"
+  git -C "$SANDBOX" add src_foo.py
+  local input='{"tool_input":{"command":"git commit -m \"chore: src\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX source file staged → non-allowed → security required"
+}
+
+# (SX allowlist path) docs + src 혼합 → 비허용 → 보안 요구.
+test_sx_docs_plus_source_mixed_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# c\n' > "$SANDBOX/CHANGELOG.md"
+  printf 'print("x")\n' > "$SANDBOX/src_foo.py"
+  git -C "$SANDBOX" add CHANGELOG.md src_foo.py
+  local input='{"tool_input":{"command":"git commit -m \"chore: mix\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX docs + source mixed → non-allowed → security required"
+}
+
+# (SX version line) rein.sh VERSION 1줄만 변경 → 허용 → 통과.
+test_sx_rein_sh_version_only_exempt_passes() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf 'VERSION="1.5.6"\n' > "$SANDBOX/scripts/rein.sh"
+  git -C "$SANDBOX" add scripts/rein.sh
+  local input='{"tool_input":{"command":"git commit -m \"chore: bump\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX rein.sh VERSION-only line change → exempt passes"
+}
+
+# (SX version line) rein.sh VERSION + 다른 라인 변경 → 비허용 → 보안 요구.
+test_sx_rein_sh_version_plus_logic_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf 'VERSION="1.5.6"\n# new comment\n' > "$SANDBOX/scripts/rein.sh"
+  git -C "$SANDBOX" add scripts/rein.sh
+  local input='{"tool_input":{"command":"git commit -m \"chore: bump\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX rein.sh VERSION + extra line → non-allowed → security required"
+}
+
+# (SX version json) plugin.json top-level version 값만 변경 → 허용 → 통과.
+test_sx_plugin_json_version_only_exempt_passes() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '{\n  "name": "rein",\n  "version": "1.5.6",\n  "description": "x"\n}\n' \
+    > "$SANDBOX/plugins/rein-core/.claude-plugin/plugin.json"
+  git -C "$SANDBOX" add plugins/rein-core/.claude-plugin/plugin.json
+  local input='{"tool_input":{"command":"git commit -m \"chore: bump\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX plugin.json version-only change → exempt passes (semantic JSON compare)"
+}
+
+# (SX version json) plugin.json version + 다른 키 변경 → 비허용 → 보안 요구.
+test_sx_plugin_json_other_key_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '{\n  "name": "rein",\n  "version": "1.5.6",\n  "description": "CHANGED"\n}\n' \
+    > "$SANDBOX/plugins/rein-core/.claude-plugin/plugin.json"
+  git -C "$SANDBOX" add plugins/rein-core/.claude-plugin/plugin.json
+  local input='{"tool_input":{"command":"git commit -m \"chore: bump\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX plugin.json version+other key change → non-allowed → security required"
+}
+
+# (SX version json) plugin.json 깨진 staged 내용 → 파싱 실패 → 비허용.
+test_sx_plugin_json_parse_fail_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '{ broken json,,,' > "$SANDBOX/plugins/rein-core/.claude-plugin/plugin.json"
+  git -C "$SANDBOX" add plugins/rein-core/.claude-plugin/plugin.json
+  local input='{"tool_input":{"command":"git commit -m \"chore: bump\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX plugin.json broken JSON → parse fail → security required"
+}
+
+# (SX version json, codex R1 Med) HEAD 부재(baseline 없는 repo) → git show HEAD: 실패 → 비허용.
+test_sx_plugin_json_no_head_failclosed() {
+  git -C "$SANDBOX" init -q 2>/dev/null
+  git -C "$SANDBOX" config user.email "t@example.com"
+  git -C "$SANDBOX" config user.name "t"
+  git -C "$SANDBOX" config commit.gpgsign false
+  mkdir -p "$SANDBOX/plugins/rein-core/.claude-plugin"
+  printf '{\n  "name": "rein",\n  "version": "1.5.6"\n}\n' \
+    > "$SANDBOX/plugins/rein-core/.claude-plugin/plugin.json"
+  git -C "$SANDBOX" add plugins/rein-core/.claude-plugin/plugin.json   # NO baseline commit → no HEAD
+  _sx_seed_standard_dod_no_security
+  local input='{"tool_input":{"command":"git commit -m \"chore: bump\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX plugin.json with no HEAD (no baseline) → git show HEAD fail → security required"
+}
+
+# (SX skip P6/M2) 버전라인-only + 코드표식이 보안표식보다 최신(평소 STALE) → 통과(M2 skip).
+test_sx_version_only_skips_m2_stale_compare() {
+  _sx_git_init_baseline
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  # 코드 표식이 보안 표식보다 최신 + 다른 cycle = 평소라면 SECURITY_REVIEW_STALE.
+  _write_code_stamp     "2026-06-16T05:00:00Z" "tc-cycle" "PASS" "skip" "skip"
+  _write_security_stamp "2026-06-16T01:00:00Z" "OTHER-cycle" "PASS"
+  printf 'VERSION="1.5.6"\n' > "$SANDBOX/scripts/rein.sh"
+  git -C "$SANDBOX" add scripts/rein.sh
+  local input='{"tool_input":{"command":"git commit -m \"chore: bump\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX version-only + stale security stamp → M2 compare skipped, passes"
+}
+
+# (SX skip P6/M2) docs + 버전라인 혼합(전부 허용) → 통과.
+test_sx_docs_plus_version_mixed_exempt_passes() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# c\n' > "$SANDBOX/CHANGELOG.md"
+  printf 'VERSION="1.5.6"\n' > "$SANDBOX/scripts/rein.sh"
+  git -C "$SANDBOX" add CHANGELOG.md scripts/rein.sh
+  local input='{"tool_input":{"command":"git commit -m \"chore: release\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX docs + version-line mixed (all allowed) → exempt passes"
+}
+
+# (SX nonexempt) 버전라인 + hook .sh 로직 변경 혼합 → 면제 미성립 → 보안 요구.
+test_sx_version_plus_hook_logic_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf 'VERSION="1.5.6"\n' > "$SANDBOX/scripts/rein.sh"
+  printf '# changed hook\necho new\n' > "$SANDBOX/hookfile.sh"
+  git -C "$SANDBOX" add scripts/rein.sh hookfile.sh
+  local input='{"tool_input":{"command":"git commit -m \"chore: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX version-line + hook .sh logic → non-allowed → security required"
+}
+
+# (SX nonexempt) 면제 미성립 + stale 보안표식 → SECURITY_REVIEW_STALE 유지.
+test_sx_nonexempt_stale_security_stamp_blocks() {
+  _sx_git_init_baseline
+  seed_dod "dod-2026-05-19-tc-gate-test.md"
+  _write_code_stamp     "2026-06-16T05:00:00Z" "tc-cycle" "PASS" "skip" "skip"
+  _write_security_stamp "2026-06-16T01:00:00Z" "OTHER-cycle" "PASS"
+  printf 'print("x")\n' > "$SANDBOX/src_foo.py"   # non-allowed → exemption fails
+  git -C "$SANDBOX" add src_foo.py
+  local input='{"tool_input":{"command":"git commit -m \"chore: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_REVIEW_STALE" "SX non-exempt (source) + stale security stamp → SECURITY_REVIEW_STALE preserved"
+}
+
+# (SX nonexempt) hooks.json 단독 → 좁은 allowlist 밖 → 보안 요구.
+test_sx_hooks_json_alone_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '{"hooks":{}}\n' > "$SANDBOX/hooks.json"
+  git -C "$SANDBOX" add hooks.json
+  local input='{"tool_input":{"command":"git commit -m \"chore: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX hooks.json alone → outside narrow allowlist → security required"
+}
+
+# (SX coexist) light-tier+approved + src 편집(보안-surface 미성립) → skip(light-tier) → 통과.
+test_sx_light_tier_with_source_still_passes() {
+  _sx_git_init_baseline
+  # light+approved DoD (Tier 1 active-dod marker).
+  local content
+  content=$(cat <<'DOD'
+# DoD light
+## 라우팅 추천
+agent: rein:feature-builder
+mcps: []
+security_tier: light
+approved_by_user: true
+## 범위 연결
+plan ref: docs/plans/test.md
+covers: [test-id]
+DOD
+)
+  seed_dod "dod-2026-05-19-tc-gate-test.md" "$content"
+  printf 'path=trail/dod/dod-2026-05-19-tc-gate-test.md\n' > "$SANDBOX/trail/dod/.active-dod"
+  _write_code_stamp "2026-06-16T01:00:00Z" "tc-cycle" "PASS" "skip" "skip"
+  printf 'print("x")\n' > "$SANDBOX/src_foo.py"   # source → security-surface not exempt
+  git -C "$SANDBOX" add src_foo.py
+  local input='{"tool_input":{"command":"git commit -m \"feat: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX light-tier + source edit → skip via light-tier (security-surface not needed)"
+}
+
+# (SX coexist) standard DoD + docs-only(보안-surface 성립) → skip(보안-surface) → 통과.
+test_sx_standard_dod_docs_only_passes() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# c\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -m \"docs: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX standard DoD + docs-only → skip via security-surface"
+}
+
+# (SX coexist) 둘 다 미성립 → P6/M2 수행 → 보안 요구.
+test_sx_neither_exempt_blocks() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf 'print("x")\n' > "$SANDBOX/src_foo.py"
+  git -C "$SANDBOX" add src_foo.py
+  local input='{"tool_input":{"command":"git commit -m \"feat: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX neither exemption holds → P6/M2 run → security required"
+}
+
+# (SX coexist) P5 코드표식 부재는 면제와 무관하게 차단 (docs-only 면제 성립 상황).
+test_sx_p5_codex_stamp_missing_blocks_despite_exempt() {
+  _sx_git_init_baseline
+  seed_dod "dod-2026-05-19-tc-gate-test.md"   # DoD only, NO codex stamp
+  printf '# c\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -m \"docs: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "CODEX_STAMP_MISSING" "SX docs-only exempt but P5 codex stamp absent → still CODEX_STAMP_MISSING (P5 above exemption)"
+}
+
+# (SX audit) 보안-surface 면제 발동 → audit 로그 1줄 기록.
+test_sx_audit_log_written_on_exempt() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# c\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"git commit -m \"docs: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX audit case: exemption passes"
+  assert_file_exists "trail/incidents/security-surface-exempt.log"
+  assert_file_contains "trail/incidents/security-surface-exempt.log" "reason=security-surface-exempt"
+}
+
+# (SX audit) light-tier 면제만 발동(보안-surface 미성립) → 본 audit 라인 미기록.
+test_sx_audit_not_written_on_light_tier_only() {
+  _sx_git_init_baseline
+  local content
+  content=$(cat <<'DOD'
+# DoD light
+## 라우팅 추천
+agent: rein:feature-builder
+mcps: []
+security_tier: light
+approved_by_user: true
+## 범위 연결
+plan ref: docs/plans/test.md
+covers: [test-id]
+DOD
+)
+  seed_dod "dod-2026-05-19-tc-gate-test.md" "$content"
+  printf 'path=trail/dod/dod-2026-05-19-tc-gate-test.md\n' > "$SANDBOX/trail/dod/.active-dod"
+  _write_code_stamp "2026-06-16T01:00:00Z" "tc-cycle" "PASS" "skip" "skip"
+  printf 'print("x")\n' > "$SANDBOX/src_foo.py"   # source → only light-tier exempts
+  git -C "$SANDBOX" add src_foo.py
+  local input='{"tool_input":{"command":"git commit -m \"feat: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX light-tier only: passes"
+  assert_file_missing "trail/incidents/security-surface-exempt.log"
+}
+
+# (SX audit) audit 디렉토리 제거 후 면제 발동 → 면제는 여전히 통과(비차단).
+test_sx_audit_dir_removed_still_passes() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# c\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  rm -rf "$SANDBOX/trail/incidents"
+  local input='{"tool_input":{"command":"git commit -m \"docs: x\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "SX audit dir removed → exemption still passes (audit non-blocking)"
+}
+
 main() {
   # Policy block points P2-P7
   run_test test_p5_codex_stamp_missing_blocks                   "$HOOK"
@@ -853,6 +1573,72 @@ main() {
   run_test test_i1_python_resolver_failure_fails_closed         "$HOOK"
   run_test test_i2_json_parse_failure_fails_closed              "$HOOK"
   run_test test_i6_emitter_unavailable_fails_closed             "$HOOK"
+  # SX-* security-surface exemption (docs/specs/2026-06-16-commit-gate-security-surface-exempt.md)
+  # SX-command-form-failclosed
+  run_test test_sx_add_and_commit_one_line_toctou_failclosed    "$HOOK"
+  run_test test_sx_reset_and_commit_failclosed                  "$HOOK"
+  run_test test_sx_lone_commit_docs_only_exempt_passes          "$HOOK"
+  run_test test_sx_commit_dash_a_failclosed                     "$HOOK"
+  run_test test_sx_commit_am_combined_failclosed                "$HOOK"
+  run_test test_sx_commit_amend_failclosed                      "$HOOK"
+  run_test test_sx_commit_pathspec_failclosed                   "$HOOK"
+  run_test test_sx_commit_dash_S_separate_pathspec_failclosed   "$HOOK"
+  run_test test_sx_commit_unknown_option_failclosed             "$HOOK"
+  run_test test_sx_commit_global_opt_only_failclosed            "$HOOK"
+  run_test test_sx_commit_signing_and_allowlist_opts_exempt_passes "$HOOK"
+  run_test test_sx_commit_gpgsign_equals_exempt_passes          "$HOOK"
+  run_test test_sx_multiword_message_quoted_exempt_passes       "$HOOK"
+  run_test test_sx_message_then_real_pathspec_failclosed        "$HOOK"
+  # SX hole-fix (codex integration review): cmd-subst/subshell/env/repo-redirect
+  run_test test_sx_cmd_subst_in_message_failclosed              "$HOOK"
+  run_test test_sx_backtick_in_message_failclosed               "$HOOK"
+  run_test test_sx_subshell_group_failclosed                    "$HOOK"
+  run_test test_sx_dash_C_other_repo_failclosed                 "$HOOK"
+  run_test test_sx_gitdir_worktree_redirect_failclosed          "$HOOK"
+  run_test test_sx_git_index_file_env_prefix_failclosed         "$HOOK"
+  run_test test_sx_dash_c_config_commit_failclosed              "$HOOK"
+  run_test test_sx_plain_lone_commit_multiword_still_passes     "$HOOK"
+  # SX hole-fix R2 (codex integration review R2 High): non-git first clause skip
+  run_test test_sx_command_wrapper_then_commit_failclosed       "$HOOK"
+  run_test test_sx_cd_other_then_commit_failclosed              "$HOOK"
+  run_test test_sx_env_wrapper_then_commit_failclosed           "$HOOK"
+  run_test test_sx_true_then_commit_failclosed                  "$HOOK"
+  run_test test_sx_echo_then_commit_failclosed                  "$HOOK"
+  run_test test_sx_commit_then_trailing_cmd_failclosed          "$HOOK"
+  # SX hole-fix R3 (codex integration review R3 High): background control `&`
+  run_test test_sx_background_commit_failclosed                 "$HOOK"
+  # SX-staged-diff-acquire
+  run_test test_sx_two_docs_staged_exempt_passes                "$HOOK"
+  run_test test_sx_rename_hook_to_doc_failclosed                "$HOOK"
+  run_test test_sx_no_staged_diff_failclosed                    "$HOOK"
+  run_test test_sx_not_a_git_repo_failclosed                    "$HOOK"
+  # SX-allowlist-docs-trail
+  run_test test_sx_trail_marker_staged_exempt_passes            "$HOOK"
+  run_test test_sx_source_file_staged_failclosed                "$HOOK"
+  run_test test_sx_docs_plus_source_mixed_failclosed            "$HOOK"
+  # SX-allowlist-version-line
+  run_test test_sx_rein_sh_version_only_exempt_passes           "$HOOK"
+  run_test test_sx_rein_sh_version_plus_logic_failclosed        "$HOOK"
+  run_test test_sx_plugin_json_version_only_exempt_passes       "$HOOK"
+  run_test test_sx_plugin_json_other_key_failclosed             "$HOOK"
+  run_test test_sx_plugin_json_parse_fail_failclosed            "$HOOK"
+  run_test test_sx_plugin_json_no_head_failclosed               "$HOOK"
+  # SX-skip-p6-m2-when-all-exempt
+  run_test test_sx_version_only_skips_m2_stale_compare          "$HOOK"
+  run_test test_sx_docs_plus_version_mixed_exempt_passes        "$HOOK"
+  # SX-nonexempt-still-required
+  run_test test_sx_version_plus_hook_logic_failclosed           "$HOOK"
+  run_test test_sx_nonexempt_stale_security_stamp_blocks        "$HOOK"
+  run_test test_sx_hooks_json_alone_failclosed                  "$HOOK"
+  # SX-coexist-light-tier
+  run_test test_sx_light_tier_with_source_still_passes          "$HOOK"
+  run_test test_sx_standard_dod_docs_only_passes                "$HOOK"
+  run_test test_sx_neither_exempt_blocks                        "$HOOK"
+  run_test test_sx_p5_codex_stamp_missing_blocks_despite_exempt "$HOOK"
+  # SX-audit-log
+  run_test test_sx_audit_log_written_on_exempt                  "$HOOK"
+  run_test test_sx_audit_not_written_on_light_tier_only         "$HOOK"
+  run_test test_sx_audit_dir_removed_still_passes               "$HOOK"
   summary
 }
 

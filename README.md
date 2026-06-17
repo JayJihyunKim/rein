@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.5.5** (2026-06-16) — closes gaps where review/security checks could pass on stale or non-PASS records: a commit now requires the security review to be at least as fresh as the code review (same work cycle) and the code review to be a real PASS, the spec-review marker generator now fails closed instead of silently passing, the one-shot spec-review bypass is consumed after a single use, and the coverage validator accepts numbered headings and backtick-wrapped IDs (so specs no longer need manual reformatting). ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.5.6** (2026-06-17) — commits that touch only docs, operational records, or version strings now skip the security re-review automatically (a `git add`-then-commit one-liner, wrappers, background, or any non-allowlisted file still requires it), removing the release-time friction introduced by v1.5.5's freshness check while keeping everything outside the allowlist fail-closed. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

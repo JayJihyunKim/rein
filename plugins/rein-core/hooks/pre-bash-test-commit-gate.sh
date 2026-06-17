@@ -222,6 +222,550 @@ if command_invokes "$GIT_MERGE_ERE"; then
   exit 0
 fi
 
+# --- 보안-surface 면제 helper (spec 2026-06-16-commit-gate-security-surface-exempt) ---
+# check_review_stamp() 의 P6/M2 진입 전 두 번째 면제 경로(§4). 단독 `git commit`
+# (staging 동반 없음 + allowlist 옵션만) + staged diff 가 전부 허용목록
+# (문서/trail/버전 문자열-only)일 때 P6+M2 를 둘 다 skip 한다. 그 외 전부
+# fail-closed(현행 보안 요구 유지) — M2 구멍 재개방 금지. 위협모델은
+# "정직한 에이전트 규율"(spec §7). 아래 helper 는 PROJECT_DIR / PYTHON_RUNNER /
+# COMMAND (gate-body 글로벌) 를 호출 시점에 읽는다.
+
+# _sx_tokenize CMD
+#   따옴표 인식 토크나이저 (spec step 2; codex plan-review R1 Med — IFS
+#   word-split 금지). 결과 토큰을 글로벌 배열 _SX_TOKENS 에 채운다.
+#   상태 머신: 작은/큰 따옴표 안의 공백·separator 는 토큰 경계가 아니다 —
+#   `-m "여러 단어 메시지"` 가 `-m` + `여러 단어 메시지`(한 토큰)로 보존돼야
+#   정상 릴리스 커밋의 메시지 공백이 pathspec 으로 오인되지 않는다.
+#   separator(`&&`/`||`/`;`/`|`)는 따옴표 밖에서만 별도 토큰으로 분리한다
+#   (clause 분할은 _sx_command_form_ok 가 이 토큰열을 보고 수행).
+_sx_tokenize() {
+  local cmd="$1"
+  _SX_TOKENS=()
+  local n=${#cmd}
+  local i=0 ch nxt
+  local cur=""        # 현재 누적 중인 토큰
+  local have=0        # 현재 토큰에 내용이 있는지 (빈 따옴표 "" 도 토큰)
+  local state=plain   # plain | sq(작은따옴표) | dq(큰따옴표)
+  while [ "$i" -lt "$n" ]; do
+    ch="${cmd:i:1}"
+    case "$state" in
+      sq)
+        if [ "$ch" = "'" ]; then
+          state=plain
+        else
+          cur="$cur$ch"; have=1
+        fi
+        i=$((i + 1))
+        continue
+        ;;
+      dq)
+        if [ "$ch" = '"' ]; then
+          state=plain
+        else
+          cur="$cur$ch"; have=1
+        fi
+        i=$((i + 1))
+        continue
+        ;;
+    esac
+    # state == plain
+    case "$ch" in
+      "'")
+        state=sq; have=1; i=$((i + 1)); continue
+        ;;
+      '"')
+        state=dq; have=1; i=$((i + 1)); continue
+        ;;
+      ' '|$'\t'|$'\n')
+        if [ "$have" = 1 ]; then
+          _SX_TOKENS+=("$cur"); cur=""; have=0
+        fi
+        i=$((i + 1)); continue
+        ;;
+      ';')
+        if [ "$have" = 1 ]; then _SX_TOKENS+=("$cur"); cur=""; have=0; fi
+        _SX_TOKENS+=(";"); i=$((i + 1)); continue
+        ;;
+      '&')
+        if [ "$have" = 1 ]; then _SX_TOKENS+=("$cur"); cur=""; have=0; fi
+        nxt="${cmd:i+1:1}"
+        if [ "$nxt" = "&" ]; then
+          _SX_TOKENS+=("&&"); i=$((i + 2))
+        else
+          _SX_TOKENS+=("&"); i=$((i + 1))
+        fi
+        continue
+        ;;
+      '|')
+        if [ "$have" = 1 ]; then _SX_TOKENS+=("$cur"); cur=""; have=0; fi
+        nxt="${cmd:i+1:1}"
+        if [ "$nxt" = "|" ]; then
+          _SX_TOKENS+=("||"); i=$((i + 2))
+        else
+          _SX_TOKENS+=("|"); i=$((i + 1))
+        fi
+        continue
+        ;;
+      *)
+        cur="$cur$ch"; have=1; i=$((i + 1)); continue
+        ;;
+    esac
+  done
+  # 미닫힌 따옴표(state != plain) → 토큰화 신뢰 불가. 호출자는 _SX_FORM_OK
+  # 를 false 로 강제한다(아래). 닫힌 경우 마지막 토큰 flush.
+  if [ "$state" != "plain" ]; then
+    _SX_TOKENIZE_OK=false
+    return 0
+  fi
+  _SX_TOKENIZE_OK=true
+  if [ "$have" = 1 ]; then
+    _SX_TOKENS+=("$cur")
+  fi
+  return 0
+}
+
+# _sx_is_separator TOKEN  →  rc 0 if TOKEN is a clause separator.
+_sx_is_separator() {
+  case "$1" in
+    "&&"|"||"|";"|"|"|"&") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# _sx_command_has_eval_or_subshell CMD
+#   FAIL-OPEN HOLE FIX (codex integration review, 2026-06-16). The tokenizer
+#   (_sx_tokenize) strips quotes and keeps `$(...)`/backtick inside a `-m`
+#   message token, and glues `(git` into one token — so a TOCTOU command
+#   substitution (`git commit -m "x $(git add src.py)"`) or a subshell group
+#   (`(git add src.py); git commit`) slipped past _sx_command_form_ok and was
+#   wrongly exempted: the embedded `git add` runs at REAL shell execution time
+#   (before the gated `git commit`), staging source under a docs-only snapshot.
+#
+#   This guard scans the RAW command for any shell evaluation or grouping that
+#   could run an arbitrary command (esp. an index-mutating `git add`) around the
+#   commit. It is QUOTE-AWARE only where the shell itself is:
+#     - single quotes ('...')  → fully inert; nothing inside fires.
+#     - double quotes ("...")  → command substitution `$(`, backtick, and
+#       parameter/command expansion `${` ARE STILL ACTIVE (the shell evaluates
+#       them inside "..."), so they fail-closed even inside double quotes.
+#       Grouping/subshell metachars ( ) { } and separators are inert in "...".
+#     - unquoted                → `$(`, backtick, `${`, process substitution
+#       `<(`/`>(`, and subshell/group `(` `)` `{` `}` all fail-closed.
+#   rc 0  = an eval/subshell/process-substitution construct is present → caller
+#           must NOT attempt exemption (fail-closed).
+#   rc 1  = none found (plain command).
+#   Principle: 모호하면 fail-closed. A plain version-bump / docs commit message
+#   never contains these; an honest mis-classification only costs a normal
+#   security review, never a bypass.
+_sx_command_has_eval_or_subshell() {
+  local cmd="$1"
+  local n=${#cmd}
+  local i=0 ch nxt
+  local state=plain   # plain | sq | dq
+  while [ "$i" -lt "$n" ]; do
+    ch="${cmd:i:1}"
+    case "$state" in
+      sq)
+        [ "$ch" = "'" ] && state=plain
+        i=$((i + 1)); continue
+        ;;
+      dq)
+        # Double quotes do NOT disable command substitution / expansion.
+        case "$ch" in
+          '"')
+            state=plain; i=$((i + 1)); continue ;;
+          '`')
+            return 0 ;;                      # backtick command substitution
+          '$')
+            nxt="${cmd:i+1:1}"
+            case "$nxt" in
+              '('|'{') return 0 ;;           # $( ... )  or  ${ ... }
+            esac
+            i=$((i + 1)); continue ;;
+          *)
+            i=$((i + 1)); continue ;;
+        esac
+        ;;
+    esac
+    # state == plain (unquoted)
+    case "$ch" in
+      "'")
+        state=sq; i=$((i + 1)); continue ;;
+      '"')
+        state=dq; i=$((i + 1)); continue ;;
+      '`')
+        return 0 ;;                          # backtick command substitution
+      '$')
+        nxt="${cmd:i+1:1}"
+        case "$nxt" in
+          '('|'{') return 0 ;;               # $( ... )  or  ${ ... }
+        esac
+        i=$((i + 1)); continue ;;
+      '<'|'>')
+        nxt="${cmd:i+1:1}"
+        [ "$nxt" = "(" ] && return 0          # process substitution <( / >(
+        i=$((i + 1)); continue ;;
+      '('|')'|'{'|'}')
+        # Unquoted subshell / brace group — can run extra commands.
+        return 0 ;;
+      *)
+        i=$((i + 1)); continue ;;
+    esac
+  done
+  return 1
+}
+
+# _sx_command_form_ok
+#   spec §4.2 / step 2 — 단일-clause 종착 규칙 (codex integration review R2,
+#   2026-06-16). 면제는 **명령 전체 = 비어있지 않은 단일 clause `git commit
+#   <allowlist-opts>`** 일 때만. 다음 중 하나라도면 _SX_FORM_OK=false (fail-closed):
+#   ① 쉘 평가/서브셸/process substitution: 호출 전 _sx_command_has_eval_or_subshell
+#      가 이미 전체 명령을 검사한다(호출자 _sx_compute_security_surface_skip).
+#   ② 비어있지 않은 clause 가 정확히 1개가 아님 — separator(&&/||/;/|/&)로
+#      분할해 비어있지 않은 clause 를 **전부 센다**. 앞뒤에 cd/command/env/true/
+#      echo/git add/또 다른 git 등 무엇이든 동반되면 clause 수가 2개 이상이 되어
+#      거부된다. ⚠️ 이전 구현은 "git 아닌 clause 는 skip" 해서 `command git add
+#      s.py; git commit` / `cd /o && git commit` / `env git add; git commit` /
+#      `true; git commit` 가 면제를 통과했다 — clause 를 skip 하지 말고 전부 세어
+#      1개 초과면 즉시 거부한다(R2 hole fix).
+#   ③ 그 유일 clause 의 첫 토큰이 정확히 `git` 아님 — wrapper(command/env/time/…)
+#      또는 env 할당(VAR=val/GIT_*=) prefix 가 앞에 있으면 첫 토큰이 git 아님
+#      → fail-closed.
+#   ④ `git` 직후 토큰이 정확히 `commit` 아님 — 사이에 글로벌옵션(-C/-c/--git-dir/
+#      --work-tree 등 repo/index redirect)이 끼면 fail-closed.
+#   ⑤ 그 유일 commit clause 의 옵션이 전부 allowlist (미상 옵션·pathspec → fail).
+#   판정 결과를 글로벌 _SX_FORM_OK 에 true/false 로 둔다.
+_sx_command_form_ok() {
+  _SX_FORM_OK=false
+  # 토큰화 실패(미닫힌 따옴표) → fail-closed.
+  [ "${_SX_TOKENIZE_OK:-false}" = true ] || return 0
+
+  local total=${#_SX_TOKENS[@]}
+  [ "$total" -gt 0 ] || return 0
+
+  # 백그라운드 제어(`&`)는 면제 즉시 실격 (codex integration review R3 High).
+  # `git commit -m x &` 는 후행 `&` 가 separator 라 "비어있지 않은 clause 1개 +
+  # 빈 후행 clause" 로 줄어 면제를 통과하던 fail-open 이 있었다. 백그라운드 실행은
+  # 평범한 전경(in-place terminal) `git commit` 이 아니라 실행 타이밍 모호성을
+  # 만들므로 fail-closed. (토크나이저가 `&&` 는 단일 토큰으로 내므로 이 검사는
+  # 논리 AND `&&` 가 아닌 백그라운드 단일 `&` 만 잡는다.)
+  local t
+  for t in "${_SX_TOKENS[@]}"; do
+    [ "$t" = "&" ] && return 0       # _SX_FORM_OK 는 false 유지 (fail-closed)
+  done
+
+  # 토큰열을 separator 로 분할해 각 clause 의 [cs, ce) 를 순회한다. clause 를
+  # skip 하지 않고 비어있지 않은 clause 를 전부 센다(단일-clause 종착 규칙). 유일
+  # clause 가 `git commit <allowlist>` 형태인지는 form_clause_ok 에 담는다 —
+  # 비어있지 않은 clause 가 정확히 1개일 때만 그 값이 최종 판정에 쓰인다.
+  local i=0
+  local nonempty_clause_count=0
+  local form_clause_ok=false
+  while [ "$i" -lt "$total" ]; do
+    # clause 시작 = i. clause 끝 = 다음 separator 직전 또는 total.
+    local cs=$i
+    local ce=$i
+    while [ "$ce" -lt "$total" ] && ! _sx_is_separator "${_SX_TOKENS[$ce]}"; do
+      ce=$((ce + 1))
+    done
+    # clause 토큰 범위 [cs, ce). ce 는 separator 또는 total.
+    if [ "$cs" -lt "$ce" ]; then
+      # --- 비어있지 않은 clause ---
+      nonempty_clause_count=$((nonempty_clause_count + 1))
+      # 이 clause 가 plain `git commit <allowlist>` 형태인지 판정. count==1 일
+      # 때만 form_clause_ok 가 최종 판정에 반영되므로, 여기서 매번 재산정한다.
+      form_clause_ok=false
+      if [ "${_SX_TOKENS[$cs]}" = "git" ]; then
+        # git 직후(글로벌옵션 skip 없이) 바로 commit 인 경우만 면제 형태.
+        local k=$((cs + 1))
+        if [ "$k" -lt "$ce" ] && [ "${_SX_TOKENS[$k]}" = "commit" ]; then
+          # commit 뒤 옵션 allowlist 검사 (commit 토큰 다음부터 clause 끝까지).
+          if _sx_commit_opts_ok "$((k + 1))" "$ce"; then
+            form_clause_ok=true
+          fi
+        fi
+      fi
+    fi
+    # 다음 clause 로. ce 가 separator 면 한 칸 더 건너뛴다.
+    if [ "$ce" -lt "$total" ]; then
+      i=$((ce + 1))
+    else
+      i=$ce
+    fi
+  done
+
+  # 면제 시도 조건: 비어있지 않은 clause 정확히 1개 AND 그 clause 가
+  # `git commit <allowlist>` 형태.
+  if [ "$nonempty_clause_count" -eq 1 ] && [ "$form_clause_ok" = true ]; then
+    _SX_FORM_OK=true
+  fi
+  return 0
+}
+
+# _sx_commit_opts_ok START END
+#   commit 토큰 다음(START)부터 clause 끝(END, exclusive)까지 옵션을 allowlist
+#   스캔. allowlist = -m/--message(다음 1토큰 메시지 소비)/--message=<v>/-s/
+#   --signoff/-q/--quiet/-v/--verbose/attached -S<keyid>/--gpg-sign=<v>/
+#   무인자 -S·--gpg-sign. -S·--gpg-sign 뒤 분리 토큰은 keyid 로 소비하지 않고
+#   일반 토큰으로 재검사(pathspec/미상 옵션이면 fail). 그 외 토큰 → rc 1.
+_sx_commit_opts_ok() {
+  local p="$1" end="$2"
+  while [ "$p" -lt "$end" ]; do
+    local tok="${_SX_TOKENS[$p]}"
+    case "$tok" in
+      -m|--message)
+        # 다음 1토큰을 메시지로 소비 (따옴표 파서 덕에 공백 메시지가 1토큰).
+        # 인자 부재(다음이 clause 끝)면 git 자체가 거부하지만, 면제 관점에선
+        # 소비할 토큰이 없으니 그대로 진행(추가 토큰 없음).
+        p=$((p + 2)); continue ;;
+      --message=*)
+        p=$((p + 1)); continue ;;
+      -s|--signoff|-q|--quiet|-v|--verbose)
+        p=$((p + 1)); continue ;;
+      --gpg-sign=*)
+        p=$((p + 1)); continue ;;
+      -S|--gpg-sign)
+        # 무인자 서명. 다음 분리 토큰은 keyid 로 소비하지 않는다 — 일반 토큰으로
+        # 재검사되도록 1칸만 전진.
+        p=$((p + 1)); continue ;;
+      -S?*)
+        # attached -S<keyid>.
+        p=$((p + 1)); continue ;;
+      *)
+        # 미상 옵션·pathspec·-a/--all/-am/--amend/--only/--include/-p/--patch/
+        # -i/-C/-c/-F 등 전부 → fail-closed.
+        return 1 ;;
+    esac
+  done
+  return 0
+}
+
+# _sx_acquire_staged_paths
+#   spec §4.1 / step 4. `git -C "$PROJECT_DIR" diff --cached --name-status -M`
+#   출력을 파싱해 글로벌 배열 _SX_PATHS 에 변경 경로를 채운다. rename(R)/copy(C)
+#   는 신·구 경로 둘 다 추가. 비0 종료 / 빈 출력(staged 없음) / status 라인
+#   파싱 실패 → _SX_DIFF_OK=false (fail-closed). 성공 시 _SX_DIFF_OK=true.
+_sx_acquire_staged_paths() {
+  _SX_PATHS=()
+  _SX_DIFF_OK=false
+  local out rc
+  out=$(git -C "$PROJECT_DIR" diff --cached --name-status -M 2>/dev/null)
+  rc=$?
+  [ "$rc" -eq 0 ] || return 0           # 비0 종료 (git 부재 / 비-repo) → fail-closed
+  [ -n "$out" ] || return 0             # 빈 출력 (staged 없음) → fail-closed
+
+  local line status f1 f2
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    # 첫 필드 = status (탭 구분). status 와 경로 사이는 탭.
+    status="${line%%$'\t'*}"
+    case "$status" in
+      R*|C*)
+        # R<score>\t<old>\t<new> — 신·구 둘 다.
+        local rest="${line#*$'\t'}"      # old\tnew
+        f1="${rest%%$'\t'*}"
+        f2="${rest#*$'\t'}"
+        # f2 가 f1 과 같으면(탭 1개뿐) 경로 1개만 = 파싱 실패 → fail-closed.
+        if [ "$f2" = "$rest" ] || [ -z "$f1" ] || [ -z "$f2" ]; then
+          _SX_PATHS=(); return 0
+        fi
+        _SX_PATHS+=("$f1" "$f2")
+        ;;
+      A|M|D|T)
+        # <status>\t<path> — 단일 경로.
+        f1="${line#*$'\t'}"
+        if [ "$f1" = "$line" ] || [ -z "$f1" ]; then
+          _SX_PATHS=(); return 0          # 탭 없음 → 파싱 실패 → fail-closed
+        fi
+        _SX_PATHS+=("$f1")
+        ;;
+      *)
+        # 예상 외 status (모호) → fail-closed.
+        _SX_PATHS=(); return 0
+        ;;
+    esac
+  done <<< "$out"
+
+  # 한 경로도 못 모았으면 fail-closed.
+  [ "${#_SX_PATHS[@]}" -gt 0 ] || return 0
+  _SX_DIFF_OK=true
+  return 0
+}
+
+# _sx_path_is_doc_or_trail PATH  →  rc 0 if PATH is docs(ⓐ) or trail(ⓑ).
+#   ⓐ 문서: *.md (저장소 어디든) 또는 docs/** (docs/ prefix).
+#   ⓑ trail: trail/** (trail/ prefix — 리뷰표식 .codex-reviewed 등 포함).
+_sx_path_is_doc_or_trail() {
+  case "$1" in
+    *.md) return 0 ;;
+    docs/*) return 0 ;;
+    trail/*) return 0 ;;
+  esac
+  return 1
+}
+
+# _sx_version_only_rein_sh
+#   spec §4.3 ⓒ / step 8. scripts/rein.sh 의 staged diff 추가/삭제 라인이 전부
+#   VERSION="..." 라인 정규식이면 rc 0, 아니면 rc 1. 추가/삭제 라인 0개(빈 diff)
+#   → rc 1 (fail-closed). git diff 비0 종료 → rc 1.
+_sx_version_only_rein_sh() {
+  local diff rc
+  diff=$(git -C "$PROJECT_DIR" diff --cached -- scripts/rein.sh 2>/dev/null)
+  rc=$?
+  [ "$rc" -eq 0 ] || return 1
+  [ -n "$diff" ] || return 1
+  local line body changed=0
+  while IFS= read -r line; do
+    case "$line" in
+      '+++ '*|'--- '*) continue ;;        # 파일 헤더 제외
+      '+'*|'-'*) ;;                        # 변경 라인
+      *) continue ;;                       # context / @@ hunk / 기타
+    esac
+    changed=$((changed + 1))
+    body="${line:1}"                        # +/- prefix 제거
+    # ^[[:space:]]*VERSION="[^"]*"[[:space:]]*$ 패턴인지 검사.
+    if ! printf '%s' "$body" | grep -qE '^[[:space:]]*VERSION="[^"]*"[[:space:]]*$'; then
+      return 1
+    fi
+  done <<< "$diff"
+  [ "$changed" -gt 0 ] || return 1          # 변경 라인 0개 → fail-closed
+  return 0
+}
+
+# _sx_version_only_plugin_json
+#   spec §4.3 ⓒ / step 8. plugin.json 의 staged 와 HEAD 를 각각 json.load 로
+#   파싱해 dict 비교 — 오직 top-level "version" 키 값에서만 다르고 그 외 모든
+#   키·값(중첩 포함) 동일할 때만 rc 0. git show 비0 / json 파싱 실패 / 다른 키
+#   차이 → rc 1 (fail-closed). key 순서·whitespace 차이는 dict 비교가 의미-동일로
+#   본다(허용).
+_sx_version_only_plugin_json() {
+  local pj="plugins/rein-core/.claude-plugin/plugin.json"
+  local staged head src rc
+  staged=$(git -C "$PROJECT_DIR" show ":$pj" 2>/dev/null) || return 1
+  head=$(git -C "$PROJECT_DIR" show "HEAD:$pj" 2>/dev/null) || return 1
+  [ -n "$staged" ] && [ -n "$head" ] || return 1
+  # python: 두 JSON 을 dict 로 파싱 → top-level version 키만 차이일 때 exit 0.
+  # staged/head 는 argv 로 전달한다 (NUL 구분 stdin 은 일부 printf 가 \0 을
+  # 흘려 1-part 로 깨지므로 금지 — 인자는 임의 텍스트를 손실 없이 보존).
+  "${PYTHON_RUNNER[@]}" - "$staged" "$head" <<'PY'
+import json, sys
+try:
+    staged = json.loads(sys.argv[1])
+    head = json.loads(sys.argv[2])
+except Exception:
+    sys.exit(1)
+if not isinstance(staged, dict) or not isinstance(head, dict):
+    sys.exit(1)
+# top-level 키 집합 동일해야 함 (키 추가/삭제 → deny).
+if set(staged.keys()) != set(head.keys()):
+    sys.exit(1)
+# 'version' 외 모든 키 값은 의미적으로 동일해야 함 (중첩 dict/list 포함).
+for k in head.keys():
+    if k == 'version':
+        continue
+    if staged.get(k) != head.get(k):
+        sys.exit(1)
+# version 키는 존재해야 하고(둘 다), 값이 달라도 허용(범프). 같아도 허용.
+if 'version' not in staged or 'version' not in head:
+    sys.exit(1)
+sys.exit(0)
+PY
+  rc=$?
+  return "$rc"
+}
+
+# _sx_classify_paths
+#   spec §4.3 / step 6+8. _SX_PATHS 의 모든 경로를 분류한다. 하나라도 비허용이면
+#   즉시 _SX_ALLOW=false. 전부 허용이면 _SX_ALLOW=true + 분류 카운트
+#   (_SX_DOCS/_SX_TRAIL/_SX_VERSION) 를 채운다(audit 용). version 파일 2개는
+#   content-level 검사를 호출 시점에 1회씩만 캐시한다.
+_sx_classify_paths() {
+  _SX_ALLOW=false
+  _SX_DOCS=0; _SX_TRAIL=0; _SX_VERSION=0
+  local rein_sh_checked="" rein_sh_ok="" plugin_json_checked="" plugin_json_ok=""
+  local p
+  for p in "${_SX_PATHS[@]}"; do
+    case "$p" in
+      *.md)
+        _SX_DOCS=$((_SX_DOCS + 1)); continue ;;
+      docs/*)
+        _SX_DOCS=$((_SX_DOCS + 1)); continue ;;
+      trail/*)
+        _SX_TRAIL=$((_SX_TRAIL + 1)); continue ;;
+    esac
+    # 문서/trail 아님 → 버전 파일 2개만 ⓒ 대상.
+    case "$p" in
+      scripts/rein.sh)
+        if [ -z "$rein_sh_checked" ]; then
+          rein_sh_checked=1
+          if _sx_version_only_rein_sh; then rein_sh_ok=1; else rein_sh_ok=0; fi
+        fi
+        if [ "$rein_sh_ok" = 1 ]; then
+          _SX_VERSION=$((_SX_VERSION + 1)); continue
+        fi
+        return 0                                   # 비허용 → _SX_ALLOW=false
+        ;;
+      plugins/rein-core/.claude-plugin/plugin.json)
+        if [ -z "$plugin_json_checked" ]; then
+          plugin_json_checked=1
+          if _sx_version_only_plugin_json; then plugin_json_ok=1; else plugin_json_ok=0; fi
+        fi
+        if [ "$plugin_json_ok" = 1 ]; then
+          _SX_VERSION=$((_SX_VERSION + 1)); continue
+        fi
+        return 0                                   # 비허용 → _SX_ALLOW=false
+        ;;
+      *)
+        return 0                                   # 그 외 .sh/.json/.yaml/소스 → 비허용
+        ;;
+    esac
+  done
+  _SX_ALLOW=true
+  return 0
+}
+
+# _sx_audit_exempt
+#   spec §4.6 / step 14. 보안-surface 면제가 실제 결정한 경우에만 호출된다
+#   (light-tier 가 아닌 경로). trail/incidents/security-surface-exempt.log 에
+#   append-only 1줄. 디렉토리 부재/쓰기 실패는 2>/dev/null || true 로 비차단.
+#   커밋 메시지 전문은 기록하지 않는다.
+_sx_audit_exempt() {
+  local logf="$PROJECT_DIR/trail/incidents/security-surface-exempt.log"
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
+  {
+    printf '%s\treason=security-surface-exempt\tstaged_files=%s\tdocs=%s trail=%s version=%s\n' \
+      "$ts" "${#_SX_PATHS[@]}" "$_SX_DOCS" "$_SX_TRAIL" "$_SX_VERSION" \
+      >> "$logf"
+  } 2>/dev/null || true
+  return 0
+}
+
+# _sx_compute_security_surface_skip
+#   면제 종합 판정 (§4.4). 명령형태 OK + staged diff 취득 OK + 전 파일 허용일 때
+#   _security_surface_skip=true. 어느 단계든 실패 시 false (fail-closed). gate
+#   본문이 이 함수를 light-tier 계산 직후 호출한다.
+_sx_compute_security_surface_skip() {
+  _security_surface_skip=false
+  # HOLE FIX (codex integration review, 2026-06-16) — entry guard. Before any
+  # tokenized form analysis, reject the whole command if it contains shell
+  # evaluation / subshell / process substitution (`$(`/backtick/`${`/`<(`/`>(`/
+  # `(`/`)`/`{`/`}`). Those can run an index-mutating `git add` (TOCTOU) around
+  # the gated commit, which the quote-stripping tokenizer cannot see. Fail-closed.
+  if _sx_command_has_eval_or_subshell "$COMMAND"; then
+    return 0
+  fi
+  _sx_tokenize "$COMMAND"
+  _sx_command_form_ok
+  [ "$_SX_FORM_OK" = true ] || return 0
+  _sx_acquire_staged_paths
+  [ "$_SX_DIFF_OK" = true ] || return 0
+  _sx_classify_paths
+  [ "$_SX_ALLOW" = true ] || return 0
+  _security_surface_skip=true
+  return 0
+}
+
 # --- Codex 리뷰 + 보안 리뷰 stamp 공통 검사 함수 ([P3]~[P6]) ---
 check_review_stamp() {
   local context="$1"  # "test" 또는 "commit"
@@ -391,8 +935,22 @@ check_review_stamp() {
     fi
   fi
 
-  # 면제 성립 → M2 비교 + P6 부재 차단 둘 다 skip (§4.4).
-  if [ "$_security_tier_skip" = true ]; then
+  # --- 보안-surface 면제 계산 (spec 2026-06-16, §4) ---
+  # light-tier 면제와 독립한 두 번째 면제 경로. 단독 `git commit`(staging 동반
+  # 없음 + allowlist 옵션만) + staged diff 가 전부 허용목록(문서/trail/버전
+  # 문자열-only)이면 P6+M2 를 둘 다 skip. 그 외 전부 fail-closed. light-tier 와
+  # 무관하게 무조건 계산하되, audit 은 보안-surface 가 실제 결정한 경우만(§4.5/§4.6).
+  _security_surface_skip=false
+  _sx_compute_security_surface_skip
+
+  # 면제 성립 → M2 비교 + P6 부재 차단 둘 다 skip (§4.4). 두 면제 경로는 OR
+  # 관계 — 둘 중 하나만 성립해도 skip. P5(코드리뷰)/M3 dual-read 는 이 분기
+  # 위쪽에서 이미 수행됐으므로 어느 면제에서도 skip 되지 않는다(불변).
+  if [ "$_security_tier_skip" = true ] || [ "$_security_surface_skip" = true ]; then
+    # audit: 보안-surface 가 실제 면제를 결정(light-tier 아님)한 경우만 기록(§4.6).
+    if [ "$_security_surface_skip" = true ] && [ "$_security_tier_skip" != true ]; then
+      _sx_audit_exempt
+    fi
     return 0
   fi
 

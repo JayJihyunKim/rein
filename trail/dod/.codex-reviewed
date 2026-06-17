@@ -1,7 +1,7 @@
-reviewed_at: 2026-06-16T05:34:14Z
+reviewed_at: 2026-06-17T02:04:09Z
 reviewer: codex
-diff_base: 58234ce653762658d91ae52533a4c631f473ec73
+diff_base: db288f3047216642d5bd011dba63e1e5a4562f2d
 verdict: PASS
-cycle: 2026-06-16-session-followups
+cycle: 2026-06-16-commit-gate-security-surface-exempt
 scope: wrapper-generated
-active_dod: trail/dod/dod-2026-06-16-session-followups.md
+active_dod: trail/dod/dod-2026-06-16-commit-gate-security-surface-exempt.md
