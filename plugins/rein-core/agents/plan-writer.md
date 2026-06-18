@@ -145,7 +145,7 @@ Skill tool 로 `codex-review` 호출:
 
 1. Bash tool 로 stamp 생성:
    ```bash
-   bash scripts/rein-mark-spec-reviewed.sh <plan-path> codex-gpt-5.5-high-automated
+   bash "${CLAUDE_PLUGIN_ROOT:-$PWD}/scripts/rein-mark-spec-reviewed.sh" <plan-path> codex-gpt-5.5-high-automated
    ```
    reviewer 문자열의 `-automated` suffix 는 trail 추적 시 수동/자동 구분.
 2. handoff to `subagent-driven-development` (또는 `superpowers:executing-plans`).
@@ -175,7 +175,7 @@ plan-writer 완료 보고 — verdict + stamp 생성 여부 + handoff target 명
 사용자가 직접 `/codex-review` 를 호출한 경우:
 
 - plan-writer 가 개입하지 않음 (자동 호출 경로 아님)
-- 기존 수동 stamp 절차 유지 (`bash scripts/rein-mark-spec-reviewed.sh <path> <reviewer>`)
+- 기존 수동 stamp 절차 유지 (`bash "${CLAUDE_PLUGIN_ROOT:-$PWD}/scripts/rein-mark-spec-reviewed.sh" <path> <reviewer>`)
 
 ## Edge case: codex 실패
 

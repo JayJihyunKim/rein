@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.5.6** (2026-06-17) — commits that touch only docs, operational records, or version strings now skip the security re-review automatically (a `git add`-then-commit one-liner, wrappers, background, or any non-allowlisted file still requires it), removing the release-time friction introduced by v1.5.5's freshness check while keeping everything outside the allowlist fail-closed. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.5.7** (2026-06-18) — code review (`/codex-review`) and design review now reliably locate the installed plugin's helper scripts no matter which directory you run from; the guidance docs previously used a working-directory-relative path that could miss in user repos. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 
