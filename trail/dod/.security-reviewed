@@ -1,6 +1,0 @@
-reviewer=security-reviewer
-reviewed=2026-06-18T08:13:30Z
-security_level=standard
-cycle=2026-06-18-skill-invocation-plugin-root
-verdict=PASS
-mechanism=llm-security-review

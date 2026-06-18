@@ -1,7 +1,0 @@
-reviewed_at: 2026-06-18T08:12:44Z
-reviewer: codex
-diff_base: 4210fb310ccdac4f9116135d8cb962fa3ec057ff
-verdict: PASS
-cycle: 2026-06-18-skill-invocation-plugin-root
-scope: wrapper-generated
-active_dod: trail/dod/dod-2026-06-18-skill-invocation-plugin-root.md
