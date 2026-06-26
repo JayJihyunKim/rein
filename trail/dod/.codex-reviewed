@@ -1,7 +1,0 @@
-reviewed_at: 2026-06-26T07:41:28Z
-reviewer: codex
-diff_base: 63a91155d8dd9cc327707dfd15b396d816373578
-verdict: PASS
-cycle: 2026-06-26-codex-effort-deterministic
-scope: wrapper-generated
-active_dod: trail/dod/dod-2026-06-26-codex-effort-deterministic.md
