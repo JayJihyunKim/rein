@@ -1,6 +1,6 @@
 reviewer=security-reviewer
-reviewed=2026-06-18T08:13:30Z
+reviewed=2026-06-26T07:43:19Z
 security_level=standard
-cycle=2026-06-18-skill-invocation-plugin-root
+cycle=2026-06-26-codex-effort-deterministic
 verdict=PASS
 mechanism=llm-security-review

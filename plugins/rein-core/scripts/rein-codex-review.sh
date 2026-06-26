@@ -171,8 +171,9 @@ fi
 
 # ---- Parse [EFFORT:<level>] marker (SKILL.md §6.1/6.2). ---------------
 # Supported values: low | medium | high. Invalid (e.g. [EFFORT:low2],
-# [EFFORT:low-high], [EFFORT: ], [EFFORT:]) → stderr warning + fallback to
-# ~/.codex/config.toml default (no --config flag passed). All [EFFORT:...]
+# [EFFORT:low-high], [EFFORT: ], [EFFORT:]) → stderr warning + leave
+# REIN_EFFORT empty so the main block computes effort from change size
+# (_compute_effort), exactly as if no marker were present. All [EFFORT:...]
 # occurrences are stripped from PROMPT_BODY regardless of validity so codex
 # never receives the marker (§6.2 contract).
 #
@@ -191,7 +192,7 @@ if [ -n "$PROMPT_BODY" ]; then
         REIN_EFFORT="$_effort_val"
         ;;
       *)
-        echo "WARNING: [codex-review] invalid effort '$_effort_val' in [EFFORT:...] marker; falling back to ~/.codex/config.toml default" >&2
+        echo "WARNING: [codex-review] invalid effort '$_effort_val' in [EFFORT:...] marker; computing effort from change size instead" >&2
         ;;
     esac
     # Strip ALL [EFFORT:...] occurrences (valid or not, any inner content).
@@ -380,6 +381,95 @@ if [ "$REIN_REVIEW_MODE" = "spec-review" ]; then
 else
   REVIEW_SUBJECT=$(_resolve_review_subject)
 fi
+
+# ---- Deterministic effort computation (Plan 2026-06-26 Phase 2). ------
+#
+# Derive the codex reasoning effort from the size of the change instead of a
+# static default. REVIEW_SUBJECT is the single authority for which size signal
+# to use (mirrors the review-subject split used everywhere else):
+#   - spec        : reviewed document length (wc -l). NO git diff — spec mode
+#                   keeps DIFF_BASE=N/A.
+#   - working_tree: git diff HEAD --numstat (HEAD absent → --cached).
+#   - commit_range: git diff DIFF_BASE..HEAD --numstat.
+# Each emits a level (low|medium|high) on success, or EMPTY on any failure /
+# unknown mode so the main block falls back to CODE_EFFORT=high (fail-closed).
+# Defined at top level (outside the main block) so tests can source the wrapper
+# and call these directly — same idiom as _resolve_diff_base / _changed_files.
+
+# Map a document line count to an effort level (E2-doclen).
+_map_doc_effort() {
+  local n="$1"
+  if   [ "$n" -le 150 ]; then printf 'low'
+  elif [ "$n" -le 400 ]; then printf 'medium'
+  else printf 'high'
+  fi
+}
+
+# Map a git numstat-derived change size to an effort level (E1-codesize-mirrors
+# + E2-codesize). $1 selects the numstat source: "diff_head" | "range".
+_map_code_effort_from_numstat() {
+  # $1 = source selector: "diff_head" | "range"
+  local src="$1" numstat
+  case "$src" in
+    diff_head)
+      # working_tree: HEAD 기준 staged+unstaged 결합. HEAD 부재 시 --cached 강등.
+      numstat=$(git -C "$PROJECT_DIR" diff HEAD --numstat 2>/dev/null \
+        || git -C "$PROJECT_DIR" diff --cached --numstat 2>/dev/null || true)
+      ;;
+    range)
+      numstat=$(git -C "$PROJECT_DIR" diff "$DIFF_BASE"..HEAD --numstat 2>/dev/null || true)
+      ;;
+    *) printf ''; return 0 ;;
+  esac
+  [ -n "$numstat" ] || { printf ''; return 0; }
+  local files=0 lines=0 all_docs=1 added deleted path
+  while IFS=$'\t' read -r added deleted path; do
+    [ -n "$path" ] || continue
+    files=$((files + 1))
+    if [ "$added" = "-" ] || [ "$deleted" = "-" ]; then
+      :  # binary 행: 파일수 +1, 줄수 +0
+    else
+      lines=$((lines + added + deleted))
+    fi
+    case "$path" in
+      *.md|*.markdown|*.txt|*.rst) ;;
+      *) all_docs=0 ;;
+    esac
+  done <<< "$numstat"
+  [ "$files" -gt 0 ] || { printf ''; return 0; }
+  if [ "$all_docs" = "1" ]; then printf 'low'; return 0; fi
+  if [ "$lines" -le 10 ]  && [ "$files" -le 1 ]; then printf 'low';    return 0; fi
+  if [ "$lines" -le 100 ] && [ "$files" -le 3 ]; then printf 'medium'; return 0; fi
+  printf 'high'
+}
+
+# Dispatch by REVIEW_SUBJECT to the right size signal (E1-compute-emits +
+# E1-docsize-wc). Emits a level on success, or empty on failure / unknown mode.
+_compute_effort() {
+  case "$REVIEW_SUBJECT" in
+    spec)
+      # 문서 길이 (git diff 금지 — spec 모드 DIFF_BASE=N/A).
+      local subj f lines
+      subj="$SPEC_REVIEW_SUBJECT"
+      [ -n "$subj" ] || { printf ''; return 0; }
+      if   [ -f "$PROJECT_DIR/$subj" ]; then f="$PROJECT_DIR/$subj"
+      elif [ -f "$subj" ];              then f="$subj"
+      else printf ''; return 0; fi
+      lines=$(wc -l < "$f" 2>/dev/null | tr -d ' ' || true)
+      [ -n "$lines" ] || { printf ''; return 0; }
+      _map_doc_effort "$lines"
+      ;;
+    working_tree)
+      _map_code_effort_from_numstat "diff_head"
+      ;;
+    commit_range)
+      _map_code_effort_from_numstat "range"
+      ;;
+    *)
+      printf ''   # 알 수 없는 모드 → 폴백(high)
+      ;;
+  esac
+}
 
 # ENV-SUBJ A2/A3 (2026-06-11): the ISO slots follow REVIEW_SUBJECT. Before this,
 # head_iso was ALWAYS the HEAD commit time — but in working_tree mode the staged
@@ -1246,8 +1336,15 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   if [ -n "$CODE_MODEL" ]; then
     CODEX_ARGS+=(-m "$CODE_MODEL")
   fi
-  # Effort: [EFFORT:] 마커(변경 규모 기반 자동 판정) 우선. 마커가 없을 때만
-  # 단일 출처의 CODE_EFFORT 를 폴백 기본값으로 적용.
+  # Effort 3단계 우선순위 (Plan 2026-06-26 Phase 2):
+  #   1) 유효 [EFFORT:] 마커가 있으면 REIN_EFFORT 가 이미 채워져 있음(우선).
+  #   2) 마커 부재(REIN_EFFORT 빈 경우)에만 변경 규모로 산출(_compute_effort).
+  #   3) 산출 실패(빈 출력)면 단일 출처 CODE_EFFORT(=high) 폴백 — fail-closed.
+  # 산출은 [ -z "$REIN_EFFORT" ] 게이팅이라 [EFFORT:high] 재승급 마커가 채운
+  # 값을 산출(low/medium)이 덮지 못한다(E5 불변식 — 코드 게이팅이 보장).
+  if [ -z "$REIN_EFFORT" ]; then
+    REIN_EFFORT="$(_compute_effort || true)"
+  fi
   if [ -z "$REIN_EFFORT" ] && [ -n "$CODE_EFFORT" ]; then
     REIN_EFFORT="$CODE_EFFORT"
   fi

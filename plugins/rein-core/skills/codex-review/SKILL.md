@@ -250,7 +250,7 @@ prompt 본문 어디든 다음 marker 가 있으면 non-interactive mode 활성:
 - `[NON_INTERACTIVE]` — AskUserQuestion 호출 skip
 - `[MODEL:<name>]` — model override (기본값은 단일 출처 `plugins/rein-core/config/codex-models.sh` 의 `CODE_MODEL`)
   - 허용 값: codex 가 지원하는 임의 모델명. 하드코딩 화이트리스트를 두지 않는다 (모델 rename 시 문서 수정 불필요).
-- `[EFFORT:<level>]` — reasoning effort override (default `high`)
+- `[EFFORT:<level>]` — reasoning effort override (마커 부재 시 래퍼가 변경 규모로 산출; 측정 실패 시 `high`)
   - 허용 값: `low`, `medium`, `high`
 - `[SANDBOX:<mode>]` — sandbox override (default `read-only`)
   - 허용 값: `read-only`, `workspace-write`
@@ -265,13 +265,15 @@ prompt 본문 어디든 다음 marker 가 있으면 non-interactive mode 활성:
 
 **구현 상태** (v1.1.2~):
 
-- `[EFFORT:<level>]` — ✅ wrapper (`scripts/rein-codex-review.sh`) 에 구현됨. 유효 값은 `low|medium|high`. 유효하지 않은 값은 stderr warning + `~/.codex/config.toml` default fallback. marker 는 codex 로 전달되는 prompt 에서 제거.
+- `[EFFORT:<level>]` — ✅ wrapper (`scripts/rein-codex-review.sh`) 에 구현됨. 유효 값은 `low|medium|high`. 유효하지 않은 값은 stderr warning + **변경 규모 기반 산출 진입**(`_compute_effort`). marker 는 codex 로 전달되는 prompt 에서 제거.
 - `[NON_INTERACTIVE]` — ✅ wrapper 의 `--non-interactive` CLI 플래그로 처리. marker 자체는 prompt 에 보존 (spec-review 모드 감지에 사용).
 - `[MODEL:<name>]` — ⏳ marker override 자체는 wrapper 미구현(legacy). 단 **기본 모델은 단일 출처 `plugins/rein-core/config/codex-models.sh` 의 `CODE_MODEL`** 을 wrapper 가 `-m` 으로 전달한다 (파일 부재 시 codex 기본 모델로 graceful degrade). `[SANDBOX:<mode>]` — ⏳ wrapper 미구현. prompt 에 포함 시 wrapper 는 무시하고 codex 기본 sandbox 를 사용.
 
-### 6.3 Claude 자동 effort 선택 기준
+### 6.3 래퍼 자동 effort 산출 기준
 
-비-interactive caller (Claude 본체) 가 `/codex-review` 를 호출할 때 변경 규모/복잡도에 따라 `[EFFORT:<level>]` marker 를 prompt 에 prepend 한다. `~/.codex/config.toml` 은 건드리지 않는다 (사용자 환경 보존).
+`/codex-review` 호출 시 **래퍼(`rein-codex-review.sh`)가 변경 규모로 effort 를 결정론적으로 산출**한다(마커 부재 시). caller 가 `[EFFORT:<level>]` marker 를 직접 prepend 하면 그 값이 산출을 **오버라이드**하고, 그 외에는 래퍼 산출이 적용된다. `~/.codex/config.toml` 은 어느 경로에서도 건드리지 않는다 (사용자 환경 보존). 측정 실패/불가 시 `CODE_EFFORT`(=`high`) 로 fail-closed 폴백.
+
+**코드 산출이 권위**다. 아래 표는 산출 휴리스틱의 의도를 설명하며, Claude 본체/사용자의 수동 `[EFFORT:]` 는 산출을 **오버라이드**(상향/하향)하는 용도다.
 
 | 조건                                                                                    | Effort   | 근거                                                        |
 | --------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------- |
@@ -284,6 +286,7 @@ prompt 본문 어디든 다음 marker 가 있으면 non-interactive mode 활성:
 - 경계 케이스는 한 단계 **낮춰서** 시작 → 리뷰 결과가 "더 깊은 분석 필요" 면 재리뷰 round 에서 `high` 로 승급.
 - security-reviewer 와 codex-review 는 **별개 agent**. codex-review 의 effort 는 보안 review 와 무관.
 - 사용자가 prompt 에 명시적 `[EFFORT:...]` 를 붙이면 Claude 의 자동 판단을 **오버라이드**. Claude 는 이를 존중.
+- **재승급 불변식 (E5)**: 3회차 재리뷰 high 강제·재리뷰 round high 승급은 caller 가 `[EFFORT:high]` 마커를 주입해 동작하며, 마커는 산출보다 우선이므로 어떤 산출 결과도 재승급된 high 를 약화시키지 않는다.
 
 ### 6.4 사용 예 (agent 내부 자동 호출)
 

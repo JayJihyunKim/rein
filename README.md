@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.5.7** (2026-06-18) — code review (`/codex-review`) and design review now reliably locate the installed plugin's helper scripts no matter which directory you run from; the guidance docs previously used a working-directory-relative path that could miss in user repos. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.5.8** (2026-06-26) — code reviews (`/codex-review`) now run faster on small changes: review depth scales automatically to the size of your change (lines, files, document length) instead of always running at the deepest, slowest setting. You can still set the depth explicitly to override it. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

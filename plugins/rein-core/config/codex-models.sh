@@ -25,7 +25,9 @@ ANALYSIS_MODEL="gpt-5.5"
 CODE_MODEL="gpt-5.5"
 
 # 역할별 기본 reasoning effort (low | medium | high).
-# 코드리뷰 래퍼는 변경 규모 기반 [EFFORT:] 자동 판정을 우선하고,
-# 이 값은 마커가 없을 때의 폴백/기본값으로 쓰인다.
+# 우선순위: 프롬프트 [EFFORT:] 마커 > 래퍼의 변경 규모 기반 산출(_compute_effort) >
+# 이 값(폴백). 즉 CODE_EFFORT 는 마커가 없고 산출 측정마저 실패/불가할 때에만
+# 적용되는 fail-closed 기본값(high)이다 — 측정이 안 될 때 약한 effort 로
+# 떨어지지 않도록 가장 높은 단계로 고정한다. 값 변경 금지.
 ANALYSIS_EFFORT="high"
 CODE_EFFORT="high"
