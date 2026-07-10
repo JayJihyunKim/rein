@@ -56,6 +56,10 @@ data/processed/
 # rein incident aggregate lock (휘발성 — 매 세션 hook 이 갱신하는 commit noise)
 /trail/incidents/.aggregate.lock
 
+# rein 보안-surface 면제 audit log (휘발성 — 면제 커밋마다 게이트가 append 하는
+# runtime 기록. 커밋 후 다시 dirty 되는 commit noise 라 추적 제외; 로컬 운영자 가시성용)
+/trail/incidents/security-surface-exempt.log
+
 # Git worktrees (로컬 작업 분리용)
 .worktrees/
 worktrees/

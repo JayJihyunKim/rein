@@ -1,7 +1,12 @@
-reviewed_at: 2026-06-26T07:41:28Z
+reviewed_at: 2026-07-10T06:26:27Z
 reviewer: codex
-diff_base: 63a91155d8dd9cc327707dfd15b396d816373578
+diff_base: de9ae0162f09b2366ad24e871aa199f8cb22285d
 verdict: PASS
-cycle: 2026-06-26-codex-effort-deterministic
+cycle: 2026-07-10-codex-model-profile-routing
 scope: wrapper-generated
-active_dod: trail/dod/dod-2026-06-26-codex-effort-deterministic.md
+active_dod: trail/dod/dod-2026-07-10-codex-model-profile-routing.md
+model: gpt-5.6-sol
+effort: low
+effort_source: marker
+policy_version: 1
+codex_version: codex-cli 0.144.1

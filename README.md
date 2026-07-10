@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.5.8** (2026-06-26) — code reviews (`/codex-review`) now run faster on small changes: review depth scales automatically to the size of your change (lines, files, document length) instead of always running at the deepest, slowest setting. You can still set the depth explicitly to override it. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.6.0** (2026-07-10) — code reviews (`/codex-review`) now run on the latest codex frontier model (gpt-5.6-sol, single fixed model for consistent verdicts), and second opinions (`/codex-ask`) automatically pick a fast, balanced, or deep model based on the nature of the question. Review pass records now note which model and depth were used. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

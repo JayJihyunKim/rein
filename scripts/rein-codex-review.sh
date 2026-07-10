@@ -116,9 +116,11 @@ fi
 # ---- Load codex model single-source-of-truth. -------------------------
 #
 # 모델명은 plugins/rein-core/config/codex-models.sh 한 곳에서 관리한다
-# (DoD codex-model-profile-routing). 래퍼는 CODE_MODEL / CODE_EFFORT 를
-# 읽어 codex 호출에 반영한다. 파일 부재/미정의 시 CODE_MODEL 은 빈
-# 문자열로 두고 -m 을 생략 → codex 기본 모델로 graceful degrade.
+# (역할 프로필 구조 — spec 2026-07-10 §4.1). 래퍼는 게이트 프로필
+# CODE_GATE_MODEL(고정 모델) / CODE_FAIL_CLOSED_EFFORT(측정 실패 폴백) 를
+# 읽어 codex 호출에 반영한다. config 전 후보 부재 시에도 무모델 호출로
+# degrade 하지 않는다 — 아래 래퍼 내장 canonical 상수로 명시 폴백한다
+# (canonical fallback, spec §4.2).
 #
 # 경로 해석은 location-agnostic — 이 스크립트는 두 위치에 byte-identical
 # 사본으로 존재한다(plugin SSOT `plugins/rein-core/scripts/` + 메인테이너
@@ -127,9 +129,16 @@ fi
 #   - plugin 위치: $_script_dir/../config (plugins/rein-core/scripts → plugins/rein-core/config)
 #   - repo 루트 위치: $_script_dir/../plugins/rein-core/config (scripts → plugins/rein-core/config)
 #   - 설치 사용자: $CLAUDE_PLUGIN_ROOT/config (설정 시에만 시도)
-# 첫 readable 후보에서 source 후 break. 모두 부재면 CODE_MODEL 빈 채 degrade.
-CODE_MODEL=""
-CODE_EFFORT=""
+# 첫 readable 후보에서 source 후 break. 모두 부재면 canonical fallback.
+
+# 래퍼 내장 canonical 상수 — config 전 후보 부재 시의 명시 폴백.
+# 게이트가 "codex 기본 모델" 이라는 외부 가변값에 좌우되지 않도록
+# (게이트 예측 가능성), 무모델 호출을 금지한다.
+REIN_CANONICAL_GATE_MODEL="gpt-5.6-sol"
+REIN_CANONICAL_GATE_EFFORT="high"
+
+CODE_GATE_MODEL=""; CODE_FAIL_CLOSED_EFFORT=""
+CODE_MODEL=""; CODE_EFFORT=""; CODE_ROUTING_POLICY_VERSION=""
 # Candidates built into a real array so each element survives whitespace in the
 # install path (B-quote, Round 5 2026-06-09): the earlier `for ... in` list used
 # `${CLAUDE_PLUGIN_ROOT:+"…"}` UNQUOTED, so a CLAUDE_PLUGIN_ROOT containing a
@@ -151,6 +160,16 @@ for _codex_models_conf in "${_codex_models_candidates[@]}"; do
   fi
 done
 unset _codex_models_candidates
+
+# 이름 해석 우선순위: 신 변수 → legacy(구버전 사용자 config 호환) → canonical.
+# stderr 경고는 전 후보 부재 시 정확히 1회 — config 정상 로드 시 무발화.
+CODE_GATE_MODEL="${CODE_GATE_MODEL:-${CODE_MODEL:-}}"
+CODE_FAIL_CLOSED_EFFORT="${CODE_FAIL_CLOSED_EFFORT:-${CODE_EFFORT:-}}"
+if [ -z "$CODE_GATE_MODEL" ]; then
+  echo "WARNING: [codex-review] codex-models.sh not found/empty in all candidates; falling back to built-in canonical ${REIN_CANONICAL_GATE_MODEL} + ${REIN_CANONICAL_GATE_EFFORT}" >&2
+  CODE_GATE_MODEL="$REIN_CANONICAL_GATE_MODEL"
+fi
+CODE_FAIL_CLOSED_EFFORT="${CODE_FAIL_CLOSED_EFFORT:-$REIN_CANONICAL_GATE_EFFORT}"
 
 # ---- Parse CLI options + read stdin prompt. ---------------------------
 
@@ -190,6 +209,15 @@ if [ -n "$PROMPT_BODY" ]; then
     case "$_effort_val" in
       low|medium|high)
         REIN_EFFORT="$_effort_val"
+        ;;
+      # ultra/max/xhigh 사유별 명시 거부 (spec 2026-07-10 §4.5) — 처리 결과는
+      # 기존 무효값 경로와 동일(strip + REIN_EFFORT 빈 채 산출 진입), 사유
+      # 메시지만 분리. 자동 산출 어휘는 low|medium|high 3종 유지.
+      ultra)
+        echo "WARNING: [codex-review] [EFFORT:ultra] is rejected at the gate — ultra delegates to auto subagents (non-deterministic verdicts, quota/timeout conflicts). Computing effort from change size instead." >&2
+        ;;
+      max|xhigh)
+        echo "WARNING: [codex-review] [EFFORT:${_effort_val}] is not supported yet — pending timeout measurement (follow-up). Computing effort from change size instead." >&2
         ;;
       *)
         echo "WARNING: [codex-review] invalid effort '$_effort_val' in [EFFORT:...] marker; computing effort from change size instead" >&2
@@ -392,7 +420,8 @@ fi
 #   - working_tree: git diff HEAD --numstat (HEAD absent → --cached).
 #   - commit_range: git diff DIFF_BASE..HEAD --numstat.
 # Each emits a level (low|medium|high) on success, or EMPTY on any failure /
-# unknown mode so the main block falls back to CODE_EFFORT=high (fail-closed).
+# unknown mode so the main block falls back to CODE_FAIL_CLOSED_EFFORT=high
+# (fail-closed).
 # Defined at top level (outside the main block) so tests can source the wrapper
 # and call these directly — same idiom as _resolve_diff_base / _changed_files.
 
@@ -469,6 +498,28 @@ _compute_effort() {
       printf ''   # 알 수 없는 모드 → 폴백(high)
       ;;
   esac
+}
+
+# Risk-path floor predicate (spec 2026-07-10 §4.3 — MP3). 변경 크기≠위험도의
+# 보완: 입력은 이미 해소된 CHANGED_FILES(규모 신호와 동일 집합)이며, 한 줄이라도
+# 아래 패턴에 매칭되면 0(true). 메인 블록이 code-review 모드 + 산출 low 일 때만
+# medium 승격에 사용한다 (low→medium 단방향; 마커 > floor; spec 모드 skip).
+# 패턴 의미: hooks/**·security/**·config/** 는 임의 깊이 디렉토리 세그먼트
+# (메인테이너 repo plugins/rein-core/hooks/… 와 사용자 repo .claude/hooks/…
+# 모두 커버), scripts/rein-*.sh 는 scripts/ 세그먼트 하위 rein-*.sh,
+# .github/workflows/** 는 repo 루트 앵커. top-level 정의 — 테스트가 래퍼를
+# source 해 직접 호출 가능 (기존 _compute_effort idiom).
+_risk_floor_matches() {
+  local path
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    case "$path" in
+      hooks/*|*/hooks/*|security/*|*/security/*|config/*|*/config/*| \
+      .github/workflows/*|scripts/rein-*.sh|*/scripts/rein-*.sh)
+        return 0 ;;
+    esac
+  done <<< "$CHANGED_FILES"
+  return 1
 }
 
 # ENV-SUBJ A2/A3 (2026-06-11): the ISO slots follow REVIEW_SUBJECT. Before this,
@@ -1279,10 +1330,13 @@ _detect_model_error() {
 
 # _emit_model_failsoft <role-var-name> <model-value>
 _emit_model_failsoft() {
-  local role_var="${1:-CODE_MODEL}" model_val="${2:-}"
+  local role_var="${1:-CODE_GATE_MODEL}" model_val="${2:-}"
   echo "ERROR: [codex-review] codex 가 요청한 모델을 거부했습니다 — 모델명이 변경되었을 수 있습니다." >&2
   echo "  현재 ${role_var}=\"${model_val}\"" >&2
   echo "  → plugins/rein-core/config/codex-models.sh 의 ${role_var} 를 codex 의 최신 모델명으로 수정하세요." >&2
+  if [ "$role_var" = "CODE_GATE_MODEL" ]; then
+    echo "  (구버전 config 는 legacy alias CODE_MODEL 로 정의할 수 있습니다 — 그 경우 CODE_MODEL 을 수정하세요.)" >&2
+  fi
 }
 
 # ---- Stamp writer (Task 6.3 Step 3). ----------------------------------
@@ -1301,7 +1355,16 @@ write_code_review_stamp() {
   if [ -n "$SAD_PATH" ]; then
     cycle=$(basename "$SAD_PATH" .md | sed 's/^dod-//')
   fi
+  # codex_version 증빙 — 메인 블록이 리뷰 호출 *이전에* best-effort 1회
+  # 해석해 둔 CODEX_VERSION_STR 를 사용한다 (spec 2026-07-10 §4.4). 게이트
+  # 판정에 영향 없는 순수 증빙 필드이므로 미해석/빈 값이 stamp 작성을
+  # 막으면 안 된다 — "(unavailable)" 로 표기.
+  local codex_ver="${CODEX_VERSION_STR:-}"
+  [ -n "$codex_ver" ] || codex_ver="(unavailable)"
   mkdir -p "$(dirname "$stamp")"
+  # 신규 5필드는 기존 7필드 **뒤에** additive (기존 필드 이름·순서·포맷
+  # 불변 — pre-bash-test-commit-gate.sh 파서는 reviewed_at:/diff_base: 만
+  # 읽으므로 비의존). policy_version 은 canonical fallback 실행 시 0.
   cat > "$stamp" <<STAMP
 reviewed_at: ${ts}
 reviewer: ${reviewer}
@@ -1310,6 +1373,11 @@ verdict: ${verdict}
 cycle: ${cycle}
 scope: wrapper-generated
 active_dod: ${SAD_PATH}
+model: ${CODE_GATE_MODEL}
+effort: ${REIN_EFFORT}
+effort_source: ${EFFORT_SOURCE}
+policy_version: ${CODE_ROUTING_POLICY_VERSION:-0}
+codex_version: ${codex_ver}
 STAMP
   # Clear .review-pending only in code-review mode (never in spec-review).
   rm -f "$PROJECT_DIR/trail/dod/.review-pending" 2>/dev/null || true
@@ -1331,26 +1399,56 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   #   REIN_EFFORT → --config model_reasoning_effort="<level>" (TOML-quoted).
   # Empty array is safely expanded with ${arr[@]+...} under `set -u`.
   CODEX_ARGS=()
-  # Model: 단일 출처의 CODE_MODEL 을 -m 으로 전달. 비어있으면 생략하여
-  # codex 기본 모델로 graceful degrade (codex-models.sh 부재 등).
-  if [ -n "$CODE_MODEL" ]; then
-    CODEX_ARGS+=(-m "$CODE_MODEL")
+  # Model: 단일 출처의 CODE_GATE_MODEL 을 -m 으로 **항상** 전달한다
+  # (unconditional — spec 2026-07-10 §4.2). config 전 후보 부재 시에도
+  # 로드 블록의 canonical fallback 이 값을 보장하므로 무모델 호출 경로는
+  # 존재하지 않는다. 빈값 방어는 아래 명시적 fatal assert 로만 둔다 —
+  # 조용한 -m 생략(codex 기본 모델 degrade)은 어떤 형태로도 금지.
+  [ -n "$CODE_GATE_MODEL" ] || {
+    echo "FATAL: [codex-review] CODE_GATE_MODEL is empty after canonical fallback — refusing model-less codex call." >&2
+    exit 3
+  }
+  CODEX_ARGS+=(-m "$CODE_GATE_MODEL")
+  # Effort 4단계 결정 체인 (spec 2026-07-10 §4.3) — EFFORT_SOURCE 가 실제
+  # 경로를 기록한다 (도장 증빙 §4.4):
+  #   1) 유효 [EFFORT:] 마커 (marker) — floor 미적용. 마커 경로는 산출/floor
+  #      블록에 진입조차 하지 않는다 (마커 > floor, E5 재승급 불변식 보존).
+  #   2) 변경 규모 산출 (computed — _compute_effort).
+  #   3) 위험도 floor (computed+floor) — code-review 모드 + 산출 low +
+  #      위험 경로 매칭 시에만 medium 승격. low→medium 단방향(하한선이지
+  #      가산기가 아니다 — medium/high 산출은 무변경). spec-review 모드는
+  #      skip — 문서 리뷰는 코드 경로가 아니다.
+  #   4) 측정 실패(빈 산출) → fail-closed 페어 (fail_closed —
+  #      CODE_FAIL_CLOSED_EFFORT, canonical 해석 후 항상 non-empty).
+  EFFORT_SOURCE=""
+  if [ -n "$REIN_EFFORT" ]; then
+    EFFORT_SOURCE="marker"
+  else
+    _eff="$(_compute_effort || true)"
+    if [ -n "$_eff" ]; then
+      EFFORT_SOURCE="computed"
+      if [ "$REIN_REVIEW_MODE" != "spec-review" ] && [ "$_eff" = "low" ] \
+         && _risk_floor_matches; then
+        _eff="medium"; EFFORT_SOURCE="computed+floor"
+      fi
+      REIN_EFFORT="$_eff"
+    fi
   fi
-  # Effort 3단계 우선순위 (Plan 2026-06-26 Phase 2):
-  #   1) 유효 [EFFORT:] 마커가 있으면 REIN_EFFORT 가 이미 채워져 있음(우선).
-  #   2) 마커 부재(REIN_EFFORT 빈 경우)에만 변경 규모로 산출(_compute_effort).
-  #   3) 산출 실패(빈 출력)면 단일 출처 CODE_EFFORT(=high) 폴백 — fail-closed.
-  # 산출은 [ -z "$REIN_EFFORT" ] 게이팅이라 [EFFORT:high] 재승급 마커가 채운
-  # 값을 산출(low/medium)이 덮지 못한다(E5 불변식 — 코드 게이팅이 보장).
   if [ -z "$REIN_EFFORT" ]; then
-    REIN_EFFORT="$(_compute_effort || true)"
-  fi
-  if [ -z "$REIN_EFFORT" ] && [ -n "$CODE_EFFORT" ]; then
-    REIN_EFFORT="$CODE_EFFORT"
+    REIN_EFFORT="$CODE_FAIL_CLOSED_EFFORT"; EFFORT_SOURCE="fail_closed"
   fi
   if [ -n "$REIN_EFFORT" ]; then
     CODEX_ARGS+=(--config "model_reasoning_effort=\"$REIN_EFFORT\"")
   fi
+  # codex_version 증빙 — best-effort 1회 해석 (spec 2026-07-10 §4.4).
+  # guarded assignment: `|| true` 가 파이프라인 전체(set -euo pipefail 의
+  # pipefail 포함)를 흡수해 해석 실패가 실행을 막지 않는다. 리뷰 본 호출
+  # *이전*에 해석한다 — 테스트 fake codex(CODEX_BIN 주입)의 인자/프롬프트
+  # 캡처는 "마지막 호출" 기준이므로, 리뷰 호출 뒤에 --version 프로브를
+  # 두면 캡처가 프로브로 덮여 오염된다 (증빙 의미는 동일 — 같은 실행의
+  # 같은 바이너리 버전).
+  CODEX_VERSION_STR=$("$CODEX_BIN" --version 2>/dev/null | head -1 || true)
+  [ -n "$CODEX_VERSION_STR" ] || CODEX_VERSION_STR="(unavailable)"
   # Feed envelope on stdin. Args forwarded to `codex exec` via _invoke_codex.
   # B2 (2026-06-09): capture codex 의 *실제* exit code. 이전 `if ! CMD; then
   # CODEX_RC=$?` 는 `$?` 가 `! CMD`(항상 0)를 캡처해 codex 비모델 실패에도
@@ -1366,7 +1464,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     # Fail-soft: 모델 거부면 sonnet fallback 으로 새지 말고(잘못된 모델을
     # 숨기지 않도록) 전용 exit 3 + 단일 출처 수정 안내.
     if _detect_model_error "$CODEX_OUT"; then
-      _emit_model_failsoft "CODE_MODEL" "$CODE_MODEL"
+      _emit_model_failsoft "CODE_GATE_MODEL" "$CODE_GATE_MODEL"
       exit 3
     fi
     echo "ERROR: [codex-review] codex invocation failed (exit $CODEX_RC)." >&2
@@ -1379,7 +1477,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   # Fail-soft (방어): codex 가 exit 0 으로 와도 출력에 모델 거부가 섞였으면
   # 통과 표시(.codex-reviewed)를 만들지 않고 단일 출처 수정을 안내한다.
   if _detect_model_error "$CODEX_OUT"; then
-    _emit_model_failsoft "CODE_MODEL" "$CODE_MODEL"
+    _emit_model_failsoft "CODE_GATE_MODEL" "$CODE_GATE_MODEL"
     exit 3
   fi
 

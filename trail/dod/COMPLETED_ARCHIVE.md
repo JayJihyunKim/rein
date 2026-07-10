@@ -3948,3 +3948,1438 @@ rationale:
   - 신규 인터페이스 없음 + 로직 변경 없음(값/문자열 정합) → complexity low
 approved_by_user: true
 
+---
+## dod-2026-06-16-review-stamp-freshness.md (mtime: 2026-06-16, archived: 2026-06-17)
+# DoD — 리뷰 통과 표식 신선도/내용 바인딩 + 생성기 fail-open 봉합 (M2/M3/M4)
+
+- 날짜: 2026-06-16
+- 유형: fix
+- Scope ID: M2-security-stamp-freshness-compare, M2-security-stamp-verdict-pass, M2-security-stamp-content-standard, M2-security-reviewer-instruction-update, M2-light-tier-skip-interaction, M3-code-stamp-verdict-dualread, M4-spec-producer-conservative-marker, M4-spec-marker-consumer-block, M4-spec-marker-bypass-consume, M2-M3-regression-tests, M4-regression-tests
+- 출처: 마커 감사 후속 백로그 (`trail/daily/2026-06-15.md` §M2/M3/M4) → brainstorm → spec → plan (모두 codex 리뷰 PASS)
+
+## 문제 (Symptom)
+
+리뷰 통과 표식(도장)이 **정직한 에이전트** 한테도 조용히 안전장치를 끄게 한다:
+- **M2**: 커밋 게이트가 보안 통과 표식을 **존재만** 검사 → 새 코드 편집 + 코드리뷰 재실행 후에도 이전 사이클 보안 통과가 적용(stale-pass).
+- **M3**: 커밋 게이트가 코드 표식의 통과 판정을 안 보고 존재+신선도만 → NEEDS-FIX/escalated 표식이 통과.
+- **M4**: 스펙 리뷰 표식 생성기가 3개 실패 경로에서 보수 마커 없이 통과(fail-open) → 미리뷰 스펙 변경이 후속 편집을 못 막음.
+
+## 범위
+
+위협모델은 "정직한 에이전트 규율"까지 (적대적 우회 하드닝 범위 밖). spec/plan 의 Chosen Direction 그대로:
+- **M2**: 커밋 시 보안 표식이 코드 표식보다 같거나 신선 + 같은 cycle(non-empty) + `verdict=PASS` 검증. 보안 표식 content-rich 표준화 + 보안리뷰어 지침 갱신. light-tier 면제면 비교 skip.
+- **M3**: 코드 표식 통과 판정 dual-read(`verdict: PASS` 우선, 없으면 legacy `resolution: passed`) + 시각 파싱. 판정 실패/파싱불가 → fail-closed.
+- **M4**: 생성기 3개 fail-open 경로(비캐시 python/JSON 파싱/캐시경로 python)에 보수 마커 생성 + pre-edit 차단 + 1회성 바이패스(consume-on-use) + 성공 시 auto-heal.
+
+### 명시적 비범위
+- 도장 원자성·락(D1/D2), M2 편집-무효화(Option A), M3 강한 바인딩(diff_base/content_sha), 적대적 우회 하드닝. (spec §9)
+
+## 변경 파일
+
+- plugins/rein-core/hooks/pre-bash-test-commit-gate.sh
+- plugins/rein-core/hooks/post-edit-spec-review-gate.sh
+- plugins/rein-core/hooks/pre-edit-dod-gate.sh
+- plugins/rein-core/agents/security-reviewer.md
+- tests/hooks/test-security-tier-gate.sh
+- tests/hooks/test-pre-bash-test-commit-gate.sh
+- tests/hooks/test-spec-review-gate.sh
+
+## 검증 기준
+
+- [ ] reproduction-first: 각 묶음 worker 가 자기 scope 테스트에 실패 케이스 먼저 작성 → 구현 → GREEN
+- [ ] M2: (보안<코드)→차단, (보안≥코드 cycle일치 non-empty verdict=PASS)→통과, (cycle 불일치/빈값)→차단, (보안 verdict=NEEDS-FIX)→차단, (보안표식 빈/touch)→차단, (light-tier 면제+보안부재)→통과
+- [ ] M3: (verdict:PASS)→통과, (verdict:NEEDS-FIX)→차단, (resolution:escalated_to_human)→차단, (legacy resolution:passed)→통과, (판정필드 부재)→차단, (시각 파싱불가)→차단
+- [ ] M4: 3개 fail-open 경로 각각 → 보수 마커 생성; 정상 → 마커 해소; 마커 존재 → 편집 차단; 바이패스 → 1회 통과+소비; 바이패스 후 → 재차단
+- [ ] 관련 hook suite 전량 GREEN (`test-security-tier-gate.sh`, `test-pre-bash-test-commit-gate.sh`, `test-spec-review-gate.sh`, `test-pre-edit-dod-gate.sh`)
+- [ ] 변경 hook 3종 `bash -n` 통과
+- [ ] 통합 codex 리뷰 + 보안 리뷰 통과
+
+## 범위 연결
+
+plan ref: docs/plans/2026-06-16-review-stamp-freshness.md
+covers: [M2-security-stamp-freshness-compare, M2-security-stamp-verdict-pass, M2-security-stamp-content-standard, M2-security-reviewer-instruction-update, M2-light-tier-skip-interaction, M3-code-stamp-verdict-dualread, M4-spec-producer-conservative-marker, M4-spec-marker-consumer-block, M4-spec-marker-bypass-consume, M2-M3-regression-tests, M4-regression-tests]
+
+## 라우팅 추천
+
+```yaml
+agent: feature-builder-fix
+skills: [parallel-execute]
+mcps: []
+rationale: >
+  plan 의 ## 실행 전략이 파일 disjoint 2 묶음(commit-gate-bundle / spec-gate-bundle)을 단일 Wave 병렬로
+  정의. 각 묶음은 reproduction-first 버그수정(게이트 hook + 그 test). 부모가 웨이브 검증·통합 리뷰·커밋 소유.
+approved_by_user: true
+```
+
+---
+## dod-2026-06-16-session-followups.md (mtime: 2026-06-16, archived: 2026-06-17)
+# DoD — 세션 후속: 검증기 표 형식 leniency + M4 소비측 하드닝
+
+- 날짜: 2026-06-16
+- 유형: fix
+- Scope ID: FU-validator-scope-items-leniency, FU-spec-writer-format-note, FU-m4-bypass-removal-proof, FU-m4-echo-sanitize
+- 출처: 2026-06-16 M2/M3/M4 세션 후속 (재발 부채 + 통합 보안리뷰 INFO 2건)
+
+## 문제 (Symptom)
+
+- **재발 부채**: 커버리지 검증기 `rein-validate-coverage-matrix.py` 가 `## Scope Items` 를 **번호 없는 정확 매칭**만, Scope ID 셀을 **백틱 없는 bare token**만 인식한다. spec-writer 가 자연스러운 마크다운(`## 3. Scope Items`, `` `M2-...` `` 백틱)으로 쓰면 validator 가 못 읽어 plan-writer 가 매번 수동 정규화 → 스펙 표식 무효화 → 재리뷰 사이클(이번 세션 + 과거 반복).
+- **INFO-1 (통합 보안리뷰)**: M4 소비측 바이패스(`pre-edit-dod-gate.sh` `.skip-spec-gen-gate`)가 `rm -f` 후 삭제 증명이 없다. M1(`.skip-spec-gate`)은 `[ ! -e ]` 로 제거 증명 + fail-closed 하는데 M4 는 누락 → 비일관.
+- **INFO-2 (통합 보안리뷰)**: M4 소비측이 `cause=`/`reason=` 값을 sanitize 없이 stderr echo. 커밋게이트 `sanitize_marker_path` 와 달리 제어문자/터미널 이스케이프가 그대로 출력될 수 있다(심층방어 갭).
+
+## 범위
+
+- **FU-validator-scope-items-leniency**: 검증기(repo `scripts/` + plugin `plugins/rein-core/scripts/` 2사본 동일) 가 (a) `## [N. ]Scope Items` 번호 heading 과 (b) 백틱 감싼 Scope ID 셀(`` `M2-...` ``)을 수용. Scope Items + 매트릭스 heading 둘 다 번호 tolerant. 기존 strict 포맷도 계속 통과(backward compatible).
+- **FU-spec-writer-format-note**: `plugins/rein-core/agents/spec-writer.md` 필수 섹션 계약에 "`## Scope Items`(번호 무관), Scope ID 는 표 셀에 bare 또는 백틱 — 둘 다 검증기 수용" 1줄 명시(defense-in-depth).
+- **FU-m4-bypass-removal-proof**: M4 바이패스 소비를 M1 패턴과 일관 — `[ -e ]` 감지 → `rm -f` → `[ ! -e ]` 제거 증명 성공 시에만 1회 통과, 실패면 fail-closed(차단).
+- **FU-m4-echo-sanitize**: M4 의 `cause`/`reason` echo 를 인라인 sanitize(`LC_ALL=C tr -d '[:cntrl:]' | cut -c1-200`, sanitize_marker_path 미러)로 출력.
+
+### 명시적 비범위
+- routing 블록(`.skip-routing-gate`)의 동일 무sanitize echo 는 이번 범위 밖(기존 패턴, 별도 pass). 검증기를 spec-writer 가 표가 아닌 heading-per-scope 로 쓰는 경우까지 수용하도록 확장하는 것도 비범위(이번은 번호+백틱 한정).
+
+## 변경 파일
+
+- scripts/rein-validate-coverage-matrix.py
+- plugins/rein-core/scripts/rein-validate-coverage-matrix.py
+- plugins/rein-core/agents/spec-writer.md
+- plugins/rein-core/hooks/pre-edit-dod-gate.sh
+- tests/hooks/test-coverage-matrix.sh
+- tests/hooks/test-spec-review-gate.sh
+
+## 검증 기준
+
+- [ ] reproduction-first: 검증기에 (번호 heading + 백틱 ID) fixture 가 현행 코드에서 실패 확인 → leniency 적용 후 통과 + 기존 strict 포맷 회귀 통과
+- [ ] M4 바이패스: 정상 바이패스 → 1회 통과 + 마커 소비; 제거 불가(디렉토리) 바이패스 → fail-closed(exit 2)
+- [ ] M4 echo sanitize: reason 에 제어문자 주입 → 출력에서 제거됨(테스트)
+- [ ] 두 검증기 사본 byte-동일 유지(drift 방지)
+- [ ] `bash tests/hooks/test-coverage-matrix.sh` / `test-spec-review-gate.sh` / `test-pre-edit-dod-gate.sh` 전량 GREEN
+- [ ] `bash -n` 변경 hook + `python3 -c` 검증기 import OK
+- [ ] codex 코드리뷰 + 보안 리뷰 통과
+
+## 라우팅 추천
+
+```yaml
+agent: feature-builder-fix
+skills: []
+mcps: []
+rationale: >
+  reproduction-first 버그/하드닝 수정 4건. 검증기 파서 leniency + M4 소비측 2건 + 지침 1줄.
+  파일 disjoint 아님(M4 2건은 같은 pre-edit-dod-gate.sh) — 작성자가 직접 순차 구현. 리뷰/커밋은 상위 흐름.
+approved_by_user: true
+```
+
+---
+## dod-2026-06-16-skip-spec-gate-consume.md (mtime: 2026-06-16, archived: 2026-06-17)
+# DoD — 스펙 리뷰 우회 마커(.skip-spec-gate) 1회 소비로 전환
+
+- 날짜: 2026-06-16
+- 유형: fix
+- Scope ID: M1-skip-spec-gate-consume
+- 출처: 마커 감사 후속 백로그 (`trail/inbox/2026-06-15-marker-audit-findings.md` §M1)
+
+## 문제 (Symptom)
+
+스펙 리뷰 게이트를 **1회** 건너뛰려고 만든 우회 마커 `trail/dod/.skip-spec-gate` 가
+사용(편집 허용) 후 소비(삭제)되지 않아, 손으로 지울 때까지 설계→리뷰 강제가 계속 꺼진 상태로
+남는다. 즉 "1회 면제"로 광고된 마커가 실제로는 **영구 면제 스위치**.
+
+## Root cause
+
+`pre-edit-dod-gate.sh:493` 에서 `SKIP_SPEC_GATE` 를 정의하고 `:496` `if [ ! -f "$SKIP_SPEC_GATE" ] && [ -d "$SPEC_REVIEWS_DIR" ]` 로
+마커가 있으면 스펙 게이트 블록 전체를 건너뛰지만, 파일 내 `SKIP_SPEC_GATE` 참조는 정의·사용
+2곳뿐 — **`rm -f` 가 없다.** 대조로 동일 성격의 1회 우회 `.skip-stop-gate` 는
+`stop-session-gate.sh:372-373` 에서 매칭 즉시 `rm -f` 로 소비된다. 스펙 게이트만 소비 누락.
+(추가 관찰: `.skip-spec-gate` 를 만들라고 안내하는 사용자 메시지는 없음 — 비공식 escape hatch.)
+
+## 범위
+
+- `pre-edit-dod-gate.sh` 의 스펙 게이트 진입부를 다음 의미로 변경:
+  - `.spec-reviews` 디렉토리가 있고 + `.skip-spec-gate` 마커가 있으면 → **이번 편집 1회만** 게이트를
+    건너뛰되, 건너뛰기 전에 마커를 `rm -f` 로 소비하고 audit 로그 1줄을 남긴다.
+  - **소비(rm) 실패 = fail-closed**: 마커가 실제로 사라졌음을 확인(`[ ! -f ]`)하지 못하면 우회를
+    적용하지 않고 게이트를 정상 실행한다 (영구 우회 버그 재발 방지).
+  - `.spec-reviews` 디렉토리가 없으면(게이트 비활성) 마커를 소비하지 않는다 (no-op 편집에 1회권 낭비 방지).
+  - 마커 없을 때의 기존 게이트 동작은 완전 불변.
+- audit 로그: `trail/incidents/auto-mode-bypass.log` 에 `<ISO8601>\tskip-spec-gate consumed (one-shot spec-review bypass)` 1줄 append.
+  로깅은 fail-soft(실패해도 hook 중단 금지). 기존 bypass 감사 원장을 재사용하되 reason 문구로 auto-mode 와 구분.
+
+### 명시적 비범위 (감사 백로그 M2/M3/M4 와 분리)
+
+- 코드/보안 리뷰 도장의 freshness·content 바인딩(M2/M3), 스펙 리뷰 표식 생성기 fail-open(M4) 은 **이 DoD 범위 아님.**
+
+## 변경 파일
+
+- `plugins/rein-core/hooks/pre-edit-dod-gate.sh` — 스펙 게이트 진입부 1회 소비 + fail-closed (M1 본체)
+- `tests/hooks/test-spec-review-gate.sh` — 소비 후 재차단 + fail-closed 재현 테스트 추가
+
+## 검증 기준
+
+- [ ] failing test 먼저: `.skip-spec-gate` + 미리뷰 스펙(pending, no reviewed) 상태에서
+      ① 첫 편집은 허용(exit 0) + 마커 삭제됨 ② **두 번째 편집은 차단(exit 2)** — 현행 코드(소비 없음)에서
+      ②가 "여전히 허용"으로 실패함을 먼저 확인
+- [ ] 소비 로직 적용 후 위 ①②가 모두 GREEN
+- [ ] fail-closed 케이스: 마커가 제거 불가(예: 마커를 디렉토리로 만들어 `rm -f` 실패 유도)일 때
+      편집이 차단됨(exit 2) GREEN
+- [ ] 기존 `test_gate_respects_bypass_file`(마커 있으면 1회 허용) 여전히 GREEN
+- [ ] `bash tests/hooks/test-spec-review-gate.sh` 전체 GREEN
+- [ ] `bash tests/hooks/test-state-fast-path-skip.sh` GREEN (`.skip-spec-gate` 사용 케이스 회귀 없음 — 라인 358)
+- [ ] `bash -n plugins/rein-core/hooks/pre-edit-dod-gate.sh` 구문 통과
+- [ ] codex review + security review 통과
+
+## 라우팅 추천
+
+```yaml
+agent: feature-builder-fix
+skills: []
+mcps: []
+rationale: >
+  reproduction-first 버그수정. 단일 hook(pre-edit-dod-gate.sh) 의 스펙 게이트 진입부 + 그 test 만 touch.
+  실패 테스트로 "소비 후 재차단" 을 먼저 고정한 뒤 1회 소비 + fail-closed 를 구현. codex/security review 는
+  상위 흐름이 처리하므로 skill/mcp 불필요.
+approved_by_user: true
+```
+
+---
+## dod-2026-05-20-hook-test-stale-references.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — hook test 5 fail stale reference 갱신
+
+- 날짜: 2026-05-20
+- 유형: refactor (test 갱신 — source-side 의도된 변화 반영)
+- slug: hook-test-stale-references
+- plan ref: (none — 단발성 test 갱신, plan 불요)
+
+## 배경
+
+UPS-1 회귀 fix (commit `6504dd6`) 직후 전체 81 hook 테스트 중 5 fail 잔존 — UPS-1 무관 pre-existing 회귀. `git stash plugins/rein-core/rules/short/` 로 변경 반전한 상태에서도 동일 5 fail 확인 (정직성 검증 완료).
+
+## Root cause 분류
+
+### 그룹 A — Phase 2b HK-4 dispatcher deprecation 미반영 (2건)
+
+Phase 2b HK-4 에서 `post-edit-dispatcher.sh` 가 hooks.json 에서 등록 해제됨 (8 sub-hook 직접 등록으로 분할). dispatcher 본문은 deprecation 메시지만 emit. test 가 dispatcher 등록/호출을 가정해 stale.
+
+| Test | 변경 |
+|---|---|
+| `test-design-plan-coverage-registered` | `EXPECTED_BASENAME="post-edit-dispatcher.sh"` → `"post-edit-design-plan-coverage-rule.sh"` (Phase 2b 분할 후 design-plan-coverage rule 을 직접 등록하는 sub-hook 의 basename) |
+| `test-hk1-post-write-rename` | Section (4) "End-to-end: dispatcher invokes the 4 renamed hooks" 를 "hooks.json registers 4 renamed sub-hooks directly" 검증으로 교체 — dispatcher 호출 검증은 더 이상 의미 없음. 의도 (post-write → post-edit rename 완료 검증) 보존. |
+
+### 그룹 B — Option C Phase 3 `.claude/hooks/` overlay 폐기 미반영 (3건)
+
+Option C Phase 3 (2026-05-13) 에서 `.claude/hooks/` overlay 가 폐기되고 `plugins/rein-core/hooks/` 가 단독 SSOT 가 됨. test 가 `.claude/hooks/` 경로를 hardcode → 부재 fail.
+
+| Test | 변경 |
+|---|---|
+| `test-post-edit-review-gate-external-paths` | `HOOK="$PROJECT_DIR/.claude/hooks/post-edit-review-gate.sh"` → `"$PROJECT_DIR/plugins/rein-core/hooks/post-edit-review-gate.sh"` (1줄) |
+| `test-session-end-stamp` | `copy_hooks_into_sandbox()` 내부 `.claude/hooks/` source path 3개를 `plugins/rein-core/hooks/` 로 교체 (sandbox 내부 layout 유지) |
+| `test-session-start-marker-cleanup` | `HOOK` + `lib/portable.sh` source path 2줄 |
+
+## 변경 범위
+
+5 test 파일만 편집:
+- `tests/hooks/test-design-plan-coverage-registered.sh` (1줄)
+- `tests/hooks/test-hk1-post-write-rename.sh` (section 4 교체, ~20줄)
+- `tests/hooks/test-post-edit-review-gate-external-paths.sh` (1줄)
+- `tests/hooks/test-session-end-stamp.sh` (3줄)
+- `tests/hooks/test-session-start-marker-cleanup.sh` (2줄)
+
+## 비범위
+
+- hook 본체 (`plugins/rein-core/hooks/`) 편집 없음 — source 측은 의도된 상태 (deprecation + SSOT 이전 완료)
+- 다른 76 PASS test 편집 없음 — 회귀 없음 보장
+- dispatcher 본체 (`post-edit-dispatcher.sh`) 추가 정리는 별 cycle (trail/index.md "별 cycle 후보 (f)" 잔존)
+
+## 검증 기준 (Definition of Done)
+
+- [ ] 5 fail test 모두 PASS
+  - `test-design-plan-coverage-registered.sh`
+  - `test-hk1-post-write-rename.sh`
+  - `test-post-edit-review-gate-external-paths.sh`
+  - `test-session-end-stamp.sh` (18 assertion 전부)
+  - `test-session-start-marker-cleanup.sh` (모든 sub-test 전부)
+- [ ] 전체 81 hook test 모두 PASS (회귀 0)
+
+## 라우팅 추천
+
+```yaml
+agent: rein:feature-builder-refactor
+skills:
+  - rein:codex-review
+mcps: []
+security_tier: light
+rationale: |
+  - agent: test 갱신 = researcher-first refactor 성격 (기존 코드 구조 파악 후 의도 보존하며 path/section 갱신, 기능 변경 없음). DoD 키워드 "갱신" 부합.
+  - skills/codex-review: test 본체는 plugin SSOT 가 아니라 tests/ 하위지만 회귀 검증 중요성을 감안해 외부 second opinion 유지.
+  - mcps: 없음 — 외부 시스템 조회 / 라이브러리 조사 불필요.
+  - security_tier: light — bash test 스크립트 path 갱신만, secret/외부 input boundary/command exec 신규 도입 없음. 기존 sandbox/mktemp 패턴 유지.
+approved_by_user: true
+```
+
+## 라우팅 승인 사유
+
+Auto Mode 활성 + 사용자 직접 명령 "다음 사이클 후보 진행하자" + AskUserQuestion 응답 "(b) hook test 5 fail 진단 (Recommended)" 로 reasonable call 진행. 5 fail 모두 2 root cause 로 분류 완료, fix 방향이 명확 (단순 path/basename/section 갱신) → 별 cycle 분리 불필요.
+
+---
+## dod-2026-05-22-area-c-atomic-state-fastpath.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — X4.C.5 State machine atomic 결합 (fast-path latency 개선)
+
+- 날짜: 2026-05-22
+- 유형: refactor (성능 최적화 — correctness/behavior 영향 0)
+- master plan: `docs/plans/2026-05-20-integrated-roadmap.md` 영역 C, cycle 묶음 **X4.C.5** (선택 잔존 → 사용자 진행 결정 2026-05-22)
+- plan ref: docs/specs/2026-05-21-area-c-state-machine.md (design memo §9 Q-5 + §8.5 후속 cycle)
+- design ref: docs/specs/2026-05-21-area-c-state-machine.md §9 (Q-5), docs/reports/2026-05-21-area-c-state-machine-spike.md §5
+
+## 목표 (Why)
+
+영역 C fast-path 가 X4.C.4 SPIKE 에서 **NET REGRESSION** 판정 (M1 +59ms / M2 source_edit +66~68ms, M2 answer 만 -32ms). 원인은 fast-path 가 state 를 확인할 때 python 을 여러 번 호출 (`state_is_valid` + `read_effective_mode` + dirty match 각각 별도 invocation) → python cold-start (~25ms/회) 누적이 절감분을 초과. 본 cycle 은 이 호출들을 **single python invocation 으로 atomic 결합** 하여 cold-start 횟수를 줄여 regression 을 break-even 또는 개선으로 전환 시도. correctness 영향 0. 부수적으로 codex Round 7 advisory 의 2-call TOCTOU (X4.C.3) 도 1-call 로 해소.
+
+## 성공 기준 (Acceptance)
+
+1. `state-machine.sh` 에 결합 함수 신설 — single python invocation 으로 (a) state_is_valid 판정 + (b) effective_mode 추출 + (c) dirty_files match 를 한 번에 수행, 단일 lock 하에서. 기존 `state_is_valid` / `read_effective_mode` 는 하위호환 유지 (다른 호출처 있을 수 있음 — grep 확인).
+2. **3 state-read fast-path hook** (M1 `pre-edit-dod-gate`, M2a `post-edit-design-plan-coverage-rule`, M2b `post-edit-routing-procedure-rule`) 의 fast-path 호출부를 결합 함수로 교체. **M3 `post-edit-spec-review-gate` 는 N/A** — 이 hook 의 fast-path 는 marker mtime-dedup 이라 `state_is_valid`/`read_effective_mode` 호출이 없어 결합 대상 아님 (design memo §8.4 의 "4 hook" 표현은 두 상이한 skip 메커니즘을 한 heading 으로 묶은 loose 표현 — codex X4.C.5 review 확인). **fast-path skip 판정 결과가 기존과 동일** (behavioral-contract test 로 검증 — 같은 state 입력 → 같은 skip/proceed 결정).
+3. **SPIKE 재측정** (`tests/hooks/bench-state-fast-path.sh`, N=50, 동일 환경) — atomic 결합 후 M1/M2 latency 측정. design memo §9 Q-5 추정 (M1 net -1~+21ms, M2 source_edit 회귀 절반 축소) 대비 실측 비교.
+4. correctness: 기존 `tests/hooks/test-state-machine.sh` 전부 PASS + 결합 함수 단위 test 추가 (state_is_valid 동치 / effective_mode 동치 / dirty match 동치 / malformed→legacy fallback 보존).
+5. **판정 분기**: 재측정이 break-even/개선이면 영역 C 완전 close. 여전히 회귀면 Option B (M1/M2 fast-path 제거 또는 limit) 를 사용자에게 제시 — atomic 결합 후에도 안 되면 fast-path 자체를 걷어내는 결정.
+
+## 제외 (Out of scope)
+
+- behavior/correctness 변화 — 본 cycle 은 순수 성능 리팩토링. fast-path 의 skip 의미·gate 차단 조건 불변.
+- 영역 B `.plan-coverage-dirty` 와 state.dirty_files 통합 — Q-1 에서 **분리 유지** 결정 (SPIKE §4). 본 cycle 은 영역 C 내부만.
+- state.json single-writer property 변경 — dispatcher 가 유일 writer (design memo §4.1). 결합 함수는 **read-only** (writer 아님).
+- X3.B.3 (영역 B dirty path append) — 사용자 미진행 결정 (2026-05-22).
+
+## 리스크
+
+- (R1) 결합 함수의 single python 이 기존 3~5 호출의 의미를 정확히 재현 못하면 fast-path 오판 (잘못 skip = gate 우회). → behavioral-contract test (acceptance #2) + malformed fallback test (acceptance #4) 로 방어.
+- (R2) atomic 결합 후에도 회귀 잔존 가능 (design memo §9 Q-5 가 이미 "M2 source_edit 여전히 회귀" 명시). → acceptance #5 판정 분기로 정직하게 처리 (실패해도 Option B 경로 존재).
+- (R3) python 1회 cold-start 자체가 25ms — 절감 추정의 정확도 한계 (SPIKE §5). → 추정 아닌 실측 (acceptance #3) 으로 판정.
+
+## 라우팅 추천
+
+```yaml
+agent: rein:feature-builder-refactor   # refactor — 기능 변경 없이 구조 개선 (researcher-first)
+skills:
+  - rein:codex-review                   # 필수 리뷰 gate (.codex-reviewed stamp)
+mcps:
+  - serena                              # state-machine.sh 함수 심볼 분석 + 호출처 추적 (find_referencing_symbols)
+rationale: >
+  atomic 결합은 기존 동작 보존이 최우선인 성능 리팩토링 → feature-builder-refactor 의
+  researcher-first 전략 (기존 구조 파악 후 기능 불변 개선) 이 적합. state-machine.sh +
+  4 hook 의 호출처 정확 추적이 핵심이라 serena 의 symbol 분석이 유효. codex-review 는
+  commit gate 필수. security 는 read-only 리팩토링이라 light tier 후보 (correctness 보존
+  + 외부 입력 boundary 변화 없음).
+security_tier: light   # read-only 성능 리팩토링 — 외부 입력/보안 경계 변화 없음. 사용자 승인 (2026-05-22)
+approved_by_user: true # 사용자 승인 (2026-05-22) — 추천 조합 그대로
+```
+
+## Self-review 예정 항목 (AGENTS.md §6)
+
+- 결합 함수가 기존 3~5 호출과 동치인가 (behavioral-contract)
+- malformed/schema-mismatch 시 legacy fallback 보존되는가
+- SPIKE 재측정 수치가 추정과 부합하는가 (정직한 판정)
+- 매직넘버/하드코딩 없는가, shellcheck clean 유지하는가
+
+---
+## dod-2026-05-22-rein-v1-3-4-b1-security-tier.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — B1 security-tier-skip Tier-1-only 정렬
+
+- 날짜: 2026-05-22
+- 유형: fix (security/correctness)
+- plan ref: rein-v1.4-improvement-plan.md §5.2 B1 (확정안 §0.5)
+- design ref: codex 검증 (2026-05-22) — security skip Tier 1+2 vs coverage self-heal Tier 1 불일치
+
+## 목표 (Why)
+
+`pre-bash-test-commit-gate.sh` 의 security stamp skip 경로(P6)는 `select_active_dod` 결과 Tier 1 **또는** Tier 2 를 모두 수용한다(line 178). 그러나 같은 파일의 coverage marker self-heal 은 Tier 1 만 신뢰한다(line 334). Tier 2 는 `select-active-dod.sh` 정의상 **advisory fallback (non-blocking authority)** 이므로, "security stamp 없이 commit 허용" 같은 **blocking 결정**의 근거로 쓰면 안 된다. `.active-dod` marker 부재 + 최신 mtime DoD 가 우연히 `security_tier: light` 인 경우 Tier 2 로 false-skip 되어 보안 리뷰를 우회할 수 있다.
+
+## 성공 기준 (Acceptance)
+
+1. line 178 의 조건을 `[ "$_sad_tier" = "1" ] && [ -n "$_sad_path" ]` 으로 좁힌다 (Tier 2 제거). 주석(line 176-177)도 "Tier 1 only" 로 갱신.
+2. **회귀 테스트 T1**: `.active-dod` marker 부재 + 최신 DoD 가 `security_tier: light` + `approved_by_user: true` 인 상태(Tier 2 fallback)에서 `git commit` 시 **여전히 `.security-reviewed` stamp 를 요구**(차단)하는지 검증.
+3. 기존 정상 경로 보존: Tier 1 (`.active-dod` 가 light DoD 를 가리킴) + `approved_by_user: true` 이면 stamp 없이 skip 허용 — 기존 동작 유지 (회귀 없음).
+4. `.codex-reviewed` (P5) 는 tier 와 무관하게 항상 요구 — 불변.
+
+## 제외 (Out of scope)
+
+- coverage self-heal 로직(line 334) 변경 — 이미 Tier 1 only, 손대지 않음.
+- `select_active_dod` 자체의 tier 판정 로직 변경.
+- `security_tier: light` 의미/파싱 변경.
+
+## 리스크
+
+- (R1) Tier 2 를 정당하게 쓰던 경로가 있으면 over-block. → codex 검증 결과 "Tier 2 light skip 은 정당한 blocking 면제 아님" (advisory authority). T1 으로 의도된 차단임을 고정.
+- (R2) 테스트 fixture 가 Tier 2 상태를 정확히 재현 못하면 검증 무효. → marker 부재 + 단일 light DoD mtime 으로 Tier 2 강제, select_active_dod 출력으로 tier=2 사전 확인.
+
+## 라우팅 추천
+
+```yaml
+agent: rein:feature-builder-fix          # 버그 수정 — reproduction-first (failing test 먼저)
+skills:
+  - rein:codex-review                    # commit gate 필수 (.codex-reviewed)
+mcps:
+  - serena                               # select_active_dod 호출처/tier 사용처 추적
+rationale: >
+  security gate 의 tier 일관성 결함 수정. reproduction-first 로 Tier 2 false-skip 을
+  failing test(T1) 로 먼저 고정한 뒤 조건을 좁힌다. select_active_dod 사용처 정확
+  추적이 핵심이라 serena symbol 분석 유효. 보안 경계(commit gate) 변경이므로
+  security_tier 는 standard — 전체 security review 필수.
+security_tier: standard  # 보안 게이트 동작 변경 — 전체 security review 필수
+approved_by_user: true   # 사용자 위임 (2026-05-22 "나 없이 혼자서 진행해봐") — 확정안 §0.5 스코프
+```
+
+## Self-review 예정 항목 (AGENTS.md §6)
+
+- Tier 2 제거가 정상 Tier 1 경로를 깨지 않는가
+- `.codex-reviewed` always-required 불변 확인
+- T1 이 Tier 2 상태를 실제로 재현하는가 (tier=2 사전 확인)
+- shellcheck clean, 매직넘버 없음
+
+---
+## dod-2026-05-22-rein-v1-3-4-b2-p8-env-read.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — B2 P8 .env-read 탐지 verb 확장 (false-positive 정밀화)
+
+- 날짜: 2026-05-22
+- 유형: fix (security)
+- plan ref: rein-v1.4-improvement-plan.md §5.2 B2 (확정안 §0.5)
+- design ref: codex 검증 (2026-05-22) — P8 누락 verb + quoted-mention false-positive 주의
+
+## 목표 (Why)
+
+`pre-bash-safety-guard.sh` 의 P8 (.env 읽기 차단) 은 read verb 를 `cat|head|tail|less|more|python[23]?|node` 로만 탐지한다(line 102). `grep KEY .env` / `awk … .env.local` / `sed … .env` / `jq . .env` / `cut … .env` 로 시크릿을 읽는 경로가 누락돼 있다. 단순 verb 추가만 하면 `grep ".env" README.md` 처럼 **따옴표 안 검색 패턴**까지 차단되는 false-positive 가 생긴다 (codex 경고).
+
+## 성공 기준 (Acceptance)
+
+1. line 102 verb alternation 에 `grep|awk|sed|jq|cut` 추가.
+2. ~~residual 정밀화(quote-boundary 면제)~~ **철회 (codex review 2026-05-22 R1: fail-open 발견)**. quote-boundary 면제는 `cat ".env"` / `grep KEY ".env"`(따옴표 파일명) 을 통과시켜 실제 시크릿 read 우회를 열었음. → residual 은 **deny-by-default 원복**: safe-template strip 후 남는 `.env` 는 따옴표 여부 무관 차단. 따옴표 검색 패턴 vs 따옴표 파일 인자 구분은 shell 파싱 필요 → classifier 범위 밖 → fail-closed.
+3. **T2 true-positive**: `grep KEY .env`, `awk '{print}' .env.local`, `sed -n p .env`, `jq . .env`, `cut -d= -f2 .env`, `cat "$HOME/.env"`, **`cat ".env"`, `grep API_KEY ".env"`(quoted filename)** → 모두 차단.
+4. **T2 false-positive 방지**: `grep KEY .env.example`(safe template), `echo "use grep .env"`(clause-anchor — verb 아님) → 통과. **`grep ".env" README.md`(quoted pattern) 은 fail-closed 로 보수적 차단** (수용된 false-positive — 보안 우선).
+5. 기존 `test-pre-bash-safety-guard.sh` / `test-bash-guard-split-command-anchoring.sh` 전부 PASS (기존 cat/python 동작 보존).
+
+## 제외 (Out of scope)
+
+- 완전한 shell quote 파싱 (command_invokes 의 알려진 한계 — full parser 는 범위 밖).
+- P9/P10 (.env stage/commit) 변경.
+- `grep .env README.md` 처럼 **따옴표 없는** 모호 패턴 — fail-closed 로 차단 유지 (deny-by-default, 안전 측).
+
+## 리스크
+
+- (R1) 따옴표-경계 휴리스틱이 quoted filename (`cat ".env"`) 을 false-negative 로 통과시킬 수 있음. → 단, quoted path (`"$HOME/.env"`) 는 `/` 경계로 여전히 차단. bare quoted filename 직접 read 는 비현실적 패턴이므로 수용.
+- (R2) verb 추가로 기존 통과 케이스가 막힐 수 있음. → acceptance #5 의 기존 테스트 전체 재실행으로 방어.
+
+## 라우팅 추천
+
+```yaml
+agent: rein:feature-builder-fix
+skills:
+  - rein:codex-review
+mcps:
+  - serena
+rationale: >
+  P8 보안 탐지 확장 + false-positive 정밀화. reproduction-first 로 true/false-positive
+  케이스를 test 로 먼저 고정한 뒤 regex 를 확장한다. command_invokes/bash-guard-infra
+  의 clause-anchoring 동작 추적이 핵심이라 serena 유효. 보안 차단 동작 변경이므로
+  security_tier standard — 전체 security review 필수.
+security_tier: standard
+approved_by_user: true   # 사용자 위임 (2026-05-22) — 확정안 §0.5 스코프
+```
+
+## Self-review 예정 항목 (AGENTS.md §6)
+
+- true-positive (시크릿 read) 모두 차단되는가
+- quoted search-pattern false-positive 통과하는가
+- 기존 cat/python 차단 동작 보존되는가
+- safe template (.env.example 등) 통과 보존되는가
+
+---
+## dod-2026-05-22-rein-v1-3-4-b3b6b7-stop-gate.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — B3+B6+B7 stop-session-gate 안정성 묶음
+
+- 날짜: 2026-05-22
+- 유형: feat (B3 GC) + fix (B6 portability, B7 ux)
+- plan ref: rein-v1.4-improvement-plan.md §5.2 B3/B6/B7 (확정안 §0.5)
+- design ref: codex 검증 (2026-05-22) — B3 캐시 경로 정정 + early-exit 앞 배치
+
+## 목표 (Why)
+
+`stop-session-gate.sh` 3건을 한 파일 응집 단위로 처리.
+- **B3**: PERF-2 resolver cache (`.rein/cache/hook-resolver/<id>.json`) 는 pre-edit-dod-gate 가 gate check 전에 write 하므로, 차단된 편집은 PostToolUse cleanup 을 못 받아 stale 로 남는다(GC 없음). 24h+ stale entry 를 session stop 시 정리.
+- **B6**: line 308 `[[ "$COUNT" =~ ^[0-9]+$ ]]` 는 bash 전용. POSIX `case` 로 교체 (portable.sh 일관성).
+- **B7**: line 236 stale DoD 경고가 완료된 DoD(inbox 매칭)도 경고. 완료분 제외.
+
+## 성공 기준 (Acceptance)
+
+1. **B3**: GC 함수 신설 — `.rein/cache/hook-resolver/*.json` 중 mtime 24h 초과만 `rm -f`. **mtime 불명/0 이면 삭제 안 함**(fail-open 삭제 방지). **src-edit early-exit(line 121) 앞**에 호출 — 차단편집 leak(SRC_EDIT_MARKER 미설정)도 회수. best-effort (세션 stop 비차단).
+2. **B6**: line 308 을 `case "$COUNT" in *[!0-9]*|'') COUNT=0 ;; esac` 로 교체. 동작 동일 (비정수→0).
+3. **B7**: stale 경고 루프(line 236)에서 inbox slug 매칭(완료) DoD 제외. pre-edit-dod-gate.sh:459-471 의 slug 매칭 로직 재사용.
+4. **T3**: 완료(inbox-matched) stale DoD 는 경고 미출력, 미완료 stale DoD 는 경고 출력 검증.
+5. **B3 test**: 24h 초과 entry 삭제 + 최신 entry 보존 + mtime 불명 시 보존 검증.
+6. 기존 stop-gate 테스트(test-session-end-stamp / test-stop-gate-deadlock / test-stop-gate-tone) 전부 PASS.
+
+## 제외 (Out of scope)
+
+- `.rein/cache/hook-output/<id>/` dir GC — rm -rf 재귀 삭제 리스크 회피 위해 제외. aggregator cleanup 이 정상 경로에서 처리. (codex "if needed" → 본 cycle 불필요 판정)
+- incident gate / index 검사 로직 변경.
+- GC 주기를 cron/SessionEnd 로 옮기는 것 — stop hook 내 best-effort 로 충분.
+
+## 리스크
+
+- (R1) GC 가 활성 entry 를 오삭제. → 24h 임계 + mtime 불명 시 skip 으로 방어. 활성 세션 entry 는 mtime 신선.
+- (R2) B7 slug 매칭이 기존 로직과 어긋나면 완료/미완료 오판. → pre-edit-dod-gate 와 동일 sed 패턴 사용 + T3 양방향 검증.
+- (R3) GC 가 stop hook 을 느리게/실패시킴. → `|| true` + 디렉토리 부재 즉시 return.
+
+## 라우팅 추천
+
+```yaml
+agent: rein:feature-builder-fix
+skills:
+  - rein:codex-review
+mcps:
+  - serena
+rationale: >
+  stop-gate 안정성 묶음. B3 는 신규 GC(파일 삭제) 라 fail-open 삭제 방지가 핵심,
+  B6/B7 은 동작보존 수정. reproduction-first 로 T3/B3 test 먼저 고정. 캐시 경로/
+  early-exit 흐름 추적에 serena 유효. 파일 삭제(rm) 포함이므로 security_tier 는
+  standard — security review 로 삭제 경계 점검.
+security_tier: standard   # rm -f 파일 삭제 포함 — 삭제 경계 security review 필요
+approved_by_user: true    # 사용자 위임 (2026-05-22) — 확정안 §0.5 스코프
+```
+
+## Self-review 예정 항목 (AGENTS.md §6)
+
+- GC 가 mtime 불명/신선 entry 를 절대 삭제 안 하는가 (fail-open 방지)
+- GC 가 early-exit 앞에서 실행되는가
+- B6 POSIX case 가 비정수 방어 동일한가
+- B7 이 완료/미완료 양방향 정확한가
+- shellcheck clean
+
+---
+## dod-2026-05-22-rein-v1-3-4-d1d2d3-docs.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — D1+D2+D3 포지셔닝 문서화
+
+- 날짜: 2026-05-22
+- 유형: docs
+- plan ref: rein-v1.4-improvement-plan.md §5.1 D1/D2/D3 (확정안 §0.5)
+- design ref: 확정안 §0 포지셔닝 ("policy-governed engineering agent")
+
+## 목표 (Why)
+
+코드 변경 없이 포지셔닝을 강화. "Claude Code workflows vs Rein" 비교 + 아키텍처/정책 모델 개념 문서로 신규 유입자가 Rein 의 차별점을 60초 안에 이해.
+
+## 성공 기준 (Acceptance)
+
+1. **D1**: `README.md` + `README.ko.md` 양쪽에 "How Rein differs from Claude Code workflows" 비교 섹션 추가 (KR/EN parity — readme-style.md §5).
+2. **D2**: `docs/architecture.md` 신설 — hook lifecycle diagram (SessionStart→...→Stop).
+3. **D3**: `docs/policy-model.md` 신설 — governance layer 개념 ("every failure becomes a rule").
+4. readme-style.md 자가검증: 오프너 mechanism 언어 회피, 기존 포지션과 충돌 없음.
+
+## 제외 (Out of scope)
+
+- 코드/hook 변경 일체.
+- README 의 다른 섹션 재작성 (비교 섹션 추가만).
+- 선언형 정책 엔진(v1.6) 의 실제 YAML 스펙 — 개념만 D3 에 언급.
+
+## 리스크
+
+- (R1) KR/EN parity drift. → 양쪽 동시 추가 + 동일 구조.
+- (R2) 신규 docs(architecture/policy-model)의 main include 여부 미결 → merge 시점 branch-strategy 결정 (본 cycle dev 누적).
+
+## 라우팅 추천
+
+```yaml
+agent: rein:docs-writer
+skills:
+  - rein:codex-review
+mcps: []
+rationale: >
+  순수 문서화 → docs-writer 적합. 코드 변경 0 이라 MCP 불요. security_tier light
+  (문서만, 보안 경계 무관). codex-review 는 commit gate 필수.
+security_tier: light
+approved_by_user: true   # 사용자 위임 (2026-05-22) — 확정안 §0.5 스코프
+```
+
+## Self-review 예정 항목 (AGENTS.md §6)
+
+- KR/EN parity 유지되는가
+- mechanism 언어 과다 아닌가 (readme-style §1)
+- 신규 docs main include 결정을 merge 체크리스트에 남겼는가
+
+---
+## dod-2026-05-22-rein-v1-3-4-s1s2s4-scaffold.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — S1+S2+S4 scaffold 잔재 정리
+
+- 날짜: 2026-05-22
+- 유형: chore (cleanup) + test (fixture)
+- plan ref: rein-v1.4-improvement-plan.md §5.3 S1/S2/S4 (확정안 §0.5)
+- design ref: codex 검증 (2026-05-22) — S3 제외(별도 cycle), S5 보존
+
+## 목표 (Why)
+
+v1.0.0 OSS launch 때 scaffold mode 실행 경로는 제거됐으나 주석·fixture 잔재가 남아 가독성/유지보수 혼선을 유발. 실행 경로 불변, 주석·fixture만 정리.
+
+## 성공 기준 (Acceptance)
+
+1. **S1**: `lib/project-dir.sh:21` 의 "Scaffold install" 용어 제거 — walk-up 동작 설명을 plugin-agnostic 으로 (CI 등 CLAUDE_PLUGIN_ROOT 미설정 케이스). **로직 불변** (S5: walk-up 실행 코드 유지).
+2. **S2**: 아래 hook 의 "scaffold mode" 주석을 "plugin mode 요구, 그 외 skip" 표현으로 교체. 동작 불변:
+   - `pre-bash-safety-guard.sh`, `pre-bash-test-commit-gate.sh`, `pre-edit-dod-gate.sh`, `post-edit-plan-coverage.sh`, `post-edit-design-plan-coverage-rule.sh`, `post-edit-routing-procedure-rule.sh`, `stop-session-gate.sh`
+3. **S4**: `tests/hooks/test-session-start.sh`, `test-session-start-tone.sh` fixture 의 `"mode":"scaffold"` → `"mode":"plugin"`.
+4. **검증**: 변경 hook 전부 `bash -n` 통과 + session-start 테스트 전체 PASS + `tests/scripts/test-rein-init-unknown.sh` PASS (S5 계약 보존).
+
+## 제외 (Out of scope)
+
+- **S3** (`rein-state-paths.py` mode 필드) — dead code 아님, 별도 cycle (확정안 §0.5).
+- **S5** (`test-rein-init-unknown.sh`) — `--mode=scaffold` unknown 계약 검증 테스트, **보존**.
+- `json-deny-emitter.sh` 의 "scaffolding" — 문자열 length 용어, scaffold-mode 와 무관.
+- `test-plugin-hooks-json-parity.sh` 의 scaffold 언급 — fixture 아닌 설명 주석, 본 cycle 제외.
+- 실행 코드 로직 변경 일체.
+
+## 리스크
+
+- (R1) S4 fixture mode 변경이 session-start 동작을 바꿈. → codex 확인: 로드 hook 은 `.rein/project.json` 존재만 검사, mode 값 미사용. session-start 테스트 전체로 방어.
+- (R2) 주석 교체가 실수로 코드 라인 변경. → bash -n + diff 검토.
+
+## 라우팅 추천
+
+```yaml
+agent: rein:feature-builder-refactor
+skills:
+  - rein:codex-review
+mcps: []
+rationale: >
+  주석·fixture 정리(동작 불변) → refactor-researcher 적합. 실행 경로 변경 없어
+  MCP 불요. security_tier light — 외부 입력/보안 경계 변화 0, 주석·테스트 fixture
+  뿐. codex-review 는 commit gate 필수.
+security_tier: light    # 주석/fixture only — 동작·보안 경계 변화 0. 사용자 위임 (2026-05-22)
+approved_by_user: true  # 사용자 위임 (2026-05-22) — 확정안 §0.5 스코프
+```
+
+## Self-review 예정 항목 (AGENTS.md §6)
+
+- 주석만 바뀌고 코드 라인 불변인가 (diff 검토)
+- session-start 테스트 PASS, test-rein-init-unknown PASS (S5)
+- S3 미포함 확인
+
+---
+## dod-2026-05-22-sr-1-spec-review-stale-reviewed-bypass.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — SR-1 spec-review gate stale `.reviewed` 우회 차단
+
+- 날짜: 2026-05-22
+- 유형: fix (security gate hardening — 리뷰 우회 경로 차단)
+- plan ref: need-to-confirm.md §SR-1 (spec-review gate 가 stale `.reviewed` 를 신뢰)
+
+## 목표 (Why)
+
+리뷰 완료된 spec/plan 문서를 **다시 편집**하면 `post-edit-spec-review-gate.sh` 가 새 `${hash}.pending` 을 만들지만 기존 `${hash}.reviewed` 를 무효화하지 않는다. 그 결과 `.pending`(신규) + `.reviewed`(stale) 가 공존하고, `pre-edit-dod-gate.sh` 의 spec-review gate 는 `.reviewed` 의 **존재 여부만** 검사하므로 통과시킨다 → 미리뷰 변경분으로 소스 편집이 풀리는 리뷰 우회 경로. 이를 닫는다.
+
+## 성공 기준 (Acceptance)
+
+1. **(b) 편집 시 무효화** — `post-edit-spec-review-gate.sh` 가 canonical spec/plan 편집을 감지하면 같은 hash 의 기존 `.reviewed` 를 제거한다 (create/touch 두 분기 모두 적용). 편집 = 직전 리뷰 무효화.
+2. **(a) gate freshness 백스톱** — `pre-edit-dod-gate.sh` spec-review gate 가 `.reviewed` 존재 시, `.pending` 의 `created=` 와 `.reviewed` 의 `reviewed=` 타임스탬프를 비교한다. `created` > `reviewed`(편집이 리뷰 이후) 또는 타임스탬프 누락/파손 → stale 로 간주하여 UNRESOLVED(차단). 둘 다 rein 이 쓰는 `date -u +%Y-%m-%dT%H:%M:%S` (UTC, offset 없음) 라 lexical 비교 = 시간 순서. legacy healer 의 trailing `Z` 는 strip 후 비교.
+3. **회귀 테스트 (TDD, 실패 → 통과)**:
+   - (b) post-edit 가 재편집 시 stale `.reviewed` 제거 + 새 `.pending` 생성
+   - (a) `.pending.created` > `.reviewed.reviewed` 공존 시 gate 차단 (exit 2)
+   - (a) `.reviewed` 가 `.pending` 보다 fresh(또는 동시각)면 통과 (false-positive 없음)
+   - (a) 타임스탬프 누락 시 fail-closed (차단)
+   - end-to-end: write spec → 실제 `rein-mark-spec-reviewed.sh` 리뷰 → 재편집(post-edit hook) → 소스 편집 시도 차단
+4. **기존 테스트 무회귀** — `tests/hooks/test-spec-review-gate.sh` 전량 PASS (특히 `test_gate_allows_reviewed_spec`: 동시각 marker → 통과 유지).
+5. codex 리뷰 PASS + `.codex-reviewed` stamp, security 리뷰 PASS + `.security-reviewed` stamp.
+
+## 제외 (Out of scope)
+
+- 다른 need-to-confirm 항목 (GE-1/GE-2/G8-3/G3/BC-INFO1/A-LowPrio). SR-1 단독.
+- `rein-mark-spec-reviewed.sh` 변경 (PD-1 에서 이미 fail-closed 처리됨 — SR-1 범위 밖).
+- legacy healer (`rein-heal-legacy-pending.py`) 변경 — `.pending` 을 항상 삭제하므로 공존을 만들지 않음(확인 완료). 불변.
+- spec 파일 mtime 기반 비교 — git checkout/touch 로 fragile. content 타임스탬프(`created=`/`reviewed=`)만 사용.
+
+## 리스크
+
+- (R1) freshness 검사 false-positive 로 정상 편집 차단. → 비교는 `.pending` + `.reviewed` **공존 시에만** 실행 (정상 flow 는 리뷰 후 `.pending` 삭제됨). 동시각/older-pending 케이스 통과 테스트로 보장. healer 는 `.pending` 삭제하므로 공존 안 만듦(확인).
+- (R2) locale collation 으로 lexical 비교 오작동. → ASCII ISO 8601 (`0-9`,`-`,`T`,`:`) 은 전 locale 동일 collate. 그래도 누락/파손 시 fail-closed.
+- (R3) 본 세션의 live gate 자기 영향. → 메인테이너 dev 는 `/plugin install` 캐시에서 hook 실행 → working-tree 편집은 이번 세션 live 동작 불변. 또한 변경은 검사 강화(additive)라 gate 기능 자체는 보존.
+
+## 라우팅 추천
+
+```yaml
+agent: rein:feature-builder-fix    # SR-1 = bugfix (리뷰 우회 경로). reproduction-first(failing test 먼저) 전략 적합
+skills:
+  - rein:codex-review              # commit gate 필수 (.codex-reviewed)
+mcps: []
+rationale: >
+  spec-review gate 우회를 닫는 보안성 bugfix. reproduction-first TDD 로 우회 시나리오를
+  failing test 로 고정 후 두 hook(post-edit-spec-review-gate / pre-edit-dod-gate)을 수정.
+  본 세션이 이미 4개 관련 파일 + healer + 테스트 하네스를 전부 read 해 컨텍스트가
+  완전하므로, subagent 재로딩 비용 회피를 위해 메인 세션에서 동일 reproduction-first
+  전략으로 구현. security_tier=full — 리뷰 게이트 자체를 만지는 변경이라 light 면제 부적합.
+security_tier: full                # 리뷰 우회 차단 = 보안 표면. full security review
+approved_by_user: true             # 사용자 승인 (2026-05-22 "두 겹으로 막기" + "지금 세션에서 직접" 선택)
+```
+
+## Self-review 예정 항목 (AGENTS.md §6)
+
+- (b) `.reviewed` 제거가 create/touch 두 분기 모두 커버하는가
+- (a) freshness 비교가 공존 시에만 실행되어 정상 편집을 막지 않는가 (false-positive)
+- 누락/파손 타임스탬프 fail-closed 가 정상인가
+- 기존 `test-spec-review-gate.sh` 무회귀 + 신규 회귀 테스트가 우회 시나리오를 실제로 재현·차단하는가
+- end-to-end 테스트가 실제 스크립트(post-edit hook + mark-spec-reviewed)를 사용하는가
+
+---
+## dod-2026-05-23-a-lowprio-verdict-firstmatch-test.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — A-LowPrio: multi-line FINAL_VERDICT first-match 회귀 테스트
+
+- 날짜: 2026-05-23
+- 유형: fix (test)
+- Scope ID: A-LowPrio-verdict-firstmatch-test
+
+## 문제 (Symptom)
+
+`rein-codex-review.sh` 의 verdict 파서가 `head -1` first-match contract 사용. 다중
+`FINAL_VERDICT:` 라인이 있을 때 first-match-wins 가 정상 동작하는지 단위 테스트 부재.
+(로직은 이미 올바름 — 회귀 방지 테스트만 추가, 코드 변경 없음)
+
+## 수정 범위 (DoD 항목)
+
+- [ ] `tests/skills/test-codex-review-wrapper.sh` 에 테스트 1건 추가:
+      `FAKE_CODEX_VERDICT` 에 `FINAL_VERDICT: PASS` + `FINAL_VERDICT: REJECT` 두 라인 주입 →
+      wrapper 가 first match(PASS)를 채택해 exit 0 (PASS) 인지 검증
+- [ ] 기존 wrapper 테스트 전부 통과 (28건 + 신규 1 = 29)
+- [ ] 코드(파서) 변경 없음 — 테스트만 추가
+
+## 라우팅 추천
+
+```yaml
+agent: feature-builder-fix
+skills: []
+mcps: []
+rationale: >
+  테스트 1건 추가(internal, no logic change). 회귀 방지 가치. integration/review 는 orchestrator.
+approved_by_user: true
+```
+
+---
+## dod-2026-05-23-bc-info1-coldpath-sanitize.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — BC-INFO1: bootstrap-check cold-path git env sanitize
+
+- 날짜: 2026-05-23
+- 유형: fix
+- Scope ID: BC-INFO1-coldpath-git-env-sanitize
+
+## 문제 (Symptom)
+
+`plugins/rein-core/hooks/lib/bootstrap-check.sh` 에서 stdin.cwd 부재 시 (cold path = 직접 CLI
+호출) `git rev-parse` fallback 이 v1.1.2 hotfix 의 env-sanitize 를 적용하지 않는다. 오염된
+`GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR`/`GIT_INDEX_FILE` 가 cold path 에서 decoy repo 를
+project_dir 로 latch 시킬 수 있다.
+
+## Root cause
+
+v1.1.2 hotfix 가 stdin.cwd walk-up 경로에만 env-sanitize 를 적용하고, cold-path fallback
+`git rev-parse --show-toplevel` 은 오염 env 그대로 실행. 두 경로의 git env 신뢰 가정이 불일치.
+
+## 수정 범위 (DoD 항목)
+
+- [ ] failing test 먼저: `tests/hooks/test-bootstrap-check-helper.sh` 에 cold-path(무 stdin)
+      env-pollution 시나리오 (Fixture J2) → 현재 코드에서 decoy latch 되어 실패 확인
+- [ ] cold-path `git rev-parse` 에 stdin.cwd 경로와 동일한
+      `env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE` 적용
+- [ ] `GIT_CEILING_DIRECTORIES` 는 양 경로 모두 보존 (policy-sensitive, caller-intended)
+- [ ] `bash tests/hooks/test-bootstrap-check-helper.sh` GREEN (기존 20 + 신규 J2 = 21)
+
+## 라우팅 추천
+
+```yaml
+agent: feature-builder-fix
+skills: []
+mcps: []
+rationale: >
+  Reproduction-first 보안 위생 수정 (cold-path env sanitize). 단일 hook lib + 그 test 만 touch.
+  codex/security review 와 integration 은 orchestrator 가 처리하므로 skill/mcp 불필요.
+approved_by_user: true
+```
+
+---
+## dod-2026-05-23-bc-info1-siblings-git-env-sanitize.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — BC-INFO1-siblings: sibling hook libs git env sanitize (defense-in-depth)
+
+- 날짜: 2026-05-23
+- 유형: fix
+- Scope ID: BC-INFO1-siblings-git-env-sanitize
+
+## 문제 (Symptom)
+
+BC-INFO1(v1.3.6) 은 `bootstrap-check.sh` cold-path 만 sanitize. 동일한 unsanitized
+`git rev-parse --show-toplevel` 패턴이 sibling hook lib 3곳에 잔존 → 오염된 git 환경변수가
+엉뚱한 repo 를 project_dir 로 latch 할 수 있는 동일 취약점. (2026-05-23 security review INFO-1)
+
+## Root cause
+
+`project-dir.sh`(line 57, 92, + Step 5 SCRIPT_DIR 앵커), `state-machine.sh`(line 36),
+`test-oracle-log.sh`(line 57) 의 `git rev-parse --show-toplevel` 호출이 env-sanitize 미적용.
+
+## 수정 범위 (DoD 항목)
+
+- [ ] 각 sibling lib 의 `git rev-parse --show-toplevel` 호출에 bootstrap-check 와 동일한
+      `env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE` 적용
+- [ ] `GIT_CEILING_DIRECTORIES` 보존 (bootstrap-check 패턴과 일치)
+- [ ] project-dir.sh Step 5 의 SCRIPT_DIR 앵커 의미 유지하면서 sanitize 추가
+- [ ] 각 파일이 단일 사본임을 확인 (scripts/ 또는 .claude/ 사본 없음)
+- [ ] 가능한 곳에 cold-path env-pollution 회귀 테스트 추가
+- [ ] 기존 테스트 회귀 없음 (test-state-machine, test-project-dir*, test-oracle-* 등)
+- [ ] bash -n clean
+
+## 라우팅 추천
+
+```yaml
+agent: feature-builder-fix
+skills: []
+mcps: []
+rationale: >
+  기계적 sanitize(BC-INFO1 패턴 적용). state-machine.sh(Area C 민감)·project-dir.sh(resolver)
+  주의. codex/security review + integration 은 orchestrator 가 처리.
+approved_by_user: true
+```
+
+---
+## dod-2026-05-23-g8-3-spec-review-fallback.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — G8-3: 신규 spec-review 의 무관 active-DoD Tier-2 fallback 차단
+
+- 날짜: 2026-05-23
+- 유형: fix
+- Scope ID: G8-3-spec-review-disable-unrelated-tier2-fallback
+
+## 문제 (Symptom)
+
+새 design/plan 문서의 첫 `/codex-review` (fresh spec review) 에서 wrapper 가 **무관한 active DoD**
+를 Tier-2 fallback 으로 envelope 에 주입한다. Design Alignment slot 이 그 무관 DoD 의 Scope ID
+들을 MISSING 으로 보고 → 구조적 **false NEEDS-FIX**. 5회+ 재발.
+
+## Root cause
+
+spec-review 분기가 무조건 `select_active_dod` 를 호출하는데, 이 함수는 spec-review 인식이 없어
+latest-mtime DoD 를 Tier-2 advisory 로 반환한다. 신규 design/plan 시점엔 존재하는 유일한 DoD 가
+무관한 in-flight 작업의 것이라, 그게 `active_dod_tier: 2` / `active_dod_path: <unrelated>` 로 주입됨.
+
+## 수정 범위 (DoD 항목)
+
+- [ ] failing test 먼저: `tests/skills/test-codex-review-wrapper.sh` 에 fresh spec review 가 무관
+      active DoD 를 Tier-2 로 채택하지 않음 assertion → 현재 코드 실패 확인
+- [ ] spec-review 분기에서 active-DoD Tier-2 fallback 비활성화 (`(N/A for fresh spec review)` 표기)
+- [ ] `diff_base` = `N/A`, `changed_files` = 리뷰 대상 문서 자체만
+- [ ] 두 사본 (`scripts/rein-codex-review.sh` + `plugins/rein-core/scripts/rein-codex-review.sh`)
+      **byte-identical** (`diff -q` 통과)
+- [ ] code-review (non-spec) 분기 동작 불변 — negative-side guard test 로 Tier-2 fallback 유지 검증
+- [ ] `bash tests/skills/test-codex-review-wrapper.sh` GREEN (기존 26 + 신규 2 = 28)
+
+## 라우팅 추천
+
+```yaml
+agent: feature-builder-fix
+skills: []
+mcps: []
+rationale: >
+  Reproduction-first 버그 수정. spec-review 분기 한정 변경, code-review 분기 불변.
+  rein-codex-review.sh 2사본 + wrapper test 만 touch. codex/security review 와 integration 은
+  orchestrator 가 처리하므로 skill/mcp 불필요.
+approved_by_user: true
+```
+
+---
+## dod-2026-05-23-job-stop-status-update.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — job-stop: record terminal status on `rein job stop`
+
+- 날짜: 2026-05-23
+- 유형: fix
+- Scope ID: BG-job-stop-record-terminal-status
+
+## 문제 (Symptom)
+
+`rein job stop` 이 SIGTERM/SIGKILL 으로 프로세스를 종료하지만 job 상태 파일
+(`.claude/cache/jobs/<jid>.status`, `.exit`, metadata) 은 `running` 그대로 stale 하게 남는다.
+rein 의 state-machine contract 는 stop 시 `running → killed` (terminal) 전이를 요구한다.
+특히 setsid 부재 경로 ("started without setsid; killing single PID only") 에서는 wrapper PID 만
+죽으므로 child 의 exit 를 wrapper 가 관측하지 못해 status 가 영영 갱신되지 않는다.
+
+## Root cause
+
+`scripts/rein.sh` 의 `cmd_job_stop` 은 PID/process-group 만 죽이고 종료 성공 후
+`.status` / `.exit` / metadata 를 갱신하지 않는다. 현재는 `cmd_job_status` 만 사후에
+opportunistic 하게 stale 상태를 보정한다. stop 명령 자체가 terminal 상태를 기록해야 한다.
+
+## 수정 범위 (DoD 항목)
+
+- [ ] failing test 먼저: `tests/scripts/test-job-stop-posix.sh` 에 stop 후 `.status` 가 `running`
+      이 아님(`killed`) + `.exit` 기록됨 assertion 추가 → 현재 코드에서 실패 확인
+- [ ] `scripts/rein.sh` 에 settle helper (`_rein_job_settle_terminal`) 추가 — `.status`/`.exit`/meta
+      를 atomic 하게 terminal 상태로 기록 (wrapper 의 settle 패턴 재사용, write_atomic + python meta patch)
+- [ ] `cmd_job_stop` 이 종료 성공 후 settle helper 호출 (setsid 부재 경로 포함 robust)
+- [ ] `bash tests/scripts/test-job-stop-posix.sh` GREEN
+- [ ] `bash tests/scripts/test-job-status.sh` 회귀 없음 (GREEN)
+- [ ] 기존 status vocabulary 유지 — `killed` 는 bug contract 가 명시한 terminal 용어,
+      신규 임의 state 발명 아님. `.exit` 는 `128 + signal` 관례 (SIGTERM=143, SIGKILL=137)
+
+## 상태 vocabulary 결정
+
+코드 내 기존 vocabulary: `running`, `success`, `failed`, `unknown_dead`.
+externally-terminated job 은 organic `success`/`failed` 와 구분되는 terminal 상태가 맞다.
+bug report 의 symptom + required-fix 가 명시적으로 `killed` 를 contract 용어로 지목 →
+`killed` 사용 (arbitrary 신규 명칭 발명 금지 제약은 충족 — contract 가 명명한 용어).
+
+## 라우팅 추천
+
+```yaml
+agent: feature-builder-fix
+skills: []
+mcps: []
+rationale: >
+  Reproduction-first 버그 수정. failing test → root cause → fix → regression guard.
+  단일 shell script(scripts/rein.sh) + job test 파일만 touch. codex/security review 와
+  integration 은 orchestrator 가 처리하므로 skill/mcp 불필요.
+approved_by_user: true
+```
+
+---
+## dod-2026-05-27-sr-1-b-pre-edit-gate-stale-reviewed.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — SR-1.b pre-edit spec gate `.reviewed` orphan stale 백스톱 강화
+
+- 날짜: 2026-05-27
+- 유형: fix (security gate hardening — SR-1 잔존 trust boundary 차단)
+- plan ref: need-to-confirm.md §SR-1.b (백스톱 (a) 가 `.pending` 존재 전제 — post-edit hook 미발화 시 `.reviewed` 만 잔존하면 통과)
+
+## 목표 (Why)
+
+SR-1 fix 는 두 겹 방어를 도입했다 — (b) post-edit hook 이 spec 편집 시 기존 `.reviewed` 를 `rm -f`, (a) pre-edit gate 가 `.pending`+`.reviewed` 공존 시 freshness 비교. 그러나 (a) 는 `.pending` 존재를 전제로만 동작한다.
+
+만약 post-edit hook 이 발화하지 못하면 (hooks 비활성 / 외부 IDE write / `git checkout` 으로 spec 복원 / MultiEdit JSON 파싱 실패 시 exit 0 silently) 새 `.pending` 이 생성되지 않는다. → 옛 `.reviewed` 만 잔존 → `.pending` 부재라 현재 for 루프 (`pre-edit-dod-gate.sh:404`) 는 실행되지 않음 → spec gate 통과 → 미리뷰 spec 변경분으로 source 편집 허용.
+
+SR-1 이전부터의 trust boundary 라 신규 갭은 아니나, `.reviewed` 도 순회하여 spec 파일 mtime 과 `reviewed=` 타임스탬프를 비교하면 백스톱을 한 겹 더 추가할 수 있다.
+
+## 성공 기준 (Acceptance)
+
+1. **`.reviewed` orphan 백스톱 추가** — `pre-edit-dod-gate.sh` spec gate 가 기존 `.pending` 루프 다음에 `*.reviewed` 도 순회한다. 매칭 `.pending` 이 있으면 skip (기존 분기가 처리). 매칭 `.pending` 부재인 orphan `.reviewed` 만 검사 대상.
+2. **freshness 비교 규칙** — 각 orphan `.reviewed` 에 대해:
+   - spec 파일 mtime (`stat -c %Y` POSIX-portable, BSD 호환) > `reviewed=` 타임스탬프 (epoch 변환) → stale → 차단 (`UNRESOLVED_SPECS=true`)
+   - spec mtime ≤ `reviewed=` → 통과 (정상)
+   - spec 파일 미존재 → skip (기존 deleted-spec 처리와 일관)
+   - `reviewed=` 필드 누락 / malformed (ISO 8601 shape 위반) → fail-closed (차단)
+   - mtime epoch 변환 실패 → fail-closed (차단)
+3. **회귀 테스트 (TDD, 실패 → 통과)** — `tests/hooks/test-pre-edit-dod-gate-sr-1-b.sh` 신설:
+   - F1 (RED→GREEN): orphan `.reviewed` + spec mtime > `reviewed=` → 차단 (exit 2)
+   - F2: orphan `.reviewed` + spec mtime ≤ `reviewed=` → 통과 (exit 0)
+   - F3: orphan `.reviewed` + `reviewed=` malformed → fail-closed (exit 2)
+   - F4: `*.reviewed` 부재 + `.pending` 부재 → 기존 동작 (통과)
+   - F5: 동일 spec 의 `.pending` + `.reviewed` 공존 → SR-1 의 `.pending` 분기가 처리, 신규 분기는 skip (기존 동작 무영향)
+4. **기존 테스트 무회귀** — `tests/hooks/test-spec-review-gate.sh` 전량 PASS (특히 SR-1 의 6 fixture 와 `test_gate_allows_reviewed_spec` 무영향).
+5. codex 리뷰 PASS + `.codex-reviewed` stamp, security 리뷰 PASS + `.security-reviewed` stamp.
+
+## 변경 파일
+
+- `plugins/rein-core/hooks/pre-edit-dod-gate.sh`
+- `tests/hooks/test-pre-edit-dod-gate-sr-1-b.sh` (신설)
+- `need-to-confirm.md` (SR-1.b 해결 → `confirmed.md` 이관은 부모 세션이 처리)
+
+## 제외 (Out of scope)
+
+- post-edit hook 미발화 자체의 root cause 처리 — 본 변경은 백스톱(방어 추가)만. hook 발화 보장은 별 cycle (hooks.json 설정 / Claude Code 자체 동작).
+- `.pending` 분기 자체 변경 — SR-1 fix 가 충분. orphan `.reviewed` 케이스만 추가.
+- spec mtime 비교 정책 자체 — SR-1 이 명시적으로 mtime 을 제외한 이유 (git checkout/touch fragile) 는 `.pending` 분기에 한정. orphan `.reviewed` 는 `.pending` 자체 부재로 content timestamp 비교 불가하므로 mtime 이 유일한 fallback. fragile 이슈는 false-positive 가 아니라 false-negative (touch 후 mtime 이 옛것으로 보일) 위험 — 그래도 현재 갭 (백스톱 0) 보다는 보수적 강화. 이 trade-off 는 본 DoD 의 의도적 선택.
+- 다른 need-to-confirm 항목 (PLN-1/AG-2/G3/etc).
+
+## 리스크
+
+- (R1) spec mtime fragility — `git checkout` 가 spec 파일 mtime 을 commit time 이 아닌 checkout time 으로 설정하므로 false-positive (정상 review 후 checkout 으로 mtime > reviewed_at 으로 보임). → R1 mitigation: orphan `.reviewed` 케이스는 본질적으로 비정상 상태 (정상 flow 면 `.pending` 도 같이 있어야 함). orphan 자체가 hook 미발화의 흔적이므로, 안전 측 fail (차단) 선택. 사용자는 spec 을 다시 review 하거나 `.skip-spec-gate` 마커로 emergency bypass.
+- (R2) stat 명령 BSD vs GNU 차이 — GNU 는 `stat -c %Y`, BSD 는 `stat -f %m`. → portable.sh 의 패턴 따라 Python `os.path.getmtime` 으로 통일 (PYTHON_RUNNER 이미 resolve 된 상태 이용).
+- (R3) `reviewed=` epoch 변환 실패 — locale dependency 우려. → ISO regex shape validation 먼저 + Python `datetime.fromisoformat` 으로 변환 (locale independent). 실패 → fail-closed.
+- (R4) 본 세션의 live gate 자기 영향 — 강화 = additive 검증. 기존 정상 flow (`.pending`+`.reviewed` 공존, `.reviewed` 만 있고 spec 미수정) 는 통과 유지. live impact 없음.
+
+## 라우팅 추천
+
+```yaml
+agent: rein:feature-builder-fix    # SR-1.b = bugfix (잔존 trust boundary 차단). reproduction-first TDD 적합
+skills:
+  - rein:codex-review              # commit gate 필수 (.codex-reviewed stamp)
+mcps: []
+rationale: >
+  SR-1 의 잔존 trust boundary 백스톱 추가. reproduction-first TDD 로 F1 (orphan
+  `.reviewed` + stale spec) 을 failing test 로 고정 후 pre-edit-dod-gate.sh 의
+  spec gate 를 확장. SR-1 패턴 (strict ISO regex + fail-closed + locale-safe
+  numeric compare) 을 그대로 재사용해 코드 일관성 유지. security_tier=normal
+  — 리뷰 게이트 자체를 만지는 변경이지만 SR-1 의 신규 갭이 아니라 잔존
+  boundary 강화 (additive). light 면제는 부적합.
+security_tier: normal
+approved_by_user: true             # 부모 세션 "남은 백로그 모두 병렬로 각각 진행하자" 위임
+```
+
+## Self-review 예정 항목 (AGENTS.md §6)
+
+- 신규 orphan `.reviewed` 분기가 SR-1 의 `.pending`+`.reviewed` 공존 분기와 충돌하지 않는가 (중복 검사 없음)
+- spec 파일 미존재 케이스가 기존 `test_gate_ignores_deleted_spec` 와 일관되게 처리되는가
+- `stat` portability — Python mtime 으로 통일했는가
+- malformed `reviewed=` fail-closed 가 SR-1 패턴과 동일하게 strict ISO regex 인가
+- 회귀 5 fixture 가 RED→GREEN 증명 + 기존 27 test 무회귀를 모두 보장하는가
+- live gate 자기 영향이 0 인지 (기존 정상 flow 통과 유지)
+
+---
+## dod-2026-05-27-v1-3-8-hotfix-plugin-dependencies-key.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — v1.3.8 hotfix: plugin.json `dependencies` key 제거
+
+- 시작일: 2026-05-27
+- 유형: hotfix (release-blocking install failure)
+- 사유: Claude Code 최신 클라이언트가 `plugin.json` 의 비공식 키 `"dependencies"` 를 strict validator 로 거부 → `/plugin install rein@rein` 자체가 실패. v1.0.0 ~ v1.3.7 모든 plugin.json 에 잔존했던 결함. 메인테이너 macOS 환경에서는 통과되어 그동안 release 시점에 미탐지.
+
+## 증상
+
+사용자 보고 (Windows, 2026-05-27):
+
+```
+Error: Failed to install: Plugin has an invalid manifest file at
+C:\Users\User\.claude\plugins\cache\temp_local_..\.claude-plugin\plugin.json.
+Validation errors: : Unrecognized key: "dependencies"
+```
+
+## 근본 원인
+
+`plugins/rein-core/.claude-plugin/plugin.json` 의 `"dependencies": []` 가 Claude Code 공식 plugin manifest 스키마에 정의되어 있지 않음. 공식 스키마(code.claude.com/docs/en/plugins) 허용 필드: `name`, `description`, `version`, `author`, `homepage`, `repository`, `license`. plugin 간 의존성 표현 메커니즘은 아직 공식 미지원 (관련 메모리: `reference_claude_code_plugin_schema.md`).
+
+도입 시점: v2.0.0 plugin-first restructure (`1d01907`, 2026-04-29) — 이후 모든 release 에 잔존.
+
+## 범위 (Scope IN)
+
+| ID | 항목 | 검증 |
+|---|---|---|
+| HF-1 | `plugins/rein-core/.claude-plugin/plugin.json` 에서 `"dependencies": []` 라인 제거 + `version` 1.3.7 → 1.3.8 | `jq` parse PASS, `claude plugin validate` PASS, `dependencies` key 부재 |
+| HF-2 | `scripts/rein.sh` 의 `VERSION="1.3.7"` → `"1.3.8"` (plugin.json 과 parity, 메모리 `feedback_rein_release_version_parity.md`) | `grep '^VERSION=' scripts/rein.sh` = `1.3.8` |
+| HF-3 | `CHANGELOG.md` 상단에 v1.3.8 entry 1개 추가 — hotfix 사유(install 차단) + user-facing 문구 (`rein update` 사용자 관점 outcome 언어, `.claude/rules/readme-style.md` 준수) | CHANGELOG head 가 v1.3.8 (1~2 bullet) |
+| HF-4 | dev → main 단방향 선별 체크아웃 후 annotated tag `v1.3.8` 생성 + push | `git tag -v v1.3.8` annotated, public mirror strip 검증 (plugin.json=1.3.8, `dependencies` 부재, `trail/`/`.rein/`/`AGENTS.md`/`.claude/` 부재) |
+
+## 범위 (Scope OUT)
+
+- plugin 의존성 표현 메커니즘 재설계 — 공식 스키마 부재. 추후 별도 작업.
+- 다른 메타필드(`homepage`, `repository`, `license`) 추가 — 본 hotfix 범위 밖.
+- `plugins/rein-core/` 내 다른 hooks/skills/agents/scripts 동작 변경 — 본 hotfix 는 manifest schema 정합성 한정.
+- `rein-bootstrap-project.py` 가 사용자 repo 에 쓰는 `.claude/security/profile.yaml` 등 다른 manifest — 영향 없음.
+- behavioral test 추가 — manifest schema 변경에 대한 회귀 차단은 `claude plugin validate` 가 release CI 단계에 들어가야 의미가 있으며 본 hotfix 와 별개 작업.
+
+## 검증 기준 (Acceptance)
+
+1. `cd plugins/rein-core && claude plugin validate` PASS (또는 동등한 manifest validation 통과 — `--plugin-dir` 로 로컬 테스트 가능).
+2. `jq -e 'has("dependencies") | not' plugins/rein-core/.claude-plugin/plugin.json` PASS.
+3. `plugin.json` `version` 과 `scripts/rein.sh` `VERSION` 둘 다 `1.3.8`.
+4. CHANGELOG head 가 v1.3.8 entry (user-facing outcome 1~2 bullet).
+5. main 머지 + annotated tag `v1.3.8` 생성. dev/main commit hash 양쪽 확보.
+6. `publish-plugin.yml` + `mirror-to-public.yml` GH Actions success.
+7. public mirror (`rein` 공개 repo) 의 main + tag commit 이 strip 검증 통과: `trail/`, `.rein/`, `AGENTS.md`, `.claude/` 부재. `plugins/rein-core/.claude-plugin/plugin.json` 의 `version`=1.3.8, `dependencies` 키 부재.
+
+## 영향 / 비영향
+
+- 영향: **신규 install 차단 해소** — 사용자 `/plugin install rein@rein` 정상화.
+- 비영향: 이미 install 된 사용자 환경 동작 — manifest 는 install 시점에만 검증, runtime 동작은 hooks/skills/agents 가 담당.
+
+## 라우팅 추천
+
+```yaml
+agent: rein:feature-builder-fix
+skills:
+  - rein:codex-review
+  - rein:security-reviewer  # security_tier:light 후보 — 아래 rationale 참조
+mcps: []
+security_tier: light
+rationale: |
+  - 변경 범위 = manifest 메타데이터 1줄 제거 + 두 버전 표면 동기화 + CHANGELOG 1 entry.
+    실행 코드/hook 동작/사용자 입력 처리 경로 변경 없음.
+  - 보안 표면: plugin.json 은 정적 JSON, secret/injection/path traversal 경로 없음.
+    `dependencies` 필드는 이전부터 무시되던 inert 데이터. 제거가 외부 동작 변경 없음.
+  - feature-builder-fix: 버그 수정 전담(install 차단=bug). reproduction = manifest validator 가 reject.
+  - codex-review: 필수 (commit gate). diff 가 작아 NEEDS-FIX 가능성 낮음.
+  - security-reviewer: security_tier:light + approved_by_user 로 stamp 면제 후보. 단 사용자 승인 필요.
+approved_by_user: true   # 승인: 2026-05-27, security_tier:light 면제 채택
+```
+
+> 사용자 결정 (2026-05-27): 라우팅 승인 + security_tier:light 면제. security-reviewer 정식 호출 대신 light tier stamp 자동 — `.codex-reviewed` 는 필수 유지.
+
+## 단방향 머지 절차 (메모리 `feedback_branch_strategy_order.md`)
+
+1. dev 에서 plugin.json, scripts/rein.sh, CHANGELOG.md 수정 + codex/security review + commit + push.
+2. main 으로 전환 (working tree clean 확인 — 현재 dev 의 trail/incidents/active-dod-cleanup.log 변경분은 별도 commit 으로 처리하거나 stash).
+3. `git checkout dev -- <변경 파일 3개>` 선별 체크아웃. **편집 금지.**
+4. `.claude/CLAUDE.md` 의 메인테이너 전용 @import 라인 (`@.claude/rules/branch-strategy.md` 등) 잔존 여부 확인 → 이번에는 변경 대상 아니므로 무시.
+5. main commit + annotated tag `v1.3.8` + push origin main + push origin v1.3.8.
+6. publish-plugin / mirror-to-public GH Actions 결과 확인.
+7. public mirror 의 main = tag commit hash 일치 + strip 검증.
+
+## 회귀 방지 (이번 hotfix 범위 밖 — 후속 메모만)
+
+- `claude plugin validate` 를 release CI 의 publish 전 검사 단계에 추가 — `scripts/rein-publish.sh` 또는 `publish-plugin.yml` 에 검증 step. 본 hotfix 후 별도 작업 후보 (`need-to-confirm.md` 또는 backlog 에 기록).
+- 위 회귀 방지 작업이 도입되기 전까지, release 전 메인테이너가 수동으로 `cd plugins/rein-core && claude plugin validate` 1회 실행을 release 체크리스트(`.claude/rules/versioning.md`)에 추가 검토.
+
+---
+## dod-2026-06-02-hook-hotpath-perf.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — Hook hot-path 성능 최적화 (G3 follow-up)
+
+- 날짜: 2026-06-02
+- 작업 유형: 리팩토링 (성능 최적화 — 불필요 process/Python spawn 제거, 단일 의도 deviation 외 동작 불변)
+- plan ref: docs/plans/2026-06-02-hook-hotpath-perf-implementation.md
+
+## 요약
+
+매 Edit/Bash 훅 체인의 불필요한 process/Python spawn 을 제거한다. Track A: `resolve_python` 이 POSIX 의 bare python3/python PATH 후보에 한해 launch 기반 health_check 생략(REIN_PYTHON·venv 는 유지). Track B축소: 2 rule 훅의 file_path(3단 fallback 보존)+tool_use_id 추출 python spawn 병합(3→2). Track C: pre-bash bootstrap/safety in-process 인라인(A 적용 후 측정 → 사용자 ship/defer 결정). 동작은 단일 의도된 deviation(깨진 bare python3 exit 12→0) 외 byte-identical.
+
+## 범위 (IN)
+
+- PERF-A-LAUNCH-SKIP / PERF-A-EXIT-PARITY / PERF-A-PARITY-FIXTURE: resolve_python 좁힌 launch-skip + exit-code 계약 보존 + 9 fixture
+- PERF-B-RULE-SPAWN-MERGE / PERF-B-BYTE-IDENTICAL: 2 rule 훅 spawn 병합(type-guard 포함) + byte-identical 회귀(routing 전용 fixture 신규)
+- PERF-C-INLINE / PERF-C-FAIL-CLOSED / PERF-C-GATED-GAIN: bootstrap/safety lib 추출 + dispatcher in-process + fail-closed 보존 + 측정 게이트(사용자 결정)
+- PERF-NFR-PER-HOOK: per-hook 고정 임계 bench(신규)
+- PERF-NO-DAEMON / PERF-DOC-RECONCILE: daemon 부재 정적 점검 + post-edit-dispatcher.sh 주석 정합
+
+## 범위 (OUT)
+
+- post-edit 11→1 전체 재통합 (SPIKE-1 닫힌 결정)
+- meta-check 추가 최적화 (이미 최적)
+- 이벤트당 누적 hard gate (advisory only)
+- Track C 는 측정 게이트(Task 3.0) defer 시 미ship — 측정값+결정 회고 기재
+
+## 변경 파일
+
+- plugins/rein-core/hooks/lib/python-runner.sh
+- plugins/rein-core/hooks/post-edit-design-plan-coverage-rule.sh
+- plugins/rein-core/hooks/post-edit-routing-procedure-rule.sh
+- plugins/rein-core/hooks/post-edit-dispatcher.sh (주석 정합)
+- tests/hooks/test-python-runner-launch-skip.sh (신규)
+- tests/hooks/test-post-edit-routing-procedure-rule.sh (신규)
+- tests/hooks/test-post-edit-design-plan-coverage-rule.sh (fallback 케이스 보강 시)
+- tests/hooks/test-hook-hotpath-perf.sh (신규)
+- (Track C ship 시) plugins/rein-core/hooks/lib/bash-bootstrap-gate.sh (신규), lib/bash-safety-guard.sh (신규), pre-tool-use-bash-bootstrap-gate.sh, pre-bash-safety-guard.sh, pre-bash-dispatcher.sh
+
+## 완료 기준 (검증)
+
+1. Track A: `test-python-runner-launch-skip.sh` 9 fixture PASS + 기존 `test-python-runner.sh` 회귀 PASS
+2. Track B: design-plan + routing(신규) fixture PASS — 3단 fallback + 비문자열 tool_use_id type-guard 검증 + aggregator 병합 회귀 PASS + 정적 grep python3 3→2
+3. Track C (ship 시): pre-bash-guard 회귀 + fail-closed 테스트 PASS + always-run fork 0. defer 시: 측정값+결정 회고 기재
+4. NFR: `test-hook-hotpath-perf.sh` per-hook p95 고정 strict 임계 이하(구현 후 확정), 누적 advisory only
+5. No daemon 정적 grep 0건 + `grep -rn '8 sub' plugins/rein-core/` 0건
+6. `bash tests/run-all.sh` 전체 PASS + `rein-check-plugin-drift.py` exit 0
+7. codex 코드리뷰 통과 + security 리뷰 통과(safety-guard 리팩토링 surface)
+
+## 라우팅 추천
+
+agent: rein:feature-builder-refactor
+skills:
+  - rein:parallel-execute
+  - rein:codex-review
+mcps: []
+security_tier: standard
+rationale:
+  - 작업 유형 = 성능 리팩토링(동작 보존, spawn 제거). 키워드 "성능 개선/리팩터" → feature-builder-refactor.
+  - **spec 의 light 에서 standard 로 상향**: Track C 가 pre-bash-safety-guard(보안 게이트)를 in-process 인라인하고 Track A 가 인터프리터 trust boundary(깨진 python 통과)를 건드림 → security-reviewer 가 정식 점검. 동작은 byte-identical 이나 보안 표면 변경이라 보수적 상향.
+  - plan 실행 전략의 Wave 1(Track A + B + doc + tests, disjoint scope) 을 parallel-execute 로 병렬 실행. Track C 는 Task 3.0 측정 게이트(사용자 결정) 후 별도 웨이브.
+  - codex 복구됨 — 통합 코드리뷰 + per-task 리뷰는 codex Mode A.
+approved_by_user: true
+
+---
+## dod-2026-06-02-spec-writer-implementation.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — spec-writer 에이전트 구현
+
+- 날짜: 2026-06-02
+- plan ref: docs/plans/2026-06-02-spec-writer-agent-implementation.md
+- spec ref: docs/specs/2026-06-02-spec-writer-agent.md (검토 통과)
+- brainstorm ref: docs/brainstorms/2026-06-02-spec-writer-agent.md
+
+## 목표
+
+rein plugin 에 brainstorm → spec 단계를 자동화하는 `spec-writer` 에이전트를 추가한다. plan-writer 와 대칭(작성 + 자동 codex-review + 표식, self-fix 없음). 라우팅 2곳에 'spec 작성' 진입점 추가 + 회귀 테스트로 계약 잠금.
+
+## 완료 기준 (acceptance)
+
+1. `plugins/rein-core/agents/spec-writer.md` 신규 — SW-1~SW-4, SW-8 계약 본문 포함 (brainstorm 입력 / `docs/specs/` 산출 / `spec review for design:` prefix / plugin-root 표식 경로 / validator·self-fix 부재 / 평문 보고).
+2. `routing-map.md` 에 'spec 작성' 행 추가 + ≤800B 회귀 통과 (`test-routing-map-emit.sh`).
+3. `routing-procedure.md` baseline 표에 'spec 작성' 행 추가.
+4. `tests/agents/test-spec-writer-auto-review-contract.sh` 신규 6 assertion PASS + `run-all.sh` 등재 (ALL SUITES PASSED).
+5. `rein-check-plugin-drift.py` 정합성 통과 (신규 에이전트 + 수정 규칙 SSOT 일치).
+6. 자동 리뷰 경로가 코드리뷰 게이트(`.codex-reviewed`) 미오염 (stamp 분리) — 본문 명시.
+7. 통합 코드/보안 리뷰 1회 통과 후 커밋.
+
+## 라우팅 추천
+
+```yaml
+agent: rein:feature-builder
+skills:
+  - rein:parallel-execute   # plan 의 v2 실행 전략(웨이브) 기반 edit_only worker 병렬 dispatch
+  - rein:codex-review       # 전체 변경분 통합 리뷰 (push/완료 전 1회)
+mcps: []
+security_tier: light        # markdown + bash 테스트, secret/auth/network 표면 없음
+rationale: >
+  신규 에이전트 추가(새 기능)이므로 feature-builder. plan 이 파일소유권 기준
+  웨이브 병렬 전략(4개 edit_only disjoint + 1개 의존)을 이미 산출했으므로
+  parallel-execute 로 첫 웨이브를 병렬 실행하고 부모가 웨이브 단위 검증·커밋.
+  변경이 문서·테스트라 보안 표면이 낮아 light tier.
+approved_by_user: true
+```
+
+## 변경 파일
+
+- plugins/rein-core/agents/spec-writer.md
+- plugins/rein-core/rules/routing-map.md
+- plugins/rein-core/rules/routing-procedure.md
+- tests/agents/test-spec-writer-auto-review-contract.sh
+- tests/agents/run-all.sh
+
+---
+## dod-2026-06-04-route-bind-1-design-routing-nudge.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — 설계 단계 라우팅 nudge (ROUTE-BIND-1)
+
+- 날짜: 2026-06-04
+- 작업 유형: 신규 기능 (provenance claim + 호스트 훅 soft nudge — 설계 단계 라우팅 강제력 부재 보완)
+- plan ref: docs/plans/2026-06-04-design-phase-routing-nudge-implementation.md
+
+## 요약
+
+spec/plan 파일이 전용 에이전트(spec-writer/plan-writer)의 provenance claim 없이 인라인으로 써지면, 기존 PostToolUse 호스트 훅(`post-edit-design-plan-coverage-rule.sh`)이 차단 없이 soft nudge(stderr advisory, exit 0)를 emit 한다. 정상 경로(에이전트가 authored write 직전 claim 기록)에서는 claim 을 매칭→소비해 nudge 무발화. presence+consume 모델(timestamp 비교 없음 — 동일초 FN 제거). 매 편집 hot-path 부하 0(비-design 경로는 nudge 코드 미도달).
+
+## 범위 (IN)
+
+- SC-1: provenance 표식 schema·위치·hash 키 확정 (helper `rein-mark-design-provenance.sh` 신규)
+- SC-2: 에이전트 claim 작성 단계 (spec-writer·plan-writer authored write 직전)
+- SC-3: claim lifecycle presence + consume (freshness 제거)
+- SC-4: 호스트 훅 nudge inline (기존 design-plan-coverage 훅, 신규 hooks.json entry 없음)
+- SC-5: nudge 발화 채널(stderr)·문구 (response-tone, 내부용어 비노출)
+- SC-6: operating-sequence 설계 체인 1줄
+- SC-7: 정당 수동 작성 문서화 (opt-out 비범위)
+- SC-8: 성능 검증 NFR-1~4 (hot-path 0 증가)
+- SC-9: dogfood 실증 (helper-level 시뮬레이션 + 라이브 에이전트-경로)
+- SC-10: 회귀 테스트 (paths·consume·동일파일 반복편집)
+
+## 범위 (OUT)
+
+- 하드 게이트 (Option C 기각 — 인라인 작성 차단 안 함, advisory only)
+- "항상 nudge" (Option B 기각 — provenance 로 정상 경로 식별)
+- brainstorm provenance (스킬이라 전용 에이전트 없음)
+- routing-procedure.md post-inject 시점 재설계
+- 온보딩/프라이머 (ONBOARD-1 몫)
+- path-policy 변형 경로(루트 specs/*.md·중첩 docs/**/specs|plans) 정렬 (SC-8 deferred, 후속 cycle)
+- opt-out 메커니즘(.rein/policy suppress) (SC-7 deferred, 후속 cycle)
+
+## 변경 파일
+
+- plugins/rein-core/scripts/rein-mark-design-provenance.sh (신규)
+- plugins/rein-core/hooks/post-edit-design-plan-coverage-rule.sh
+- plugins/rein-core/agents/spec-writer.md
+- plugins/rein-core/agents/plan-writer.md
+- plugins/rein-core/rules/operating-sequence.md
+- tests/hooks/test-post-edit-design-plan-coverage-rule.sh
+- tests/hooks/test-design-provenance-marker.sh (신규)
+- tests/hooks/run-all.sh (신규 helper 테스트 등록)
+- (검증) tests/hooks/test-hook-hotpath-perf.sh
+- hooks.json: 변경 없음 (NFR-4)
+
+## 완료 기준 (검증)
+
+1. SC-1: helper `bash -n` PASS + exec bit 100755 + smoke check (claim 생성·path= 정확 대조)
+2. SC-2/SC-3/SC-4/SC-5: 호스트 훅 nudge inline — claim 부재→nudge / claim 존재→무발화+소비. 함수 정의+호출 같은 커밋(미정의 함수 호출 방지). exit 2 절대 안 냄
+3. SC-6: operating-sequence 설계 체인 1줄 + 6규칙 inject 토큰 예산 회귀 없음
+4. SC-7: 정당 수동 작성 주석 + nudge 괄호절 면책
+5. SC-8: NFR-1(비-design 경로 nudge 미도달) / NFR-2(hot-path latency 증가 0) / NFR-3(design 편집 추가분 측정·기록) / NFR-4(hooks.json diff 0)
+6. SC-9: dogfood — helper-level claim/consume 시뮬레이션 + 라이브 에이전트 경로 trail 기록
+7. SC-10: 회귀 (a)~(g) + (c') 동일파일 반복편집 전부 green. 신규 helper 테스트 run-all.sh 등록 확인
+8. `bash tests/hooks/run-all.sh` 전체 PASS
+9. codex 코드리뷰 통과 + security 리뷰 통과
+
+## 범위 연결
+
+plan ref: docs/plans/2026-06-04-design-phase-routing-nudge-implementation.md
+work unit: Implementation 전체 — Phase 1~5 / 모든 Task
+covers: [SC-1, SC-2, SC-3, SC-4, SC-5, SC-6, SC-7, SC-8, SC-9, SC-10]
+
+## 라우팅 추천
+
+agent: rein:feature-builder
+skills:
+  - rein:parallel-execute
+  - rein:codex-review
+mcps: []
+security_tier: standard
+rationale:
+  - 작업 유형 = 신규 기능 (provenance claim 메커니즘 + 호스트 훅 nudge inline + helper 신규). add-feature 키워드 → feature-builder.
+  - plan 실행 전략(`## 실행 전략`)의 웨이브를 parallel-execute 로 의존 위상정렬 실행 — step1 host-hook(mutating 단독) → step2 helper+operating-sequence(edit_only 동시) → step3 tests(mutating) → step4 agents(edit_only). 부모가 웨이브 단위 검증·커밋.
+  - security_tier standard: advisory-only·비차단·gitignored 캐시 write 이나, 매 편집 hot-path 훅(post-edit-design-plan-coverage-rule.sh)을 건드리고 신규 helper 가 파일시스템 write·python spawn 을 하므로 보수적 standard. 사용자 확인.
+  - codex 통합 코드리뷰 (codex Mode A). 설계 체인은 이미 codex PASS (spec R3 / plan R3).
+approved_by_user: true
+
+---
+## dod-2026-06-05-release-v1-4-5.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — 릴리스 v1.4.5 (chore)
+
+- 날짜: 2026-06-05
+- plan ref: (release chore — 단일 plan 없음. 묶인 기능 작업은 각자 설계체인+리뷰 완료: git-snapshot `dod-2026-06-05-session-state-git-snapshot.md`, ONBOARD-1 `dod-2026-06-05-onboard-1-first-session-primer.md`, ROUTE-DOC-1)
+
+## 목표
+
+dev 누적 작업(ONBOARD-1 첫 세션 온보딩 + git 사실 자동 스냅샷[index 신선도] + ROUTE-DOC-1 라우팅 문서 정합 + 부속 tweak)을 v1.4.5 로 릴리스한다. 본 DoD 는 **릴리스 chore** (버전 2곳 동기화 + CHANGELOG + README 버전 히스토리)만 다룬다 — 묶인 기능 코드는 각자 이미 codex+보안 리뷰 PASS.
+
+## 완료 기준 (acceptance)
+
+1. 버전 2곳 동기화: `scripts/rein.sh` `VERSION="1.4.5"` + `plugins/rein-core/.claude-plugin/plugin.json` `"version": "1.4.5"`.
+2. `CHANGELOG.md` 에 v1.4.5 엔트리 — user-facing 항목만(온보딩 프라이머 + git 스냅샷 신선도 + 라우팅 문서 정합). 버전 등급 메모(minor 권고이나 메인테이너 patch 선택).
+3. `README.md` + `README.ko.md` Release history "Latest release" 1줄 갱신 + CHANGELOG 링크. EN/KO parity.
+4. 버전 bump 이 재유발하는 codex 리뷰 1회 PASS 후 커밋.
+5. main 선별 체크아웃(별도, full merge 아님) + tag `v1.4.5` + push → publish/mirror.
+
+## 라우팅 추천
+
+```yaml
+agent: rein:changelog-writer
+skills:
+  - rein:codex-review
+mcps: []
+security_tier: light
+rationale: >
+  릴리스 chore — 버전 문자열 2곳 + CHANGELOG/README 문서만 변경(코드 로직 0).
+  묶인 기능 코드는 각자 codex+보안 리뷰 PASS 완료. secret/auth/network/실행로직
+  표면 없음(버전 상수 + 사용자용 문서) → light tier. 버전 bump 이 .review-pending
+  을 재유발하므로 codex-review 1회는 필수.
+approved_by_user: true
+```
+
+## 변경 파일
+
+- scripts/rein.sh
+- plugins/rein-core/.claude-plugin/plugin.json
+- CHANGELOG.md
+- README.md
+- README.ko.md
+
+---
+## dod-2026-06-09-codex-review-wrapper-sync.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — codex-review wrapper 결함 6건 수정 (drift sync + config/exit-code/verdict/changed-files/claim-sources/라벨)
+
+작성일: 2026-06-09
+slug: codex-review-wrapper-sync
+
+## 배경 / 동기
+
+`test-plugin-scripts-bundle.sh` 가 `rein-codex-review.sh` 의 두 사본 sha256 drift 로 실패(`FAIL[b]: sha256 drift`). 진단:
+- **plugin 사본** `plugins/rein-core/scripts/rein-codex-review.sh` = 최신(`fa3fae8`, v1.4.6 "codex 모델 단일 출처 + 모델 거부 fail-soft"). CODE_MODEL 로드 + `_detect_model_error` + `_emit_model_failsoft` + exit 3 fail-soft 포함.
+- **루트 fallback 사본** `scripts/rein-codex-review.sh` = stale(`0e91991`, 2026-05-29). v1.4.6 의 fail-soft 갱신이 **누락**.
+
+즉 v1.4.6 작업에서 plugin 사본만 갱신하고 루트 fallback 동기화를 빠뜨린 기존 결함. 페르소나 작업과 무관.
+
+**codex 리뷰(Round 1)가 추가 결함 발견 — 단순 byte-identical 복제는 부족**: plugin 사본의 config 로드가 `$_script_dir/../config/codex-models.sh` 단일 경로다. 두 사본을 byte-identical 로 맞추면 루트 사본은 `scripts/../config/codex-models.sh`(repo 루트의 `config/`)를 찾는데 **부재**(SSOT 는 `plugins/rein-core/config/`에만 존재) → 루트 실행 시 CODE_MODEL 로드 실패 → 모델 단일출처 상실(codex 기본 모델로 silent degrade). 즉 byte-identical 자체가 location-sensitive regression 을 옮긴다. 근본 해결 = 두 사본의 config 로드를 **다중 경로 시도(location-agnostic)** 로 보강해 양쪽(plugin/root) + 설치 사용자(CLAUDE_PLUGIN_ROOT) 어디서 실행해도 SSOT 를 찾게 한다. 사용자 결정(2026-06-09): 경로 해석 보강(근본).
+
+**codex 리뷰(Round 2)가 wrapper 의 기존 버그 2건 추가 발견** (우리 변경 밖, fa3fae8 기존 코드):
+- **(B2) exit-code 누수**: `if ! CODEX_OUT=$(...); then CODEX_RC=$?` 구조에서 `$?` 가 `! CMD`(항상 0)를 캡처 → codex 비모델 호출 실패에도 `exit "$CODEX_RC"` = `exit 0`. codex 실패가 성공으로 위장.
+- **(B3) verdict 파서 first-match 결함**: `_parse_verdict` 가 `grep ... | head -1` 로 **첫** FINAL_VERDICT 채택(A-LowPrio 2026-05-23 의도적 설계). codex 가 본문에 코드/예시의 FINAL_VERDICT(예: 테스트 stub `FINAL_VERDICT: PASS'`)를 인용하면 그 앞쪽 노이즈를 결론으로 오인 → 실제 결론(응답 끝, envelope 규칙 "끝에 FINAL_VERDICT")을 놓침. 실측: 본 cycle Round 2 리뷰가 NEEDS-FIX 였으나 stamp 가 PASS 로 오생성. 사용자 결정(2026-06-09): tail-match 전환 + 기존 first-match 테스트를 last-match 의도로 갱신.
+
+## 범위
+
+### IN
+- **(B1) config 경로**: plugin 사본 config 로드를 단일 경로 → **다중 경로 시도**로 보강: `$_script_dir/../config/`(plugin 레이아웃) → `$_script_dir/../plugins/rein-core/config/`(repo 루트 fallback) → `${CLAUDE_PLUGIN_ROOT:+...}/config/`(설치 사용자). 첫 readable 후보에서 source + break.
+- **(B2) exit-code**: `if ! CMD; then RC=$?` → `CMD; RC=$?; if [ "$RC" -ne 0 ]` 로 교체해 codex 실제 exit code 전파(모델에러 exit 3 fail-soft 분기는 보존).
+- **(B3) verdict 파서**: `_parse_verdict` 의 `head -1` → `tail -1`(codex 응답 끝의 진짜 결론 채택). 기존 `test_parse_verdict_multiple_final_verdict_lines_first_match_wins` 를 last-match 의도로 갱신(PASS 먼저/REJECT 끝 → REJECT 채택, 보수적).
+- **(B4) stale review context**: `_changed_files`(line 305)가 `DIFF_BASE..HEAD`(이미 커밋된 무관 범위)를 우선해 staged 변경을 못 봄(주석 의도는 "--cached first" 였으나 코드가 반대). working tree(staged ∪ unstaged) 우선 → 비면 committed range degrade 로 수정. rein 리뷰-후-커밋 흐름에서 staged 를 정확히 리뷰. 통합 리뷰 Round 1(B4 발견)에서 codex 가 짚음(이번 cycle 리뷰가 wrapper 변경 대신 페르소나 파일을 리뷰하던 증상).
+- **(B5) claim_sources stale**: `_claim_sources`(line 570)가 `PR env > HEAD commit > DoD` 순서라, staged 리뷰에서 HEAD(거의 항상 이전 무관 커밋)를 claim 기준으로 삼는 구조적 결함(false NEEDS-FIX + staged claim 미반영으로 **false PASS 도 가능** — codex-ask 지적). 드문 self-review 만의 문제가 아니라 staged 리뷰 일반의 구조적 결함.
+- **(B6) 라벨 misleading**: changed_files 슬롯 라벨이 `(${DIFF_BASE}..HEAD)`(line 867) 하드코딩 — working tree 내용일 때도 committed range 로 표시.
+- **(B5/B6) 리뷰 대상 모드(review subject) 일관성 — 처리 방향 D (codex-ask 2026-06-09 권고)**: `working_tree`(staged∪unstaged 있음)/`commit_range`(clean)/`spec`(spec-review) 모드를 한 번 결정하고 (a) `_claim_sources` 가 working_tree 모드면 HEAD commit 대신 DoD 기준(PR env 최우선 유지), (b) changed_files 라벨이 모드 반영, (c) freshness 가 그 claim source 따름. B7+ 같은 stale-context 재발 차단. B1~B4 는 보존(되돌림은 검증된 치명 결함 되살림이라 과함).
+- 루트 `scripts/rein-codex-review.sh` 를 보강된 plugin 사본에 byte-identical 동기화(B1~B6 반영).
+- reproduction-first: B2·B3·B4·B5·B6 각각 failing test 선작성 → fix → green.
+- broader staged-review 전면 재설계(모든 envelope 슬롯의 리뷰 대상 일관성)는 본 cycle 범위 밖 — 별도 후속 brainstorm/spec 등록.
+
+### OUT
+- 다른 helper 스크립트 사본 점검 — test 가 11개 helper 검사 중 codex-review.sh 만 drift, 나머지는 통과. 본 cycle 은 codex-review.sh 한정.
+- fail-soft 로직(`_detect_model_error`/`_emit_model_failsoft`/exit 3) 자체 재설계 — exit-code 캡처 구조만 수정, 모델에러 분기 동작 보존.
+- 루트에 별도 `config/codex-models.sh` 사본 추가 — 기각(동기화 부채 증가). 경로 보강으로 단일 SSOT 유지.
+- verdict 파서를 정교한 인용-제외 파싱으로 재설계 — 기각(복잡도·취약점 증가). tail-match + envelope "끝에 FINAL_VERDICT" 규칙 일치로 충분.
+
+## 변경 파일
+- plugins/rein-core/scripts/rein-codex-review.sh (B1 config 다중 경로 + B2 exit-code + B3 verdict head→tail + B4 changed_files working-tree 우선 + B5 claim_sources review-subject 분기 + B6 라벨 모드 반영)
+- scripts/rein-codex-review.sh (보강된 plugin 사본에 byte-identical 동기화)
+- tests/skills/test-codex-review-wrapper.sh (B2·B3·B4·B5·B6 reproduction test 추가 + 기존 first-match 테스트 last-match 갱신)
+
+## 검증 기준
+- `diff scripts/rein-codex-review.sh plugins/rein-core/scripts/rein-codex-review.sh` 빈 출력(byte-identical).
+- **(B1) 양쪽 위치 config 로드 작동**: plugin 위치·repo 루트 위치 양쪽에서 CODE_MODEL 이 `gpt-5.5`로 로드됨(시뮬레이션 확인).
+- **(B2) exit-code 전파**: fake codex 가 비모델 실패(exit≠0) 시 wrapper 가 동일 non-zero exit(현재 버그=exit 0). reproduction test red→green.
+- **(B3) verdict tail-match**: 본문 앞에 인용 `FINAL_VERDICT: PASS` + 끝에 실제 `FINAL_VERDICT: NEEDS-FIX` → wrapper 가 NEEDS-FIX(exit 1) 채택(현재 버그=PASS exit 0). reproduction test red→green. 갱신된 multiple-verdict 테스트(last-match) 통과.
+- **(B4) staged 우선 review context**: 무관 파일 커밋(DIFF_BASE..HEAD non-empty) + 실제 변경 staged → changed_files 슬롯에 staged 포함 + 무관 커밋 미포함. working tree clean(PR 흐름)이면 committed range degrade. reproduction test 2개 red→green.
+- **(B5) claim_sources 모드 일관성**: working_tree 모드(무관 HEAD 커밋 + staged 변경) 시 claim_sources 가 HEAD commit 메시지가 아니라 DoD 기준을 사용(이전 무관 커밋의 claim 오염 차단). reproduction test red→green.
+- **(B6) 라벨 모드 반영**: working_tree 모드 시 changed_files 슬롯 라벨이 committed range 가 아니라 working tree 를 표시. reproduction test red→green.
+- `bash tests/scripts/test-plugin-scripts-bundle.sh` 통과(11 helpers mirrored sha256-identical).
+- `bash -n` 양쪽 사본 구문 통과.
+- `bash tests/skills/test-codex-review-wrapper.sh` 전체 통과(B2·B3 신규 + 기존 회귀 0) + `bash tests/skills/test-codex-model-failsoft.sh` 회귀 0.
+- tests/scripts 전체 스위트 ALL PASS.
+- codex 코드 리뷰 PASS(Round 1 config / Round 2 exit-code+verdict → 보강 → 재리뷰).
+
+## 라우팅 추천
+
+agent: 직접 편집 (메인 세션 — 검증된 plugin 사본의 byte-identical 복제, reproduction = test red→green)
+skills:
+  - rein:codex-review
+mcps: []
+security_tier: standard
+complexity: medium
+model_hint: opus
+effort_hint: medium
+rationale:
+  - drift sync(B1 config)로 시작했으나 codex 2 round 가 게이트 인프라의 기존 버그 2건(B2 exit-code 누수 / B3 verdict first-match 오인) 추가 발견 → scope 확대
+  - B2·B3 는 codex-review 게이트 무결성에 직결(실패 위장 / 잘못된 PASS stamp). reproduction-first(failing test 선작성)로 증상 고정 후 수정
+  - 게이트 인프라 로직 수정 + 기존 설계(first-match) 의도 변경이라 complexity medium, standard 보안 보수 적용
+approved_by_user: true
+
+---
+## dod-2026-06-09-persona-preset.md (mtime: 2026-06-11, archived: 2026-07-03)
+# DoD — 페르소나 프리셋 기능 (boss-ace 기본, 기본 ON + opt-out)
+
+작성일: 2026-06-09
+slug: persona-preset
+plan ref: docs/plans/2026-06-09-persona-preset-implementation.md
+
+## 배경 / 동기
+
+rein 어시스턴트 응답에 교체 가능한 페르소나 레이어를 추가한다. 기본 프리셋 `boss-ace` 는 사용자를 "보스"라 부르는 과잉충성 "조직의 에이스" 말투를 입히되, 판단·경고·운영 디테일은 절대 무르게 하지 않는다(말투에만 적용, 판단은 냉정). 목적은 OSS 공개 초반 화제성, 기본 ON + 정책 opt-out.
+
+brainstorm → spec → plan 체인 완료(설계·플랜 모두 codex 검토 PASS + 표식 생성). 본 DoD 는 plan 의 구현 단계를 정의한다.
+
+## 범위
+
+### IN
+- **PP-2~PP-6 (loader)**: `rein-policy-loader.py` 에 `get_persona()` + `--persona` CLI + `KNOWN_PERSONA_PRESETS={"boss-ace"}` 형식·멤버십 2중 검증. 2사본(plugin SSOT + 루트 fallback) byte-identical 동기화. loader 단위·parity 테스트(fail-open 전 분기 + path 주입 + 미등재 이름).
+- **PP-7~PP-8 (프리셋 본문)**: `plugins/rein-core/rules/persona/boss-ace.md` 신규 — 원칙 + 예시 1~2개("복붙 금지"), 불변 조항, response-tone precedence 조항, 한/영 언어분기, 간결 cap(≤약 1.5KB).
+- **PP-9~PP-10 (hook 주입)**: `session-start-rules.sh` 6-rule 루프 뒤 persona 주입 블록(활성 프리셋 1개만 해석, O(1), 새 hook 미등록).
+- **PP-11~PP-12 (bootstrap)**: plugin 본체 `rein-bootstrap-project.py` 가 신규 설치 시 `persona.yaml`(enabled:true/preset:boss-ace) 생성 + `POLICY_PERSONA_TEMPLATE`. 루트 래퍼는 runpy 위임이라 무편집.
+- **PP-13 (주입 테스트)**: persona 주입 회귀 테스트 5 assert.
+- **PP-14 (무변경 보존)**: `user-prompt-submit-rules.sh` 무변경 + `rules/persona/short/` 미생성 검증.
+
+### OUT
+- 매턴 nudge / short summary(결정: 첫 릴리스 off, decay 측정 후 후속).
+- `boss-ace` 외 추가 프리셋(구조는 교체 가능하게 두되 본 릴리스 단일 프리셋).
+- 기존 사용자 migration 스크립트(부재=ON default 라 불필요).
+- `response-tone.md`/기존 6-rule 본문 변경(precedence 는 persona 본문에서 선언).
+- README opt-out 문서화(릴리스 단계 별도 판단).
+
+## 변경 파일
+- plugins/rein-core/scripts/rein-policy-loader.py + scripts/rein-policy-loader.py (2사본)
+- plugins/rein-core/rules/persona/boss-ace.md (신규)
+- plugins/rein-core/hooks/session-start-rules.sh
+- plugins/rein-core/scripts/rein-bootstrap-project.py (plugin 본체만)
+- tests/scripts/test-policy-loader-persona.sh (신규) + tests/scripts/run-all.sh
+- tests/hooks/test-session-start-persona-inject.sh (신규) + tests/hooks/run-all.sh
+
+## 검증 기준
+- plan 의 Design 범위 커버리지 매트릭스 PP-1~PP-14 전부 충족(파일·계약·테스트 이진 판정).
+- `diff plugins/rein-core/scripts/rein-policy-loader.py scripts/rein-policy-loader.py` 빈 출력(byte-identical).
+- loader 테스트: fail-open 전 분기(파일부재/파싱실패/non-dict/enabled부재/preset부재/PyYAML부재) + path 주입(`../x`,`a/b`,`$(x)`,빈) + 미등재 이름(`mentor`,`does-not-exit`) 모두 default `boss-ace` 강등 통과.
+- persona 주입 테스트 5 assert 통과(enabled 포함/disabled 미포함/unknown 강등/response-tone 뒤 순서/파일부재 default ON).
+- `session-start-rules.sh -n` 구문 통과, 새 hook 미등록.
+- 전체 테스트 스위트 회귀 없음. `user-prompt-submit-rules.sh` diff 무변경.
+- codex 코드 리뷰 PASS + 보안 리뷰 PASS.
+
+## 라우팅 추천
+
+agent: rein:parallel-execute (plan 의 실행 전략 — Wave 1 4태스크 병렬 edit_only + Wave 2 테스트 2태스크, 각 worker = feature-builder)
+skills:
+  - rein:codex-review
+mcps: []
+security_tier: standard
+complexity: medium
+model_hint: opus
+effort_hint: medium
+rationale:
+  - 신규 기능 구현이며 plan 이 Wave 병렬 구조(서로 다른 파일 4개 edit_only)로 설계됨 → parallel-execute 로 Wave 단위 dispatch, 부모가 웨이브별 검증·커밋
+  - 보안 표면 = loader 의 preset 이름 path 주입 방어 + hook 주입 경로 → security_tier standard, 통합 보안 리뷰 필수
+  - 단일 모듈 다수 파일 + 기존 패턴 복제(meta-check loader/POLICY_TEMPLATE/6-rule 루프) → complexity medium
+approved_by_user: true
+

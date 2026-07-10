@@ -1,6 +1,6 @@
 reviewer=security-reviewer
-reviewed=2026-06-26T07:43:19Z
+reviewed=2026-07-10T06:29:50Z
 security_level=standard
-cycle=2026-06-26-codex-effort-deterministic
+cycle=2026-07-10-codex-model-profile-routing
 verdict=PASS
 mechanism=llm-security-review

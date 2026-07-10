@@ -117,15 +117,17 @@ check '[ "$T3_RC" = "3" ]' "T3 exit0+거부출력 → 래퍼 exit 3 (got $T3_RC)
 check '[ ! -f "$SANDBOX/trail/dod/.codex-reviewed" ]' "T3 통과 표시 미생성"
 sandbox_teardown
 
-# ---- T4: config 부재 → -m 생략(graceful) + 정상 통과 -----------------
+# ---- T4: config 부재 → canonical 폴백으로 -m 항상 전달 + 정상 통과 ----
+# (구계약 "-m 생략 graceful degrade" 는 2026-07-10 모델 프로필 라우팅
+#  spec §4.2 에서 폐지 — 무모델 호출 0건, 내장 canonical gpt-5.6-sol+high)
 sandbox_setup
 rm -f "$SANDBOX/config/codex-models.sh"
 STUB_ARGS_OUT="$SANDBOX/args.txt" STUB_VERDICT="PASS
 clean" STUB_EXIT=0 run_wrapper "$SANDBOX/err.txt"
 T4_RC=$?
 check '[ "$T4_RC" = "0" ]' "T4 config 부재 → exit 0 (got $T4_RC)"
-check '! grep -q -- "-m " "$SANDBOX/args.txt"' \
-  "T4 config 부재 시 -m 생략 (args: $(cat "$SANDBOX/args.txt" 2>/dev/null))"
+check 'grep -q -- "-m gpt-5.6-sol" "$SANDBOX/args.txt"' \
+  "T4 config 부재 시 canonical -m gpt-5.6-sol 전달 (args: $(cat "$SANDBOX/args.txt" 2>/dev/null))"
 sandbox_teardown
 
 # ---- T6: 다른 거부 문구(model_not_found)도 감지 ----------------------
