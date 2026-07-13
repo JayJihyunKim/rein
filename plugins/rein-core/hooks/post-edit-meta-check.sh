@@ -4,9 +4,9 @@
 #
 # Compares the active DoD's `## 변경 파일` hint set with the dirty git diff
 # path set (D \ H) and emits a PostToolUse advisory envelope when they
-# mismatch. Always appends an evaluated-check line to
-# trail/inbox/<utc-date>-meta-check.jsonl regardless of mismatch outcome
-# (G3-MC-INBOX append-only lifecycle).
+# mismatch. The evaluated-check line is emitted only when
+# REIN_META_CHECK_TRACE_FILE is set (test oracle opt-in) — the former
+# unconditional trail/inbox jsonl append was retired 2026-07-13 (no consumer).
 #
 # Silent fail-open at every error path. Never blocks (no exit 2). Aggregator
 # (post-edit-aggregator.sh) auto-merges via hook-output-cache.
@@ -25,7 +25,7 @@
 #   7. dirty diff set D (env-scrubbed git diff)
 #   8. mismatch = (D \ H) ≠ ∅                          -> G3-MC-DETECT
 #   9. advisory envelope (conditional, Top-5 + ≤500B)  -> G3-MC-ADVISORY
-#  10. inbox jsonl append (unconditional)              -> G3-MC-INBOX
+#  10. trace line append (REIN_META_CHECK_TRACE_FILE opt-in only) -> G3-MC-INBOX (retired)
 #
 # Scope IDs:
 #   G3-MC-FASTPATH G3-MC-NO-ACTIVE-DOD G3-MC-POLICY G3-MC-DOD-MISSING-HINT
@@ -513,13 +513,13 @@ if isinstance(d, dict):
   fi
 fi
 
-# G3-MC-INBOX — unconditional jsonl append for every evaluated check
-if [ -n "$INBOX_LINE" ]; then
-  INBOX_DIR="trail/inbox"
-  if mkdir -p "$INBOX_DIR" 2>/dev/null; then
-    INBOX_FILE="$INBOX_DIR/$(date -u +%Y-%m-%d)-meta-check.jsonl"
-    printf '%s\n' "$INBOX_LINE" >> "$INBOX_FILE" 2>/dev/null || true
-  fi
+# G3-MC-INBOX (retired 2026-07-13) — the unconditional trail/inbox jsonl append
+# is removed: no production consumer ever read it and it accumulated forever in
+# user repos. The evaluated-check line is now written ONLY when a caller (tests)
+# opts in via REIN_META_CHECK_TRACE_FILE, which keeps the behavioral test oracle
+# (mismatch_count observation) without leaving files behind in real sessions.
+if [ -n "$INBOX_LINE" ] && [ -n "${REIN_META_CHECK_TRACE_FILE:-}" ]; then
+  printf '%s\n' "$INBOX_LINE" >> "$REIN_META_CHECK_TRACE_FILE" 2>/dev/null || true
 fi
 
 exit 0

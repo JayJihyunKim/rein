@@ -56,6 +56,16 @@ data/processed/
 # rein incident aggregate lock (휘발성 — 매 세션 hook 이 갱신하는 commit noise)
 /trail/incidents/.aggregate.lock
 
+# rein incident 파이프라인 런타임 커서 (휘발성 세션 상태 — 매 세션 갱신되는
+# commit noise 라 추적 제외. 파일 자체는 집계 파이프라인의 기능 파일로 유지)
+/trail/incidents/.last-processed-line
+/trail/incidents/.last-aggregate-state.json
+/trail/incidents/.session-start-line
+
+# rein meta-check 텔레메트리 (2026-07-13 retire — 훅이 더 이상 안 씀. 구버전
+# 플러그인 캐시가 세션 중 생성하는 잔재 방어용 ignore)
+/trail/inbox/*-meta-check.jsonl
+
 # rein 보안-surface 면제 audit log (휘발성 — 면제 커밋마다 게이트가 append 하는
 # runtime 기록. 커밋 후 다시 dirty 되는 commit noise 라 추적 제외; 로컬 운영자 가시성용)
 /trail/incidents/security-surface-exempt.log

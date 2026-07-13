@@ -44,6 +44,7 @@ for test_file in \
   "$SCRIPT_DIR/test-governance-stage.sh" \
   "$SCRIPT_DIR/test-select-active-dod.sh" \
   "$SCRIPT_DIR/test-pre-edit-dod-gate.sh" \
+  "$SCRIPT_DIR/test-pre-edit-index-lines.sh" \
   "$SCRIPT_DIR/test-bad-test-candidates-log-format.sh" \
   "$SCRIPT_DIR/test-project-dir-resolution.sh" \
   "$SCRIPT_DIR/test-post-edit-dispatcher.sh" \

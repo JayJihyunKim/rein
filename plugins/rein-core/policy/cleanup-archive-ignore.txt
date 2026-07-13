@@ -1,4 +1,3 @@
 trail/dod/COMPLETED_ARCHIVE.md
 trail/incidents/blocks.jsonl
 trail/incidents/blocks.log
-trail/incidents/blocks.log.legacy

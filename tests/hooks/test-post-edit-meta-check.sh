@@ -5,7 +5,12 @@
 #
 # Each fixture creates an isolated PROJECT_DIR (git repo + DoD + policy + .active-dod
 # marker), then invokes the hook with a synthetic PostToolUse envelope on stdin
-# and asserts (action, stdout, stderr, inbox jsonl).
+# and asserts (action, stdout, stderr, trace jsonl).
+#
+# Observation channel: the hook writes its evaluated-check line only when
+# REIN_META_CHECK_TRACE_FILE is set (the unconditional trail/inbox jsonl append
+# was retired 2026-07-13 — no production consumer). run_hook sets the trace file
+# to $proj/trace.jsonl; fixture 17 asserts the production default leaves no file.
 #
 # Fixture coverage (spec §5):
 #   1. FASTPATH                 — state.json effective_mode=answer → 0 envelope + 0 inbox
@@ -130,7 +135,7 @@ make_dirty_files() {
 run_hook() {
   local proj="$1"
   local stdin_payload="${2:-{}}"
-  (cd "$proj" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK" <<< "$stdin_payload")
+  (cd "$proj" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" REIN_META_CHECK_TRACE_FILE="$proj/trace.jsonl" bash "$HOOK" <<< "$stdin_payload")
 }
 
 assert_eq() {
@@ -145,16 +150,14 @@ assert_eq() {
 
 inbox_count() {
   local proj="$1"
-  local f
-  f=$(ls "$proj/trail/inbox/"*-meta-check.jsonl 2>/dev/null | head -1)
-  [ -n "$f" ] && wc -l < "$f" | tr -d ' ' || echo 0
+  local f="$proj/trace.jsonl"
+  [ -f "$f" ] && wc -l < "$f" | tr -d ' ' || echo 0
 }
 
 inbox_mismatch_field() {
   local proj="$1" line_no="$2"
-  local f
-  f=$(ls "$proj/trail/inbox/"*-meta-check.jsonl 2>/dev/null | head -1)
-  [ -n "$f" ] || { echo ""; return; }
+  local f="$proj/trace.jsonl"
+  [ -f "$f" ] || { echo ""; return; }
   sed -n "${line_no}p" "$f" | python3 -c 'import sys,json;d=json.loads(sys.stdin.read());print(d.get("mismatch_count",-1))' 2>/dev/null
 }
 
@@ -177,7 +180,7 @@ exec /usr/bin/git "\$@"
 SPYEOF
 chmod +x "$SPY_BIN/git"
 F1_STDOUT=$(mktemp)
-(cd "$F1" && PATH="$SPY_BIN:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK" <<< "{}" >"$F1_STDOUT" 2>/dev/null) || true
+(cd "$F1" && PATH="$SPY_BIN:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" REIN_META_CHECK_TRACE_FILE="$F1/trace.jsonl" bash "$HOOK" <<< "{}" >"$F1_STDOUT" 2>/dev/null) || true
 INBOX=$(inbox_count "$F1")
 # state-machine.sh 가 project-dir lookup 으로 `git rev-parse --show-toplevel` 1회
 # 호출하는 건 정상. 본 assertion 은 meta-check 본체의 `git diff --name-only HEAD` /
@@ -232,7 +235,7 @@ write_dod_without_hint "$F5"
 make_dirty_files "$F5" "extra.txt"
 STDERR_FILE=$(mktemp)
 STDOUT_FILE=$(mktemp)
-(cd "$F5" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK" <<< "{}" >"$STDOUT_FILE" 2>"$STDERR_FILE") || true
+(cd "$F5" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" REIN_META_CHECK_TRACE_FILE="$F5/trace.jsonl" bash "$HOOK" <<< "{}" >"$STDOUT_FILE" 2>"$STDERR_FILE") || true
 INBOX=$(inbox_count "$F5")
 assert_eq "F5-AUTO-NO-HINT-stdout-empty" "" "$(cat "$STDOUT_FILE")"
 assert_eq "F5-AUTO-NO-HINT-inbox-zero" "0" "$INBOX"
@@ -512,9 +515,33 @@ else
 fi
 rm -rf "$F13" "$SAMPLES"
 
+# ---------- Fixture 17: NO-TRACE-ENV-NO-FILES (production default) ----------
+# 실사용 세션에는 REIN_META_CHECK_TRACE_FILE 이 없다. 이때 훅은 advisory 만 내고
+# trail/inbox jsonl 도 trace 파일도 만들지 않아야 한다 (2026-07-13 retire 회귀).
+F17=$(mktemp -d "/tmp/meta-f17-XXXXXX")
+make_project "$F17"
+write_dod_with_hint "$F17" "- a.txt"
+make_dirty_files "$F17" "a.txt" "b.txt"
+OUT=$(cd "$F17" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK" <<< "{}" 2>&1) || true
+if printf '%s' "$OUT" | grep -q "b.txt"; then
+  echo "OK [F17-NO-TRACE-ENV-advisory-still-fires]"
+else
+  echo "FAIL [F17-NO-TRACE-ENV-advisory-still-fires]: expected 'b.txt' in advisory, got: $OUT" >&2
+  FAILED=$((FAILED+1))
+fi
+JSONL_LEFT=$(ls "$F17/trail/inbox/"*-meta-check.jsonl 2>/dev/null | wc -l | tr -d ' ')
+assert_eq "F17-NO-TRACE-ENV-no-inbox-jsonl" "0" "$JSONL_LEFT"
+if [ -f "$F17/trace.jsonl" ]; then
+  echo "FAIL [F17-NO-TRACE-ENV-no-trace-file]: trace.jsonl created without opt-in env" >&2
+  FAILED=$((FAILED+1))
+else
+  echo "OK [F17-NO-TRACE-ENV-no-trace-file]"
+fi
+rm -rf "$F17"
+
 # ---------- Result ---------------------------------------------------------
 if [ "$FAILED" -gt 0 ]; then
   echo "test-post-edit-meta-check: FAIL ($FAILED assertion(s))" >&2
   exit 1
 fi
-echo "test-post-edit-meta-check: OK (16 fixtures covered)"
+echo "test-post-edit-meta-check: OK (17 fixtures covered)"

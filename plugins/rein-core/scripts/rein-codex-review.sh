@@ -171,6 +171,466 @@ if [ -z "$CODE_GATE_MODEL" ]; then
 fi
 CODE_FAIL_CLOSED_EFFORT="${CODE_FAIL_CLOSED_EFFORT:-$REIN_CANONICAL_GATE_EFFORT}"
 
+# ---- Review-readiness precheck (spec 2026-07-13 review-evidence-manifest).
+#
+# Scope IDs: EV1~EV6 (evidence block parser / quant-claim scanner /
+# readiness disposition / exit 4 contract / envelope manifest slots).
+#
+# 함수 3종(_parse_evidence_blocks / _scan_quant_claims / _readiness_check)은
+# 호출 지점(모드 감지 직후)보다 반드시 **위**에 정의한다 — bash 는 후행 정의
+# 함수를 호출할 수 없다 (command not found → 오거부).
+#
+# 규율 (plan Phase 1 계약):
+#   - awk → shell 결과 전달은 구획별 **별도 임시파일** (요약 key=value /
+#     블록당 3줄 레코드 / 마스킹 본문 통짜). 단일 파일 구분선 방식 금지.
+#   - 임시파일은 생성 즉시 cleanup 목록 등록 + trap EXIT 전 경로 정리.
+#   - errexit 억제 대응: 호출부가 `_readiness_check || exit 4` 이므로 이
+#     스택 전체에서 set -e 가 억제된다 — 모든 외부 명령에 명시 전파.
+#   - 인프라 실패(awk/mktemp 비정상 종료)는 [readiness-reject] 태그 **없는**
+#     plain ERROR + 실패 반환 (fail-open 금지 + 판별 계약 오분류 방지).
+#   - 파이프라인 내 grep -q 금지 (SIGPIPE fail-open 클래스). 바이트 계수는
+#     LC_ALL=C awk length() (UTF-8 원시 바이트 + 줄당 LF 포함).
+
+_REIN_TMP_FILES=()
+_rein_cleanup_tmp() {
+  local _f
+  for _f in ${_REIN_TMP_FILES[@]+"${_REIN_TMP_FILES[@]}"}; do
+    rm -f "$_f" 2>/dev/null || true
+  done
+}
+# source-and-call(테스트) 경로에서는 호출자 shell 의 기존 EXIT trap 을 덮어쓰지
+# 않는다 — 실행형 경로에서만 등록. sourced 호출자는 함수 사용 후
+# _rein_cleanup_tmp 를 직접 호출해 정리할 책임을 진다 (codex 통합리뷰 R1 Low).
+if [ "${BASH_SOURCE[0]:-}" = "$0" ]; then
+  trap _rein_cleanup_tmp EXIT
+fi
+
+# 공용 awk 함수 (parser/scanner 두 awk 프로그램 앞에 문자열 결합으로 주입) —
+# LC_ALL=C byte substr 절단 후 끝의 불완전 UTF-8 시퀀스를 제거해 문자 경계를
+# 보존한다 (codex 통합리뷰 R3/R6 Medium: 발췌·진단의 invalid UTF-8 전파 차단).
+_REIN_AWK_UTF8TRIM='
+function utf8trim(ex,   exlen, ti, b, ntail, conts) {
+  exlen = length(ex); ti = exlen
+  while (ti > 0) { b = substr(ex, ti, 1); if (b >= "\200" && b < "\300") ti--; else break }
+  ntail = exlen - ti
+  if (ti == 0) return ""
+  b = substr(ex, ti, 1)
+  if (b >= "\300") { conts = (b >= "\360") ? 3 : (b >= "\340") ? 2 : 1; if (ntail < conts) return substr(ex, 1, ti - 1) }
+  else if (ntail > 0) return substr(ex, 1, ti)
+  return ex
+}'
+
+# _rein_mktemp <varname> — 임시파일 생성 + cleanup 목록 등록 + 경로를 varname 에
+# 저장. 값 반환에 command substitution 을 쓰면 등록이 서브셸에 갇히므로
+# printf -v 로 부모 셸 변수에 직접 쓴다.
+_rein_mktemp() {
+  local __f rc
+  __f=$(mktemp "${TMPDIR:-/tmp}/rein-readiness.XXXXXX") || {
+    rc=$?
+    echo "ERROR: [codex-review] readiness precheck: mktemp failed (rc=$rc)" >&2
+    return "$rc"
+  }
+  _REIN_TMP_FILES+=("$__f")
+  printf -v "$1" '%s' "$__f"
+}
+
+# _parse_evidence_blocks — [EVIDENCE] 블록 파서 + 형식 검증 (spec §4.1 규칙 0~8).
+# 단일 좌→우 라인 스캔 4상태 상태기계: outside / outside-fence-open /
+# in-block-fields / in-block-output. fence 토글은 블록 밖에서만 유효, 블록 안의
+# ``` 는 일반 텍스트.
+#
+# 입력: PROMPT_BODY (전역 — [EFFORT:] strip 이후 원문, spec §4.3).
+# 성공(return 0) 시 전역 산출:
+#   EVIDENCE_BLOCK_COUNT   — 유효 블록 수
+#   EVIDENCE_BLOCK_SUMMARY — 블록당 3줄(claim/command/exit_code) 레코드
+#   REIN_EV_MASKED_FILE    — 마스킹 본문 (블록 내부 + fence 내부 치환, 라인수 보존)
+# 형식 위반(return 1): anchored 접두사 거부 진단행을 stderr 로 방출.
+# 인프라 실패(return rc≠0): 태그 없는 plain ERROR + 실패 전파.
+_parse_evidence_blocks() {
+  local rc in_f="" sum_f="" blk_f="" mask_f="" vio_f=""
+  _rein_mktemp in_f   || return $?
+  _rein_mktemp sum_f  || return $?
+  _rein_mktemp blk_f  || return $?
+  _rein_mktemp mask_f || return $?
+  _rein_mktemp vio_f  || return $?
+
+  printf '%s' "$PROMPT_BODY" > "$in_f" || {
+    rc=$?
+    echo "ERROR: [codex-review] readiness precheck: prompt spool write failed (rc=$rc)" >&2
+    return "$rc"
+  }
+
+  LC_ALL=C awk -v maskf="$mask_f" -v blkf="$blk_f" -v sumf="$sum_f" -v viof="$vio_f" "$_REIN_AWK_UTF8TRIM"'
+    function fldname(i) {
+      if (i == 1) return "claim:"
+      if (i == 2) return "command:"
+      if (i == 3) return "exit_code:"
+      return "output:"
+    }
+    function san(s) {
+      gsub(/\[readiness-reject\]/, "[readiness-…]", s)
+      gsub(/\[readiness-advisory\]/, "[readiness-…]", s)
+      return s
+    }
+    BEGIN { state = 0; f = 0; nb = 0; vc = 0; open_line = 0 }
+    {
+      line = $0
+      if (state == 0) {
+        if (line ~ /^[[:space:]]*\[EVIDENCE\][[:space:]]*$/) {
+          state = 2; f = 1; bclaim = ""; bcmd = ""; bec = ""; open_line = NR
+          print "" > maskf; next
+        }
+        if (line ~ /^[[:space:]]*\[\/EVIDENCE\][[:space:]]*$/) {
+          vc++; print "L" NR ": 고아 [/EVIDENCE] — 대응하는 [EVIDENCE] 없음" > viof
+          print "" > maskf; next
+        }
+        if (line ~ /^ {0,3}```/) {
+          # 여는 fence (CommonMark): 선행 공백 0~3칸 + 백틱 런 ≥3, backtick
+          # fence 의 info string 에는 백틱 금지 — 아니면 fence 가 아니라 일반
+          # 텍스트다 (codex 통합리뷰 R7 High: 과도한 opener 가 EOF 까지
+          # 마스킹해 EV2 우회). 런 길이는 닫는 fence 판정에 기억 (R4).
+          tmpl = line; sub(/^ {0,3}/, "", tmpl)
+          fl = 0
+          while (substr(tmpl, fl + 1, 1) == "`") fl++
+          info = substr(tmpl, fl + 1)
+          if (info !~ /`/) {
+            fence_len = fl
+            state = 1; print "" > maskf; next
+          }
+          # info string 에 백틱 → fence 아님 — 일반 텍스트로 계속 처리.
+        }
+        print line > maskf; next
+      }
+      if (state == 1) {
+        # 닫는 fence: 선행 공백 0~3칸 + 백틱 런 길이 >= 여는 길이 + 뒤에 공백만.
+        if (line ~ /^ {0,3}`/) {
+          tmpl = line; sub(/^ {0,3}/, "", tmpl)
+          run = 0
+          while (substr(tmpl, run + 1, 1) == "`") run++
+          rest_after = substr(tmpl, run + 1)
+          if (run >= fence_len && rest_after ~ /^[[:space:]]*$/) state = 0
+        }
+        print "" > maskf; next
+      }
+      if (state == 2) {
+        print "" > maskf
+        if (line ~ /^[[:space:]]*\[EVIDENCE\][[:space:]]*$/) {
+          vc++; print "L" NR ": 블록 중첩 금지 — L" open_line " 블록이 닫히기 전 [EVIDENCE] 재등장" > viof
+          next
+        }
+        if (line ~ /^[[:space:]]*\[\/EVIDENCE\][[:space:]]*$/) {
+          vc++; print "L" NR ": 필수 필드 누락 — L" open_line " 블록이 " fldname(f) " 필드 전에 폐쇄됨" > viof
+          state = 0; next
+        }
+        d = 0
+        if (line ~ /^[[:space:]]*claim:/) d = 1
+        else if (line ~ /^[[:space:]]*command:/) d = 2
+        else if (line ~ /^[[:space:]]*exit_code:/) d = 3
+        else if (line ~ /^[[:space:]]*output:/) d = 4
+        if (d == 0) {
+          vc++; print "L" NR ": 필드 순서 위반 — 기대 " fldname(f) " 위치에 알 수 없는 라인: " san(utf8trim(substr(line, 1, 80))) > viof
+          next
+        }
+        if (d < f) {
+          vc++; print "L" NR ": 필드 중복/순서 위반 — " fldname(d) " 재등장 (기대: " fldname(f) ")" > viof
+          next
+        }
+        if (d > f) {
+          vc++; print "L" NR ": 필드 순서 위반/누락 — 기대 " fldname(f) " 이전에 " fldname(d) " 등장" > viof
+          f = d + 1
+          if (d == 4) { state = 3; olines = 0; obytes = 0 }
+          next
+        }
+        val = line
+        sub(/^[[:space:]]*[a-z_]+:[[:space:]]*/, "", val)
+        if (d == 1) {
+          if (val == "") { vc++; print "L" NR ": claim: 비어있음" > viof }
+          bclaim = val; f = 2; next
+        }
+        if (d == 2) {
+          if (val == "") { vc++; print "L" NR ": command: 비어있음" > viof }
+          bcmd = val; f = 3; next
+        }
+        if (d == 3) {
+          if (val !~ /^[0-9]+$/ || val + 0 > 255) {
+            vc++; print "L" NR ": exit_code: 0–255 정수가 아님 (" san(utf8trim(substr(val, 1, 20))) ")" > viof
+          }
+          bec = val; f = 4; next
+        }
+        if (val != "") { vc++; print "L" NR ": output: 라인에 내용 — 출력 원문은 다음 줄부터 (형식 위반)" > viof }
+        state = 3; olines = 0; obytes = 0; next
+      }
+      # state == 3 (output 영역 — fence 토글 없음, ``` 는 일반 텍스트)
+      print "" > maskf
+      if (line ~ /^[[:space:]]*\[\/EVIDENCE\][[:space:]]*$/) {
+        if (olines > 60) {
+          vc++; print "L" open_line ": output " olines "줄 — 상한 60줄 초과. tail/grep 으로 관련 발췌만 남겨라 (래퍼는 요청서를 절단하지 않는다)" > viof
+        }
+        if (obytes > 8000) {
+          vc++; print "L" open_line ": output " obytes "바이트 — 상한 8000바이트 초과 (줄당 LF 포함 UTF-8 바이트). tail/grep 으로 관련 발췌만 남겨라" > viof
+        }
+        nb++
+        print bclaim > blkf; print bcmd > blkf; print bec > blkf
+        state = 0; next
+      }
+      if (line ~ /^[[:space:]]*\[EVIDENCE\][[:space:]]*$/) {
+        vc++; print "L" NR ": 블록 중첩 금지 — output 영역 안 [EVIDENCE] 단독 라인" > viof
+        next
+      }
+      olines++; obytes += length(line) + 1
+      next
+    }
+    END {
+      if (state == 2 || state == 3) { vc++; print "L" open_line ": 미폐쇄 블록 — [/EVIDENCE] 없음" > viof }
+      if (nb > 16) { vc++; print "블록 수 " nb "개 — 상한 16개 초과 (요청서당 유효 블록 16개 이하)" > viof }
+      print "count=" nb > sumf
+      print "violations=" vc > sumf
+    }
+  ' "$in_f" || {
+    rc=$?
+    echo "ERROR: [codex-review] readiness precheck: evidence parser (awk) failed (rc=$rc)" >&2
+    return "$rc"
+  }
+
+  local count="" viol="" line
+  while IFS= read -r line; do
+    case "$line" in
+      count=*) count="${line#count=}" ;;
+      violations=*) viol="${line#violations=}" ;;
+    esac
+  done < "$sum_f"
+  case "$count" in
+    '' | *[!0-9]*)
+      echo "ERROR: [codex-review] readiness precheck: parser summary corrupt (count='$count')" >&2
+      return 1 ;;
+  esac
+  case "$viol" in
+    '' | *[!0-9]*)
+      echo "ERROR: [codex-review] readiness precheck: parser summary corrupt (violations='$viol')" >&2
+      return 1 ;;
+  esac
+
+  if [ "$viol" -gt 0 ]; then
+    echo "ERROR: [codex-review][readiness-reject] 증거 블록 형식 위반 ${viol}건 (codex 미호출)" >&2
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      echo "ERROR: [codex-review][readiness-reject]   $line" >&2
+    done < "$vio_f"
+    echo "ERROR: [codex-review][readiness-reject]   → [EVIDENCE] claim/command/exit_code/output 블록 문법을 교정 후 재호출하라. 문법: SKILL.md §4.1" >&2
+    return 1
+  fi
+
+  EVIDENCE_BLOCK_COUNT="$count"
+  EVIDENCE_BLOCK_SUMMARY=$(cat "$blk_f" 2>/dev/null) || {
+    rc=$?
+    echo "ERROR: [codex-review] readiness precheck: block summary read failed (rc=$rc)" >&2
+    return "$rc"
+  }
+  REIN_EV_MASKED_FILE="$mask_f"
+  return 0
+}
+
+# _scan_quant_claims — 정량/PASS 패턴 엔진 (spec §4.2). 입력은 파서가 남긴
+# 마스킹 본문(블록 내부 + fence 내부 치환 완료). 인라인 백틱 스팬 마스킹은
+# 이 함수가 첫 단계로 자체 수행 (spec §4.1 규칙 0 — 패턴 스캐너 전용).
+# 제외 마스킹(스캔 전): 경로 토큰(순수 [0-9]+/[0-9]+ 비율은 예외), ISO 날짜,
+# semver/§절 참조, L<n>, exit (code )?<n>, 영숫자·하이픈 전용 + 하이픈 ≥2 토큰.
+# 매칭: Q1 수량+단위 / Q2 비율·백분율 / Q3 PASS 공존 (case-insensitive, 라인 단위).
+# 성공(return 0) 시 전역 산출:
+#   QUANT_MATCH_COUNT — 매칭 라인 총계
+#   QUANT_FLAGS       — "L<n>: <발췌 80자>" 목록 (최대 10건, 예약 태그 소독)
+_scan_quant_claims() {
+  local rc sum_f="" flg_f=""
+  _rein_mktemp sum_f || return $?
+  _rein_mktemp flg_f || return $?
+
+  LC_ALL=C awk -v sumf="$sum_f" -v flgf="$flg_f" "$_REIN_AWK_UTF8TRIM"'
+    BEGIN { m = 0; kept = 0; nrl = 0 }
+    { nrl++; origbuf[nrl] = $0; docbuf[nrl] = $0 }
+    END {
+      # 인라인 코드 스팬 마스킹 (패턴 스캐너 전용, spec §4.1 규칙 0) —
+      # CommonMark 규약대로 **문서 전체** 에서 임의 길이 백틱 런을 정확히
+      # 같은 길이의 닫는 런과 짝짓는다. 스팬은 여러 줄에 걸칠 수 있으므로
+      # (codex 통합리뷰 R5 Medium) 라인 경계를 넘어 마스킹하되 개행은
+      # 보존해 라인 번호를 유지한다. 닫는 런이 문서 어디에도 없으면
+      # 불균형 — 런만 제거하고 내용은 노출 (실주장 탐지 유지, R3 합의).
+      doc = ""
+      for (r = 1; r <= nrl; r++) doc = doc origbuf[r] ((r < nrl) ? "\n" : "")
+      maskeddoc = ""
+      rest0 = doc
+      while (match(rest0, /`+/)) {
+        # backslash-escape (CommonMark): opener 후보 런 직전의 연속 백슬래시가
+        # 홀수면 escaped 리터럴 — delimiter 아님, 내용 노출 유지 (codex 통합
+        # 리뷰 R6 Medium: \` 우회 차단). 스팬 내부(closer 탐색)에는 escape 가
+        # 없다 — CommonMark 코드 스팬 내부는 escape 비적용.
+        nbs = 0
+        while (RSTART - 1 - nbs >= 1 && substr(rest0, RSTART - 1 - nbs, 1) == "\\") nbs++
+        if (nbs % 2 == 1) {
+          maskeddoc = maskeddoc substr(rest0, 1, RSTART + RLENGTH - 1)
+          rest0 = substr(rest0, RSTART + RLENGTH)
+          continue
+        }
+        pre = substr(rest0, 1, RSTART - 1)
+        dl = RLENGTH
+        rest = substr(rest0, RSTART + RLENGTH)
+        p = 0; cl = 0; base = 0; tmp = rest
+        while (match(tmp, /`+/)) {
+          if (RLENGTH == dl) { p = base + RSTART; cl = RLENGTH; break }
+          base += RSTART + RLENGTH - 1
+          tmp = substr(tmp, RSTART + RLENGTH)
+        }
+        if (p > 0) {
+          span = substr(rest, 1, p - 1)
+          gsub(/[^\n]/, " ", span)
+          maskeddoc = maskeddoc pre " " span " "
+          rest0 = substr(rest, p + cl)
+        } else {
+          maskeddoc = maskeddoc pre " "
+          rest0 = rest
+        }
+      }
+      maskeddoc = maskeddoc rest0
+      nml = split(maskeddoc, mline, /\n/)
+      for (r = 1; r <= nrl; r++) {
+        orig = origbuf[r]
+        line = (r <= nml) ? mline[r] : ""
+        scan_line(line, orig, r)
+      }
+      print "matches=" m > sumf
+    }
+    function scan_line(line, orig, lnum,   low, n, tok, out, i, t, h, matched, ex, exlen, b, ntail, conts) {
+      low = tolower(line)
+      # 제외 규칙 6 (다단어): exit <n> / exit code <n>.
+      gsub(/exit ?(code ?)?[0-9]+/, " ", low)
+      n = split(low, tok, /[[:space:]]+/)
+      out = ""
+      for (i = 1; i <= n; i++) {
+        t = tok[i]
+        if (t == "") continue
+        if (t ~ /\//) {
+          # 제외 규칙 3 예외: 토큰 전체가 순수 비율이면 경로 마스킹 제외 (Q2 대상).
+          if (t ~ /^[0-9]+\/[0-9]+$/) out = out " " t
+          continue
+        }
+        if (t ~ /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) continue
+        if (t ~ /^v?[0-9]+\.[0-9]+(\.[0-9]+)?$/) continue
+        if (t ~ /^§[0-9]+(\.[0-9]+)*$/) continue
+        if (t ~ /^l[0-9]+$/) continue
+        if (t ~ /^[a-z0-9_.-]*\.[a-z][a-z0-9]*$/) continue
+        if (t ~ /^[a-z0-9-]+$/) { h = t; if (gsub(/-/, "-", h) >= 2) continue }
+        out = out " " t
+      }
+      matched = 0
+      if (out ~ /[0-9]+ ?(건|개소|개|회|줄|파일|케이스)/) matched = 1
+      else if (out ~ /[0-9]+ ?(tests?|files?|lines?|cases?|checks?|functions?)([^a-z0-9]|$)/) matched = 1
+      else if (out ~ /[0-9]+\/[0-9]+/) matched = 1
+      else if (out ~ /[0-9]+(\.[0-9]+)?%/) matched = 1
+      else if (out ~ /(^|[^a-z0-9])(테스트|tests?|suites?|검증|빌드|builds?|lints?|typechecks?|회귀|regressions?)([^a-z0-9]|$)/ \
+            && out ~ /(^|[^a-z0-9])(pass(ed)?|green|통과|성공)([^a-z0-9]|$)/) matched = 1
+      if (matched) {
+        m++
+        if (kept < 10) {
+          # utf8trim: byte 절단 후 문자 경계 보존 (공용 함수 — parser 진단과 동일).
+          ex = utf8trim(substr(orig, 1, 80))
+          ex = "L" lnum ": " ex
+          gsub(/\[readiness-reject\]/, "[readiness-…]", ex)
+          gsub(/\[readiness-advisory\]/, "[readiness-…]", ex)
+          print ex > flgf
+          kept++
+        }
+      }
+    }
+  ' "$REIN_EV_MASKED_FILE" || {
+    rc=$?
+    echo "ERROR: [codex-review] readiness precheck: quant scanner (awk) failed (rc=$rc)" >&2
+    return "$rc"
+  }
+
+  local matches="" line
+  while IFS= read -r line; do
+    case "$line" in
+      matches=*) matches="${line#matches=}" ;;
+    esac
+  done < "$sum_f"
+  case "$matches" in
+    '' | *[!0-9]*)
+      echo "ERROR: [codex-review] readiness precheck: scanner summary corrupt (matches='$matches')" >&2
+      return 1 ;;
+  esac
+
+  QUANT_MATCH_COUNT="$matches"
+  QUANT_FLAGS=$(cat "$flg_f" 2>/dev/null) || {
+    rc=$?
+    echo "ERROR: [codex-review] readiness precheck: flags read failed (rc=$rc)" >&2
+    return "$rc"
+  }
+  return 0
+}
+
+# _readiness_check — 처분 (spec §4.2):
+#   블록 0 + 매칭 ≥1 → 거부(실패 반환, [readiness-reject] 진단행)
+#   블록 ≥1 + 매칭 ≥1 → advisory([readiness-advisory] 경고) + 성공
+#   매칭 0 → 무발화 성공
+# 파싱 결과(전역)는 build_envelope 가 §4.3 슬롯 방출에 재사용 — 파싱 1회,
+# 이중 조립 없음.
+_readiness_check() {
+  _parse_evidence_blocks || return $?
+  _scan_quant_claims || return $?
+  if [ "${QUANT_MATCH_COUNT:-0}" -ge 1 ]; then
+    local flag_line extra
+    extra=$((QUANT_MATCH_COUNT - 10))
+    if [ "${EVIDENCE_BLOCK_COUNT:-0}" -eq 0 ]; then
+      echo "ERROR: [codex-review][readiness-reject] 정량/PASS 주장 감지 — 증거 블록 0개 (codex 미호출)" >&2
+      while IFS= read -r flag_line; do
+        [ -n "$flag_line" ] || continue
+        echo "ERROR: [codex-review][readiness-reject]   $flag_line" >&2
+      done <<< "${QUANT_FLAGS:-}"
+      if [ "$extra" -gt 0 ]; then
+        echo "ERROR: [codex-review][readiness-reject]   ... (+${extra} more)" >&2
+      fi
+      echo "ERROR: [codex-review][readiness-reject]   → [EVIDENCE] claim/command/exit_code/output 블록으로 각 주장의 재현 증거를 선언하거나, 주장 표현을 제거 후 재호출하라. 문법: SKILL.md §4.1" >&2
+      return 1
+    fi
+    echo "WARNING: [codex-review][readiness-advisory] 블록 밖 정량/PASS 패턴 ${QUANT_MATCH_COUNT}건 — 증거 블록 미결박 (비차단)" >&2
+    while IFS= read -r flag_line; do
+      [ -n "$flag_line" ] || continue
+      echo "WARNING: [codex-review][readiness-advisory]   $flag_line" >&2
+    done <<< "${QUANT_FLAGS:-}"
+    if [ "$extra" -gt 0 ]; then
+      echo "WARNING: [codex-review][readiness-advisory]   ... (+${extra} more)" >&2
+    fi
+  fi
+  return 0
+}
+
+# _emit_evidence_manifest — envelope context 슬롯 (spec §4.3). 유효 블록 ≥1
+# 일 때만 방출 — 0 이면 코드 경로 자체가 실행되지 않아 기존과 byte 동일.
+_emit_evidence_manifest() {
+  [ "${EVIDENCE_BLOCK_COUNT:-0}" -ge 1 ] 2>/dev/null || return 0
+  printf '\nevidence_manifest:\n  blocks: %s\n' "$EVIDENCE_BLOCK_COUNT"
+  local line i=0 field=0
+  while IFS= read -r line; do
+    field=$((field % 3 + 1))
+    case "$field" in
+      1) i=$((i + 1)); printf '  block %s:\n    claim: %s\n' "$i" "$line" ;;
+      2) printf '    command: %s\n' "$line" ;;
+      3) printf '    exit_code: %s\n' "$line" ;;
+    esac
+  done <<< "${EVIDENCE_BLOCK_SUMMARY:-}"
+}
+
+# _emit_unbacked_quant_flags — advisory 매칭 ≥1 일 때만 방출 (spec §4.3).
+_emit_unbacked_quant_flags() {
+  [ "${QUANT_MATCH_COUNT:-0}" -ge 1 ] 2>/dev/null || return 0
+  [ -n "${QUANT_FLAGS:-}" ] || return 0
+  printf '\nunbacked_quant_flags:\n'
+  local line
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    printf '  %s\n' "$line"
+  done <<< "$QUANT_FLAGS"
+}
+
 # ---- Parse CLI options + read stdin prompt. ---------------------------
 
 NON_INTERACTIVE=0
@@ -259,6 +719,19 @@ elif printf '%s' "$PROMPT_FIRST_LINE" | grep -qE "$SPEC_REVIEW_DESIGN_RE"; then
   SPEC_REVIEW_SUBJECT=$(printf '%s' "$PROMPT_FIRST_LINE" \
     | sed -E 's/^\[NON_INTERACTIVE\][[:space:]]+spec review for design:[[:space:]]*//' \
     | sed -E 's/[[:space:]]+$//')
+fi
+
+# ---- Review-readiness precheck 삽입 지점 (spec §4.5/§4.6). -------------
+#
+# code-review 모드 한정 — spec-review 는 사전검사·휴리스틱·manifest 슬롯 전부
+# skip (자동 spec 경로의 구조적 false-positive 차단). interactive 모드
+# (PROMPT_BODY 빈 값)는 조건식으로 자연 통과 — 별도 분기 없음.
+# exit 4 는 codex spawn 이전에만 발생한다 (EV5 — 컨텍스트 조립보다도 앞).
+# 위반 상세는 _readiness_check 가 stderr 로 방출: 거부 진단행은 라인 시작
+# anchored `ERROR: [codex-review][readiness-reject]`, 인프라 실패는 태그 없는
+# plain ERROR (호출자 판별 계약, spec §4.4).
+if [ "$REIN_REVIEW_MODE" = "code-review" ] && [ -n "$PROMPT_BODY" ]; then
+  _readiness_check || exit 4
 fi
 
 # ---- Context assembly (Task 6.1 Step 4). ------------------------------
@@ -1182,6 +1655,24 @@ SLOTS
       boolean/qualitative 이므로 본 rule 대상 아님 — 기존 High 판정 규칙 유지.
       Evidence freshness (sub-item 5) 의 HIGH 판정도 본 rule 의 verdict 승격
       대상이 **아님** (numeric mapping claim 전용).
+SLOTS
+  # Evidence manifest cross-check (EV6, 2026-07-13): additive sub-item 7 —
+  # evidence_manifest: 슬롯 방출 시(유효 블록 ≥1)에만 함께 방출. 미방출 시
+  # 앞뒤 heredoc 이 그대로 이어져 기존 slot 텍스트와 byte 동일 (하위호환).
+  if [ "${EVIDENCE_BLOCK_COUNT:-0}" -ge 1 ] 2>/dev/null; then
+    cat <<'SLOTS'
+
+   7. Evidence manifest cross-check
+
+      context 블록의 evidence_manifest 를 sub-item 1(numeric mapping) 판정의
+      1차 증거로 사용하라 — claim 의 숫자가 output 발췌·exit_code 와 정합하는지
+      대조. unbacked_quant_flags 의 라인은 증거 미결박 주장 후보다 — manifest
+      블록·코드·config 어디에서도 근거를 찾지 못하면 기존 sub-item 1 규칙대로
+      High. manifest 블록의 output 이 claim 과 모순되면(예: claim "21건" vs
+      output "20 passed") sub-item 6 discrepancy 기준을 그대로 적용한다.
+SLOTS
+  fi
+  cat <<'SLOTS'
 
 응답 출력 형식 (필수 — P2 verdict parser hardening, 2026-04-25):
 
@@ -1225,6 +1716,11 @@ ${CLAIM_SOURCES}
 CTX
   # Optional per-file ISO hints (only emitted if any file ref detected).
   _emit_claim_source_iso_hints
+  # Evidence manifest + unbacked quant flags (EV1/EV3, 2026-07-13): 준비도
+  # 사전검사가 남긴 전역을 재사용해 조건부 방출 — 둘 다 0 이면 방출 코드
+  # 경로 자체가 실행되지 않아 envelope 은 기존과 byte 동일 (EV2 하위호환).
+  _emit_evidence_manifest
+  _emit_unbacked_quant_flags
   printf -- '---\n'
 }
 

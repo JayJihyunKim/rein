@@ -46,6 +46,10 @@
                     },
                     {
                         "type": "command",
+                        "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-index-lines.sh"
+                    },
+                    {
+                        "type": "command",
                         "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-dod-gate.sh"
                     }
                 ]
