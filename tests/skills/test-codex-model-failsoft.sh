@@ -77,11 +77,16 @@ sandbox_teardown() {
 trap sandbox_teardown EXIT
 
 # run_wrapper <stderr-file> — env STUB_* / STUB_ARGS_OUT passed by caller.
+# stdin 은 자가검증 관문(2026-07-21 review-cycle-efficiency A축) fixture
+# 통행증 — sandbox 의 untracked 하네스 부산물로 관문이 발동하므로 none 폴백
+# 선언으로 통과 (이 스위트의 검증 대상은 모델 fail-soft 경로).
 run_wrapper() {
+  printf 'model failsoft check\nverification_commands: none\ndiff_self_review: harness fixture pass\n' \
+    > "$SANDBOX/.stdin.txt"
   ( cd "$SANDBOX" && CODEX_BIN="$SANDBOX/stub-codex.sh" \
       REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
       bash scripts/rein-codex-review.sh --non-interactive \
-      < /dev/null > "$SANDBOX/out.txt" 2> "$1" )
+      < "$SANDBOX/.stdin.txt" > "$SANDBOX/out.txt" 2> "$1" )
 }
 
 echo "== codex model fail-soft tests =="

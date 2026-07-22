@@ -176,6 +176,11 @@ run_wrapper() {
   tmp_stdout=$(mktemp)
   tmp_stderr=$(mktemp)
   printf '%s' "$stdin_content" > "$stdin_file"
+  # 자가검증 관문(2026-07-21 review-cycle-efficiency A축) fixture 통행증:
+  # 이 스위트는 envelope/claim-source 계약 검증이 목적이므로 dirty-tree
+  # 시나리오가 관문에 막히지 않게 none 폴백 선언을 항상 덧붙인다
+  # (관문 자체 계약은 test-review-selfverify-gate.sh 소유).
+  printf '\nverification_commands: none\ndiff_self_review: harness fixture pass\n' >> "$stdin_file"
   (
     cd "$SANDBOX"
     export CODEX_BIN="$FAKE_CODEX"
@@ -774,7 +779,10 @@ _run_wrapper_with_verdict() {
   local tmp_stdout tmp_stderr
   tmp_stdout=$(mktemp)
   tmp_stderr=$(mktemp)
-  printf '%s' "code review please" > "$stdin_file"
+  # 자가검증 관문 fixture 통행증 (run_wrapper 와 동일 사유 — sandbox 는
+  # untracked 하네스 부산물로 관문이 발동).
+  printf '%s\nverification_commands: none\ndiff_self_review: harness fixture pass\n' \
+    "code review please" > "$stdin_file"
   (
     cd "$SANDBOX"
     export CODEX_BIN="$FAKE_CODEX"
@@ -899,7 +907,9 @@ test_codex_nonzero_exit_propagates() {
   local tmp_stdout tmp_stderr
   tmp_stdout=$(mktemp)
   tmp_stderr=$(mktemp)
-  printf '%s' "code review please" > "$stdin_file"
+  # 자가검증 관문 fixture 통행증 (run_wrapper 와 동일 사유).
+  printf '%s\nverification_commands: none\ndiff_self_review: harness fixture pass\n' \
+    "code review please" > "$stdin_file"
   (
     cd "$SANDBOX"
     export CODEX_BIN="$FAKE_CODEX"
@@ -986,7 +996,9 @@ test_wrapper_plugin_layout_user_repo_without_claude_dir_uses_bundled_lib() {
   local stdin_file="$user_repo/.stdin.txt"
   local tmp_stdout tmp_stderr
   tmp_stdout=$(mktemp); tmp_stderr=$(mktemp)
-  printf 'code review please' > "$stdin_file"
+  # 자가검증 관문 fixture 통행증 (user_repo 의 untracked 시드로 관문 발동).
+  printf 'code review please\nverification_commands: none\ndiff_self_review: harness fixture pass\n' \
+    > "$stdin_file"
   (
     cd "$user_repo"
     export CODEX_BIN="$FAKE_CODEX"

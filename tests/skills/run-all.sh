@@ -15,6 +15,8 @@ for test_file in \
   "$SCRIPT_DIR/test-codex-model-failsoft.sh" \
   "$SCRIPT_DIR/test-codex-model-profile-routing.sh" \
   "$SCRIPT_DIR/test-review-evidence-manifest.sh" \
+  "$SCRIPT_DIR/test-review-selfverify-gate.sh" \
+  "$SCRIPT_DIR/test-review-envelope-reduction.sh" \
   "$SCRIPT_DIR/test-parallel-execute-skill.sh"
 do
   echo ""

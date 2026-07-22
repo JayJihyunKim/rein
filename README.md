@@ -282,7 +282,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.6.1** (2026-07-13) — code review requests (`/codex-review`) that make quantitative or "tests pass" claims now require reproducible evidence blocks (claim/command/exit code/output); requests without evidence are rejected before any review cost is spent. The project status summary length rule is now enforced at edit time, and a no-longer-consumed per-edit diagnostic file is no longer created. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.6.2** (2026-07-22) — code review (`/codex-review`) now requires local verification evidence before the review starts: with pending changes, a request must carry passing typecheck + test evidence blocks plus a one-line self diff review (with declared escapes for projects without verification commands and for intentional TDD red phases), or it is rejected before any review cost is spent. Review responses are also shorter — passing items collapse to a per-section count summary while findings stay fully detailed (`REIN_REVIEW_VERBOSE=1` restores full narration). ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

@@ -158,10 +158,17 @@ sandbox_teardown() {
 # run_wrapper <prompt> — STUB_* / STUB_ARGS_OUT / STUB_PROMPT_OUT passed by
 # caller as inline env. CLAUDE_PLUGIN_ROOT pinned empty (host leak guard).
 run_wrapper() {
+  # 자가검증 관문(2026-07-21 review-cycle-efficiency A축) fixture 통행증:
+  # effort/도장 계약 검증이 목적인 스위트라 dirty-tree 시나리오가 관문에
+  # 막히지 않게 none 폴백 선언을 항상 덧붙인다 (관문 자체 계약은
+  # test-review-selfverify-gate.sh 소유).
+  local _p="$1
+verification_commands: none
+diff_self_review: harness fixture pass"
   ( cd "$SANDBOX" && CODEX_BIN="$SANDBOX/stub-codex.sh" \
       REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" CLAUDE_PLUGIN_ROOT="" \
       bash scripts/rein-codex-review.sh --non-interactive \
-      <<<"$1" > "$SANDBOX/out.txt" 2> "$SANDBOX/err.txt" )
+      <<<"$_p" > "$SANDBOX/out.txt" 2> "$SANDBOX/err.txt" )
   WRAP_RC=$?
 }
 

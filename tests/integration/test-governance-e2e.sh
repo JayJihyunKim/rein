@@ -276,7 +276,9 @@ test_wrapper_writes_diff_base_stamp() {
   local capture stdin_file
   capture="$SANDBOX/.cap-e2e.txt"
   stdin_file="$SANDBOX/.stdin.txt"
-  printf 'integration test prompt' > "$stdin_file"
+  # 자가검증 관문(2026-07-21 review-cycle-efficiency A축) fixture 통행증 —
+  # sandbox 의 untracked 준비물로 관문이 발동하므로 none 폴백 선언으로 통과.
+  printf 'integration test prompt\nverification_commands: none\ndiff_self_review: harness fixture pass\n' > "$stdin_file"
   (
     cd "$SANDBOX"
     export CODEX_BIN="$FAKE_CODEX"

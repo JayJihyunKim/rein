@@ -829,23 +829,34 @@ HEAD_ISO=$(_resolve_commit_iso "HEAD")
 # diff. The previous order put the committed range first; when an unrelated
 # file was already committed (DIFF_BASE..HEAD non-empty) the wrapper reviewed
 # that stale range and never looked at the staged subject (B4, 2026-06-09).
-# Failures degrade to an empty list.
+# 반환 계약 (spec 2026-07-20 A6): 변경 목록은 stdout, 취득 성공/실패는
+# 종료코드(0=성공, 1=실패). git probe 오류를 `|| true` 로 빈 출력에 삼키면
+# "성공했으나 0건" 과 구분이 안 돼 자가검증 관문이 fail-silent 가 된다 —
+# probe 별 `|| rc=1` 로 명시 캡처 (fail-closed 진리표).
 _changed_files() {
-  local staged unstaged worktree out
-  staged=$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null || true)
-  unstaged=$(git -C "$PROJECT_DIR" diff --name-only 2>/dev/null || true)
+  local staged unstaged worktree out rc=0
+  staged=$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null) || rc=1
+  unstaged=$(git -C "$PROJECT_DIR" diff --name-only 2>/dev/null) || rc=1
   # Union of staged + unstaged, drop blank lines, dedup (stable order).
+  # 순수 텍스트 파이프라인 — 전량 공백(clean tree) 입력 시 grep -v '^$' 가
+  # pipefail 아래서 exit 1. 이는 git 오류가 아니라 정상(빈 결과)이므로
+  # `|| true` 로 흡수한다 (git probe 의 `|| rc=1` 과 구분).
   worktree=$(printf '%s\n%s\n' "$staged" "$unstaged" \
     | grep -v '^$' | awk '!seen[$0]++' || true)
   if [ -n "$worktree" ]; then
     out="$worktree"
   else
     # Working tree clean → degrade to the committed range (PR flow).
-    out=$(git -C "$PROJECT_DIR" diff --name-only "$DIFF_BASE"..HEAD 2>/dev/null || true)
+    out=$(git -C "$PROJECT_DIR" diff --name-only "$DIFF_BASE"..HEAD 2>/dev/null) || rc=1
   fi
   printf '%s' "$out"
+  return "$rc"
 }
-CHANGED_FILES=$(_changed_files)
+# `set -euo pipefail` 아래서 `CHANGED_FILES=$(_changed_files)` 가 비-0 이면
+# errexit 로 즉시 죽어 rc 캡처 라인이 실행되지 못한다 — if 조건으로 감싸
+# errexit 를 무력화하고 rc 를 잡는다 (A6 fail-closed 가 fail-silent 로 새던
+# plan 리뷰 지적 반영). 기존 envelope/label 소비는 stdout 만 쓰므로 회귀 없음.
+if CHANGED_FILES=$(_changed_files); then CHANGED_FILES_RC=0; else CHANGED_FILES_RC=$?; fi
 
 # Review subject mode (B5/B6, 2026-06-09 — codex-ask D: bounded consistency
 # fix). Decide ONCE what this review is actually about, then make every
@@ -881,6 +892,172 @@ if [ "$REIN_REVIEW_MODE" = "spec-review" ]; then
   REVIEW_SUBJECT="spec"
 else
   REVIEW_SUBJECT=$(_resolve_review_subject)
+fi
+
+# ---- 무상태 자가검증 관문 (spec 2026-07-20 review-cycle-efficiency). ----
+#
+# Scope IDs: A1~A6. code-review 모드 호출에 로컬 검증 증거(두 축 [EVIDENCE]
+# 블록 / verification_commands: none 폴백 / TDD red-phase escape)를 codex
+# spawn **이전**에 요구한다 — "리뷰 지적 고침 → 새 문제 → 재리뷰" 회귀 루프
+# 차단. 무상태: 재리뷰·면제 판정 없음, 새 런타임 파일/마커/스키마 없음.
+# 판정 신호는 전부 기존 산출물 — REIN_REVIEW_MODE / CHANGED_FILES(+RC) /
+# EVIDENCE_BLOCK_SUMMARY / REIN_EV_MASKED_FILE. 파서·awk 상태기계 개조 금지
+# (spec §4.2) — 이미 산출된 요약(블록당 3줄 claim/command/exit_code)만 소비.
+# 거부 = caller 의 `|| exit 4` + 라인 앵커 `ERROR: [codex-review][readiness-reject]`
+# (F3/F5 before-spawn 불변식 — exit 4 는 codex spawn 이전에만 발생).
+
+# exit_code base-10 정규화 (00·0 → 0). 파서가 ^[0-9]+$·≤255 를 이미 보장.
+_ec_is_zero() { [ "$(( 10#${1:-1} ))" -eq 0 ]; }
+
+# 완화된 red-phase test 블록 유효 exit_code = {1..123, 125, 126}.
+# 0(통과 — red 선언 상충)·124(timeout)·127(command-not-found)·128+(signal)
+# 는 "의도적 red" 가 아니라 인프라/환경 실패이므로 거부 (spec §4.4).
+_ec_redphase_ok() {
+  local n; n=$(( 10#${1:-0} ))
+  { [ "$n" -ge 1 ] && [ "$n" -le 123 ]; } || [ "$n" -eq 125 ] || [ "$n" -eq 126 ]
+}
+
+# masked-body 단독 라인 `diff_self_review:` (비어있지 않은 진술) 존재 검사.
+# 선언 검색은 전부 masked-body(REIN_EV_MASKED_FILE) — raw PROMPT_BODY 가
+# 아니다: 블록/fence 내부에 숨긴 선언은 마스킹돼 미인정 (spec §4.2/§4.3).
+_selfverify_has_diff_review() {
+  grep -Eq '^[[:space:]]*diff_self_review:[[:space:]]*[^[:space:]].*$' "$REIN_EV_MASKED_FILE"
+}
+
+# verification_commands: none 폴백 (spec §4.3 — A3).
+# 반환 0 = none 폴백 성립(diff_self_review 필수 충족), 1 = 미선언 또는
+# 선언했으나 diff 부재 (후자는 진단행 방출 후 기본 계약으로 fall-through —
+# 기본 계약도 미충족이므로 fail-closed 로 exit 4 에 귀결).
+_selfverify_escape_none() {
+  grep -Eq '^[[:space:]]*verification_commands:[[:space:]]*none[[:space:]]*$' "$REIN_EV_MASKED_FILE" || return 1
+  _selfverify_has_diff_review && return 0
+  echo "ERROR: [codex-review][readiness-reject] 자가검증 증거 미비 — verification_commands: none 폴백은 diff_self_review: 진술 필수" >&2
+  return 1
+}
+
+# TDD red-phase escape (spec §4.4 — A4).
+# 반환 3-state: 0 = 완화 통과, 1 = 미선언(기본 계약으로 fall-through),
+# 2 = 선언했으나 위반 → 거부. 호출 규약(caller): `local _rp=0;
+# _selfverify_escape_redphase || _rp=$?` 로 rc 를 캡처(set -e 억제)한 뒤
+# case 로 0→통과·2→거부·1→fall-through 분기. `if …; then return $?; fi` 는
+# 2(거부)를 fall-through 시켜 fail-open 이므로 쓰지 않는다 (plan 리뷰 지적).
+_selfverify_escape_redphase() {
+  grep -Eq '^[[:space:]]*verification_state:[[:space:]]*tests-intentionally-red[[:space:]]*$' "$REIN_EV_MASKED_FILE" || return 1
+  grep -Eq '^[[:space:]]*expected_failure:[[:space:]]*[^[:space:]].*$' "$REIN_EV_MASKED_FILE" || {
+    echo "ERROR: [codex-review][readiness-reject] red-phase 선언에 expected_failure: 명명 누락 (fail-closed)" >&2
+    return 2
+  }
+  # typecheck 축 exit0 블록 + test 축 블록(완화 exit_code) 존재 검사.
+  # 3줄 레코드(claim/command/exit_code) 순회 — bash 3.2 호환 3연속 read.
+  # axis 토큰 유일성(claim 당 정확히 1개)은 기본 계약과 동일하게 유지한다 —
+  # red 완화는 test 축의 exit0 요구만 풀지, 토큰 규칙은 풀지 않는다
+  # (코드리뷰 R1 Medium: 혼재/중복 토큰 블록은 여기서도 미집계).
+  local claim cmd ec tc_ok="" test_ok="" tctok testtok total
+  while IFS= read -r claim && IFS= read -r cmd && IFS= read -r ec; do
+    tctok=$(printf '%s' "$claim" | grep -oE '\[axis:typecheck\]' | wc -l | tr -d ' ')
+    testtok=$(printf '%s' "$claim" | grep -oE '\[axis:test\]' | wc -l | tr -d ' ')
+    total=$(( ${tctok:-0} + ${testtok:-0} ))
+    if [ "$total" -eq 1 ] && [ "$tctok" -eq 1 ] && _ec_is_zero "$ec"; then
+      tc_ok=1
+    fi
+    if [ "$total" -eq 1 ] && [ "$testtok" -eq 1 ]; then
+      if _ec_redphase_ok "$ec"; then test_ok=1
+      else
+        echo "ERROR: [codex-review][readiness-reject] red-phase test 블록 exit_code=$ec 는 의도적 red 아님 (0·124·127·128+ 거부)" >&2
+        return 2
+      fi
+    fi
+  done <<< "${EVIDENCE_BLOCK_SUMMARY:-}"
+  if [ -z "$tc_ok" ] || [ -z "$test_ok" ]; then
+    echo "ERROR: [codex-review][readiness-reject] red-phase: [axis:typecheck] exit0 블록 + [axis:test] 블록 필요" >&2
+    return 2
+  fi
+  _selfverify_has_diff_review || {
+    echo "ERROR: [codex-review][readiness-reject] red-phase: diff_self_review: 진술 필요" >&2
+    return 2
+  }
+  return 0
+}
+
+# 증거 계약 본판정 (spec §4.2 — A2). escape 미선언 시 두 축 계약:
+# [axis:typecheck] exit0 블록 + [axis:test] exit0 블록 (claim 당 axis 토큰
+# 정확히 1개, 서로 다른 블록) + diff_self_review: 진술.
+_selfverify_check() {
+  # 0) escape 선판정 — none(§4.3) 이 red-phase(§4.4) 보다 상위 (상호배타).
+  _selfverify_escape_none && return 0
+  local _rp=0
+  _selfverify_escape_redphase || _rp=$?
+  case "$_rp" in
+    0) return 0 ;;   # 완화 통과
+    2) return 1 ;;   # 선언 위반 → 거부 (caller 의 `|| exit 4` 로 전파)
+  esac               # 1 = 미선언 → 아래 기본 두 축 계약으로 fall-through
+
+  # 1) 두 축 집계 — 3줄 레코드 순회 (bash 3.2 호환 3연속 read).
+  local claim cmd ec idx=0 tc_idx="" test_idx="" tctok testtok total
+  while IFS= read -r claim && IFS= read -r cmd && IFS= read -r ec; do
+    tctok=$(printf '%s' "$claim" | grep -oE '\[axis:typecheck\]' | wc -l | tr -d ' ')
+    testtok=$(printf '%s' "$claim" | grep -oE '\[axis:test\]' | wc -l | tr -d ' ')
+    total=$(( ${tctok:-0} + ${testtok:-0} ))
+    # claim 당 axis 토큰 "정확히 1개" — 0 또는 ≥2 (혼재/중복) 는 미집계.
+    if [ "$total" -eq 1 ] && _ec_is_zero "$ec"; then
+      if [ "$tctok" -eq 1 ] && [ -z "$tc_idx" ]; then tc_idx=$idx; fi
+      if [ "$testtok" -eq 1 ] && [ -z "$test_idx" ]; then test_idx=$idx; fi
+    fi
+    idx=$((idx + 1))
+  done <<< "${EVIDENCE_BLOCK_SUMMARY:-}"
+
+  if [ -z "$tc_idx" ] || [ -z "$test_idx" ] || [ "$tc_idx" = "$test_idx" ]; then
+    echo "ERROR: [codex-review][readiness-reject] 자가검증 증거 미비 — [axis:typecheck] exit0 블록 + [axis:test] exit0 블록(서로 다른 블록) 필요. 검증 명령이 없으면 verification_commands: none, TDD red 는 verification_state: tests-intentionally-red + expected_failure: 를 본문에 선언" >&2
+    return 1
+  fi
+  _selfverify_has_diff_review || {
+    echo "ERROR: [codex-review][readiness-reject] 자가검증 증거 미비 — diff_self_review: 진술(단독 라인) 필요" >&2
+    return 1
+  }
+  return 0
+}
+
+# untracked 신규 파일 probe (코드리뷰 R1 High — A1/A6). diff 기반
+# CHANGED_FILES 는 staged/unstaged 만 보므로 "신규 파일만 있는 작업" 이
+# 증거 없이 관문을 통과한다 — ls-files 로 별도 감지. 반환 0 = untracked
+# 존재 또는 probe 실패(fail-closed — 취득 실패와 동일 취급), 1 = 진짜 clean.
+# envelope changed_files 의 의미(staged∪unstaged, B4/B5 계약)는 이 사이클
+# 에서 바꾸지 않는다 — untracked 의 envelope 노출은 후속 사이클.
+_selfverify_untracked_probe() {
+  local out
+  if out=$(git -C "$PROJECT_DIR" ls-files --others --exclude-standard 2>/dev/null); then
+    [ -n "$out" ] && return 0   # untracked 존재 → 변경 있음 → 발동
+    return 1                    # 진짜 clean → skip
+  fi
+  return 0                      # probe 실패 → fail-closed 발동
+}
+
+# 발동 판정 (spec §4.1 — A1/A5/A6). 반환 0 = 발동(증거 요구), 1 = skip.
+_selfverify_should_fire() {
+  [ "$REIN_REVIEW_MODE" = "spec-review" ] && return 1        # (A5) 전면 skip
+  [ "${CHANGED_FILES_RC:-0}" -ne 0 ] && return 0             # (A6) 취득 실패 → 발동 (fail-closed)
+  [ -n "$CHANGED_FILES" ] && return 0                        # (A1) 변경 존재 → 발동
+  _selfverify_untracked_probe                                # (A1/A6) untracked-only 발동 / 진짜 빈 → skip
+}
+
+# 관문은 codex spawn 을 보호한다 — source-and-call(단위 테스트) 경로에는
+# spawn 자체가 없으므로 실행형 경로에서만 발동한다 (main 블록과 동일 guard).
+if [ "${BASH_SOURCE[0]:-}" = "$0" ] \
+   && [ "$REIN_REVIEW_MODE" = "code-review" ] && _selfverify_should_fire; then
+  # 빈 프롬프트 경로 (spec §4.1 Medium 국소 수정): _readiness_check 는
+  # PROMPT_BODY 가 비면 발동하지 않아 파서 전역이 미설정으로 남는다.
+  # 소비 전 안전 초기화 — masked-body 는 읽을 수 있는 빈 임시 파일
+  # (빈 문자열이면 grep 이 파일 인자 오류 → 앵커 없는 crash).
+  if [ -z "${REIN_EV_MASKED_FILE:-}" ]; then
+    _rein_mktemp REIN_EV_MASKED_FILE || {
+      echo "ERROR: [codex-review] readiness precheck: masked-body spool 할당 실패" >&2
+      exit 4
+    }
+    : > "$REIN_EV_MASKED_FILE"   # 빈 본문 (라인 0)
+  fi
+  : "${EVIDENCE_BLOCK_SUMMARY:=}"
+  : "${EVIDENCE_BLOCK_COUNT:=0}"
+  _selfverify_check || exit 4
 fi
 
 # ---- Deterministic effort computation (Plan 2026-06-26 Phase 2). ------
@@ -1670,6 +1847,27 @@ SLOTS
       블록·코드·config 어디에서도 근거를 찾지 못하면 기존 sub-item 1 규칙대로
       High. manifest 블록의 output 이 claim 과 모순되면(예: claim "21건" vs
       output "20 passed") sub-item 6 discrepancy 기준을 그대로 적용한다.
+SLOTS
+  fi
+  # 출력 밀도 (spec 2026-07-20 C1/C2/C4): 통과(MATCH) 서술을 카운트 요약으로
+  # 축소해 리뷰 결과 읽기 시간을 줄인다. 축소는 서술 형식 지시일 뿐 — 네
+  # Required review section 의 검사 수행 자체는 불변 (C5 정적 검사가 보장).
+  # REIN_REVIEW_VERBOSE=1 은 감사 모드: 축소 이전 전량 서술 복원 (미설정=축소).
+  # FINAL_VERDICT: 마지막 줄 계약(아래 블록)은 그대로 유지 (C3 불변).
+  if [ "${REIN_REVIEW_VERBOSE:-}" = "1" ]; then
+    cat <<'SLOTS'
+
+출력 밀도 (감사 모드 — REIN_REVIEW_VERBOSE=1): 통과(MATCH) 항목을 포함해 모든
+slot 을 전량 서술한다 (축소 이전 형식 복원).
+SLOTS
+  else
+    cat <<'SLOTS'
+
+출력 밀도 (기본 — 축소):
+- 통과(MATCH) 항목: slot 별 "검사 N개 / 통과 N개" 한 줄 요약만. 개별 MATCH 서술 생략.
+- PARTIAL / MISSING / CONTRADICTS 및 발견(High/Medium): 전량 상세 (축소 금지).
+- 입력 없는 섹션(covers 부재·claim 없음 등)은 응답에서 생략.
+위 축소는 서술(출력) 축소일 뿐, 위 네 Required review section 의 검사 자체는 모두 수행한다.
 SLOTS
   fi
   cat <<'SLOTS'
