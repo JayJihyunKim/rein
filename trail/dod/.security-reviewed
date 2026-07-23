@@ -1,6 +1,6 @@
 reviewer=security-reviewer
-reviewed=2026-07-22T03:13:03Z
+reviewed=2026-07-23T14:52:45Z
 security_level=standard
-cycle=2026-07-22-release-v162
+cycle=2026-07-23-release-v163
 verdict=PASS
-mechanism=llm-security-review
+mechanism=release-bundle-docs-version-only-no-surface

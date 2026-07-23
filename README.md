@@ -187,6 +187,12 @@ That's all. The framework's **hooks, rules, agents, and skills** ship inside the
 
 For repo-local hook policy overrides, `.rein/policy/hooks.yaml` accepts either `<hook-name>: false` or `<hook-name>: { enabled: false }`. A `profile:` key (one of `lean`, `standard`, `strict`) sets defaults for the heavy gates — `lean` disables `post-edit-plan-coverage`, `post-write-spec-review-gate`, and `post-write-dod-routing-check` for exploratory work; `standard` (default) keeps all gates on; `strict` is reserved for stricter future defaults. Per-hook entries always override the profile.
 
+**Persona (optional).** Rein replies in a plain, neutral tone by default. Two built-in personas ship with the plugin — say "pick a persona" in a session to choose one, or answer a few questions to create your own. If you relied on the previous default persona and want it back, one line restores it (details in the [CHANGELOG](CHANGELOG.md)):
+
+```bash
+mkdir -p .rein/policy && printf 'enabled: true\npreset: boss-ace\n' > .rein/policy/persona.yaml
+```
+
 > Recommended: add `trail/` and `.claude/cache/` to your `.gitignore` if you don't want session evidence committed (Rein doesn't auto-edit `.gitignore`).
 
 ---
@@ -282,7 +288,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.6.2** (2026-07-22) — code review (`/codex-review`) now requires local verification evidence before the review starts: with pending changes, a request must carry passing typecheck + test evidence blocks plus a one-line self diff review (with declared escapes for projects without verification commands and for intentional TDD red phases), or it is rejected before any review cost is spent. Review responses are also shorter — passing items collapse to a per-section count summary while findings stay fully detailed (`REIN_REVIEW_VERBOSE=1` restores full narration). ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.6.3** (2026-07-23) — the persona layer is now opt-in and neutral by default, ships a second built-in persona (`jennie`) plus a `persona` skill to pick one or build your own from a few questions, greets you in-character (in your conversation language) the moment you switch, and adds a stall-detecting time cap to code review (`/codex-review`) so a hung review is auto-detected and handed off instead of hanging your session. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

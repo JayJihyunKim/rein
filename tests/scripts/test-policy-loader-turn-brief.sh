@@ -8,16 +8,24 @@
 #
 # Assertions:
 #   (a) two loader copies byte-identical (PT-7 drift)
-#   (b) persona enabled  -> valid envelope with answer-only + response-tone +
-#       persona markers
-#   (c) persona disabled -> persona marker absent, other two present
+#   (b) persona enabled (explicit fixture: enabled:true + preset:boss-ace)
+#       -> valid envelope with answer-only + response-tone + persona markers
+#       + active-preset line (`활성 프리셋:` + `boss-ace`)
+#   (b2) persona-summary.md marker file is preset-agnostic (no `보스` /
+#        `boss-ace` hardcoding) — Task 3.1
+#   (c) persona disabled -> active-preset line absent, other two present
 #   (d) answer-only summary absent -> empty stdout (hard-requirement fail-open)
 #   (e) response-tone summary absent -> answer-only still emitted (optional skip)
 #   (f) CLAUDE_PLUGIN_ROOT unset -> empty stdout + exit 0 (env fail-open)
 #   (g) REIN_TURN_BRIEF_PREPEND set -> text prepended at the front of body
 #   (h) every path exits 0
+#   (i) custom preset with frontmatter summary -> `활성 프리셋: <name> — <summary>`
+#   (j) preset without frontmatter summary -> name-only line `활성 프리셋: <name>`
 #
-# Scope ID: PT-10
+# NOTE (Task 3.1 sweep): no assert below premises the old default-ON persona —
+# (b)/(c)/(i)/(j) all pin explicit persona.yaml fixtures.
+#
+# Scope ID: PT-10, turn-brief-appends-active-preset-name-and-summary-line
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -63,10 +71,21 @@ B_RC=$?
 B_CTX="$(printf '%s' "$B_OUT" | extract_ctx)"
 if [ "$B_RC" = "0" ] && printf '%s' "$B_CTX" | grep -q 'Answer-only' \
    && printf '%s' "$B_CTX" | grep -q 'Response Tone' \
-   && printf '%s' "$B_CTX" | grep -q '보스'; then
-  ok "(b) persona enabled -> answer-only + response-tone + persona markers"
+   && printf '%s' "$B_CTX" | grep -q '활성 프리셋:' \
+   && printf '%s' "$B_CTX" | grep -q 'boss-ace'; then
+  ok "(b) persona enabled -> answer-only + response-tone + active-preset line"
 else
   fail "(b) persona-enabled turn-brief missing a marker (rc=$B_RC)"
+fi
+
+# (b2) persona-summary.md marker file is preset-agnostic (Task 3.1) ------------
+PERSONA_SUMMARY_FILE="$PLUGIN_ROOT/rules/short/persona-summary.md"
+if [ -f "$PERSONA_SUMMARY_FILE" ] \
+   && ! grep -q '보스' "$PERSONA_SUMMARY_FILE" \
+   && ! grep -q 'boss-ace' "$PERSONA_SUMMARY_FILE"; then
+  ok "(b2) persona-summary.md has no preset hardcoding (보스/boss-ace zero)"
+else
+  fail "(b2) persona-summary.md still hardcodes a preset (보스/boss-ace found)"
 fi
 
 # (c) persona disabled --------------------------------------------------------
@@ -75,7 +94,7 @@ printf 'enabled: false\n' > "$C_DIR/.rein/policy/persona.yaml"
 C_CTX="$( cd "$C_DIR" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" python3 "$LOADER" --turn-brief 2>/dev/null | extract_ctx )"
 if printf '%s' "$C_CTX" | grep -q 'Answer-only' \
    && printf '%s' "$C_CTX" | grep -q 'Response Tone' \
-   && ! printf '%s' "$C_CTX" | grep -q '보스'; then
+   && ! printf '%s' "$C_CTX" | grep -q '활성 프리셋:'; then
   ok "(c) persona disabled -> persona absent, other two present"
 else
   fail "(c) persona-disabled turn-brief wrong markers"
@@ -136,6 +155,61 @@ if [ "$?" = "0" ]; then
   ok "(h) malformed persona.yaml -> exit 0 (fail-open)"
 else
   fail "(h) malformed persona.yaml should exit 0"
+fi
+
+# (i) custom preset WITH frontmatter summary -> name + summary line ------------
+I_DIR="$TMP_ROOT/i"; mkdir -p "$I_DIR/.rein/policy/persona"
+printf 'enabled: true\npreset: mia\n' > "$I_DIR/.rein/policy/persona.yaml"
+cat > "$I_DIR/.rein/policy/persona/mia.md" <<'EOF'
+---
+summary: 시크한 밤샘 메이트
+---
+
+# Persona: mia
+
+차분한 말투를 유지한다.
+EOF
+I_CTX="$( cd "$I_DIR" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" python3 "$LOADER" --turn-brief 2>/dev/null | extract_ctx )"
+if printf '%s' "$I_CTX" | grep -q '활성 프리셋: mia — 시크한 밤샘 메이트'; then
+  ok "(i) custom preset with summary -> '활성 프리셋: mia — <summary>'"
+else
+  fail "(i) custom-preset summary line missing"
+fi
+
+# (j) preset WITHOUT frontmatter summary -> name-only line ---------------------
+J_DIR="$TMP_ROOT/j"; mkdir -p "$J_DIR/.rein/policy/persona"
+printf 'enabled: true\npreset: nosumm\n' > "$J_DIR/.rein/policy/persona.yaml"
+cat > "$J_DIR/.rein/policy/persona/nosumm.md" <<'EOF'
+# Persona: nosumm
+
+frontmatter 없는 커스텀 프리셋.
+EOF
+J_CTX="$( cd "$J_DIR" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" python3 "$LOADER" --turn-brief 2>/dev/null | extract_ctx )"
+if printf '%s' "$J_CTX" | grep -q '^활성 프리셋: nosumm$'; then
+  ok "(j) summary-less preset -> name-only line '활성 프리셋: nosumm'"
+else
+  fail "(j) summary-less preset should emit name-only line"
+fi
+
+# (k) UNCLOSED frontmatter (summary present, no closing ---) -> summary IGNORED,
+#     name-only line (integrated-review Medium regression — an unclosed fence
+#     makes the hook's awk swallow the whole body, so reporting its summary
+#     would describe a preset that injects nothing).
+K_DIR="$TMP_ROOT/k"; mkdir -p "$K_DIR/.rein/policy/persona"
+printf 'enabled: true\npreset: unclosed\n' > "$K_DIR/.rein/policy/persona.yaml"
+cat > "$K_DIR/.rein/policy/persona/unclosed.md" <<'EOF'
+---
+summary: 미폐쇄 머리말 요약
+# Persona: unclosed
+
+본문이 통째로 머리말로 삼켜지는 형태.
+EOF
+K_CTX="$( cd "$K_DIR" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" python3 "$LOADER" --turn-brief 2>/dev/null | extract_ctx )"
+if printf '%s' "$K_CTX" | grep -q '^활성 프리셋: unclosed$' \
+   && ! printf '%s' "$K_CTX" | grep -q '미폐쇄 머리말 요약'; then
+  ok "(k) unclosed frontmatter -> summary ignored, name-only line"
+else
+  fail "(k) unclosed frontmatter summary must be ignored (closure mandatory)"
 fi
 
 echo "test-policy-loader-turn-brief: PASS=$PASS FAIL=$FAIL"

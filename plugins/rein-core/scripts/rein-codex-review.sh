@@ -201,8 +201,24 @@ _rein_cleanup_tmp() {
 # source-and-call(테스트) 경로에서는 호출자 shell 의 기존 EXIT trap 을 덮어쓰지
 # 않는다 — 실행형 경로에서만 등록. sourced 호출자는 함수 사용 후
 # _rein_cleanup_tmp 를 직접 호출해 정리할 책임을 진다 (codex 통합리뷰 R1 Low).
+# 비정상 래퍼 종료 계약 (R1 Medium-5): 워치독 활성 구간(WD_PID 설정~reap 전)에
+# TERM/INT/내부 오류로 종료되면 활성 child 를 TERM→grace→KILL→reap 한 *뒤*
+# 임시파일을 정리한다 — child 잔존 상태의 파일 삭제 경합·orphan 방치 배제.
+# unset-safe 판정 (R3/R4 Medium): trap 등록이 WD_PID 초기화보다 먼저이므로
+# 초기화 전 조기 종료(set -u)에서도 unbound 오류 없이 무동작. 정상 reap 후에는
+# WD_PID="" 라 재-kill 없음 (PID 재사용 오살 배제). trap body 의 함수 해석은
+# 발화 시점이므로 뒤에 정의된 워치독 함수 사용 가능 (WD_PID 비어있으면 미호출).
+# 실측 전제 (2026-07-22, macOS bash 3.2): wait 대기 중 untrapped SIGTERM 수신 시
+# EXIT trap 실행됨.
 if [ "${BASH_SOURCE[0]:-}" = "$0" ]; then
-  trap _rein_cleanup_tmp EXIT
+  trap '[ -n "${WD_PID:-}" ] && _watchdog_kill_sequence "$WD_PID" "${WD_GRACE:-10}"; _rein_cleanup_tmp' EXIT
+  # SIGINT 명시 trap (R2 High-C 보완): 비대화형 bash 는 untrapped SIGINT 를
+  # foreground child(워치독 sleep)가 INT 로 죽지 않고 정상 종료하면 WCE 규약에
+  # 따라 **폐기**한다 — INT 로는 래퍼가 죽지 않아 EXIT trap(child reap→cleanup)
+  # 이 영영 발화하지 않는다. INT 를 exit 130 (128+SIGINT) 으로 변환해 계약
+  # (TERM/INT/내부 오류 종료 시 reap→cleanup — spec §4.1 R1 Medium-5)을
+  # 코드로 강제한다. TERM 은 untrapped 로도 EXIT trap 발화 실측 (2026-07-22).
+  trap 'exit 130' INT
 fi
 
 # 공용 awk 함수 (parser/scanner 두 awk 프로그램 앞에 문자열 결합으로 주입) —
@@ -1981,10 +1997,125 @@ _parse_verdict() {
   fi
 }
 
-# Invoke codex. stdin = envelope. stdout = verdict body.
-_invoke_codex() {
-  # Use `exec` subcommand by default (same as SKILL.md examples).
-  "$CODEX_BIN" exec "$@" || return $?
+# ---- Watchdog timing resolver (2026-07-22 review-time-cap). -----------
+#
+# 워치독 타이밍 해석 (R1 Medium-5 + R2 Medium-3).
+# 입력: $1 = effort (spawn 전 확정된 REIN_EFFORT — 산출 체인 비접촉, 소비만).
+#       env REIN_WATCHDOG_{CAP,INTERVAL,GRACE}_OVERRIDE (테스트 전용, 단위 초).
+# 출력: stdout "cap interval grace". 무효 override 는 stderr 경고 1회 + 정책값 폴백.
+# spec-review/code-review 공통 — 모드 분기 없음 (동일 매핑, spec Open Q4).
+_watchdog_pick_override() {
+  local name="$1" val="$2" fallback="$3"
+  if [ -z "$val" ]; then printf '%s\n' "$fallback"; return 0; fi
+  case "$val" in
+    *[!0-9]*)   # 비정수·음수(-)·공백 전부 여기로
+      echo "WARN: [codex-review] invalid ${name}='${val}' (positive integer required) — using policy default ${fallback}s" >&2
+      printf '%s\n' "$fallback"; return 0 ;;
+  esac
+  # 길이 상한 7자리 (≤ 9999999s) — bash 3.2 는 정수 범위 초과 숫자열에
+  # `integer expression expected` 를 추가 방출해 "경고 1회" 계약을 깨므로
+  # -ge 비교 **이전에** 길이로 차단한다 (R3 Medium — 초대형 숫자 경계).
+  if [ "${#val}" -gt 7 ]; then
+    echo "WARN: [codex-review] invalid ${name}='${val}' (too large) — using policy default ${fallback}s" >&2
+    printf '%s\n' "$fallback"; return 0
+  fi
+  if [ "$val" -ge 1 ]; then
+    printf '%s\n' "$val"
+  else
+    echo "WARN: [codex-review] invalid ${name}='${val}' (must be >= 1) — using policy default ${fallback}s" >&2
+    printf '%s\n' "$fallback"
+  fi
+}
+_watchdog_resolve_timings() {
+  local effort="${1:-}" cap interval grace
+  case "$effort" in
+    low)    cap=120 ;;
+    medium) cap=180 ;;
+    high)   cap=300 ;;
+    *)      cap=300 ;;   # 예상 외 값(CODE_FAIL_CLOSED_EFFORT 페어 포함) 방어 매핑
+  esac
+  cap=$(_watchdog_pick_override "REIN_WATCHDOG_CAP_OVERRIDE" "${REIN_WATCHDOG_CAP_OVERRIDE:-}" "$cap")
+  interval=$(_watchdog_pick_override "REIN_WATCHDOG_INTERVAL_OVERRIDE" "${REIN_WATCHDOG_INTERVAL_OVERRIDE:-}" 30)
+  grace=$(_watchdog_pick_override "REIN_WATCHDOG_GRACE_OVERRIDE" "${REIN_WATCHDOG_GRACE_OVERRIDE:-}" 10)
+  printf '%s %s %s\n' "$cap" "$interval" "$grace"
+}
+
+# ---- Watchdog core (2026-07-22 review-time-cap, spec §4.2). -----------
+#
+# 공통 reap 지점 (R3 High): 모든 반환 경로가 경유. 자연 종료 RC 는 전역
+# WD_CHILD_RC 로 전달, reap 직후 WD_PID="" 즉시 해제 (R2 Medium-2 —
+# PID 재사용으로 무관 프로세스를 죽이는 경로 배제).
+_watchdog_reap() {
+  local pid="$1" rc=0
+  wait "$pid" 2>/dev/null || rc=$?
+  WD_CHILD_RC=$rc
+  WD_PID=""
+}
+# 종료 시퀀스: TERM → 최대 grace 초 1초 폴링(조기 종료 시 즉시 진행) → 잔존 시 KILL → reap.
+_watchdog_kill_sequence() {
+  local pid="$1" grace="$2" waited=0
+  kill -TERM "$pid" 2>/dev/null || true
+  while [ "$waited" -lt "$grace" ]; do
+    kill -0 "$pid" 2>/dev/null || break
+    # sleep 실패 = grace 대기 포기 → 즉시 KILL 단계로 (fail-closed —
+    # 실패를 삼키고 busy-spin 하지 않는다, plan 리뷰 High-3)
+    sleep 1 || break
+    waited=$((waited + 1))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true   # TERM 무시 child 도 KILL 로 종료 고정
+  fi
+  _watchdog_reap "$pid"
+}
+# 3상 반환: 0=자연 종료(WD_CHILD_RC 설정) / 5=정지 판정 / 6=내부 오류(fail-closed 종료 후).
+# 내부 명령 실패(스풀 측정 등)는 전부 함수 안에서 포착 → 종료 시퀀스 → 6 정규화
+# (R2 High-1 — caller 의 `|| WD_RC=$?` 가 내부 errexit 를 억제하므로 명시 캡처 필수).
+# 전역 소비: WD_CAP / WD_INTERVAL / WD_GRACE (호출부가 resolver 로 확정).
+# 전역 산출: WD_CHILD_RC (자연 종료 RC), WD_ELAPSED (모든 반환 경로에서 설정).
+_watchdog_wait() {
+  local pid="$1" spool="$2" elapsed=0
+  # Phase 1 — 1차 상한 대기 (1초 생존 폴링 — 조기 완료 무지연)
+  # sleep 실패는 내부 명령 실패 → 6 정규화 (plan 리뷰 High-3 — `|| true` 로
+  # 삼키면 busy-spin 으로 elapsed 만 증가해 fail-closed 계약이 새는 지점)
+  while [ "$elapsed" -lt "$WD_CAP" ]; do
+    kill -0 "$pid" 2>/dev/null || { _watchdog_reap "$pid"; WD_ELAPSED=$elapsed; return 0; }
+    sleep 1 || { _watchdog_kill_sequence "$pid" "$WD_GRACE"; WD_ELAPSED=$elapsed; return 6; }
+    elapsed=$((elapsed + 1))
+  done
+  # Phase 2 — 생존 검진 (결합 스풀 바이트 성장 단조 판정 — append-only 라 wc -c 단조 증가)
+  local baseline size stalled=0 i
+  baseline=$(wc -c < "$spool" 2>/dev/null) || { _watchdog_kill_sequence "$pid" "$WD_GRACE"; WD_ELAPSED=$elapsed; return 6; }
+  while :; do
+    i=0
+    while [ "$i" -lt "$WD_INTERVAL" ]; do
+      kill -0 "$pid" 2>/dev/null || { _watchdog_reap "$pid"; WD_ELAPSED=$elapsed; return 0; }
+      sleep 1 || { _watchdog_kill_sequence "$pid" "$WD_GRACE"; WD_ELAPSED=$elapsed; return 6; }   # High-3 동일
+      i=$((i + 1)); elapsed=$((elapsed + 1))
+    done
+    size=$(wc -c < "$spool" 2>/dev/null) || { _watchdog_kill_sequence "$pid" "$WD_GRACE"; WD_ELAPSED=$elapsed; return 6; }
+    if [ "$size" -gt "$baseline" ]; then
+      baseline=$size; stalled=0          # 성장 → 카운터 리셋, 무기한 유예 (절대 상한 없음)
+    else
+      stalled=$((stalled + 1))
+    fi
+    if [ "$stalled" -ge 2 ]; then        # 연속 2창(정책 60s) 무성장 → Phase 3
+      # 정지 판정 직전 생존 재확인 (plan 리뷰 R2 High-A): child 가 창의 마지막
+      # sleep 중 무성장 상태로 자연 종료했을 수 있다 — 죽었으면 timeout 이
+      # 아니라 정상 완료 (reap 으로 RC 보존, 오분류 배제).
+      kill -0 "$pid" 2>/dev/null || { _watchdog_reap "$pid"; WD_ELAPSED=$elapsed; return 0; }
+      _watchdog_kill_sequence "$pid" "$WD_GRACE"
+      WD_ELAPSED=$elapsed
+      return 5
+    fi
+  done
+}
+# 스풀 방출 소독 (R1 High-3 — 앵커 소유권): 라인 시작 예약 접두사를 치환해
+# `> log 2>&1` 결합 로그의 라인 앵커 매치가 래퍼 소유 stderr 라인뿐이도록 보장.
+# verdict 파싱 입력(CODEX_OUT)은 소독 전 원문 — 화면/로그 방출 단계에만 적용.
+_emit_spool_sanitized() {
+  local spool="$1"
+  [ -r "$spool" ] || return 0
+  sed 's/^ERROR: \[codex-review\]\[review-timeout\]/ERROR: [codex-review][review-…]/' "$spool" || true
 }
 
 # ---- Model fail-soft (DoD codex-model-profile-routing). ---------------
@@ -2143,18 +2274,51 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   # 같은 바이너리 버전).
   CODEX_VERSION_STR=$("$CODEX_BIN" --version 2>/dev/null | head -1 || true)
   [ -n "$CODEX_VERSION_STR" ] || CODEX_VERSION_STR="(unavailable)"
-  # Feed envelope on stdin. Args forwarded to `codex exec` via _invoke_codex.
-  # B2 (2026-06-09): capture codex 의 *실제* exit code. 이전 `if ! CMD; then
-  # CODEX_RC=$?` 는 `$?` 가 `! CMD`(항상 0)를 캡처해 codex 비모델 실패에도
-  # exit 0 으로 성공 위장했다. 여기서는 `$()` 를 단독 평가하고 `|| CODEX_RC=$?`
-  # 로 codex 의 종료 코드를 그대로 받는다 (`set -e` 가 non-zero `$()` 에서
-  # 스크립트를 죽이지 않도록 `||` 로 분리. pipefail 이라 _invoke_codex 의
-  # return $? 가 파이프 exit status 로 전파된다).
-  CODEX_RC=0
-  CODEX_OUT=$(printf '%s' "$ENVELOPE" | _invoke_codex ${CODEX_ARGS[@]+"${CODEX_ARGS[@]}"} 2>&1) || CODEX_RC=$?
+  # ---- Watchdog call site (2026-07-22 review-time-cap, spec §4.1). ----
+  # 워치독 타이밍 확정 (spawn 전 — EXIT trap 경로가 WD_GRACE 를 재사용)
+  WD_TIMINGS=$(_watchdog_resolve_timings "$REIN_EFFORT")
+  read -r WD_CAP WD_INTERVAL WD_GRACE <<< "$WD_TIMINGS"
+
+  # envelope 를 파일로 (stdin 파이프 제거 — foreground 규칙 완화는 비범위 §제외)
+  _rein_mktemp WD_ENV_FILE
+  printf '%s' "$ENVELOPE" > "$WD_ENV_FILE"
+  _rein_mktemp WD_SPOOL_FILE
+
+  # WD_PID 수명: spawn 전 빈 값 → spawn 직후 설정 → 모든 reap 직후 해제 (함수 소유).
+  # EXIT trap 판정식은 unset-safe `[ -n "${WD_PID:-}" ]` (trap 등록이 이 초기화보다 먼저).
+  WD_PID=""
+
+  # background child spawn — 결합 출력을 스풀로 스트리밍.
+  # CRITICAL (R1 High-2): subshell 안 `exec` 로 codex 이미지 치환 — $! 가 실제
+  # codex PID 를 소유해 TERM/KILL 이 subshell 이 아닌 codex 에 직접 도달.
+  ( exec "$CODEX_BIN" exec ${CODEX_ARGS[@]+"${CODEX_ARGS[@]}"} ) \
+    < "$WD_ENV_FILE" > "$WD_SPOOL_FILE" 2>&1 &
+  WD_PID=$!
+
+  # R1 High-1: 조건 컨텍스트 캡처 필수 (bare 호출 + `WD_RC=$?` 는 set -e 하 도달 불가).
+  WD_RC=0
+  _watchdog_wait "$WD_PID" "$WD_SPOOL_FILE" || WD_RC=$?
+  case "$WD_RC" in
+    0)
+      : ;;                                     # 아래 공통 파이프라인으로 진행
+    5)
+      _emit_spool_sanitized "$WD_SPOOL_FILE"   # 부분 스풀 best-effort 방출 (소독)
+      echo "ERROR: [codex-review][review-timeout] codex stalled: no combined-output growth for 2 consecutive ${WD_INTERVAL}s windows after ${WD_CAP}s primary cap (effort=${REIN_EFFORT}, elapsed=${WD_ELAPSED}s). Caller: switch to fallback review (no retry)." >&2
+      exit 5
+      ;;
+    *)                                         # 6 및 그 외 전부 = 내부 오류 (fail-closed 전분기)
+      _emit_spool_sanitized "$WD_SPOOL_FILE"
+      echo "ERROR: [codex-review][review-timeout] watchdog internal failure (rc=$WD_RC) — codex terminated fail-closed. Caller: switch to fallback review (no retry)." >&2
+      exit 5
+      ;;
+  esac
+  CODEX_RC="${WD_CHILD_RC:-0}"                # 자연 종료 RC (함수 내부 reap 에서 캡처)
+  CODEX_OUT=$(<"$WD_SPOOL_FILE")              # 이후 기존 파이프라인 무변경 (2>&1 결합 의미 보존)
   if [ "$CODEX_RC" -ne 0 ]; then
     # Best-effort: emit output so caller can see what went wrong.
-    printf '%s\n' "$CODEX_OUT"
+    # 방출 전 예약 접두사 소독 (R2 Medium-E — CODEX_OUT 변수 자체는 원문 유지,
+    # 기존 command-substitution newline 정규화 의미 보존을 위해 변수 기반 sed).
+    printf '%s\n' "$CODEX_OUT" | sed 's/^ERROR: \[codex-review\]\[review-timeout\]/ERROR: [codex-review][review-…]/'
     # Fail-soft: 모델 거부면 sonnet fallback 으로 새지 말고(잘못된 모델을
     # 숨기지 않도록) 전용 exit 3 + 단일 출처 수정 안내.
     if _detect_model_error "$CODEX_OUT"; then
@@ -2165,8 +2329,9 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     exit "$CODEX_RC"
   fi
 
-  # Emit codex output unchanged for the caller.
-  printf '%s\n' "$CODEX_OUT"
+  # Emit codex output for the caller — 방출 전 예약 접두사 소독 (앵커 소유권,
+  # spec §4.3a). verdict 파싱/stamp 입력(CODEX_OUT)은 소독 전 원문 유지.
+  printf '%s\n' "$CODEX_OUT" | sed 's/^ERROR: \[codex-review\]\[review-timeout\]/ERROR: [codex-review][review-…]/'
 
   # Fail-soft (방어): codex 가 exit 0 으로 와도 출력에 모델 거부가 섞였으면
   # 통과 표시(.codex-reviewed)를 만들지 않고 단일 출처 수정을 안내한다.

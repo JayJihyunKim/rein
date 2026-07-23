@@ -31,6 +31,7 @@ codex exec -m <model> --config model_reasoning_effort="<effort>" \
 - Bash 도구 호출 시 `run_in_background: false` 명시
 - timeout: effort 기준 타이트하게 — low ≤120s, medium ≤180s, high ≤300s. 600s harness 한계 넘어가면 prompt 쪼개기
 - 출력 pipe 는 `| tail -N` 금지 (EOF 까지 버퍼링되어 부분 출력 미도달). `> file 2>&1` 로 직접 파일에 쓰고 Read 로 읽기
+- 예외 (scoped): 리뷰 래퍼 **내부** 감시 child — `rein-codex-review.sh` 래퍼 자신이 spawn·wait·reap 하는 codex 프로세스 + 그 폴링 루프 — 는 foreground 규칙의 예외다. 하니스 Bash background 와 다른 메커니즘이기 때문: stdin 이 unix socket 이 아닌 파일 redirect 로 붙고, 프로세스 소유·정리 주체가 래퍼다. 단, **세션 레벨 금지는 불변** — Bash background 도 `rein job` 도 codex 계열 (codex exec / /codex-review / /codex-ask) 을 띄우는 데 여전히 쓰지 않는다 (규칙 원 목적 = auto-background stdin socket hang 방지, 그대로 유지)
 
 근거: 2026-04-22 세션 재현 — `codex exec ... | tail -200` 을 7분 timeout 으로 호출 → Bash 가 auto-background → 24분 hang, 복구 불가. 상세: `trail/dod/dod-2026-04-22-codex-foreground-policy.md`, memory `feedback_codex_foreground.md`.
 

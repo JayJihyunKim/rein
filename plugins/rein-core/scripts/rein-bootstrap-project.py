@@ -50,16 +50,17 @@ POLICY_RULES_TEMPLATE = """# .rein/policy/rules.yaml
 
 POLICY_PERSONA_TEMPLATE = """# .rein/policy/persona.yaml
 #
-# Persona layer — applies a character/tone preset on top of the response
-# rules. The response rules (plain language, no internal IDs, cold warnings)
-# ALWAYS win; persona only adds a tone layer above them.
+# Persona layer — OFF by default (neutral). Only an explicit `enabled: true`
+# activates it; the response rules always win over any persona.
 #
-# To opt out, set enabled to false:
-#   enabled: false
+# Built-in presets: boss-ace, jennie
+# Custom presets live in .rein/policy/persona/<name>.md (create them via the
+# persona skill — ask "페르소나 만들어줘" / "pick a persona").
 #
-# Default (this file absent OR a parse error) = {enabled: true, preset: boss-ace}.
-enabled: true
-preset: boss-ace
+# To enable:
+#   enabled: true
+#   preset: boss-ace
+enabled: false
 """
 
 INDEX_TEMPLATE = """# trail/index.md

@@ -21,6 +21,8 @@ Resolution order (relative to current working directory):
     .rein/policy/hooks.yaml   — hook toggles
     .rein/policy/rules.yaml   — prompt-only rule body overrides
 """
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -78,15 +80,20 @@ UMBRELLA_KEYS = {
 }
 
 
-# Registered persona presets — single source of truth for membership
-# validation (PP-3). Adding a preset means adding its name here AND creating
-# rules/persona/<name>.md. A name that passes the format allowlist but is not
-# listed here is downgraded to the default preset (fail-safe) so the hook
-# never points at a missing rules/persona/<typo>.md (which would silently
-# skip persona injection entirely).
-KNOWN_PERSONA_PRESETS = {"boss-ace"}
+# Registered BUILT-IN persona presets — single source of truth for the builtin
+# tier (PP-3). Adding a builtin preset means adding its name here AND creating
+# rules/persona/<name>.md under the plugin root. Builtin names ALWAYS win over
+# same-name custom files. Names outside this set may still resolve as CUSTOM
+# presets from CUSTOM_PERSONA_DIR after validation (containment + UTF-8 decode
+# + char cap); anything unresolvable downgrades to DEFAULT_PERSONA (fail-safe)
+# so the hook never points at a missing file.
+KNOWN_PERSONA_PRESETS = {"boss-ace", "jennie"}
 PERSONA_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 DEFAULT_PERSONA = "boss-ace"
+# Custom persona tier — resolved relative to the current working directory
+# (the user's project root, same convention as .rein/policy/*.yaml).
+CUSTOM_PERSONA_DIR = Path(".rein/policy/persona")
+CUSTOM_PERSONA_MAX_CHARS = 4000
 
 
 def _normalize_enabled(raw):
@@ -260,51 +267,228 @@ def get_meta_check_policy() -> str:
     return "auto"
 
 
-def get_persona() -> tuple[bool, str]:
-    """Return (enabled, preset) for the active persona layer.
+def get_persona() -> tuple[bool, object]:
+    """Return (enabled, preset_raw) for the persona layer — NEUTRAL default.
 
-    Reads .rein/policy/persona.yaml's top-level {enabled, preset}.
-    Fail-open at every error path: missing file, PyYAML absent, parse
-    error, non-dict top-level, missing/non-bool `enabled`, missing/invalid
-    `preset` all yield (True, DEFAULT_PERSONA). Only an explicit
-    `enabled: false` disables. The returned preset name is ALWAYS validated
-    (format allowlist ^[a-z0-9-]+$ AND membership in KNOWN_PERSONA_PRESETS);
-    any failure downgrades to DEFAULT_PERSONA (PP-3).
+    Reads .rein/policy/persona.yaml's top-level {enabled, preset}. The
+    persona layer is active ONLY when the file parses to a dict whose
+    `enabled` is literally the bool True (`data.get("enabled") is True`).
+    Every other state — missing file, PyYAML absent, parse error, non-dict
+    top-level, absent/string/int `enabled`, explicit false — yields
+    (False, DEFAULT_PERSONA): the persona layer stays OFF (PP-2 neutral
+    default).
+
+    The second element is the RAW `preset` value (no validation here — it
+    may be a non-str: number, list, None...). Format validation and
+    downgrade are unified at the consumption point via
+    resolve_persona_source() -> _validate_persona_name() (PP-3) so there is
+    exactly one interpretation path and no double validation.
 
     Scope ID: PP-2, PP-3
     """
     if yaml is None:
-        return (True, DEFAULT_PERSONA)
+        return (False, DEFAULT_PERSONA)
     policy_path = Path(".rein/policy/persona.yaml")
     if not policy_path.exists():
-        return (True, DEFAULT_PERSONA)
+        return (False, DEFAULT_PERSONA)
     try:
         data = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
     except Exception:
         print(
-            f"warning: failed to parse {policy_path} - using default persona",
+            f"warning: failed to parse {policy_path} - persona stays off",
             file=sys.stderr,
         )
-        return (True, DEFAULT_PERSONA)
+        return (False, DEFAULT_PERSONA)
     if not isinstance(data, dict):
-        return (True, DEFAULT_PERSONA)
-    enabled = False if data.get("enabled") is False else True
-    preset = _validate_persona_name(data.get("preset"))
+        return (False, DEFAULT_PERSONA)
+    enabled = data.get("enabled") is True
+    preset = data.get("preset")
     return (enabled, preset)
 
 
-def _validate_persona_name(raw) -> str:
-    """Return a trusted preset name, downgrading to DEFAULT_PERSONA on any
-    validation failure (PP-3): non-str, empty, format violation
-    (path traversal / substitution chars), or not in KNOWN_PERSONA_PRESETS."""
+def _leading_fence_awk_mismatch(text: str) -> bool:
+    """True iff the lenient parser sees a leading frontmatter fence but the
+    hook's awk does NOT — the general (P)∧¬(A) invariant (spec §4).
+
+    (P) parser view: str.splitlines()[0].strip() == "---" (splitlines splits
+        on \\r, \\r\\n and unicode line separators — the same lenient view
+        the frontmatter parsers use).
+    (A) awk view: the leading raw \\n-record (text.split("\\n",1)[0]) is
+        byte-exact "---". MUST be a \\n-literal split on newline-PRESERVING
+        text — never str.splitlines() (which strips a trailing \\r / U+2028
+        and would hide CRLF / bare-CR / unicode-separator fences).
+
+    Reject (True) iff (P) and not (A). One rule closes padded ` --- `, CRLF
+    `---\\r`, bare-CR `---\\r`(no \\n in file), and unicode line-separator
+    terminators uniformly; exact `---`(LF) fences and no-frontmatter files
+    are untouched (returns False).
+    """
+    if not text:
+        return False
+    lines = text.splitlines()
+    parser_sees_fence = bool(lines) and lines[0].strip() == "---"
+    awk_sees_exact = text.split("\n", 1)[0] == "---"
+    return parser_sees_fence and not awk_sees_exact
+
+
+def _validate_persona_name(raw) -> str | None:
+    """FORMAT-ONLY validation: return the candidate name when `raw` is a
+    non-empty string matching ^[a-z0-9-]+$ (blocks path traversal /
+    substitution chars / hidden `_`-prefixed files), else None. Membership
+    and downgrade decisions live in resolve_persona_source()."""
     if not isinstance(raw, str):
-        return DEFAULT_PERSONA
+        return None
     candidate = raw.strip()
     if not candidate or not PERSONA_NAME_RE.match(candidate):
-        return DEFAULT_PERSONA
-    if candidate not in KNOWN_PERSONA_PRESETS:
-        return DEFAULT_PERSONA
+        return None
     return candidate
+
+
+def resolve_persona_source(preset_raw) -> tuple[str, str | None]:
+    """Resolve the raw preset value to (name, source_path) — the single
+    trusted interpretation point (D2) shared by --persona / --persona-file
+    and the turn brief.
+
+    Name-level rules:
+        format violation           -> DEFAULT_PERSONA
+        builtin member             -> name kept (path depends on plugin root)
+        non-member, valid custom   -> name kept (cwd-based validation, root-
+                                      independent, so --persona stays
+                                      deterministic even without a root)
+        non-member, invalid custom -> DEFAULT_PERSONA (PP-3 extended)
+
+    Path-level: _resolve_persona_file() applies D1 — CLAUDE_PLUGIN_ROOT
+    unset means the invariant layer is unresolvable, so the path is always
+    None regardless of tier.
+    """
+    name = _validate_persona_name(preset_raw)
+    if name is None:
+        name = DEFAULT_PERSONA
+    path = _resolve_persona_file(name)
+    if path is None and name != DEFAULT_PERSONA:
+        # unresolvable custom/typo -> known-good downgrade (PP-3 확장)
+        if name not in KNOWN_PERSONA_PRESETS and not _custom_persona_valid(name):
+            name = DEFAULT_PERSONA
+            path = _resolve_persona_file(name)
+    return (name, path)
+
+
+def _resolve_persona_file(name):
+    """Return the persona source file path for `name`, or None.
+
+    D1: without CLAUDE_PLUGIN_ROOT the invariant layer cannot be resolved,
+    so NO source path is ever emitted (not even a custom-only one). Builtin
+    names resolve exclusively under the plugin root (same-name customs are
+    ignored — builtin wins); non-builtin names resolve from
+    CUSTOM_PERSONA_DIR only after _custom_persona_valid().
+    """
+    root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if not root:
+        return None  # D1: invariant layer unresolvable -> no path, ever
+    try:
+        # .resolve(): the CLI contract promises an ABSOLUTE path — a relative
+        # CLAUDE_PLUGIN_ROOT would otherwise leak through (integrated-review fix;
+        # custom tier already resolves). Wrapped fail-open: a pathological root
+        # (e.g. over-long path -> OSError ENAMETOOLONG) or a .resolve()/is_file()
+        # filesystem error must yield None, never crash the caller — every CLI
+        # persona path (--persona / --persona-file / --persona-greeting) promises
+        # empty output + exit 0.
+        builtin = (Path(root) / "rules" / "persona" / f"{name}.md").resolve()
+        if name in KNOWN_PERSONA_PRESETS:
+            return str(builtin) if builtin.is_file() else None  # builtin wins; same-name custom ignored
+        if _custom_persona_valid(name):
+            return str((CUSTOM_PERSONA_DIR / f"{name}.md").resolve())
+        return None
+    except Exception:
+        return None  # filesystem resolution failure -> fail-open (no path)
+
+
+def _custom_persona_valid(name) -> bool:
+    """True iff `.rein/policy/persona/<name>.md` (cwd-relative) is a safe
+    custom persona source: realpath containment inside the persona dir
+    (blocks symlink escape), a regular file, UTF-8 decodable, at most
+    CUSTOM_PERSONA_MAX_CHARS characters, AND free of a (P)∧¬(A) leading
+    fence mismatch (spec §4 fail-safe). Any exception -> False (fail-safe).
+    """
+    try:
+        base = CUSTOM_PERSONA_DIR.resolve()
+        cand = base / f"{name}.md"
+        real = cand.resolve()
+        if real.parent != base:
+            return False  # containment violated (symlink escape)
+        if not real.is_file():
+            return False
+        # newline-PRESERVING read: read_bytes().decode() keeps \r / U+2028 so
+        # the (A) awk view is computed on raw newlines. Path.read_text() would
+        # universal-newline normalize and hide CRLF / bare-CR fences.
+        text = real.read_bytes().decode("utf-8")
+        if len(text) > CUSTOM_PERSONA_MAX_CHARS:
+            return False
+        if _leading_fence_awk_mismatch(text):
+            return False  # (P)∧¬(A) open fence -> fail-safe reject
+        return True
+    except Exception:
+        return False
+
+
+def _read_frontmatter_summary(path) -> str | None:
+    """Return the `summary:` field from a leading `---` frontmatter block.
+
+    Task 3.1: only when the file's FIRST line is `---` AND the block is
+    CLOSED by a second `---`, return the first `^summary:\\s*(.+)$` match
+    found inside the block. Closure is mandatory (integrated-review fix —
+    an unclosed fence makes the hook's awk strip swallow the whole body, so
+    accepting its summary here would report a preset that injects nothing).
+    Everything else — path None, unreadable file, no leading frontmatter,
+    closed without a match, never closed — yields None (fail-open).
+    """
+    if not path:
+        return None
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except Exception:
+        return None
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    summary = None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return summary  # closed — summary valid only now
+        if summary is None:
+            m = re.match(r"^summary:\s*(.+)$", line)
+            if m:
+                summary = m.group(1).strip()
+    return None  # never closed — no valid frontmatter
+
+
+def _read_frontmatter_greeting(path) -> str | None:
+    """Return the `greeting:` field from a leading `---` frontmatter block.
+
+    Sibling of _read_frontmatter_summary but matches `^greeting:`. Used only
+    on already-trusted presets (builtin) or _custom_persona_valid-validated
+    customs, so the lenient parser view (splitlines) is correct here — the
+    (P)∧¬(A) fence fail-safe lives in _custom_persona_valid, not here.
+    Closure mandatory; everything else -> None (fail-open).
+    """
+    if not path:
+        return None
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except Exception:
+        return None
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    greeting = None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return greeting  # closed — greeting valid only now
+        if greeting is None:
+            m = re.match(r"^greeting:\s*(.+)$", line)
+            if m:
+                greeting = m.group(1).strip()
+    return None  # never closed — no valid frontmatter
 
 
 def _read_text_or_empty(path: Path) -> str:
@@ -350,11 +534,20 @@ def get_turn_brief() -> str:
     if response_tone.strip():
         parts.append(response_tone.rstrip("\n"))
 
-    enabled, _preset = get_persona()
+    enabled, preset_raw = get_persona()
     if enabled:
         persona = _read_text_or_empty(short_dir / "persona-summary.md")
         if persona.strip():
-            parts.append(persona.rstrip("\n"))
+            # Task 3.1: the nudge text is preset-agnostic; append ONE line
+            # naming the ACTIVE preset (resolved via the single trusted
+            # interpretation point) plus its frontmatter summary when present.
+            name, source_path = resolve_persona_source(preset_raw)
+            summary = _read_frontmatter_summary(source_path)
+            if summary:
+                active_line = f"활성 프리셋: {name} — {summary}"
+            else:
+                active_line = f"활성 프리셋: {name}"
+            parts.append(persona.rstrip("\n") + "\n" + active_line)
 
     body = "\n\n---\n\n".join(parts)
 
@@ -381,7 +574,7 @@ def get_all_rule_overrides() -> dict:
 def main() -> int:
     if len(sys.argv) < 2:
         print(
-            "usage: rein-policy-loader.py <hook-name> | --rule-override <rule-name> | --meta-check-policy | --persona | --turn-brief",
+            "usage: rein-policy-loader.py <hook-name> | --rule-override <rule-name> | --meta-check-policy | --persona | --persona-file | --persona-greeting <name> | --turn-brief",
             file=sys.stderr,
         )
         return 0  # fail-open - never block a hook due to internal usage error
@@ -403,12 +596,45 @@ def main() -> int:
         return 0
 
     if sys.argv[1] == "--persona":
-        # PP-4: print the validated active preset name (one line) when enabled,
-        # nothing when disabled. Always exit 0 so the hook never breaks the
-        # SessionStart envelope.
+        # PP-4: print the RESOLVED active preset name (one line) when enabled,
+        # nothing when disabled (neutral default). Interpretation of the raw
+        # preset value is unified in resolve_persona_source(). Always exit 0
+        # so the hook never breaks the SessionStart envelope.
         enabled, preset = get_persona()
         if enabled:
-            sys.stdout.write(preset)
+            sys.stdout.write(resolve_persona_source(preset)[0])
+        return 0
+
+    if sys.argv[1] == "--persona-file":
+        # Single trusted boundary for the hook (spec §10): print the resolved
+        # persona source path (one line) when the layer is enabled AND a path
+        # resolves (D1: no CLAUDE_PLUGIN_ROOT -> always empty), else empty
+        # stdout. Always exit 0.
+        enabled, preset = get_persona()
+        if enabled:
+            path = resolve_persona_source(preset)[1]
+            if path is not None:
+                sys.stdout.write(path)
+        return 0
+
+    if sys.argv[1] == "--persona-greeting":
+        # Greeting boundary (spec OQ2): print the stored `greeting:` line for a
+        # VALIDATED builtin or custom preset named on argv, else empty stdout,
+        # always exit 0 (fail-open). Does NOT reuse resolve_persona_source(),
+        # which downgrades typos to boss-ace and would leak a wrong greeting
+        # (High-1). _resolve_persona_file() returns None (never a downgrade) for
+        # invalid / typo / traversal / unresolved / (P)∧¬(A)-fence customs.
+        if len(sys.argv) < 3:
+            return 0
+        name = _validate_persona_name(sys.argv[2])
+        if name is None:
+            return 0  # format violation / traversal / empty -> empty stdout
+        path = _resolve_persona_file(name)  # None on D1 / missing / invalid custom
+        if path is None:
+            return 0
+        greeting = _read_frontmatter_greeting(path)
+        if greeting:
+            sys.stdout.write(greeting)
         return 0
 
     if sys.argv[1] == "--turn-brief":

@@ -34,6 +34,9 @@ HELPER="$PLUGIN_ROOT/hooks/lib/onboarded-check.sh"
 PRIMER_PARA_ANCHOR="처음 오셨네요"                            # (a) welcome line (sed start)
 PRIMER_FLOW_ANCHOR="무엇을 할지 정하기"                       # (b) flow (define→approve→review)
 PRIMER_STUCK_ANCHOR="막혀도 괜찮아요"                         # (c) stuck-is-normal (sed end)
+# Persona selection guidance (Task 5.2 — primer-adds-persona-selection-guidance-without-new-marker).
+PRIMER_PERSONA_ANCHOR1="말투도 고를 수 있어요"                # (d) persona guidance line 1
+PRIMER_PERSONA_ANCHOR2="페르소나 골라줘"                      # (d) persona trigger phrase
 
 FAIL=0
 pass() { echo "  PASS: $1"; }
@@ -105,6 +108,9 @@ echo "RUN helper_unit"
   case "$body" in *"$PRIMER_PARA_ANCHOR"*) :;; *) echo "  FAIL: primer body missing paragraph anchor"; exit 1;; esac
   case "$body" in *"$PRIMER_FLOW_ANCHOR"*) :;; *) echo "  FAIL: primer body missing flow anchor"; exit 1;; esac
   case "$body" in *"$PRIMER_STUCK_ANCHOR"*) :;; *) echo "  FAIL: primer body missing stuck anchor"; exit 1;; esac
+  # Task 5.2: persona selection guidance present in primer body (no new marker/hook).
+  case "$body" in *"$PRIMER_PERSONA_ANCHOR1"*) :;; *) echo "  FAIL: primer body missing persona guidance line"; exit 1;; esac
+  case "$body" in *"$PRIMER_PERSONA_ANCHOR2"*) :;; *) echo "  FAIL: primer body missing persona trigger phrase"; exit 1;; esac
   echo "  OK"
 ) || FAIL=$((FAIL + 1))
 

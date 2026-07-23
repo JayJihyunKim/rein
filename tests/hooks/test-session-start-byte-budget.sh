@@ -30,7 +30,10 @@ HOOKS="$PLUGIN_ROOT/hooks"
 # Conservative per-hook budgets (bytes). All well under the platform per-hook
 # cap (10,000 chars) so growth is caught with headroom to spare.
 BUDGET_RULES=8000        # rules summaries (~4.8KB today)
-BUDGET_PERSONA=4000      # persona body (~1.6KB today)
+BUDGET_PERSONA=6000      # invariant layer (<=1,000 chars Korean ~ <=3,000B
+                         # UTF-8) + builtin preset body (<=1,536B) + separator
+                         # (~10B) ~ <=4.6KB worst case -> 6,000B budget keeps
+                         # headroom while staying well under the 10,000-char cap
 BUDGET_UPS=4000          # per-turn brief (~2.2KB today)
 BUDGET_PLAIN=8000        # bootstrap / load-trail raw stdout
 
@@ -69,11 +72,47 @@ else
 fi
 
 # ---- (b) session-start-persona.sh additionalContext <= BUDGET_PERSONA -------
-PERSONA_BYTES="$( ( cd "$(mktemp -d)" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOKS/session-start-persona.sh" </dev/null 2>/dev/null ) | ctx_bytes )"
-if [ "$PERSONA_BYTES" -ge 0 ] && [ "$PERSONA_BYTES" -le "$BUDGET_PERSONA" ]; then
-  ok "(b) session-start-persona additionalContext ${PERSONA_BYTES}B <= ${BUDGET_PERSONA}B"
+# Neutral default emits NOTHING with no persona.yaml (0B would be vacuous), so
+# measure with explicit enabled:true fixtures for BOTH builtin presets. Require
+# >= 1B so a silently-empty envelope can't fake a pass.
+for preset in boss-ace jennie; do
+  P_DIR="$(mktemp -d)"
+  mkdir -p "$P_DIR/.rein/policy"
+  printf 'enabled: true\npreset: %s\n' "$preset" > "$P_DIR/.rein/policy/persona.yaml"
+  PERSONA_BYTES="$( ( cd "$P_DIR" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOKS/session-start-persona.sh" </dev/null 2>/dev/null ) | ctx_bytes )"
+  if [ "$PERSONA_BYTES" -ge 1 ] && [ "$PERSONA_BYTES" -le "$BUDGET_PERSONA" ]; then
+    ok "(b) session-start-persona [$preset] additionalContext ${PERSONA_BYTES}B in 1..${BUDGET_PERSONA}B"
+  else
+    fail "(b) session-start-persona [$preset] additionalContext ${PERSONA_BYTES}B outside 1..${BUDGET_PERSONA}B"
+  fi
+  rm -rf "$P_DIR"
+done
+
+# ---- (b2) persona source-file size contracts ---------------------------------
+# The BUDGET_PERSONA arithmetic above only holds if the source files respect
+# their own caps: _invariant.md <= 1,000 CHARS (UTF-8 decoded) and the largest
+# builtin preset jennie.md <= 1,536 BYTES.
+INVARIANT_MD="$PLUGIN_ROOT/rules/persona/_invariant.md"
+JENNIE_MD="$PLUGIN_ROOT/rules/persona/jennie.md"
+if [ -f "$INVARIANT_MD" ]; then
+  INV_CHARS="$(python3 -c 'import sys; print(len(open(sys.argv[1], encoding="utf-8").read()))' "$INVARIANT_MD")"
+  if [ "$INV_CHARS" -le 1000 ]; then
+    ok "(b2) _invariant.md ${INV_CHARS} chars <= 1000"
+  else
+    fail "(b2) _invariant.md ${INV_CHARS} chars exceeds 1000"
+  fi
 else
-  fail "(b) session-start-persona additionalContext ${PERSONA_BYTES}B exceeds ${BUDGET_PERSONA}B"
+  fail "(b2) _invariant.md missing at $INVARIANT_MD (invariant layer not shipped)"
+fi
+if [ -f "$JENNIE_MD" ]; then
+  JENNIE_BYTES="$(wc -c < "$JENNIE_MD" | tr -d ' ')"
+  if [ "$JENNIE_BYTES" -le 1536 ]; then
+    ok "(b2) jennie.md ${JENNIE_BYTES}B <= 1536B"
+  else
+    fail "(b2) jennie.md ${JENNIE_BYTES}B exceeds 1536B"
+  fi
+else
+  fail "(b2) jennie.md missing at $JENNIE_MD (builtin preset not shipped)"
 fi
 
 # ---- (c) bootstrap + load-trail raw stdout <= BUDGET_PLAIN ------------------
