@@ -10,7 +10,7 @@
 #       → wrapper-enforces-per-effort-primary-cap-… / wrapper-feeds-envelope-…
 #   W2  성장 유예 후 완료 (유예 회귀 가드, baseline GREEN)
 #       → watchdog-defers-kill-indefinitely-… / completed-run-restores-codex-out-…
-#   W3  연속 2창 정지 → exit 5 + 앵커 + 부분 스풀
+#   W3  정지 임계 창(기본 6, 2026-07-27~) 연속 무활동 → exit 5 + 앵커 + 부분 스풀
 #       → watchdog-terminates-codex-after-two-consecutive-… / timeout-verdict-exits-5-…
 #   W4  TERM 무시 → KILL → 잔존 0        → wrapper-terminates-stalled-codex-with-term-…
 #   W5  1창 무성장 후 성장 재개 = 카운터 리셋 (오탐 회귀 가드, baseline GREEN)
@@ -26,6 +26,9 @@
 #   W11 spec-review timeout 표식 무접촉  → timeout-path-touches-no-review-stamp-…
 #       / spec-review-mode-applies-identical-effort-caps-…
 #   W12 resolver 단위 seam               → watchdog-timing-resolver-rejects-invalid-…
+#   W13~W16 자식 명령 실행 중은 정지가 아니다 — 두 축 동시 / 축 A 단독 /
+#       축 B 단독(환경 프로브 후 skip 가능) / 완료 표식 짝 맞으면 다시 정지 판정
+#       (2026-07-27 false-stall 수리, dod-2026-07-27-review-watchdog-false-stall)
 #
 # 하니스 규율 (plan Task 1.2):
 #   - sandbox 관용구 = test-review-selfverify-gate.sh 동일 (mktemp -d + git init
@@ -146,6 +149,7 @@ e2e_setup() {
 .sup.err
 .wpid
 .w12err.*
+.childpid
 fake-codex.sh
 probe.txt
 empty.txt
@@ -175,8 +179,27 @@ count_anchor() {
   fi
 }
 
+probe_child_visibility() {
+  sleep 5 &
+  local sp=$! seen
+  seen=$(pgrep -P $$ 2>/dev/null | grep -c "^${sp}\$" || true)
+  kill "$sp" 2>/dev/null || true
+  wait "$sp" 2>/dev/null || true
+  [ "${seen:-0}" -ge 1 ]
+}
+
 sandbox_residue() {
-  pgrep -f "$SANDBOX" 2>/dev/null | wc -l | tr -d ' '
+  # 결정론적 잔존 oracle (R5 High): `pgrep` 은 격리 샌드박스에서 관측 자체가 실패해
+  # (RC>1) fail-open 도 fail-closed 도 옳지 않다. fixture 가 기록한 PID 파일 +
+  # `kill -0` 로 **프로세스 열거 없이** 생존을 직접 확인한다 — 환경 비의존.
+  # 반환: 살아있는 child 수 (0 또는 1). PID 파일이 없으면 spawn 자체가 없었으므로 0.
+  local pf="$SANDBOX/.childpid" pid
+  # PID 파일 부재 = fixture 가 spawn 되지 않았거나 주입이 누락된 것 → **공검사 금지**.
+  # -1 을 돌려 호출부의 `assert_eq 0` 이 반드시 깨지게 한다 (R6 Medium).
+  [ -f "$pf" ] || { echo -1; return 0; }
+  pid=$(cat "$pf" 2>/dev/null)
+  [ -n "$pid" ] || { echo 0; return 0; }
+  if kill -0 "$pid" 2>/dev/null; then echo 1; else echo 0; fi
 }
 
 readiness_listing() {
@@ -213,6 +236,7 @@ run_wrapper_supervised() {
     cd "$SANDBOX"
     export CODEX_BIN="$SANDBOX/fake-codex.sh"
     export FAKE_CODEX_CAPTURE="$CAPTURE"
+    export FAKE_CODEX_PIDFILE="$SANDBOX/.childpid"
     export TMPDIR="$SANDBOX/tmpdir"
     export REIN_PROJECT_DIR_OVERRIDE="$SANDBOX"
     exec bash "$SANDBOX/scripts/rein-codex-review.sh" --non-interactive "$@" \
@@ -303,10 +327,10 @@ assert_ge "$WALL" 6 "W2 총 소요 ≥6s (상한 초과 상태로 워치독 관�
 e2e_teardown
 
 # ============================================================
-echo "-- W3: 연속 2창 정지 → exit 5 + 앵커 + 부분 스풀 + 표식 무접촉"
+echo "-- W3: 정지 임계 창 연속 무활동 → exit 5 + 앵커 + 부분 스풀 + 표식 무접촉"
 e2e_setup
 FAKE_CODEX_PARTIAL="partial-marker" FAKE_CODEX_STALL=1 \
-  REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 REIN_WATCHDOG_GRACE_OVERRIDE=1 \
+  REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 REIN_WATCHDOG_GRACE_OVERRIDE=1 REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE=1 \
   run_wrapper_supervised 15 "code review please"
 assert_eq "$RC" "5" "W3 정지 판정 → exit 5"
 assert_ge "$(count_anchor "$SANDBOX/.err.txt")" 1 "W3 라인 시작 review-timeout 앵커행 ≥1"
@@ -322,7 +346,7 @@ e2e_teardown
 echo "-- W4: TERM 무시 child → grace 초과 → KILL → 잔존 0"
 e2e_setup
 FAKE_CODEX_PARTIAL="partial-marker" FAKE_CODEX_STALL=1 FAKE_CODEX_IGNORE_TERM=1 \
-  REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 REIN_WATCHDOG_GRACE_OVERRIDE=1 \
+  REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 REIN_WATCHDOG_GRACE_OVERRIDE=1 REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE=1 \
   run_wrapper_supervised 15 "code review please"
 assert_eq "$RC" "5" "W4 TERM 무시에도 정지 판정 → exit 5"
 assert_eq "$(sandbox_residue)" "0" "W4 sandbox 경로 참조 프로세스 잔존 0 (KILL 종료 고정)"
@@ -333,6 +357,7 @@ echo "-- W5: 1창 무성장 후 성장 재개 = 카운터 리셋 (drip 3s — �
 e2e_setup
 FAKE_CODEX_DRIP=3 FAKE_CODEX_DRIP_COUNT=3 \
   REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=2 REIN_WATCHDOG_GRACE_OVERRIDE=1 \
+  REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE=2 \
   run_wrapper_supervised 20 "code review please"
 assert_eq "$RC" "0" "W5 카운터 리셋 반복 → kill 없이 완주 → exit 0 (오탐 회귀 가드)"
 assert_eq "$(count_anchor "$SANDBOX/.err.txt")" "0" "W5 review-timeout 앵커행 0"
@@ -344,6 +369,7 @@ e2e_setup
 : > "$SANDBOX/empty.txt"
 FAKE_CODEX_VERDICT_FILE="$SANDBOX/empty.txt" FAKE_CODEX_DELAY=4.5 \
   REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=2 REIN_WATCHDOG_GRACE_OVERRIDE=1 \
+  REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE=2 \
   run_wrapper_supervised 15 "code review please"
 assert_neq "$RC" "5" "W5b 경계 자연 종료는 timeout 아님 (exit 5 금지 — 무출력은 parser 폴백 경로)"
 assert_eq "$(count_anchor "$SANDBOX/.err.txt")" "0" "W5b review-timeout 앵커행 0"
@@ -413,8 +439,8 @@ if ! declare -F _watchdog_resolve_timings >/dev/null 2>&1 \
 fi
 echo "W9A_FUNCS=present"
 export REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 REIN_WATCHDOG_GRACE_OVERRIDE=1
-read -r WD_CAP WD_INTERVAL WD_GRACE <<<"$(_watchdog_resolve_timings low)"
-echo "W9A_TIMINGS=$WD_CAP $WD_INTERVAL $WD_GRACE"
+read -r WD_CAP WD_INTERVAL WD_GRACE WD_STALL_WINDOWS <<<"$(_watchdog_resolve_timings low)"
+echo "W9A_TIMINGS=$WD_CAP $WD_INTERVAL $WD_GRACE $WD_STALL_WINDOWS"
 trap '[ -n "${W9A_CHILD:-}" ] && kill -9 "$W9A_CHILD" 2>/dev/null || true' EXIT
 sleep 30 &
 W9A_CHILD=$!
@@ -436,7 +462,7 @@ W9A_EOF
 )
 run_sourced_supervised 15 "$W9A_BODY"
 assert_eq "$(src_val W9A_FUNCS)" "present" "W9a 워치독 함수 정의 존재 (source seam)"
-assert_eq "$(src_val W9A_TIMINGS)" "1 1 1" "W9a resolver 로 전역 3종 확정 (호출 전제 구성)"
+assert_eq "$(src_val W9A_TIMINGS)" "1 1 1 6" "W9a resolver 4종을 4변수로 분리 수신 (필드 병합 사고 차단)"
 assert_eq "$(src_val W9A_RC)" "6" "W9a 스풀 측정 불가 → 내부 오류 6 정규화"
 assert_eq "$(src_val W9A_CHILD_ALIVE)" "0" "W9a child kill·reap 완료 (kill -0 실패)"
 assert_eq "$(src_val W9A_WDPID)" "[]" "W9a reap 직후 WD_PID 해제 (빈 값)"
@@ -458,7 +484,7 @@ EOF
 chmod +x "$STUBDIR/wc"
 PATH="$STUBDIR:$PATH" REIN_TEST_WC_FAIL=1 \
   FAKE_CODEX_PARTIAL="partial-marker" FAKE_CODEX_STALL=1 \
-  REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 REIN_WATCHDOG_GRACE_OVERRIDE=1 \
+  REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 REIN_WATCHDOG_GRACE_OVERRIDE=1 REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE=1 \
   run_wrapper_supervised 15 "code review please"
 assert_eq "$RC" "5" "W9b 스풀 측정 실패 → 종료 시퀀스 → exit 5 (fail-closed)"
 assert_ge "$(count_anchor "$SANDBOX/.err.txt")" 1 "W9b review-timeout 앵커행 ≥1"
@@ -474,6 +500,7 @@ printf '%s' "code review please" > "$SANDBOX/.stdin.txt"
 (
   cd "$SANDBOX"
   export CODEX_BIN="$SANDBOX/fake-codex.sh"
+  export FAKE_CODEX_PIDFILE="$SANDBOX/.childpid"
   export TMPDIR="$SANDBOX/tmpdir"
   export REIN_PROJECT_DIR_OVERRIDE="$SANDBOX"
   export FAKE_CODEX_STALL=1
@@ -577,6 +604,7 @@ w10b_helper=$!
   set -m
   cd "$SANDBOX"
   export CODEX_BIN="$SANDBOX/fake-codex.sh"
+  export FAKE_CODEX_PIDFILE="$SANDBOX/.childpid"
   export TMPDIR="$SANDBOX/tmpdir"
   export REIN_PROJECT_DIR_OVERRIDE="$SANDBOX"
   export FAKE_CODEX_STALL=1
@@ -622,7 +650,7 @@ printf 'path=/x/plan-foo.md\nreviewer=t\nreviewed=2026-07-22T00:00:00\n' \
 printf 'pending\n' > "$SANDBOX/trail/dod/.review-pending"
 w11_snap_before=$(dod_snapshot)
 FAKE_CODEX_PARTIAL="partial-marker" FAKE_CODEX_STALL=1 \
-  REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 REIN_WATCHDOG_GRACE_OVERRIDE=1 \
+  REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 REIN_WATCHDOG_GRACE_OVERRIDE=1 REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE=1 \
   run_wrapper_supervised 15 "[NON_INTERACTIVE] spec review for plan: docs/plans/foo.md
 Validate the plan document."
 assert_eq "$RC" "5" "W11 spec-review 모드도 동일 override 소비 → 정지 판정 exit 5"
@@ -645,7 +673,7 @@ export TMPDIR="$2/tmpdir"
 . ./rein-codex-review.sh
 set +e
 set +u
-unset REIN_WATCHDOG_CAP_OVERRIDE REIN_WATCHDOG_INTERVAL_OVERRIDE REIN_WATCHDOG_GRACE_OVERRIDE
+unset REIN_WATCHDOG_CAP_OVERRIDE REIN_WATCHDOG_INTERVAL_OVERRIDE REIN_WATCHDOG_GRACE_OVERRIDE REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE
 if ! declare -F _watchdog_resolve_timings >/dev/null 2>&1; then
   echo "W12_FUNCS=missing"
   exit 0
@@ -670,15 +698,205 @@ W12_EOF
 )
 run_sourced_supervised 15 "$W12_BODY"
 assert_eq "$(src_val W12_FUNCS)" "present" "W12 resolver 함수 정의 존재 (source seam)"
-assert_eq "$(src_val T_LOW)" "[120 30 10]" "W12a effort low → 120 30 10"
-assert_eq "$(src_val T_MED)" "[180 30 10]" "W12a effort medium → 180 30 10"
-assert_eq "$(src_val T_HIGH)" "[300 30 10]" "W12a effort high → 300 30 10"
-assert_eq "$(src_val T_ODD)" "[300 30 10]" "W12b 예상 외 effort → cap 300 방어 매핑"
-assert_eq "$(src_val T_OVR)" "[2 1 3]" "W12c 유효 override 3종 그대로 반영"
-assert_eq "$(src_val B1)" "[120 30 10]|warns=1" "W12d 무효 override 'abc' → 경고 정확히 1줄 + 정책값 폴백"
-assert_eq "$(src_val B2)" "[120 30 10]|warns=1" "W12d 무효 override '0' → 경고 정확히 1줄 + 정책값 폴백"
-assert_eq "$(src_val B3)" "[120 30 10]|warns=1" "W12d 무효 override '-5' → 경고 정확히 1줄 + 정책값 폴백"
-assert_eq "$(src_val B4)" "[120 30 10]|warns=1" "W12d 초대형 override → 경고 정확히 1줄 (정수 범위 오류 추가 방출 없음)"
+assert_eq "$(src_val T_LOW)" "[120 30 10 6]" "W12a effort low → 120 30 10"
+assert_eq "$(src_val T_MED)" "[180 30 10 6]" "W12a effort medium → 180 30 10"
+assert_eq "$(src_val T_HIGH)" "[300 30 10 6]" "W12a effort high → 300 30 10"
+assert_eq "$(src_val T_ODD)" "[300 30 10 6]" "W12b 예상 외 effort → cap 300 방어 매핑"
+assert_eq "$(src_val T_OVR)" "[2 1 3 6]" "W12c 유효 override 3종 그대로 반영"
+assert_eq "$(src_val B1)" "[120 30 10 6]|warns=1" "W12d 무효 override 'abc' → 경고 정확히 1줄 + 정책값 폴백"
+assert_eq "$(src_val B2)" "[120 30 10 6]|warns=1" "W12d 무효 override '0' → 경고 정확히 1줄 + 정책값 폴백"
+assert_eq "$(src_val B3)" "[120 30 10 6]|warns=1" "W12d 무효 override '-5' → 경고 정확히 1줄 + 정책값 폴백"
+assert_eq "$(src_val B4)" "[120 30 10 6]|warns=1" "W12d 초대형 override → 경고 정확히 1줄 (정수 범위 오류 추가 방출 없음)"
+e2e_teardown
+
+# ============================================================
+# W13~W15 (2026-07-27 watchdog false-stall): 자식 명령 실행 중은 정지가 아니다.
+#
+# 배경 실측: codex 는 자식 명령 실행 동안 출력을 내지 않고 완료 시점에 일괄
+# 방출한다. 219초짜리 테스트를 돌리던 정상 리뷰가 "무성장" 으로 오판돼 종료됐다.
+# 생존 신호를 2축(자식 명령 진행 표식 / 자식 프로세스 활동)으로 확장한 뒤,
+# 각 축이 **단독으로도** 오판을 막는지 분리 검증한다.
+# 정지 임계는 override 로 2창으로 낮춰 케이스 소요를 짧게 유지한다.
+echo "-- W13: 자식 명령 진행 중(두 축 모두) → 종료되지 않고 완주"
+e2e_setup
+FAKE_CODEX_EXEC_MARKER=1 FAKE_CODEX_CHURN=6 \
+  REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 \
+  REIN_WATCHDOG_GRACE_OVERRIDE=1 REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE=2 \
+  run_wrapper_supervised 25 "code review please"
+assert_eq "$RC" "0" "W13 자식 명령 대기 중 종료 안 됨 → exit 0"
+assert_eq "$(count_anchor "$SANDBOX/.err.txt")" "0" "W13 review-timeout 앵커행 0 (오판 없음)"
+assert_ge "$WALL" 6 "W13 무성장 구간을 상한 초과 상태로 통과 (≥6s)"
+e2e_teardown
+
+echo "-- W14: 축 A 단독 — 진행 표식만 있고 프로세스는 안정 → 완주"
+e2e_setup
+FAKE_CODEX_EXEC_MARKER=1 FAKE_CODEX_DELAY=6 \
+  REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 \
+  REIN_WATCHDOG_GRACE_OVERRIDE=1 REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE=2 \
+  run_wrapper_supervised 25 "code review please"
+assert_eq "$RC" "0" "W14 진행 표식 단독으로 오판 차단 → exit 0"
+assert_eq "$(count_anchor "$SANDBOX/.err.txt")" "0" "W14 앵커행 0"
+e2e_teardown
+
+# W15 는 축 B 단독 검증이므로 **자식 프로세스 관측이 가능한 환경**에서만 유효하다.
+# 격리 샌드박스(예: codex 의 sandbox-exec) 안에서는 pgrep 이 형제 프로세스를
+# 보지 못해 축 B 가 설계대로 조용히 비활성화되고, 그 환경의 W15 실패는
+# 결함이 아니라 전제 불충족이다 (2026-07-27 codex R1 이 실제로 이 실패를 보고).
+# 따라서 전제를 먼저 프로브하고, 불충족이면 skip 으로 명시한다 — 조용한 통과도,
+# 환경 탓 오탐 실패도 만들지 않는다.
+echo "-- W15: 축 B 단독 — 표식 없이 자식 프로세스만 활동 → 완주"
+if probe_child_visibility; then
+  e2e_setup
+  FAKE_CODEX_CHURN=6 \
+    REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 \
+    REIN_WATCHDOG_GRACE_OVERRIDE=1 REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE=2 \
+    run_wrapper_supervised 25 "code review please"
+  assert_eq "$RC" "0" "W15 자식 프로세스 활동 단독으로 오판 차단 → exit 0"
+  assert_eq "$(count_anchor "$SANDBOX/.err.txt")" "0" "W15 앵커행 0"
+  e2e_teardown
+else
+  echo "  skip: W15 — 이 환경은 자식 프로세스를 관측할 수 없어 축 B 전제 불충족 (축 A 는 W13/W14 가 커버)"
+fi
+
+echo "-- W17: 활동 분류 단위 seam — edge/level/무활동 (환경 비의존, W15 skip 보완)"
+e2e_setup
+W17_BODY=$(cat <<'W17_EOF'
+cd "$1" || exit 97
+export REIN_PROJECT_DIR_OVERRIDE="$2"
+export TMPDIR="$2/tmpdir"
+. ./rein-codex-review.sh
+set +e
+set +u
+if ! declare -F _watchdog_classify_activity >/dev/null 2>&1 \
+   || ! declare -F _watchdog_exec_inflight >/dev/null 2>&1; then
+  echo "W17_FUNCS=missing"; exit 0
+fi
+echo "W17_FUNCS=present"
+# classify(size, baseline, inflight, dcount, dmin, dset, dprev) — 순수 입력 주입.
+_watchdog_classify_activity 200 100 0 0 0 "" "";           echo "C_GROWTH=$?"
+_watchdog_classify_activity 100 100 0 1 1 "7 8" "7";       echo "C_PIDSET=$?"
+_watchdog_classify_activity 100 100 1 0 0 "" "";           echo "C_INFLIGHT=$?"
+_watchdog_classify_activity 100 100 0 3 1 "7 8 9" "7 8 9"; echo "C_DCOUNT=$?"
+_watchdog_classify_activity 100 100 0 1 1 "7" "7";         echo "C_IDLE=$?"
+# 표식 파서: 열린 exec 만 진행 중, 짝이 맞으면 아님, 본문의 exec 문자열은 오인 금지.
+printf 'exec\n/bin/zsh -lc %s in /tmp\n' "'x'" > "$2/sp_open.txt"
+_watchdog_exec_inflight "$2/sp_open.txt";  echo "P_OPEN=$?"
+printf 'exec\n/bin/zsh -lc %s in /tmp\n succeeded in 12ms:\n' "'x'" > "$2/sp_done.txt"
+_watchdog_exec_inflight "$2/sp_done.txt";  echo "P_DONE=$?"
+printf 'some output mentioning exec\nnot a command line\n' > "$2/sp_noise.txt"
+_watchdog_exec_inflight "$2/sp_noise.txt"; echo "P_NOISE=$?"
+printf 'exec\nprose in /tmp is only mentioned here, not a workdir suffix\n' > "$2/sp_prose.txt"
+_watchdog_exec_inflight "$2/sp_prose.txt"; echo "P_PROSE=$?"
+# 공백 있는 작업 디렉토리에서도 축 A 가 살아 있어야 한다 (R4 Medium — 라인 끝 앵커로
+# 좁히면 여기서 축 A 가 통째로 죽고, 자손 관측 불가 환경과 겹치면 오판이 재현된다).
+printf 'exec\n/bin/zsh -lc %s in /tmp/dir with space\n' "'x'" > "$2/sp_space.txt"
+_watchdog_exec_inflight "$2/sp_space.txt"; echo "P_SPACE=$?"
+# 자손 집합 정규형: production helper 를 직접 호출한다 (재작성 금지 — helper 에서
+# 정렬·중복 제거를 지워도 통과하던 vacuous oracle 을 제거, R4 Medium).
+_watchdog_descendants() { printf '10\n2\n10\n'; }   # stub — 열거 순서·중복 주입
+echo "N_SET=[$(_watchdog_descendant_set 12345)]"
+# 신규 override 계약 (유효값 반영 + 무효값 경고 정확히 1줄 + 단위 라벨).
+echo "OVR_OK=[$(REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE=4 _watchdog_resolve_timings low)]"
+echo "LEASE_DEF=$(_watchdog_pick_override "REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE" "" 20 " windows")"
+echo "LEASE_OVR=$(_watchdog_pick_override "REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE" "7" 20 " windows")"
+_e="$2/.w17err"
+_o=$(REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE=abc _watchdog_resolve_timings low 2>"$_e")
+echo "OVR_BAD=[$_o]|warns=$(wc -l < "$_e" | tr -d ' ')|unit=$(grep -c 'default 6 windows' "$_e")"
+_rein_cleanup_tmp
+exit 0
+W17_EOF
+)
+run_sourced_supervised 15 "$W17_BODY"
+assert_eq "$(src_val W17_FUNCS)" "present" "W17 분류·파서 함수 정의 존재"
+assert_eq "$(src_val C_GROWTH)"   "0" "W17 출력 성장 → edge(0)"
+assert_eq "$(src_val C_PIDSET)"   "0" "W17 자손 PID 집합 변동 → edge(0)"
+assert_eq "$(src_val C_INFLIGHT)" "1" "W17 미완료 진행 표식만 → level(1)"
+assert_eq "$(src_val C_DCOUNT)"   "1" "W17 자손 수 최소치 초과만 → level(1)"
+assert_eq "$(src_val C_IDLE)"     "2" "W17 무활동 → 2"
+assert_eq "$(src_val P_OPEN)"     "0" "W17 열린 exec 표식 → 진행 중"
+assert_eq "$(src_val P_DONE)"     "1" "W17 완료 표식 짝 → 진행 중 아님"
+assert_eq "$(src_val P_NOISE)"    "1" "W17 본문의 exec 문자열은 시작 표식으로 오인 안 함"
+assert_eq "$(src_val P_PROSE)"    "1" "W17 exec 직후 산문에 ' in /' 가 섞여도 시작 표식 아님 (명령행 구조 요구)"
+assert_eq "$(src_val P_SPACE)"    "0" "W17 공백 있는 작업 디렉토리에서도 시작 표식 인식 (축 A 생존)"
+assert_eq "$(src_val N_SET)" "[2 10 ]" "W17 자손 정규형 — production helper 가 순서·중복을 접는다 (10 2 10 → 2 10)"
+assert_eq "$(src_val OVR_OK)" "[120 30 10 4]" "W17 신규 override 유효값 반영"
+assert_eq "$(src_val OVR_BAD)" "[120 30 10 6]|warns=1|unit=1" "W17 무효 override → 경고 1줄 + 창 단위 문구"
+assert_eq "$(src_val LEASE_DEF)" "20" "W17 기본 lease 20창 exact oracle (기본값 변경 시 즉시 FAIL)"
+assert_eq "$(src_val LEASE_OVR)" "7" "W17 lease override 반영"
+e2e_teardown
+
+echo "-- W18: level 신호만 유지되는 진짜 멈춤은 lease 소진 후 종료 → exit 5"
+e2e_setup
+FAKE_CODEX_EXEC_MARKER=1 FAKE_CODEX_STALL=1 \
+  REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 \
+  REIN_WATCHDOG_GRACE_OVERRIDE=1 REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE=1 REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE=2 \
+  run_wrapper_supervised 25 "code review please"
+assert_eq "$RC" "5" "W18 진행 표식이 남아도 lease 소진 후에는 정지 판정 → exit 5"
+assert_ge "$(count_anchor "$SANDBOX/.err.txt")" 1 "W18 앵커행 ≥1"
+e2e_teardown
+
+echo "-- W20: 실제 루프의 기준선 0 — 자손 열거 stub 으로 환경 비의존 검증"
+e2e_setup
+W20_BODY=$(cat <<'W20_EOF'
+cd "$1" || exit 97
+export REIN_PROJECT_DIR_OVERRIDE="$2"
+export TMPDIR="$2/tmpdir"
+. ./rein-codex-review.sh
+set +e
+set +u
+if ! declare -F _watchdog_wait >/dev/null 2>&1; then echo "W20_FUNCS=missing"; exit 0; fi
+echo "W20_FUNCS=present"
+# 상한 전부터 존재해 **변하지 않는** 자손 1개를 주입한다 (열거는 stub — pgrep 미사용).
+# dmin=0 구현: 매 창 level 활동 → lease 안에서 생존 → child 자연 종료로 0 반환.
+# 관측 기반 기준선 구현: dcount==dmin → level 없음 → 무활동 2창에 정지 판정(5).
+_watchdog_descendants() { printf '4242\n'; }
+export REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 \
+       REIN_WATCHDOG_GRACE_OVERRIDE=1 REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE=2 \
+       REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE=8
+read -r WD_CAP WD_INTERVAL WD_GRACE WD_STALL_WINDOWS <<<"$(_watchdog_resolve_timings low)"
+WD_LEVEL_LEASE=$(_watchdog_pick_override "REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE" "${REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE:-}" 20 " windows")
+: > "$2/w20.spool"
+sleep 6 &   # 출력이 자라지 않는 상태로 6초 생존하는 child
+W20_CHILD=$!
+WD_RC=0
+_watchdog_wait "$W20_CHILD" "$2/w20.spool" || WD_RC=$?
+echo "W20_RC=$WD_RC"
+_rein_cleanup_tmp
+exit 0
+W20_EOF
+)
+run_sourced_supervised 25 "$W20_BODY"
+assert_eq "$(src_val W20_FUNCS)" "present" "W20 워치독 루프 함수 존재"
+assert_eq "$(src_val W20_RC)" "0" "W20 안정된 자손 1개가 lease 안에서 생존 → 정지 판정 없음 (기준선 0 계약)"
+e2e_teardown
+
+echo "-- W19: 상한 전 시작해 변화 없이 유지되는 장기 자식 → lease 안에서 완주 (dmin=0 회귀)"
+# W15 와 동일하게 자손 관측을 전제한다 — 격리 샌드박스에서는 축 B 가 설계대로
+# 비활성화되어 이 케이스가 성립하지 않는다 (전제 불충족이지 결함 아님).
+if probe_child_visibility; then
+e2e_setup
+# 관측 기반 기준선 구현이면 dcount==dmin 이라 level 신호가 없어 무활동 2창에 죽고,
+# dmin=0 구현이면 매 창 level 로 계수돼 lease(8) 안에서 완주한다.
+FAKE_CODEX_DELAY=6 \
+  REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 \
+  REIN_WATCHDOG_GRACE_OVERRIDE=1 REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE=2 \
+  REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE=8 \
+  run_wrapper_supervised 25 "code review please"
+assert_eq "$RC" "0" "W19 상한 전 시작된 안정 자식이 lease 안에서 완주 → exit 0"
+assert_eq "$(count_anchor "$SANDBOX/.err.txt")" "0" "W19 앵커행 0"
+e2e_teardown
+else
+  echo "  skip: W19 — 이 환경은 자식 프로세스를 관측할 수 없어 축 B 전제 불충족"
+fi
+
+echo "-- W16: 진행 표식이 짝을 맞추면(완료) 다시 정지 판정 대상 → exit 5"
+e2e_setup
+FAKE_CODEX_EXEC_MARKER=1 FAKE_CODEX_EXEC_DONE=1 FAKE_CODEX_STALL=1 \
+  REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 \
+  REIN_WATCHDOG_GRACE_OVERRIDE=1 REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE=1 REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE=2 \
+  run_wrapper_supervised 25 "code review please"
+assert_eq "$RC" "5" "W16 완료 표식으로 짝이 맞으면 진짜 정지로 판정 → exit 5"
+assert_ge "$(count_anchor "$SANDBOX/.err.txt")" 1 "W16 앵커행 ≥1"
 e2e_teardown
 
 # ============================================================

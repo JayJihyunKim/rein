@@ -2002,32 +2002,36 @@ _parse_verdict() {
 # 워치독 타이밍 해석 (R1 Medium-5 + R2 Medium-3).
 # 입력: $1 = effort (spawn 전 확정된 REIN_EFFORT — 산출 체인 비접촉, 소비만).
 #       env REIN_WATCHDOG_{CAP,INTERVAL,GRACE}_OVERRIDE (테스트 전용, 단위 초).
-# 출력: stdout "cap interval grace". 무효 override 는 stderr 경고 1회 + 정책값 폴백.
+# 출력: stdout "cap interval grace windows" (4필드). level lease 는 튜플에 넣지 않고
+#       호출부가 별도 대입한다 — read -r 필드 수 불일치로 값이 합쳐지는 사고 차단.
+#       무효 override 는 stderr 경고 1회 + 정책값 폴백.
 # spec-review/code-review 공통 — 모드 분기 없음 (동일 매핑, spec Open Q4).
 _watchdog_pick_override() {
-  local name="$1" val="$2" fallback="$3"
+  # $4 = 단위 라벨 (기본 "s"). 창 수·lease 처럼 초가 아닌 값의 경고 문구가
+  # "6s" 로 잘못 나가지 않도록 호출부가 단위를 넘긴다 (R2 Low).
+  local name="$1" val="$2" fallback="$3" unit="${4:-s}"
   if [ -z "$val" ]; then printf '%s\n' "$fallback"; return 0; fi
   case "$val" in
     *[!0-9]*)   # 비정수·음수(-)·공백 전부 여기로
-      echo "WARN: [codex-review] invalid ${name}='${val}' (positive integer required) — using policy default ${fallback}s" >&2
+      echo "WARN: [codex-review] invalid ${name}='${val}' (positive integer required) — using policy default ${fallback}${unit}" >&2
       printf '%s\n' "$fallback"; return 0 ;;
   esac
   # 길이 상한 7자리 (≤ 9999999s) — bash 3.2 는 정수 범위 초과 숫자열에
   # `integer expression expected` 를 추가 방출해 "경고 1회" 계약을 깨므로
   # -ge 비교 **이전에** 길이로 차단한다 (R3 Medium — 초대형 숫자 경계).
   if [ "${#val}" -gt 7 ]; then
-    echo "WARN: [codex-review] invalid ${name}='${val}' (too large) — using policy default ${fallback}s" >&2
+    echo "WARN: [codex-review] invalid ${name}='${val}' (too large) — using policy default ${fallback}${unit}" >&2
     printf '%s\n' "$fallback"; return 0
   fi
   if [ "$val" -ge 1 ]; then
     printf '%s\n' "$val"
   else
-    echo "WARN: [codex-review] invalid ${name}='${val}' (must be >= 1) — using policy default ${fallback}s" >&2
+    echo "WARN: [codex-review] invalid ${name}='${val}' (must be >= 1) — using policy default ${fallback}${unit}" >&2
     printf '%s\n' "$fallback"
   fi
 }
 _watchdog_resolve_timings() {
-  local effort="${1:-}" cap interval grace
+  local effort="${1:-}" cap interval grace windows
   case "$effort" in
     low)    cap=120 ;;
     medium) cap=180 ;;
@@ -2037,7 +2041,80 @@ _watchdog_resolve_timings() {
   cap=$(_watchdog_pick_override "REIN_WATCHDOG_CAP_OVERRIDE" "${REIN_WATCHDOG_CAP_OVERRIDE:-}" "$cap")
   interval=$(_watchdog_pick_override "REIN_WATCHDOG_INTERVAL_OVERRIDE" "${REIN_WATCHDOG_INTERVAL_OVERRIDE:-}" 30)
   grace=$(_watchdog_pick_override "REIN_WATCHDOG_GRACE_OVERRIDE" "${REIN_WATCHDOG_GRACE_OVERRIDE:-}" 10)
-  printf '%s %s %s\n' "$cap" "$interval" "$grace"
+  # 정지 임계 창 수 (2026-07-27 false-stall): 기존 2창(60s) → 6창(180s).
+  # 자식도 없고 출력도 없는 순수 추론 구간이 60s 를 넘겨 오판되던 여지를 줄인다.
+  windows=$(_watchdog_pick_override "REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE" "${REIN_WATCHDOG_STALL_WINDOWS_OVERRIDE:-}" 6 " windows")
+  printf '%s %s %s %s\n' "$cap" "$interval" "$grace" "$windows"
+}
+
+# ---- 생존 신호 축 A/B (2026-07-27 watchdog false-stall) ----------------
+#
+# 배경(실측): codex 는 자식 명령 실행 **동안 출력을 내지 않고** 완료 시점에
+# ` succeeded in <N>ms:` 로 일괄 방출한다. 219초짜리 테스트를 돌리던 정상
+# 리뷰가 "무성장" 단일 축 판정으로 종료됐다. 아래 두 축을 OR 로 더해,
+# 어느 하나라도 활동을 보이면 그 창은 정지로 계수하지 않는다.
+
+# 축 A — 자식 명령 진행 중: 열린 `exec` 시작 표식 수 > 완료 표식 수.
+# 시작 표식은 `^exec$` 단독 라인 **직후** 라인이 작업 디렉토리(` in /…`)로
+# 끝나는 쌍으로만 인정한다 — 명령 출력 본문에 우연히 섞인 `exec` 문자열을
+# 시작으로 오인해 정지 판정을 영구히 막는 경로를 좁힌다.
+# 반환 0 = 진행 중(활동), 1 = 진행 중 아님/판정 불가.
+_watchdog_exec_inflight() {
+  local spool="$1"
+  [ -r "$spool" ] || return 1
+  # 시작 표식 = `^exec$` 단독 라인 **직후** 라인이 **명령행 구조**인 경우:
+  # 절대경로 프로그램으로 시작(`^/<공백없는토큰> `) AND 작업 디렉토리 절(` in /`) 포함.
+  # ` in /` 만 포함 검사하면 `exec` 다음 줄이 산문이어도(`prose in /tmp 참조`) 시작으로
+  # 오인해 정지 판정을 영구히 막는다. 반대로 라인 끝 앵커(` in /<공백없는경로>$`)로
+  # 좁히면 **공백이 있는 작업 디렉토리에서 축 A 가 통째로 죽어**, 자손 관측까지 막힌
+  # 환경과 겹치면 원래의 오판이 재현된다 (R4 Medium). 프로그램 토큰으로 구조를 잡고
+  # 경로 쪽은 공백을 허용하는 편이 두 실패 모드를 동시에 피한다.
+  awk '
+    prev == "exec" && $0 ~ /^\/[^ ]+ / && $0 ~ / in \// { starts++ }
+    /^ (succeeded|failed) in [0-9]+ms/ { dones++ }
+    { prev = $0 }
+    END { exit ((starts + 0) > (dones + 0)) ? 0 : 1 }
+  ' "$spool" 2>/dev/null
+}
+
+# 축 B 보조 — 자손 PID 를 개행 구분으로 열거 (깊이 우선).
+# pgrep 부재/실패는 빈 출력 → 축 B 가 조용히 비활성화될 뿐 판정을 막지 않는다.
+_watchdog_descendants() {
+  local pid="$1" kids k
+  kids=$(pgrep -P "$pid" 2>/dev/null) || return 0
+  for k in $kids; do
+    printf '%s\n' "$k"
+    _watchdog_descendants "$k"
+  done
+}
+
+# 자손 집합의 **정규형** (숫자 정렬 + 중복 제거, 공백 구분 1줄).
+# 열거 순서가 흔들리면 동일 집합도 edge 변동으로 오인돼 무기한 유예가 새므로,
+# 비교는 반드시 이 정규형으로 한다.
+_watchdog_descendant_set() {
+  _watchdog_descendants "$1" | sort -n -u | tr '\n' ' '
+}
+
+# ---- 활동 분류: edge vs level (R2 High — level 신호의 무기한 유예 차단) ----
+#
+# 신호를 두 종류로 나눈다. 이 구분이 없으면 "과거에 시작된 exec 표식이 영영
+# 짝을 못 맞춘 채 남은 hang" 이나 "최소치보다 많은 자손이 그대로 멈춰 있는
+# hang" 이 매 창 활동으로 계수되어 **영구히 종료되지 않는다**.
+#
+#   edge  — 창 사이에 실제 변화가 관측됨 (출력 성장 / 자손 PID 집합 변동).
+#           기존 "활동 중이면 무기한 유예" 계약 그대로 카운터를 리셋한다.
+#   level — 상태가 유지될 뿐 변화는 없음 (미완료 exec 표식 존재 / 자손 수가
+#           최소치 초과). 정당한 장기 단일 명령을 살리되 hang 을 영원히
+#           숨기지 않도록 **유한 lease** 안에서만 활동으로 인정한다.
+#
+# 반환: 0 = edge 활동, 1 = level 활동만, 2 = 무활동.
+_watchdog_classify_activity() {
+  local size="$1" baseline="$2" inflight="$3" dcount="$4" dmin="$5" dset="$6" dprev="$7"
+  [ "$size" -gt "$baseline" ] && return 0        # edge: 출력 성장
+  [ "$dset" != "$dprev" ] && return 0            # edge: 자손 PID 집합 변동
+  [ "$inflight" = "1" ] && return 1              # level: 자식 명령 진행 표식
+  [ "$dcount" -gt "$dmin" ] && return 1          # level: 자손 수 최소치 초과
+  return 2
 }
 
 # ---- Watchdog core (2026-07-22 review-time-cap, spec §4.2). -----------
@@ -2082,9 +2159,19 @@ _watchdog_wait() {
     sleep 1 || { _watchdog_kill_sequence "$pid" "$WD_GRACE"; WD_ELAPSED=$elapsed; return 6; }
     elapsed=$((elapsed + 1))
   done
-  # Phase 2 — 생존 검진 (결합 스풀 바이트 성장 단조 판정 — append-only 라 wc -c 단조 증가)
-  local baseline size stalled=0 i
+  # Phase 2 — 생존 검진. 신호 3축 OR (2026-07-27 false-stall 이전엔 스풀 성장 단축):
+  #   (1) 결합 스풀 바이트 성장 (append-only 라 wc -c 단조 증가)
+  #   (2) 축 A — 자식 명령 진행 중 (열린 exec 표식)
+  #   (3) 축 B — 자손 프로세스 수가 관측 최소치 초과 또는 PID 집합 변동
+  # 어느 하나라도 활동이면 카운터 리셋 (무기한 유예 — 절대 상한 없음).
+  local baseline size stalled=0 i dset dcount dmin dprev inflight cls level_used=0
   baseline=$(wc -c < "$spool" 2>/dev/null) || { _watchdog_kill_sequence "$pid" "$WD_GRACE"; WD_ELAPSED=$elapsed; return 6; }
+  dprev=$(_watchdog_descendant_set "$pid")
+  # dmin 은 **불변 상수 0** — 관측값으로 기준선을 잡으면(진입 시점이든 Phase 1
+  # 표본이든) 그 전에 시작된 장기 자식이 기준선에 흡수돼 `dcount > dmin` 이
+  # 영구 거짓이 되고 축 B 가 침묵한다. 하한 0 은 "자손이 하나라도 있으면 level
+  # 활동" 을 뜻하며, 그 비용은 lease 가 유계로 흡수한다 (design §4.2).
+  dmin=0
   while :; do
     i=0
     while [ "$i" -lt "$WD_INTERVAL" ]; do
@@ -2093,12 +2180,24 @@ _watchdog_wait() {
       i=$((i + 1)); elapsed=$((elapsed + 1))
     done
     size=$(wc -c < "$spool" 2>/dev/null) || { _watchdog_kill_sequence "$pid" "$WD_GRACE"; WD_ELAPSED=$elapsed; return 6; }
-    if [ "$size" -gt "$baseline" ]; then
-      baseline=$size; stalled=0          # 성장 → 카운터 리셋, 무기한 유예 (절대 상한 없음)
-    else
-      stalled=$((stalled + 1))
-    fi
-    if [ "$stalled" -ge 2 ]; then        # 연속 2창(정책 60s) 무성장 → Phase 3
+    dset=$(_watchdog_descendant_set "$pid")
+    dcount=$(printf '%s' "$dset" | wc -w | tr -d ' ')
+    if _watchdog_exec_inflight "$spool"; then inflight=1; else inflight=0; fi
+    _watchdog_classify_activity "$size" "$baseline" "$inflight" \
+      "$dcount" "$dmin" "$dset" "$dprev" || cls=$?
+    cls=${cls:-0}
+    dprev=$dset                                # dmin 은 상수 0 — 갱신 없음
+    case "$cls" in
+      0) baseline=$size; stalled=0; level_used=0 ;;   # edge — 무기한 유예 (기존 계약)
+      1) if [ "$level_used" -lt "$WD_LEVEL_LEASE" ]; then
+           level_used=$((level_used + 1)); stalled=0  # level — lease 안에서만 유예
+         else
+           stalled=$((stalled + 1))                   # lease 소진 → 정지 계수 재개
+         fi ;;
+      *) stalled=$((stalled + 1)) ;;                  # 무활동
+    esac
+    cls=0
+    if [ "$stalled" -ge "$WD_STALL_WINDOWS" ]; then   # 연속 N창 전 축 무활동 → Phase 3
       # 정지 판정 직전 생존 재확인 (plan 리뷰 R2 High-A): child 가 창의 마지막
       # sleep 중 무성장 상태로 자연 종료했을 수 있다 — 죽었으면 timeout 이
       # 아니라 정상 완료 (reap 으로 RC 보존, 오분류 배제).
@@ -2277,7 +2376,12 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   # ---- Watchdog call site (2026-07-22 review-time-cap, spec §4.1). ----
   # 워치독 타이밍 확정 (spawn 전 — EXIT trap 경로가 WD_GRACE 를 재사용)
   WD_TIMINGS=$(_watchdog_resolve_timings "$REIN_EFFORT")
-  read -r WD_CAP WD_INTERVAL WD_GRACE <<< "$WD_TIMINGS"
+  read -r WD_CAP WD_INTERVAL WD_GRACE WD_STALL_WINDOWS <<< "$WD_TIMINGS"
+  # level 신호(미완료 exec 표식 / 자손 수 초과)의 유한 lease — 창 단위.
+  # 정책 20창(기본 간격에서 10분): 정당한 장기 단일 명령은 통과시키되
+  # hang 이 무기한 숨지 않도록 상한을 둔다 (R2 High). 튜플에 넣지 않는 이유는
+  # read -r 필드 수 불일치가 조용히 값을 합치는 사고를 막기 위함이다.
+  WD_LEVEL_LEASE=$(_watchdog_pick_override "REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE" "${REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE:-}" 20 " windows")
 
   # envelope 를 파일로 (stdin 파이프 제거 — foreground 규칙 완화는 비범위 §제외)
   _rein_mktemp WD_ENV_FILE
@@ -2303,7 +2407,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
       : ;;                                     # 아래 공통 파이프라인으로 진행
     5)
       _emit_spool_sanitized "$WD_SPOOL_FILE"   # 부분 스풀 best-effort 방출 (소독)
-      echo "ERROR: [codex-review][review-timeout] codex stalled: no combined-output growth for 2 consecutive ${WD_INTERVAL}s windows after ${WD_CAP}s primary cap (effort=${REIN_EFFORT}, elapsed=${WD_ELAPSED}s). Caller: switch to fallback review (no retry)." >&2
+      echo "ERROR: [codex-review][review-timeout] codex stalled: no eligible activity (no edge change; no lease-eligible level activity) for ${WD_STALL_WINDOWS} consecutive ${WD_INTERVAL}s windows after ${WD_CAP}s primary cap (effort=${REIN_EFFORT}, elapsed=${WD_ELAPSED}s). Caller: switch to fallback review (no retry)." >&2
       exit 5
       ;;
     *)                                         # 6 및 그 외 전부 = 내부 오류 (fail-closed 전분기)

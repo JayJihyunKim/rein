@@ -1,6 +1,8 @@
-reviewer=security-reviewer
-reviewed=2026-07-23T14:52:45Z
+reviewer=security-reviewer-inline
+reviewed=2026-07-27T09:15:09
 security_level=standard
-cycle=2026-07-23-release-v163
+cycle=2026-07-27-review-watchdog-false-stall
 verdict=PASS
-mechanism=release-bundle-docs-version-only-no-surface
+scope=리뷰 워치독 생존 판정 3축 + 유한 lease (래퍼 2사본) + 테스트/fixture/설계문서
+findings=none
+notes=최종본 재검토(테스트 잔존 oracle 을 PID 파일+kill -0 로 교체, fixture 가 자기 PID 를 기록 — 테스트 하네스 한정, 프로덕션 표면 무변화). 신규 표면 3종 중점 검토. (1) 프로세스 열거 — pgrep 인자는 래퍼가 spawn 한 자식 PID 와 그 자손 PID 뿐이며 전부 pgrep 자신이 산출한 숫자다. 외부·프롬프트 유래 문자열이 인자로 들어가는 경로 없음. 인용 처리 확인. (2) 스풀 파싱 — awk 가 리뷰 대상 출력을 읽지만 패턴 매칭만 하고 shell 로 되돌리지 않는다. 시작 표식 판정에 명령 실행·경로 조합 없음. (3) 신규 환경변수 2종은 테스트 전용 정수 override 이며 기존 검증기(형식·범위·길이 상한)를 그대로 통과해야 반영된다. 자격증명·네트워크·파일 쓰기 표면 변화 없음. 종료 시퀀스(TERM/grace/KILL/reap)와 표식 무접촉 계약 불변. 위협모델은 v1.5.3 결정(정직한 에이전트 규율) 유지 — 적대적 프로세스 위장으로 lease 를 연장하는 시나리오는 범위 밖이며, 그 경우에도 lease 상한이 무한 점유를 막는다.

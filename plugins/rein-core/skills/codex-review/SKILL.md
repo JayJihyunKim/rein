@@ -97,8 +97,12 @@ Wrapper 가 context assembly, envelope 4 slots, codex exec, stamp 생성을 담�
 **공통 규칙** (wrapper / direct 모두):
 
 - Bash 도구 호출 시 `run_in_background: false` 필수
-- **시간상한은 래퍼가 코드로 강제한다** (문서 규약 아님): 1차 상한 `low 120s` / `medium 180s` / `high 300s` (spec-review 동일). 1차 상한 도달 후 30초 창 단위로 결합 스풀(stdout+stderr) 생존 검진 — 출력이 성장하는 동안 **무기한 유예** (절대 상한 없음), 연속 2창(60s) 무성장 시에만 TERM → 10s grace → KILL → reap 후 **exit 5** 로 종료한다 (판별 계약 + 호출자 행동: §4.2, 하니스 상호작용: §4.3)
-- 워치독 override env 3종 `REIN_WATCHDOG_{CAP,INTERVAL,GRACE}_OVERRIDE` 는 **테스트 전용**이다 — 운영 호출에서 설정 금지
+- **시간상한은 래퍼가 코드로 강제한다** (문서 규약 아님): 1차 상한 `low 120s` / `medium 180s` / `high 300s` (spec-review 동일). 1차 상한 도달 후 30초 창 단위로 생존 검진하며, 신호는 **3축**이다 (2026-07-27~):
+  - **edge**(창 사이 실제 변화: 결합 스풀 성장 **또는** codex 자손 PID 집합 변동) → **무기한 유예** (절대 상한 없음)
+  - **level**(상태 유지·변화 없음: 미완료 자식 명령 표식 **또는** 자손 존재) → **유한 lease**(기본 20창) 안에서만 유예
+  - 위 어느 것도 아닌 창이 **연속 6창(180s)** 이면 TERM → 10s grace → KILL → reap 후 **exit 5** 로 종료 (판별 계약 + 호출자 행동: §4.2, 하니스 상호작용: §4.3)
+  - 배경: codex 는 자식 명령 실행 **중 출력을 내지 않아**, 리뷰어가 테스트를 돌리는 정상 구간이 과거 '무성장 단일 축' 판정으로 오살됐다 (2026-07-27 실측·수리)
+- 워치독 override env **5종** `REIN_WATCHDOG_{CAP,INTERVAL,GRACE,STALL_WINDOWS,LEVEL_LEASE}_OVERRIDE` 는 **테스트 전용**이다 — 운영 호출에서 설정 금지
 - 600s harness limit 을 넘어가는 리뷰는 기존대로 prompt 쪼개기 (§4.3)
 
 **Wrapper 경로** — `bash "${CLAUDE_PLUGIN_ROOT:-$PWD}/scripts/rein-codex-review.sh" [--non-interactive] < /tmp/<prompt>.txt`:

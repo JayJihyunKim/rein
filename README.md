@@ -288,7 +288,9 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.6.3** (2026-07-23) — the persona layer is now opt-in and neutral by default, ships a second built-in persona (`jennie`) plus a `persona` skill to pick one or build your own from a few questions, greets you in-character (in your conversation language) the moment you switch, and adds a stall-detecting time cap to code review (`/codex-review`) so a hung review is auto-detected and handed off instead of hanging your session. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.6.4** (2026-07-27) — the persona picker now offers **Create new** directly (the custom-persona flow was previously unreachable from the list), switching a persona now takes effect immediately in the running session, you can pick or write the greeting yourself, and code review (`/codex-review`) no longer mis-cancels itself while the reviewer is running your tests — a genuinely hung review is still detected and handed off. ([CHANGELOG](CHANGELOG.md))
+
+Previous: **v1.6.3** (2026-07-23) — the persona layer is now opt-in and neutral by default, ships a second built-in persona (`jennie`) plus a `persona` skill to pick one or build your own from a few questions, greets you in-character (in your conversation language) the moment you switch, and adds a stall-detecting time cap to code review (`/codex-review`) so a hung review is auto-detected and handed off instead of hanging your session. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

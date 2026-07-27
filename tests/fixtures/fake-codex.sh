@@ -76,6 +76,10 @@ elif [ -n "$term_probe" ]; then
   trap 'ls "${TMPDIR:-/tmp}"/rein-readiness.* 2>/dev/null | wc -l | tr -d " " > "$term_probe"; exit 143' TERM
 fi
 
+# 잔존 검사용 PID 기록 (2026-07-27): `pgrep` 은 격리 샌드박스에서 관측 실패하므로
+# 프로세스 열거에 의존하지 않는 결정론적 oracle 을 테스트에 제공한다.
+if [ -n "${FAKE_CODEX_PIDFILE:-}" ]; then printf '%s\n' "$$" > "$FAKE_CODEX_PIDFILE" 2>/dev/null || true; fi
+
 if [ -n "$capture_file" ]; then
   # Write stdin (the envelope) to the capture file for golden asserts.
   cat > "$capture_file"
@@ -87,6 +91,28 @@ fi
 # 행 시뮬레이션 (2026-07-22 review-time-cap): 순서 = 부분 출력 → 지연 → drip → stall.
 if [ -n "$partial" ]; then
   printf '%s\n' "$partial"     # 즉시 부분 출력 (STALL/DRIP 과 조합)
+fi
+# 자식 명령 실행 시뮬레이션 (2026-07-27 watchdog false-stall).
+# 실제 codex 는 자식 명령 실행 **중에는 출력을 내지 않고** 완료 시점에
+# ` succeeded in <N>ms:` 로 일괄 방출한다 (2026-07-27 실측). 아래 두 축을
+# 개별/조합으로 재현한다.
+#   - FAKE_CODEX_EXEC_MARKER=1 : 시작 표식만 방출(완료 표식 없음) → 축 A
+#   - FAKE_CODEX_EXEC_DONE=1   : 완료 표식까지 방출 → 축 A 해제(짝 맞춤)
+#   - FAKE_CODEX_CHURN=<sec>   : N초간 매초 단발성 자식 생성 → 축 B (테스트 스위트 모사)
+if [ "${FAKE_CODEX_EXEC_MARKER:-}" = "1" ]; then
+  printf 'exec\n'
+  printf "/bin/zsh -lc 'sleep 30' in %s\n" "$PWD"
+fi
+if [ -n "${FAKE_CODEX_CHURN:-}" ]; then
+  _c=0
+  while [ "$_c" -lt "${FAKE_CODEX_CHURN}" ]; do
+    sh -c 'exit 0'              # 단발성 자식 — 자손 PID 집합이 매초 바뀐다
+    sleep 1
+    _c=$((_c + 1))
+  done                          # 무출력 — 출력 성장 축은 계속 0
+fi
+if [ "${FAKE_CODEX_EXEC_DONE:-}" = "1" ]; then
+  printf ' succeeded in 100ms:\n'
 fi
 # 지연값은 양의 정수/소수 문자열 모두 허용 (R4 High — `[ -gt 0 ]` 정수
 # 비교는 4.5 같은 소수에서 false 가 되어 sleep 이 조용히 생략된다. 존재
@@ -103,7 +129,27 @@ if [ -n "$drip" ]; then
   done                          # count 소진 후 fall-through → verdict 방출 + 정상 종료
 fi
 if [ "$stall" = "1" ]; then
-  while :; do sleep 1; done     # 무한 정지 — verdict 미방출 (정지 판정 경로)
+  # 무한 정지 — verdict 미방출 (정지 판정 경로).
+  # 긴 sleep 을 쓰는 이유(2026-07-27 watchdog false-stall): `sleep 1` 반복은
+  # 매초 새 자식 PID 를 만들어 워치독의 자식-활동 축에 "활동 중"으로 보인다.
+  # 진짜 hang 은 프로세스 트리가 정지해 있어야 하므로 안정된 단일 자식으로
+  # 모델링한다 (테스트 deadline 은 모두 이보다 짧다).
+  #
+  # background + `wait` 인 이유: foreground `sleep 30` 중에는 bash 가 TERM 트랩을
+  # 자식 완료까지 **지연**시켜 W10 의 TERM_PROBE 가 grace 안에 기록되지 못한다.
+  # `wait` 중에는 트랩이 즉시 실행되므로 안정된 트리와 TERM 응답성을 동시에 만족.
+  # 고아 정리(2026-07-27 codex R1): 부모가 TERM 으로 죽으면 background sleep 이
+  # 남는다. residue 검사는 argv 에 sandbox 경로가 있는 프로세스만 세므로 일반
+  # `sleep 30` 을 놓친다 — EXIT 트랩으로 직접 거둔다. SIGKILL 경로(W4)는 트랩이
+  # 돌지 않으므로 최대 30초 자연 소멸이 남는 알려진 한계다.
+  _stall_pid=""
+  # kill 후 wait 로 거둔다 (R2 Low) — kill 만으로는 좀비가 남을 수 있다.
+  trap '[ -n "$_stall_pid" ] && { kill "$_stall_pid" 2>/dev/null; wait "$_stall_pid" 2>/dev/null; }; true' EXIT
+  while :; do
+    sleep 30 &
+    _stall_pid=$!
+    wait "$_stall_pid" 2>/dev/null || true
+  done
 fi
 
 if [ -n "$verdict_file" ] && [ -r "$verdict_file" ]; then
