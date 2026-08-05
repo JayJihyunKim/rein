@@ -10,8 +10,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/test-harness.sh"
 # =================================================================
 
 test_canonical_path_docs_specs() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Canonical: docs/specs/2026-04-15-spec-review-enforcement-design.md
   mkdir -p "$SANDBOX/docs/specs"
   touch "$SANDBOX/docs/specs/2026-04-15-spec-review-enforcement-design.md"
@@ -27,8 +26,7 @@ test_canonical_path_docs_specs() {
 }
 
 test_canonical_path_docs_plans() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Canonical: docs/features/plans/2026-Q2-roadmap.md
   local input='{
     "tool_input": {"file_path": "'$SANDBOX'/docs/features/plans/2026-Q2-roadmap.md"},
@@ -41,8 +39,7 @@ test_canonical_path_docs_plans() {
 }
 
 test_canonical_path_specs_root() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Canonical: specs/api-design.md (root level)
   local input='{
     "tool_input": {"file_path": "'$SANDBOX'/specs/api-design.md"},
@@ -55,8 +52,7 @@ test_canonical_path_specs_root() {
 }
 
 test_canonical_path_plans_root() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Canonical: plans/2026-roadmap.md (root level)
   local input='{
     "tool_input": {"file_path": "'$SANDBOX'/plans/2026-roadmap.md"},
@@ -69,8 +65,7 @@ test_canonical_path_plans_root() {
 }
 
 test_non_canonical_src_file() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Non-canonical: src/components/auth.ts
   local input='{
     "tool_input": {"file_path": "'$SANDBOX'/src/components/auth.ts"},
@@ -83,8 +78,7 @@ test_non_canonical_src_file() {
 }
 
 test_non_canonical_readme() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Non-canonical: README.md (root)
   local input='{
     "tool_input": {"file_path": "'$SANDBOX'/README.md"},
@@ -97,8 +91,7 @@ test_non_canonical_readme() {
 }
 
 test_canonical_deeply_nested_specs() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Canonical with nested dirs: docs/a/b/c/specs/detail.md
   local input='{
     "tool_input": {"file_path": "'$SANDBOX'/docs/a/b/c/specs/detail.md"},
@@ -111,8 +104,7 @@ test_canonical_deeply_nested_specs() {
 }
 
 test_canonical_deeply_nested_plans() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Canonical with nested dirs: docs/x/y/z/plans/roadmap.md
   local input='{
     "tool_input": {"file_path": "'$SANDBOX'/docs/x/y/z/plans/roadmap.md"},
@@ -125,8 +117,7 @@ test_canonical_deeply_nested_plans() {
 }
 
 test_false_positive_specs_in_filename() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Non-canonical: has "specs" in path but not at canonical level
   local input='{
     "tool_input": {"file_path": "'$SANDBOX'/src/specs-utils.js"},
@@ -139,8 +130,7 @@ test_false_positive_specs_in_filename() {
 }
 
 test_false_positive_plans_in_dir() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Non-canonical: has "plans" in path but not at canonical level
   local input='{
     "tool_input": {"file_path": "'$SANDBOX'/app/plans/auth.ts"},
@@ -157,7 +147,7 @@ test_false_positive_plans_in_dir() {
 # =================================================================
 
 test_gate_blocks_unreviewed_spec() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   touch "$SANDBOX/specs/api-design.md"
 
@@ -181,7 +171,7 @@ test_gate_blocks_unreviewed_spec() {
 }
 
 test_gate_allows_reviewed_spec() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   touch "$SANDBOX/specs/api-design.md"
 
@@ -210,8 +200,7 @@ test_gate_allows_reviewed_spec() {
 }
 
 test_gate_ignores_deleted_spec() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Create marker for non-existent spec file
   mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
   hash=$(printf '%s' "$SANDBOX/specs/deleted.md" | shasum 2>/dev/null | head -c 16 || printf 'abc123def456')
@@ -231,7 +220,7 @@ test_gate_ignores_deleted_spec() {
 }
 
 test_gate_respects_bypass_file() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   touch "$SANDBOX/specs/api-design.md"
 
@@ -257,8 +246,7 @@ test_gate_respects_bypass_file() {
 }
 
 test_gate_no_spec_reviews_dir() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # No .spec-reviews directory at all
   [ -d "$SANDBOX/trail/dod/.spec-reviews" ] && rm -rf "$SANDBOX/trail/dod/.spec-reviews"
 
@@ -272,7 +260,7 @@ test_gate_no_spec_reviews_dir() {
 }
 
 test_gate_multiple_unreviewed_specs() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   touch "$SANDBOX/specs/api.md"
   touch "$SANDBOX/specs/auth.md"
@@ -297,8 +285,7 @@ test_gate_multiple_unreviewed_specs() {
 }
 
 test_post_edit_hook_hash_consistency() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Create spec file
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/consistency-test.md"
@@ -323,8 +310,7 @@ test_post_edit_hook_hash_consistency() {
 # =================================================================
 
 test_multiedit_extracts_all_files() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # MultiEdit with 3 files including one spec
   mkdir -p "$SANDBOX/docs/features/specs"
   touch "$SANDBOX/docs/features/specs/test-spec.md"
@@ -348,8 +334,7 @@ test_multiedit_extracts_all_files() {
 }
 
 test_multiedit_deduplicates_files() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   touch "$SANDBOX/specs/dedup-test.md"
 
@@ -470,7 +455,7 @@ test_helper_normalizes_relative_paths() {
 # =================================================================
 
 test_post_edit_removes_stale_reviewed_on_respec() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
   echo "# Spec v1" > "$spec_file"
@@ -500,7 +485,7 @@ test_post_edit_removes_stale_reviewed_on_respec() {
 }
 
 test_gate_blocks_stale_reviewed_when_pending_newer() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   touch "$SANDBOX/specs/api-design.md"
 
@@ -527,7 +512,7 @@ test_gate_blocks_stale_reviewed_when_pending_newer() {
 }
 
 test_gate_allows_when_reviewed_fresher_than_pending() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   touch "$SANDBOX/specs/api-design.md"
 
@@ -554,7 +539,7 @@ test_gate_allows_when_reviewed_fresher_than_pending() {
 }
 
 test_gate_blocks_when_reviewed_timestamp_missing() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   touch "$SANDBOX/specs/api-design.md"
 
@@ -580,7 +565,7 @@ test_gate_blocks_when_reviewed_timestamp_missing() {
 }
 
 test_gate_blocks_when_reviewed_timestamp_garbled() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   touch "$SANDBOX/specs/api-design.md"
 
@@ -610,7 +595,7 @@ test_gate_blocks_when_reviewed_timestamp_garbled() {
 
 test_respec_after_review_blocks_source_edit() {
   # End-to-end: real post-edit hook + real mark-spec-reviewed.sh.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
   echo "# Spec v1" > "$spec_file"
@@ -706,7 +691,7 @@ test_orphan_content_sha_match_allows_despite_mtime() {
   # FP REGRESSION: content unchanged since review (matching content_sha) but
   # mtime bumped (checkout/cherry-pick). Old mtime>reviewed logic blocked;
   # content_sha match must ALLOW.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
   echo "# Reviewed content" > "$spec_file"
@@ -730,7 +715,7 @@ test_orphan_content_sha_match_allows_despite_mtime() {
 test_orphan_content_sha_mismatch_blocks() {
   # content changed after review (stored sha != current) → stale → BLOCK,
   # even when mtime would let it pass under the old logic (reviewed in future).
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
   echo "# v1 reviewed" > "$spec_file"
@@ -757,7 +742,7 @@ test_orphan_content_sha_mismatch_blocks() {
 test_orphan_retro_clean_checkout_allows() {
   # retro marker, no content_sha, spec committed BEFORE review, clean tree,
   # mtime bumped > reviewed. Old logic blocked; commit_epoch <= reviewed allows.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   _sr1b_git_init
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
@@ -783,7 +768,7 @@ test_orphan_retro_clean_checkout_allows() {
 test_orphan_retro_dirty_blocks() {
   # retro marker, spec has uncommitted working-tree change → can't prove
   # freshness → BLOCK (FN guard). reviewed in future so old mtime logic allows.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   _sr1b_git_init
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
@@ -810,7 +795,7 @@ test_orphan_retro_dirty_blocks() {
 test_orphan_retro_commit_after_review_blocks() {
   # retro marker, clean, but spec committed AFTER review → genuine stale → BLOCK.
   # mtime set below reviewed so old logic would allow.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   _sr1b_git_init
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
@@ -835,7 +820,7 @@ test_orphan_retro_commit_after_review_blocks() {
 
 test_orphan_retro_untracked_blocks() {
   # retro marker but spec is untracked in the repo → can't verify via git → fail-closed BLOCK.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   _sr1b_git_init
   echo "seed" > "$SANDBOX/README.md"
   git -C "$SANDBOX" add README.md
@@ -863,7 +848,7 @@ test_orphan_retro_untracked_blocks() {
 
 test_orphan_non_retro_mtime_block_preserved() {
   # non-retro marker, non-git sandbox, content_sha absent, mtime > reviewed → BLOCK (current behavior).
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
   echo "# spec" > "$spec_file"
@@ -884,7 +869,7 @@ test_orphan_non_retro_mtime_block_preserved() {
 
 test_orphan_non_retro_mtime_allow_preserved() {
   # non-retro marker, non-git, content_sha absent, mtime <= reviewed → ALLOW (current behavior).
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
   echo "# spec" > "$spec_file"
@@ -917,7 +902,7 @@ test_skip_spec_gate_consumed_after_one_edit() {
   # Case A: .skip-spec-gate + unreviewed spec (pending, no reviewed).
   # ① first source edit allowed (exit 0) AND the marker is deleted;
   # ② a second edit under the same unreviewed-spec state is blocked (exit 2).
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   touch "$SANDBOX/specs/api-design.md"
 
@@ -953,7 +938,7 @@ test_skip_spec_gate_consumed_after_one_edit() {
 test_skip_spec_gate_fail_closed_when_unremovable() {
   # Case B: marker can't be removed (made a non-empty directory so `rm -f`
   # fails) + unreviewed spec → fail-closed: gate runs normally and blocks.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   touch "$SANDBOX/specs/api-design.md"
 
@@ -1030,7 +1015,7 @@ _m4_run_post_edit_no_python() {
 test_m4_noncache_python_unresolved_creates_marker() {
   # Path (1): non-cache + python missing → resolve_python fails → must drop
   # the conservative marker, then exit 0 (silent — does not revert the write).
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   local input='{
     "tool_input": {"file_path": "'$SANDBOX'/specs/api-design.md"},
     "tool_result": {}
@@ -1044,7 +1029,7 @@ test_m4_noncache_python_unresolved_creates_marker() {
 test_m4_json_parse_failure_creates_marker() {
   # Path (2): python present but extract-hook-json.py exits non-zero → JSON
   # parse failure branch → conservative marker + exit 0.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Replace the sandbox extractor with a stub that always fails.
   cat > "$SANDBOX/.claude/hooks/lib/extract-hook-json.py" <<'PYEOF'
 import sys
@@ -1064,7 +1049,7 @@ test_m4_cache_path_python_unresolved_creates_marker() {
   # Path (3): cache active (FILE_PATHS supplied) but python missing so the
   # cache-path resolve_python (for path normalize) fails → conservative
   # marker + exit 0.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   local input='{
     "tool_input": {"file_path": "'$SANDBOX'/specs/api-design.md"},
     "tool_result": {}
@@ -1097,7 +1082,7 @@ test_m4_cache_path_python_unresolved_creates_marker() {
 test_m4_success_path_autoheals_marker() {
   # Normal input (python OK, JSON OK) → no marker created, AND any pre-existing
   # conservative marker is auto-healed (rm -f), mirroring routing-check.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
   echo "# Spec" > "$spec_file"
@@ -1121,7 +1106,7 @@ test_m4_non_spec_edit_does_not_autoheal_marker() {
   # auto-heal the conservative marker — else the spec missed during the failure
   # window stays untracked and M4 fail-open reopens. Auto-heal is narrowed to
   # canonical-spec reprocessing only.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/trail/dod"
   printf 'cause=noncache-python\ncreated=2026-01-01T00:00:00Z\n' \
     > "$SANDBOX/$M4_GEN_MARKER"
@@ -1143,7 +1128,7 @@ test_m4_non_spec_edit_does_not_autoheal_marker() {
 
 test_m4_consumer_blocks_when_marker_present() {
   # Conservative marker present → next source edit blocked (exit 2).
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/trail/dod"
   printf 'cause=json-parse\ncreated=2026-06-16T00:00:00Z\n' \
     > "$SANDBOX/$M4_GEN_MARKER"
@@ -1158,7 +1143,7 @@ test_m4_consumer_blocks_when_marker_present() {
 
 test_m4_consumer_allows_when_marker_absent() {
   # No conservative marker → edit allowed (no false block).
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   local input='{
     "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
     "tool_result": {}
@@ -1170,7 +1155,7 @@ test_m4_consumer_allows_when_marker_absent() {
 test_m4_bypass_consumed_after_one_edit() {
   # Conservative marker + bypass marker → ① first edit allowed AND bypass
   # consumed; ② second edit (bypass gone, marker still present) → re-blocked.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/trail/dod"
   printf 'cause=noncache-python\ncreated=2026-06-16T00:00:00Z\n' \
     > "$SANDBOX/$M4_GEN_MARKER"
@@ -1192,7 +1177,7 @@ test_m4_bypass_consumed_after_one_edit() {
 test_m4_bypass_fail_closed_when_unremovable() {
   # 통합 보안리뷰 INFO-1: bypass marker 가 제거 불가(비어있지 않은 디렉토리)면
   # rm -f 가 실패 → 제거 증명(`[ ! -e ]`) 불가 → fail-closed(차단). M1 패턴 일관.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/trail/dod"
   printf 'cause=json-parse\ncreated=2026-06-16T00:00:00Z\n' > "$SANDBOX/$M4_GEN_MARKER"
   # bypass 를 비어있지 않은 디렉토리로 → `rm -f`(no -r) 가 제거 못 함.
@@ -1208,7 +1193,7 @@ test_m4_bypass_fail_closed_when_unremovable() {
 test_m4_bypass_reason_sanitized_in_stderr() {
   # 통합 보안리뷰 INFO-2: bypass reason 의 제어문자(터미널 이스케이프)는 stderr
   # echo 전에 제거돼야 한다. 출력 가능한 텍스트는 보존.
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/trail/dod"
   printf 'cause=json-parse\ncreated=2026-06-16T00:00:00Z\n' > "$SANDBOX/$M4_GEN_MARKER"
   # reason 에 ESC(\033) 제어문자 주입.

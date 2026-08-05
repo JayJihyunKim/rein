@@ -152,6 +152,14 @@ if [ "$stall" = "1" ]; then
   done
 fi
 
+# "codex 실행 도중" 상태 전이 재현 훅 (2026-08-05 round-budget clear 재검사).
+# stdin 소비(= 래퍼의 판정 초입 검사 이후)와 verdict 방출(= 래퍼의 통과 정리
+# 이전) 사이에 명령을 1회 실행한다 — sleep 타이밍 경쟁 없이 "리뷰 도중 경로가
+# 바뀌는" 시나리오를 결정론적으로 재현하는 테스트 전용 옵션.
+if [ -n "${FAKE_CODEX_PRE_VERDICT_CMD:-}" ]; then
+  sh -c "$FAKE_CODEX_PRE_VERDICT_CMD" || true
+fi
+
 if [ -n "$verdict_file" ] && [ -r "$verdict_file" ]; then
   cat "$verdict_file"
 else

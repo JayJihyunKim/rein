@@ -1,0 +1,181 @@
+[NON_INTERACTIVE]
+
+High process gap — required context missing:
+- plan_ref: MISSING
+- design_ref: MISSING
+- covers: MISSING
+- diff_base: present
+Proceed with partial checks only.
+
+code review please
+
+Required review sections (모두 응답에 포함해야 한다):
+
+1. Code defects and regressions
+   - 기존 코드리뷰 체크 (look-ahead, 타입, 경계, resource leak 등)
+
+2. Design Alignment  [Spec B policy]
+   각 active DoD covers 의 Scope ID 에 대해 아래 4 status 중 하나로 분류 + 근거 제시:
+
+   - MATCH: 해당 ID 가 기술한 entity/direction/scenario 가 diff 의 코드 변경 또는
+            test 변경에서 명확히 반영됐다. direction 의 부등호/boolean/exact
+            값이 assertion 이나 조건문에 관찰됨.
+   - PARTIAL: entity 는 반영됐으나 direction/scenario 중 일부가 누락.
+   - MISSING: 해당 ID 를 구현해야 하는 commit 인데 diff 에 entity 관련 변경이 없음.
+   - CONTRADICTS: direction 이 반대로 구현됨. 예: design 이 "A < B" 인데
+                  코드/test 가 "A == B" 또는 "A > B".
+
+   covers 외 Scope ID 는 "out of scope of this change".
+
+   TO-scope-id-measurable-contract-required 자기 강제: Scope ID 자체가
+   direction/scenario 가 결여된 서술이면 MEDIUM 으로 플래그 ("ID 포맷 미달").
+   bad ID 가 slot 을 오염시키는 것을 막는다.
+
+3. Test Alignment  [Spec B policy — 단일 deterministic rule, parent/child 분리 구조 사용 금지]
+
+   --- Step 1: Status 판정 ---
+
+   test 함수 이름이 design term (mode name, state name, action name 등) 을
+   사용하는가? 예: test_caution_*, test_defense_*, test_rotation_bearish_*.
+
+   사용하면 assertion 을 design 의 해당 term 정의와 대조하여 status 분류:
+
+   - MATCH: assertion 이 design 의 서술과 같은 방향/값
+   - PARTIAL: assertion 이 term 의 일부만 검증
+   - CONTRADICTS: assertion 이 design 이 명시한 동작과 상충 — 다음 중 하나:
+     * 방향 반전 (design 이 A < B 인데 assertion 이 A > B 또는 A == B)
+     * 임계값 누락 (design 이 수치 threshold 를 요구하는데 assertion 이 equality 만)
+     * same-result 패턴 (expected == <other_mode_literal> 또는 다른 mode 의 상수와
+       일치) — 단, same-result 는 design 이 divergence 를 요구하는 경우에만
+       CONTRADICTS. design 이 두 mode 의 동일 결과를 허용하거나 divergence
+       요구가 없으면 MATCH (false-positive 원천 차단).
+
+   CONTRADICTS 는 status 일 뿐 severity 가 아님. severity 는 Step 2 로 결정.
+
+   --- Step 2: Severity 판정 (corroboration matrix) ---
+
+   status = MATCH 또는 PARTIAL: Low signal, detection log 기록 안 함.
+
+   status = CONTRADICTS: test 에서 3 요소 추출 후 corroboration 으로 severity 결정:
+
+   - test_entity: test 함수명에서 design term 부분 (예: test_caution_nav_* → "caution-nav")
+   - test_direction: assertion 이 요구하는 방향 (부등호, boolean, exact value)
+   - test_scenario: test 함수명/fixture/parameter 에서 추출된 scenario token
+                    (예: *_s1_2020_03_* → "s1-2020-03")
+
+   3 요소 중 하나라도 추출 불가능하면 corroboration 0 으로 처리 (fail-safe).
+
+   Corroboration 출처 3 종 — 각 출처에서 entity + direction + scenario
+   세 축이 모두 일치해야 1 건으로 count:
+
+   1. design 서술체: design 본문이 test_entity 의 direction 을 명시 + test_scenario
+      를 언급. generic 서술 (scenario 미언급) 은 scenario 축 fail → count 안 됨.
+      다른 scenario 서술도 scenario 불일치 → count 안 됨.
+   2. design Scope Items: test_entity prefix + test_direction keyword + test_scenario
+      suffix 를 모두 포함하는 Scope ID 존재. scenario 다른 ID 는 count 안 됨.
+   3. plan matrix covers: active DoD covers 에 출처 2 의 entity+direction+scenario
+      일치 Scope ID 가 implemented 로 포함. 애매한 match 는 권한 없음 (fail-safe).
+
+   severity matrix:
+   | corroboration 건수 | severity |
+   |------------------|----------|
+   | 0                | Low signal, detection log ONLY (envelope 에 기록, verdict = warning) |
+   | 1 이상           | High (corroboration 증거를 envelope 에 인용)                       |
+
+   예시 1 (High — corroboration 1): design 본문 "CAUTION 은 S1 2020-03 에서
+   ATTACK 보다 drawdown 작다" + Scope ID "caution-nav-drawdown-less-than-attack-in-s1-2020-03"
+   존재. test_caution_nav_drawdown_less_than_attack_in_s1_2020_03 이 nav_caution
+   == nav_attack 를 assert → CONTRADICTS + corroboration 2 출처 매칭 → High.
+
+   예시 2 (Low signal): design 이 두 mode 동일 결과를 허용. test_caution_mode_nav
+   이 nav == 101_000_000 assert → status 는 MATCH (divergence 요구 없음). 기록
+   대상 아님.
+
+4. Claim Audit  [Spec B policy]
+
+   1. Claim 에 숫자가 포함된 경우 (예: "3 선행지표", "5단계 포지션", "4 ETF 쌍"):
+      - 각 숫자 항목에 대해 코드/config/design 에서 1:1 mapping 을 찾아 제시.
+      - 예: "3 선행지표" → 선행지표 1 (path), 선행지표 2 (path), 선행지표 3 (path).
+      - mapping 이 불완전하면 High severity.
+
+   2. 기능 이름 claim (예: "CAUTION mode 구현 완료"):
+      - 해당 mode/기능의 Scope ID 가 active DoD covers 에 존재하는지 확인.
+      - 존재 + Design Alignment MATCH → 통과.
+      - 존재 + MISSING/CONTRADICTS → High.
+
+   3. Matrix `deferred` 행의 사유:
+      - plan matrix 의 deferred 행 "위치/사유" 가 PR/commit claim 과 일치하는가?
+      - changelog 에 언급된 항목인데 matrix 에 없으면 "claim vs tracking drift" High.
+
+   4. Claim source 우선순위 (Spec A GI-codex-review-context-assembly 에서 주입,
+      현재 review subject 모드에 맞춰 동적 생성 — B5):
+      PR title/body > HEAD commit > DoD/plan top > (pre-commit) "unavailable"  [commit range: committed change is the subject]
+
+   5. Evidence freshness
+
+      context block 의 claim_source_iso_hints 각 항목에 대해 last-commit ISO 를
+      diff_base_iso 와 비교:
+
+      - last-commit ISO < diff_base_iso → "stale evidence", HIGH severity flag
+      - ISO = (unavailable) → freshness 판정 skip + advisory 기록만 (severity Low)
+
+      본 slot 응답에 plaintext 로 entity + timestamp + 판정을 명시.
+      (verdict 승격 강제는 sub-item 6 의 discrepancy 기준만 적용 —
+      freshness HIGH 는 slot 내부 severity flag 일 뿐 verdict 강제 아님)
+
+   6. Claim discrepancy escalation
+
+      sub-item 1 (numeric mapping) 에만 적용. expected 값과 관찰 값 관계에서
+      다음 중 하나 충족 시 **응답 첫 줄에 NEEDS-FIX 출력**:
+
+      (a) |expected - observed| / max(|expected|, 1) > 0.20
+      (b) 1:1 mapping 누락 항목 수 ≥ 1
+
+      sub-item 2 (feature name) / sub-item 3 (Matrix deferred 사유) 는
+      boolean/qualitative 이므로 본 rule 대상 아님 — 기존 High 판정 규칙 유지.
+      Evidence freshness (sub-item 5) 의 HIGH 판정도 본 rule 의 verdict 승격
+      대상이 **아님** (numeric mapping claim 전용).
+
+출력 밀도 (기본 — 축소):
+- 통과(MATCH) 항목: slot 별 "검사 N개 / 통과 N개" 한 줄 요약만. 개별 MATCH 서술 생략.
+- PARTIAL / MISSING / CONTRADICTS 및 발견(High/Medium): 전량 상세 (축소 금지).
+- 입력 없는 섹션(covers 부재·claim 없음 등)은 응답에서 생략.
+위 축소는 서술(출력) 축소일 뿐, 위 네 Required review section 의 검사 자체는 모두 수행한다.
+
+응답 출력 형식 (필수 — P2 verdict parser hardening, 2026-04-25):
+
+응답의 **마지막 줄**에 반드시 아래 한 줄을 출력한다 (parser 가 이 라인을 우선
+매칭한다):
+
+  FINAL_VERDICT: <PASS|NEEDS-FIX|REJECT>
+
+위 라인이 없으면 wrapper 는 첫 줄 keyword 매칭으로 fallback 하며, 둘 다 부재
+시 NEEDS-FIX 로 처리한다. 본문에서 판정을 분석한 뒤에도 마지막에 위 한 줄을
+반드시 다시 출력하라.
+
+---
+Context:
+
+review_subject: commit_range
+diff_base: <SHA>
+diff_base_iso: <ISO>
+head_iso: <ISO>
+active_dod_tier: 0
+active_dod_path: 
+active_dod_reason: 
+plan_ref: (none)
+design_ref: (none)
+
+covers (from DoD):
+(none)
+
+scope_items (from design):
+(none)
+
+changed_files (<SHA>..HEAD):
+(none)
+
+claim_sources:
+head_commit=
+head
+---

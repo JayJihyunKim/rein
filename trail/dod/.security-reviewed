@@ -1,8 +1,9 @@
-reviewer=security-reviewer-inline
-reviewed=2026-07-27T09:15:09
+reviewer=security-reviewer
+reviewed=2026-08-05T07:09:41Z
 security_level=standard
-cycle=2026-07-27-review-watchdog-false-stall
+cycle=2026-08-05-release-v165
 verdict=PASS
-scope=리뷰 워치독 생존 판정 3축 + 유한 lease (래퍼 2사본) + 테스트/fixture/설계문서
-findings=none
-notes=최종본 재검토(테스트 잔존 oracle 을 PID 파일+kill -0 로 교체, fixture 가 자기 PID 를 기록 — 테스트 하네스 한정, 프로덕션 표면 무변화). 신규 표면 3종 중점 검토. (1) 프로세스 열거 — pgrep 인자는 래퍼가 spawn 한 자식 PID 와 그 자손 PID 뿐이며 전부 pgrep 자신이 산출한 숫자다. 외부·프롬프트 유래 문자열이 인자로 들어가는 경로 없음. 인용 처리 확인. (2) 스풀 파싱 — awk 가 리뷰 대상 출력을 읽지만 패턴 매칭만 하고 shell 로 되돌리지 않는다. 시작 표식 판정에 명령 실행·경로 조합 없음. (3) 신규 환경변수 2종은 테스트 전용 정수 override 이며 기존 검증기(형식·범위·길이 상한)를 그대로 통과해야 반영된다. 자격증명·네트워크·파일 쓰기 표면 변화 없음. 종료 시퀀스(TERM/grace/KILL/reap)와 표식 무접촉 계약 불변. 위협모델은 v1.5.3 결정(정직한 에이전트 규율) 유지 — 적대적 프로세스 위장으로 lease 를 연장하는 시나리오는 범위 밖이며, 그 경우에도 lease 상한이 무한 점유를 막는다.
+mechanism=llm-security-review
+scope=v1.6.5 릴리스 델타 (버전 표면+문서, 로직 무변경) + main 선별 머지 스테이징 검토본 일치 확인
+findings=blocking 0 / informational 0
+notes=릴리스 델타(dev d923bde·9f679e1·6121cc9) 검토 — (1) 코드 로직 변경 0 확인: 커밋 구성 실측 결과 버전 문자열 2줄(plugins/rein-core/.claude-plugin/plugin.json "1.6.5" / scripts/rein.sh VERSION="1.6.5" — 스테이징 blob 에서 직접 확인, 두 표면 일치) + CHANGELOG/README 릴리스 서술 + trail 운영기록·리뷰 표식뿐. 훅/래퍼/테스트 스테이징 내용은 직전 두 PASS 사이클(2026-08-04-review-scope-and-round-budget / 2026-08-05-gate-scope-defects)에서 보안 검토된 바로 그 내용이다. (2) main 스테이징 78파일 = dev 검토본 일치: `git diff dev --cached -- <스테이징 경로 78건>` 차이 0 건 (바이트 동일) — 선별 체크아웃 과정에서의 변조·이탈 없음. (3) 스테이징 목록에 제외 대상·민감 파일 없음(.env/settings.local.json/.claude overlay/docs\/specs 부재). (4) 공개 문서 델타(CHANGELOG·README 양어) 스캔: 사실 서술만, 시크릿·주입 표면 0, 보안 동작 서술(워크트리 차단 유지 포함)이 실제 구현과 일치. 버전 등급(사용자 결정 patch, 기계 판정 minor 병기)은 문서에 정직 기록됨 — 보안 무관.

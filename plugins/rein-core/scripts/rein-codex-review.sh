@@ -705,6 +705,43 @@ if [ -n "$PROMPT_BODY" ]; then
   unset _effort_raw _effort_val
 fi
 
+# ---- Parse [MAX_ROUNDS:<n>] marker (round budget, 2026-08-04). --------
+# 회차 예산의 호출자 연장 선언. 기본 상한(REIN_ROUND_LIMIT_DEFAULT)을 넘겨
+# 리뷰를 계속하려면 호출자가 이 마커로 상한을 **명시 선언**해야 한다. 선언은
+# 조용히 통과하지 않는다 — stderr 경고 + 카운터 파일의 extensions= 이력에
+# 누적 기록된다 (에이전트가 상한을 소리 없이 늘리는 경로 차단).
+#
+# 값은 1~999 정수.
+#
+# **선언 위치는 첫 줄 단독으로 제한한다** (R3 High). 이전 판은 프롬프트 어디에
+# 있든 유효 마커를 선언으로 처리했다 — 이전 리뷰 출력이나 문서 예시를 요청서에
+# 인용하기만 해도, 심지어 "사용자는 [MAX_ROUNDS:8] 을 승인하지 않았다" 같은
+# 문장으로도 상한이 8 이 됐다. 사람 승인 없이 예산이 늘어나는 경로였다.
+# 이제 첫 줄 전체가 마커 하나뿐일 때만 선언으로 인정하고, 본문 어디의 마커든
+# 인용으로 보아 **건드리지 않는다** (내용 보존 — 리뷰어가 원문을 그대로 받는다).
+REIN_ROUND_LIMIT_DECLARED=""
+if [ -n "$PROMPT_BODY" ]; then
+  _mr_first="${PROMPT_BODY%%$'\n'*}"
+  if printf '%s' "$_mr_first" | grep -qE '^[[:space:]]*\[MAX_ROUNDS:[^]]*\][[:space:]]*$'; then
+    _mr_val=$(printf '%s' "$_mr_first" | sed -E 's/^[[:space:]]*\[MAX_ROUNDS:[[:space:]]*//; s/[[:space:]]*\][[:space:]]*$//')
+    if printf '%s' "$_mr_val" | grep -qE '^[1-9][0-9]{0,2}$'; then
+      REIN_ROUND_LIMIT_DECLARED="$_mr_val"
+      # 선언 줄만 제거한다 — 본문 다른 위치의 마커 문자열은 보존.
+      PROMPT_BODY="${PROMPT_BODY#*$'\n'}"
+      # 선언 줄 뒤에 빈 줄이 이어지면 모드 감지(첫 줄 앵커)가 빈 줄을 읽어 문서
+      # 리뷰가 코드 리뷰로 오분류된다. 선행 공백 줄만 제거 (본문 내부 빈 줄 보존).
+      PROMPT_BODY=$(printf '%s' "$PROMPT_BODY" | sed -E '/./,$!d')
+    else
+      # 첫 줄 단독이지만 정수가 아니면 선언으로 해석하지 않고 본문도 건드리지
+      # 않는다. 스킬·규칙 문서가 문법을 설명할 때 쓰는 꺾쇠 표기가 그대로 살아야
+      # 리뷰어가 받는 요청서 내용이 바뀌지 않는다 (R1 실측: 본 기능의 첫 실전
+      # 리뷰 요청서가 이 경로로 오파싱됐다). 기본 상한 적용이라 fail-safe.
+      echo "WARNING: [codex-review] '[MAX_ROUNDS:${_mr_val}]' 은 정수 값이 아니라 회차 상한 선언으로 해석하지 않았다 (본문 보존, 기본 상한 적용). 실제 선언은 첫 줄에 [MAX_ROUNDS:5] 처럼 정수 단독으로 쓴다." >&2
+    fi
+  fi
+  unset _mr_first _mr_val
+fi
+
 # ---- Mode detection (Task 6.1 Step 2a). -------------------------------
 
 # Marker patterns anchored to the start of the prompt.
@@ -735,6 +772,39 @@ elif printf '%s' "$PROMPT_FIRST_LINE" | grep -qE "$SPEC_REVIEW_DESIGN_RE"; then
   SPEC_REVIEW_SUBJECT=$(printf '%s' "$PROMPT_FIRST_LINE" \
     | sed -E 's/^\[NON_INTERACTIVE\][[:space:]]+spec review for design:[[:space:]]*//' \
     | sed -E 's/[[:space:]]+$//')
+fi
+
+# 경로 뒤 잔여 정리 (R4 High). 호출자가 경로 뒤에 리뷰 지시문이나 마침표를 같은
+# 줄에 붙이면(정본 호출문 일부가 그렇게 쓰여 있었다) 그 전체가 대상 경로로
+# 파싱돼, 같은 문서인데도 예산 키가 갈라진다. 추출값이 실재 경로가 아니면
+# 공백 경계로 앞에서부터 잘라 **실재하는 최장 접두**를 대상으로 삼는다.
+# 어느 접두도 실재하지 않으면 원문을 유지한다 (없는 경로를 지어내지 않는다).
+if [ "$REIN_REVIEW_MODE" = "spec-review" ] && [ -n "$SPEC_REVIEW_SUBJECT" ]; then
+  _srs_abs="$SPEC_REVIEW_SUBJECT"
+  case "$_srs_abs" in /*) ;; *) _srs_abs="$PROJECT_DIR/$_srs_abs" ;; esac
+  if [ ! -e "$_srs_abs" ]; then
+    _srs_try=""
+    _srs_found=""
+    # glob 확장 차단 (보안 리뷰 2026-08-04). 인용 없는 확장은 대상 문자열의
+    # 와일드카드를 파일명으로 치환한다 — "sample-*.md 를 검토하라" 가 경고 없이
+    # 특정 파일 한 건으로 좁혀져, 리뷰 대상과 예산 키가 조용히 바뀌었다.
+    set -f
+    for _srs_tok in $SPEC_REVIEW_SUBJECT; do
+      _srs_try="${_srs_try:+$_srs_try }$_srs_tok"
+      _srs_probe="$_srs_try"
+      case "$_srs_probe" in /*) ;; *) _srs_probe="$PROJECT_DIR/$_srs_probe" ;; esac
+      # 뒤따르는 마침표·쉼표 같은 문장부호도 한 번 벗겨서 확인.
+      if [ -e "$_srs_probe" ]; then
+        _srs_found="$_srs_try"
+      elif [ -e "${_srs_probe%[.,;:]}" ]; then
+        _srs_found="${_srs_try%[.,;:]}"
+      fi
+    done
+    set +f
+    [ -n "$_srs_found" ] && SPEC_REVIEW_SUBJECT="$_srs_found"
+    unset _srs_try _srs_found _srs_tok _srs_probe
+  fi
+  unset _srs_abs
 fi
 
 # ---- Review-readiness precheck 삽입 지점 (spec §4.5/§4.6). -------------
@@ -1637,6 +1707,142 @@ _emit_claim_source_iso_hints() {
 
 # ---- Envelope builder (Task 6.2). -------------------------------------
 
+# _emit_verdict_format — 응답 출력 형식(FINAL_VERDICT 계약) 블록. 코드/문서 두
+# 모드가 공유한다. 본 함수는 기존 build_envelope 안 heredoc 을 그대로 옮긴 것
+# (바이트 동일) — 문서 모드 분기 신설 시 중복을 만들지 않기 위한 추출이다.
+_emit_verdict_format() {
+  cat <<'SLOTS'
+
+응답 출력 형식 (필수 — P2 verdict parser hardening, 2026-04-25):
+
+응답의 **마지막 줄**에 반드시 아래 한 줄을 출력한다 (parser 가 이 라인을 우선
+매칭한다):
+
+  FINAL_VERDICT: <PASS|NEEDS-FIX|REJECT>
+
+위 라인이 없으면 wrapper 는 첫 줄 keyword 매칭으로 fallback 하며, 둘 다 부재
+시 NEEDS-FIX 로 처리한다. 본문에서 판정을 분석한 뒤에도 마지막에 위 한 줄을
+반드시 다시 출력하라.
+
+SLOTS
+}
+
+# _emit_context_block — 6.2 Step 4 구조화 컨텍스트 블록 + 조건부 슬롯 + 종결
+# 구분선. 코드/문서 두 모드 공유 (위와 동일한 추출, 출력 바이트 동일).
+_emit_context_block() {
+  cat <<CTX
+---
+Context:
+
+review_subject: ${REVIEW_SUBJECT}
+diff_base: ${DIFF_BASE}
+diff_base_iso: ${DIFF_BASE_ISO}
+head_iso: ${HEAD_ISO}
+active_dod_tier: ${SAD_TIER_DISPLAY}
+active_dod_path: ${SAD_PATH_DISPLAY}
+active_dod_reason: ${SAD_REASON}
+plan_ref: ${PLAN_REF:-(none)}
+design_ref: ${DESIGN_REF:-(none)}
+
+covers (from DoD):
+${COVERS:-(none)}
+
+scope_items (from design):
+${SCOPE_ITEMS:-(none)}
+
+changed_files (${CHANGED_FILES_LABEL}):
+${CHANGED_FILES:-(none)}
+
+claim_sources:
+${CLAIM_SOURCES}
+CTX
+  # Optional per-file ISO hints (only emitted if any file ref detected).
+  _emit_claim_source_iso_hints
+  # Evidence manifest + unbacked quant flags (EV1/EV3, 2026-07-13): 준비도
+  # 사전검사가 남긴 전역을 재사용해 조건부 방출 — 둘 다 0 이면 방출 코드
+  # 경로 자체가 실행되지 않아 envelope 은 기존과 byte 동일 (EV2 하위호환).
+  _emit_evidence_manifest
+  _emit_unbacked_quant_flags
+  printf -- '---\n'
+}
+
+# _emit_doc_review_slots — 문서(설계·계획) 리뷰 전용 슬롯 + 판정 규율.
+#
+# 배경 (2026-08-04): build_envelope 에 모드 분기가 없어 문서 리뷰에도 코드 리뷰
+# 슬롯이 그대로 방출됐다 — 문서를 놓고 "resource leak 을 찾아라", "test 함수의
+# assertion 을 대조하라" 고 지시한 것이다. 리뷰어가 계획서에서 파일 핸들
+# 수명주기를 소송한 것은 지시대로 수행한 결과이며, 그 지적에 대응하려면 구현
+# 세부를 문서 본문에 쌓아야 해서 리뷰 표면이 자가증식했다.
+#
+# 문서 판정 축은 **결정·범위·추적성** 이다. 구현 수준 결함은 코드 리뷰 게이트가
+# 실물을 놓고 판정한다 — 문서 단계에서 텍스트로 완결하려 하지 않는다.
+_emit_doc_review_slots() {
+  cat <<'SLOTS'
+Required review sections (모두 응답에 포함해야 한다):
+
+1. Decision Soundness
+   - 문서가 채택한 결정마다 근거가 문서 안에 있는가. 기각한 대안이 있다면 기각
+     사유가 있는가.
+   - 문서 내부에서 서로 충돌하는 결정·수치·계약이 있는가 (있으면 위치를 짚어라).
+   - 결정에 필요한 정보가 없어 유보된 항목이 명시돼 있는가, 아니면 조용히
+     비어 있는가.
+
+2. Scope & Traceability
+   - Scope ID 가 측정 가능한 계약인가 — 대상(entity) + 방향/임계(direction) +
+     상황(scenario) 이 식별되는가. 서술만 있고 판정 불가능한 ID 는 지적하라.
+   - 상위 문서(brainstorm / design)의 결정과 정합하는가. 상위에서 명시적으로
+     제외한 항목을 이 문서가 되살리고 있지 않은가.
+   - 범위와 범위 외의 경계가 그어져 있는가. 문서가 스스로 "다루지 않는다" 고
+     한 것이 뒤에서 슬그머니 다뤄지지 않는가.
+
+3. Claim Audit
+   - 문서의 수치 주장(건수·비율·소요)에 대해 근거를 문서/저장소에서 찾아
+     1:1 대조하라. 근거를 찾지 못한 수치는 지적하라.
+   - "완료·통과·검증됨" 류 상태 주장이 실제 산출물(테스트·기록·커밋)과
+     연결되는가.
+   - Evidence freshness:
+SLOTS
+  # 리뷰 대상 모드별 freshness 지침 (spec 모드 = commit diff 없음 → 전체 skip).
+  # context 블록이 ISO 필드를 계속 방출하므로, 명시 안내가 없으면 리뷰어가 그
+  # 필드로 freshness 판정을 시도한다 (기존 A3 계약 — 모드 분기 신설로 누락됐던
+  # 것을 회귀 테스트가 잡아 복원).
+  if [ -n "$FRESHNESS_MODE_NOTE" ]; then
+    printf '     %s\n' "$FRESHNESS_MODE_NOTE"
+  fi
+  cat <<'SLOTS'
+
+문서 리뷰 판정 축 (필수 — 아래 세 규율은 verdict 결정에 직접 적용된다):
+
+   (i) 심도-계층. 구현 수준 결함 — 오류 처리 경로, 자원/핸들 수명주기, 버퍼링
+       방식, 자료구조 선택, 함수 분해 같은 코드 실물의 문제 — 은 이 리뷰의
+       verdict 에 반영하지 마라. 발견했으면 "구현 단계 이관" 참고사항으로
+       분류해 별도 목록에 적어라. 문서는 실행할 수 없으므로 그런 주장은 여기서
+       검증될 수 없고, 코드 리뷰 게이트가 실물을 놓고 한 번에 판정한다.
+       verdict 를 좌우하는 것은 결정·범위·추적성 세 축뿐이다.
+
+  (ii) 결함 족 일괄 열거. 같은 성격의 지적은 적용 대상 **전체를 이번 회차에
+       한 번에** 열거하라. 동일 패턴을 입력별·대상별로 쪼개 여러 회차에 나눠
+       지적하는 것을 금지한다. 한 곳에서 패턴을 발견했으면 나머지 적용 지점을
+       스스로 찾아 같은 지적 안에 묶어라.
+
+ (iii) 근거 출처 분리. 이 저장소에 존재하지 않는 일반 규칙(임의의 줄 수 상한,
+       특정 스타일 가이드 등)을 근거로 반려 판정하지 마라. 지적은 두 부류로
+       나눠 표기하라 — "저장소 계약 위반"(규칙 문서·기존 선례에 근거)과
+       "일반론 참고사항". 후자는 verdict 를 승격시키지 않는다.
+
+출력 밀도:
+- 통과 항목: 섹션별 "검사 N개 / 통과 N개" 한 줄 요약만.
+- 지적 사항: 전량 상세 (축소 금지). 각 지적에 위치(절/줄)와 근거 부류를 명시.
+- 입력 없는 섹션은 응답에서 생략.
+SLOTS
+  # 현재 회차/상한 표기 — 리뷰어가 수렴 압박을 인지하도록. 문서 모드 전용이라
+  # 코드 모드 envelope 바이트에는 영향이 없다.
+  if [ "${ROUND_BUDGET_COUNT:-0}" -ge 1 ] 2>/dev/null; then
+    printf '\n리뷰 회차: %s / 상한 %s. 상한에 도달하면 래퍼가 재호출을 거부하고 사람에게 넘긴다.\n' \
+      "$ROUND_BUDGET_COUNT" "$ROUND_BUDGET_LIMIT"
+  fi
+}
+
 # build_envelope → emits the full prompt to stdout. The heading literals
 # below are owned by Spec A §5; internal heuristics (bad-test, numeric
 # mapping) are defined by Spec B and are allowed to be light here.
@@ -1693,6 +1899,16 @@ HDR
   # used for mode detection.
   if [ -n "$PROMPT_BODY" ]; then
     printf '%s\n\n' "$PROMPT_BODY"
+  fi
+
+  # 문서 리뷰 분기 (2026-08-04). 설계·계획 문서에는 코드 리뷰 슬롯을 방출하지
+  # 않는다 — 문서 판정 축은 결정·범위·추적성이다. 아래 코드 리뷰 경로는 이
+  # 분기 이전과 이후 모두 한 글자도 바뀌지 않았다 (바이트 동일 계약).
+  if [ "$REIN_REVIEW_MODE" = "spec-review" ]; then
+    _emit_doc_review_slots
+    _emit_verdict_format
+    _emit_context_block
+    return 0
   fi
 
   # 6.2 Step 3: 4 fixed slots.
@@ -1886,56 +2102,8 @@ SLOTS
 위 축소는 서술(출력) 축소일 뿐, 위 네 Required review section 의 검사 자체는 모두 수행한다.
 SLOTS
   fi
-  cat <<'SLOTS'
-
-응답 출력 형식 (필수 — P2 verdict parser hardening, 2026-04-25):
-
-응답의 **마지막 줄**에 반드시 아래 한 줄을 출력한다 (parser 가 이 라인을 우선
-매칭한다):
-
-  FINAL_VERDICT: <PASS|NEEDS-FIX|REJECT>
-
-위 라인이 없으면 wrapper 는 첫 줄 keyword 매칭으로 fallback 하며, 둘 다 부재
-시 NEEDS-FIX 로 처리한다. 본문에서 판정을 분석한 뒤에도 마지막에 위 한 줄을
-반드시 다시 출력하라.
-
-SLOTS
-
-  # 6.2 Step 4: structured context block.
-  cat <<CTX
----
-Context:
-
-review_subject: ${REVIEW_SUBJECT}
-diff_base: ${DIFF_BASE}
-diff_base_iso: ${DIFF_BASE_ISO}
-head_iso: ${HEAD_ISO}
-active_dod_tier: ${SAD_TIER_DISPLAY}
-active_dod_path: ${SAD_PATH_DISPLAY}
-active_dod_reason: ${SAD_REASON}
-plan_ref: ${PLAN_REF:-(none)}
-design_ref: ${DESIGN_REF:-(none)}
-
-covers (from DoD):
-${COVERS:-(none)}
-
-scope_items (from design):
-${SCOPE_ITEMS:-(none)}
-
-changed_files (${CHANGED_FILES_LABEL}):
-${CHANGED_FILES:-(none)}
-
-claim_sources:
-${CLAIM_SOURCES}
-CTX
-  # Optional per-file ISO hints (only emitted if any file ref detected).
-  _emit_claim_source_iso_hints
-  # Evidence manifest + unbacked quant flags (EV1/EV3, 2026-07-13): 준비도
-  # 사전검사가 남긴 전역을 재사용해 조건부 방출 — 둘 다 0 이면 방출 코드
-  # 경로 자체가 실행되지 않아 envelope 은 기존과 byte 동일 (EV2 하위호환).
-  _emit_evidence_manifest
-  _emit_unbacked_quant_flags
-  printf -- '---\n'
+  _emit_verdict_format
+  _emit_context_block
 }
 
 # ---- Codex invocation (Task 6.3). -------------------------------------
@@ -2263,6 +2431,298 @@ _emit_model_failsoft() {
   fi
 }
 
+# ---- Review round budget (2026-08-04). --------------------------------
+#
+# 리뷰 회차 상한을 **코드 계약**으로 강제한다. 배경: 상한이 산문 지시로만
+# 존재해 두 번 무력화됐다 (13회차 무보고 연속 실행 / 종결 명령 후 5회차 폭주).
+# SKILL.md 가 서술하던 `review_round` 도장 필드는 실제로 존재한 적이 없다.
+#
+# 계약:
+#   - 미통과 회차만 누적한다. 통과(PASS)는 사이클 종료이므로 카운터를 지운다.
+#   - 상한 도달 후 호출은 codex spawn **이전**에 거부한다 (exit 6 + 앵커 진단).
+#   - 계수는 **verdict 확정 이후** 1회다. 리뷰가 수행되지 않은 종료 — 준비도
+#     거부(4)·모델 오류(3)·워치독 정지(5) — 는 회차를 소모하지 않는다.
+#   - 카운터를 읽거나 쓸 수 없는 상태(디렉토리 쓰기 불가, count 손상)는 예산
+#     소진이 **아니다**. 별도 앵커 + exit 7 로 반환한다 — 같은 신호를 쓰면
+#     호출자가 인프라 오류를 정상 소진으로 오분류해 복구 대신 사람 핸드오프를
+#     수행한다 (리뷰 R2 Medium).
+#   - 호출자는 [MAX_ROUNDS:<n>] 으로 상한을 연장할 수 있으나, 연장은 stderr
+#     경고 + 카운터 파일 이력으로 남는다 (조용한 연장 경로 없음).
+# 기본 상한은 **상수**다 — 환경변수로 받지 않는다. 환경변수 override 는 선언·
+# 경고·이력 없이 상한을 무력화하는 조용한 우회 경로이며, "연장은 항상 기록에
+# 남는다" 는 계약을 깬다 (리뷰 R1 High 실증: `REIN_ROUND_LIMIT_DEFAULT=999` 설정
+# 시 6회차가 경고 0건으로 통과). 상한을 올리는 유일한 경로는 프롬프트의 정수
+# 마커 선언이며, 그것은 경고 + 이력에 남는다.
+REIN_ROUND_LIMIT_DEFAULT=5
+ROUND_BUDGET_FILE=""
+ROUND_BUDGET_COUNT=0
+ROUND_BUDGET_LIMIT=0
+ROUND_BUDGET_KEY=""
+ROUND_BUDGET_EXTS=""
+
+# 키 해시 — rein-mark-spec-reviewed.sh 의 compute_hash 와 동일 관용구
+# (shasum → sha1sum → 해시 도구 없는 환경용 결정론 폴백).
+_round_budget_hash() {
+  local input="$1"
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$input" | shasum | cut -c1-16
+  elif command -v sha1sum >/dev/null 2>&1; then
+    printf '%s' "$input" | sha1sum | cut -c1-16
+  else
+    local tail_part="${input: -12}"
+    printf '%s%d' "$(printf '%s' "$tail_part" | tr -cd 'a-zA-Z0-9')" "${#input}" | cut -c1-16
+  fi
+}
+
+# 경로 정규화 — 같은 문서를 다른 표기로 부르면 별도 예산을 받는 우회를 막는다
+# (R3 High: `docs/x.md` 와 `./docs/x.md` 가 각각 5회를 받았고, 절대/상대 전환도
+# 같은 우회였다). 디렉토리를 실제로 해소해 `..`·심볼릭 링크·중복 슬래시까지
+# 하나의 표기로 모은다. 해소 불가(경로 부재)면 원문을 그대로 쓴다 — 키가 조금
+# 갈라질 뿐 판정은 계속되며, 없는 경로를 지어내지 않는다.
+_round_budget_normalize_path() {
+  local p="$1" d b rp
+  [ -n "$p" ] || { printf '(unknown)'; return 0; }
+  case "$p" in
+    /*) ;;
+    *) p="$PROJECT_DIR/$p" ;;
+  esac
+  # 1순위: realpath — 마지막 구성요소가 **파일 심볼릭 링크**인 경우까지 해소한다
+  # (R4 High: 디렉토리만 pwd -P 로 풀면 문서 파일의 링크가 별도 키를 받았다).
+  if command -v realpath >/dev/null 2>&1; then
+    rp=$(realpath "$p" 2>/dev/null) || rp=""
+    if [ -n "$rp" ]; then printf '%s' "$rp"; return 0; fi
+  fi
+  # 2순위: 파일 링크를 한 단계 해소한 뒤 디렉토리를 pwd -P 로 푼다 (realpath
+  # 부재 또는 경로 미존재 환경). 링크 체인이 깊으면 완전 해소되지 않을 수 있다.
+  if [ -L "$p" ]; then
+    rp=$(readlink "$p" 2>/dev/null) || rp=""
+    if [ -n "$rp" ]; then
+      case "$rp" in
+        /*) p="$rp" ;;
+        *) p="$(dirname "$p")/$rp" ;;
+      esac
+    fi
+  fi
+  d=$(dirname "$p")
+  b=$(basename "$p")
+  ( cd "$d" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$b" ) 2>/dev/null \
+    || printf '%s' "$p"
+}
+
+# 사이클 키 — 문서 리뷰는 리뷰 대상 문서(정규화된 절대 경로), 코드 리뷰는 활성
+# 작업 기준서 slug (도장의 cycle: 필드와 동일 산출). 키가 다르면 예산은 독립이다.
+_round_budget_key() {
+  if [ "$REIN_REVIEW_MODE" = "spec-review" ]; then
+    printf 'spec:%s' "$(_round_budget_normalize_path "${SPEC_REVIEW_SUBJECT:-}")"
+  else
+    local cyc=""
+    if [ -n "${SAD_PATH:-}" ]; then
+      cyc=$(basename "$SAD_PATH" .md | sed 's/^dod-//')
+    fi
+    printf 'code:%s' "${cyc:-(no-dod)}"
+  fi
+}
+
+# _round_budget_check — 상한 판정만.
+#   return 0 — 진행 가능
+#   return 1 — 예산 소진 (호출부가 exit 6)
+#   return 2 — 카운터를 신뢰할 수 없음: 인프라/손상 (호출부가 exit 7)
+# 성공 시 ROUND_BUDGET_* 전역을 세팅하되 **파일에는 쓰지 않는다** — 계수는
+# verdict 가 확정된 뒤 _round_budget_commit 이 한다. 판정과 계수를 분리하는
+# 이유: codex 가 완료되지 않은 종료(모델 오류 exit 3, 워치독 정지 exit 5)는
+# "리뷰가 수행되지 않았다" 이므로 회차를 소모하면 안 된다 (§4.2 계약과 정합).
+_round_budget_check() {
+  local key hash dir file prev limit exts
+  key=$(_round_budget_key)
+  hash=$(_round_budget_hash "$key")
+  dir="$PROJECT_DIR/trail/dod/.review-rounds"
+  file="$dir/$hash"
+
+  # 심볼릭 링크 거부 — 판정 초입, mkdir/읽기 **이전** (코드 리뷰 2026-08-05
+  # High). commit 의 락 내 검사만으로는 부족했다: 여기의 mkdir -p 와 카운터
+  # 읽기가 링크를 추종하고, 통과 경로(_round_budget_clear)는 검사 없이 rm 을
+  # 실행해 카운터 디렉토리가 외부를 가리키면 저장소 밖 해시 파일이 삭제됐다
+  # (격리 재현). commit 의 검사는 락 안 TOCTOU 재검증으로 유지된다.
+  if [ -L "$dir" ] || [ -L "$file" ]; then
+    echo "ERROR: [codex-review][round-budget-unavailable] 회차 카운터 경로가 심볼릭 링크다 (${file}). 판정·기록·정리가 저장소 밖 파일로 향할 수 있으므로 중단한다 — 예산 소진이 아니라 경로 상태 문제이므로 링크를 제거한 뒤 재호출하라." >&2
+    return 2
+  fi
+
+  # 쓰기 가능성을 **판정 시점에** 확인한다 — commit 은 codex 실행 이후라 그때
+  # 실패하면 리뷰는 끝났는데 회차가 안 남는 fail-open 이 된다 (R1 High).
+  if ! mkdir -p "$dir" 2>/dev/null || [ ! -w "$dir" ]; then
+    echo "ERROR: [codex-review][round-budget-unavailable] 회차 카운터 디렉토리를 쓸 수 없다 ($dir) — 예산을 강제할 수 없으므로 fail-closed 로 중단한다. 예산 소진이 아니라 인프라 문제이므로 디렉토리 권한을 고친 뒤 재호출하라." >&2
+    return 2
+  fi
+
+  prev=0
+  exts=""
+  if [ -f "$file" ]; then
+    prev=$(grep -E '^count=' "$file" 2>/dev/null | head -1 | sed 's/^count=//')
+    # 손상은 **fail-closed** — 0 으로 재설정하면 카운터를 훼손하는 것만으로
+    # 예산이 무한 리셋된다 (R1 High: `count=corrupt` 가 진단 없이 1회차로
+    # 되돌아갔다). 게이트 계열에서 거짓 음성이 거짓 양성보다 나쁘다.
+    if ! printf '%s' "$prev" | grep -qE '^[0-9]+$'; then
+      echo "ERROR: [codex-review][round-budget-unavailable] 회차 카운터가 손상됐다 ($file: count='${prev}'). 임의 복구하지 않고 중단한다 — 예산 소진이 아니라 카운터 상태 문제이므로, 파일을 확인하고 사이클을 새로 시작하려면 해당 파일을 지워라." >&2
+      return 2
+    fi
+    exts=$(grep -E '^extensions=' "$file" 2>/dev/null | head -1 | sed 's/^extensions=//')
+  fi
+
+  limit="$REIN_ROUND_LIMIT_DEFAULT"
+  [ -n "$REIN_ROUND_LIMIT_DECLARED" ] && limit="$REIN_ROUND_LIMIT_DECLARED"
+
+  if [ "$prev" -ge "$limit" ]; then
+    echo "ERROR: [codex-review][round-budget-exceeded] 이 사이클의 리뷰 회차 예산을 다 썼다 (사용 ${prev} / 상한 ${limit}, 키: ${key})." >&2
+    echo "ERROR: [codex-review][round-budget-exceeded]   codex 를 실행하지 않았다. 재호출하지 말고 사람에게 넘겨라 — 지금까지의 지적과 남은 쟁점을 요약해 보고하라." >&2
+    echo "ERROR: [codex-review][round-budget-exceeded]   예산이 더 필요하다고 판단하면 사람의 승인을 받은 뒤 프롬프트에 [MAX_ROUNDS:5] 처럼 정수 상한을 선언해 재호출하라 (선언은 기록에 남는다)." >&2
+    return 1
+  fi
+
+  # 연장이 **실제로 효력을 발휘한** 경우만 경고·기록한다 (기본 상한 이하 선언은
+  # 축소이므로 조용히 적용). 가시성 강제 — 사용자가 연장 허용을 선택했으므로
+  # 차단이 아니라 기록·경고로 완화한다.
+  if [ -n "$REIN_ROUND_LIMIT_DECLARED" ] \
+     && [ "$REIN_ROUND_LIMIT_DECLARED" -gt "$REIN_ROUND_LIMIT_DEFAULT" ]; then
+    echo "WARNING: [codex-review][round-budget-extended] 호출자가 회차 상한을 ${REIN_ROUND_LIMIT_DEFAULT} → ${REIN_ROUND_LIMIT_DECLARED} 로 연장 선언했다 (현재 ${prev} 회차 사용). 이 선언은 카운터 이력에 기록된다." >&2
+    exts="${exts:+${exts};}pending:${REIN_ROUND_LIMIT_DECLARED}"
+  fi
+
+  ROUND_BUDGET_KEY="$key"
+  ROUND_BUDGET_EXTS="$exts"
+  ROUND_BUDGET_COUNT=$((prev + 1))
+  ROUND_BUDGET_LIMIT="$limit"
+  ROUND_BUDGET_FILE="$file"
+  return 0
+}
+
+# _round_budget_commit — verdict 가 확정된(= 리뷰가 실제로 수행된) 뒤 회차를
+# 기록한다. 미통과 회차만 여기 도달한다 (통과는 _round_budget_clear).
+#
+# 동시성: 기록은 키별 락(mkdir 원자성) 안에서 **파일을 다시 읽어** 현재 값
+# 기준으로 증가시킨다. 판정 시점의 값을 그대로 쓰면 같은 키의 두 리뷰가 겹칠 때
+# 회차가 유실된다 (R1 High: 동시 2건 실행 후 카운터가 1로 남았다).
+#
+# 남는 한계(의도적): 판정과 기록이 codex 실행 시간만큼 떨어져 있으므로, 상한
+# 직전에 동시 진입한 호출들은 모두 통과할 수 있다. 초과량은 **동시 진입 수에
+# 비례**한다 — k 개가 겹쳐 들어오면 최대 k-1 회 초과이며 k 자체에는 상한이 없다
+# (R2 High 정정: 이전 주석은 "최대 1회 초과" 라고 적었으나 사실이 아니다).
+# 초과분이 기록된 뒤의 호출은 정상적으로 거부된다.
+#
+# 이를 엄격히 막으려면 판정 시점에 예약 계수를 하고 만료 가능한 lease 로 회수해야
+# 하는데, 그러면 프로세스가 강제 종료될 때 예약이 남아 "리뷰하지 않은 회차" 를
+# 소모하거나(만료 전) 만료 시간을 잘못 잡으면 정상 리뷰를 막는다 — 실측된 타임아웃
+# 경로가 정확히 그 위험이다(10분 넘게 정상 진행 중인 리뷰가 있었다).
+# 위협 모델(정직한 에이전트 규율)에서 같은 사이클 동시 리뷰는 드물고, 유실 방지가
+# 더 큰 값이므로 이 한계를 남기고 명시한다. 사용자 결정 (2026-08-04).
+_round_budget_commit() {
+  [ -n "$ROUND_BUDGET_FILE" ] || return 0
+  local ts lock waited prev
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  lock="${ROUND_BUDGET_FILE}.lock"
+  waited=0
+  until mkdir "$lock" 2>/dev/null; do
+    waited=$((waited + 1))
+    if [ "$waited" -gt 50 ]; then
+      # 기록 실패는 **fail-closed** 다 (R4 High). 경고만 내고 성공으로 반환하면,
+      # 중단된 프로세스가 남긴 락 디렉토리 하나로 이후 모든 미통과 회차가
+      # 계수되지 않아 상한이 통째로 무력화된다.
+      echo "ERROR: [codex-review][round-budget-unavailable] 회차 카운터 락을 얻지 못해 이번 회차를 기록할 수 없다 ($lock). 예산을 강제할 수 없는 상태이므로 중단한다 — 중단된 리뷰가 남긴 락이면 해당 디렉토리를 지운 뒤 재호출하라." >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+
+  # 심볼릭 링크 거부 (보안 리뷰 2026-08-04). 카운터 파일이나 그 디렉토리가
+  # 링크면 기록이 저장소 밖 파일로 새어나간다. 저장소를 받아오는 것만으로
+  # 성립하는 경로였다 (git 은 링크를 저장하고, 키 해시는 미리 계산 가능하다).
+  if [ -L "$ROUND_BUDGET_FILE" ] || [ -L "$(dirname "$ROUND_BUDGET_FILE")" ]; then
+    rmdir "$lock" 2>/dev/null || true
+    echo "ERROR: [codex-review][round-budget-unavailable] 회차 카운터 경로가 심볼릭 링크다 (${ROUND_BUDGET_FILE}). 기록이 의도하지 않은 파일로 향할 수 있으므로 중단한다 — 해당 경로를 확인하고 링크를 제거하라." >&2
+    return 1
+  fi
+
+  prev=0
+  if [ -f "$ROUND_BUDGET_FILE" ]; then
+    prev=$(grep -E '^count=' "$ROUND_BUDGET_FILE" 2>/dev/null | head -1 | sed 's/^count=//')
+    printf '%s' "$prev" | grep -qE '^[0-9]+$' || prev=$((ROUND_BUDGET_COUNT - 1))
+  fi
+  ROUND_BUDGET_COUNT=$((prev + 1))
+
+  # 원자적 기록 — 부분 기록된 파일이 다음 판정에서 손상으로 읽히지 않게.
+  # 임시 파일명은 **mktemp** 로 만든다. 고정 이름(`<file>.tmp`)은 미리 계산
+  # 가능해, 그 자리에 링크를 심어두면 내용이 링크 대상으로 쓰이고 이어지는
+  # 교체가 그 링크를 카운터 자리에 심는다 (보안 리뷰에서 실제 재현).
+  local tmpf
+  tmpf=$(mktemp "${ROUND_BUDGET_FILE}.XXXXXX" 2>/dev/null) || tmpf=""
+  if [ -z "$tmpf" ]; then
+    rmdir "$lock" 2>/dev/null || true
+    echo "ERROR: [codex-review][round-budget-unavailable] 회차 카운터 임시 파일을 만들지 못했다 (${ROUND_BUDGET_FILE}). 예산을 강제할 수 없으므로 중단한다 — 디렉토리 권한·디스크 상태를 확인하라." >&2
+    return 1
+  fi
+  if ! cat > "$tmpf" <<ROUNDS
+key=${ROUND_BUDGET_KEY}
+count=${ROUND_BUDGET_COUNT}
+limit=${ROUND_BUDGET_LIMIT}
+updated=${ts}
+extensions=${ROUND_BUDGET_EXTS//pending:/${ts}:}
+ROUNDS
+  then
+    rm -f "$tmpf" 2>/dev/null || true
+    rmdir "$lock" 2>/dev/null || true
+    echo "ERROR: [codex-review][round-budget-unavailable] 회차 카운터를 기록하지 못했다 (${ROUND_BUDGET_FILE}). 이번 회차가 예산에 반영되지 않으면 상한이 무력화되므로 중단한다 — 디렉토리 권한·디스크 상태를 확인하라." >&2
+    return 1
+  fi
+  if ! mv -f "$tmpf" "$ROUND_BUDGET_FILE" 2>/dev/null; then
+    rm -f "$tmpf" 2>/dev/null || true
+    rmdir "$lock" 2>/dev/null || true
+    echo "ERROR: [codex-review][round-budget-unavailable] 회차 카운터 교체에 실패했다 (${ROUND_BUDGET_FILE}). 예산을 강제할 수 없으므로 중단한다." >&2
+    return 1
+  fi
+  rmdir "$lock" 2>/dev/null || true
+  return 0
+}
+
+# 사이클 종료(통과) 시 카운터 제거 — 다음 사이클이 0 에서 시작한다.
+# 정리도 commit 과 **같은 키별 락 안에서** 수행한다 (코드 리뷰 2026-08-05 R2
+# High: 락 없이 rmdir 하면, 다른 프로세스의 commit 이 락을 쥔 동안에도 — 락
+# 디렉토리는 비어 있으므로 — clear 가 그 락을 제거해 상호배제와 회차 계수
+# 보장이 깨진다. 자신이 획득한 락만 해제한다. 중단된 리뷰가 남긴 stale 락은
+# commit 경로와 동일하게 대기 초과 → 진단 + 수동 제거 안내로 수렴한다).
+# rm 직전 링크 재검사 (R1 High): 판정 초입 검사 이후 codex 실행 시간 동안
+# 경로가 링크로 바뀌면 rm -f 가 디렉토리 링크를 따라 저장소 밖 해시 파일을
+# 삭제한다. 모든 정리 실패는 return 1 — 호출부가 통과 표식을 쓰기 전에
+# exit 7 로 합류한다 (실패를 성공으로 위장하지 않는다, R2 Medium).
+_round_budget_clear() {
+  [ -n "$ROUND_BUDGET_FILE" ] || return 0
+  local lock waited
+  lock="${ROUND_BUDGET_FILE}.lock"
+  waited=0
+  until mkdir "$lock" 2>/dev/null; do
+    waited=$((waited + 1))
+    if [ "$waited" -gt 50 ]; then
+      echo "ERROR: [codex-review][round-budget-unavailable] 회차 카운터 락을 얻지 못해 통과 정리를 수행할 수 없다 ($lock). 중단된 리뷰가 남긴 락이면 해당 디렉토리를 지운 뒤 재호출하라." >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+  if [ -L "$ROUND_BUDGET_FILE" ] || [ -L "$(dirname "$ROUND_BUDGET_FILE")" ]; then
+    rmdir "$lock" 2>/dev/null || true
+    echo "ERROR: [codex-review][round-budget-unavailable] 회차 카운터 경로가 심볼릭 링크다 (${ROUND_BUDGET_FILE}). 통과 정리가 의도하지 않은 파일을 지울 수 있으므로 정리하지 않고 중단한다 — 링크를 제거한 뒤 카운터 파일을 직접 정리하라." >&2
+    return 1
+  fi
+  if ! rm -f "$ROUND_BUDGET_FILE" "${ROUND_BUDGET_FILE}.tmp" 2>/dev/null; then
+    rmdir "$lock" 2>/dev/null || true
+    echo "ERROR: [codex-review][round-budget-unavailable] 회차 카운터를 정리하지 못했다 (${ROUND_BUDGET_FILE}). 정리 실패를 성공으로 위장하지 않기 위해 중단한다 — 권한·디스크 상태를 확인하라." >&2
+    return 1
+  fi
+  if ! rmdir "$lock" 2>/dev/null; then
+    echo "ERROR: [codex-review][round-budget-unavailable] 회차 카운터 락 해제에 실패했다 ($lock). 다음 호출이 이 락에 막히므로 해당 디렉토리를 확인하라." >&2
+    return 1
+  fi
+  return 0
+}
+
 # ---- Stamp writer (Task 6.3 Step 3). ----------------------------------
 
 # write_code_review_stamp <verdict> <reviewer>
@@ -2314,6 +2774,21 @@ STAMP
 # canonical portable idiom.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   # Build envelope.
+  # 회차 예산 판정 — 사전검사(exit 4) 통과 후, codex spawn 이전. 여기서 걸리면
+  # envelope 조립도 하지 않는다. 성공 시 회차 전역이 세팅되어 문서 모드 envelope
+  # 이 현재 회차/상한을 표기한다. 실제 계수는 verdict 확정 후.
+  # 예산 소진(6)과 카운터 불가(7)는 호출자 행동이 다르므로 종료코드를 분리한다.
+  # errexit(set -e) 하에서는 함수의 non-zero 반환이 즉시 스크립트를 죽인다 —
+  # `|| _rc=$?` 로 억제해야 case 분기에 도달한다 (_readiness_check 가 `|| exit 4`
+  # 로 억제하는 것과 같은 이유).
+  _rb_rc=0
+  _round_budget_check || _rb_rc=$?
+  case "$_rb_rc" in
+    0) ;;
+    1) exit 6 ;;
+    *) exit 7 ;;
+  esac
+
   ENVELOPE=$(build_envelope)
 
   # Invoke codex (real or fake via CODEX_BIN).
@@ -2446,6 +2921,28 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
 
   # Parse verdict.
   VERDICT=$(_parse_verdict "$CODEX_OUT")
+
+  # 회차 확정 — 여기까지 왔다는 것은 codex 가 실제로 리뷰를 수행하고 verdict 를
+  # 냈다는 뜻이다. 통과는 사이클 종료이므로 카운터를 지우고, 미통과만 계수한다
+  # ("지적 → 수정 → 재리뷰" 루프의 발산을 막는 것이지 통과를 벌하는 게 아니다).
+  # 모델 오류(exit 3)·워치독 정지(exit 5)는 이 지점에 도달하지 않으므로 회차를
+  # 소모하지 않는다 — §4.2 의 "리뷰가 완료되지 않았다" 계약과 정합.
+  if [ "$VERDICT" = "PASS" ]; then
+    # 정리 실패(락 미획득·링크 전환·삭제 실패)는 전부 fail-closed — 통과
+    # 표식을 쓰지 않고 exit 7 로 합류한다 (코드 리뷰 2026-08-05 High +
+    # Medium). 리뷰 본문은 이미 stdout 으로 방출됐으므로 결과는 유실되지
+    # 않는다.
+    _rb_clear_rc=0
+    _round_budget_clear || _rb_clear_rc=$?
+    [ "$_rb_clear_rc" -eq 0 ] || exit 7
+  else
+    # 기록 실패는 fail-closed — 호출부가 반환값을 검사해 exit 7 로 끝낸다 (R4
+    # High). 리뷰 본문은 이미 stdout 으로 방출됐으므로 결과가 유실되지는 않지만,
+    # 회차가 반영되지 않은 채 통과 신호를 주면 상한이 무의미해진다.
+    _rb_commit_rc=0
+    _round_budget_commit || _rb_commit_rc=$?
+    [ "$_rb_commit_rc" -eq 0 ] || exit 7
+  fi
 
   # Mode-aware stamp handling.
   if [ "$REIN_REVIEW_MODE" = "code-review" ]; then

@@ -1120,14 +1120,34 @@ test_sx_command_wrapper_then_commit_failclosed() {
 }
 
 # (SX hole R2 — cd then commit) `cd /other && git commit` → repo decouple → 미시도.
-test_sx_cd_other_then_commit_failclosed() {
+# (SX hole R2 → GSD-3 재분류, 2026-08-05 dod-2026-08-05-gate-scope-defects)
+# `cd /other && git commit` 는 이전에 "저장소 분리 → SX 면제 판정 불가 →
+# fail-closed 차단" 이었다. GSD-3 사용자 확정 계약이 이 형태를 재분류했다:
+# 리터럴 절대경로 cd 가 저장소 밖이면 그 커밋은 **이 저장소의 커밋이 아니므로**
+# 커밋 게이트 대상 자체가 아니다 (샌드박스 재현 스크립트 실측 오차단 수리).
+# SX 면제 판정에 도달하기 전에 상위에서 전체 면제된다 — 이 저장소 보호 목적에
+# FN 없음 (다른 저장소를 향한 커밋임이 어휘적으로 증명된 경우만 면제).
+test_sx_cd_other_then_commit_exempt_gsd3() {
   _sx_git_init_baseline
   _sx_seed_standard_dod_no_security
   printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
   git -C "$SANDBOX" add CHANGELOG.md
   local input='{"tool_input":{"command":"cd /other && git commit -m x"},"tool_result":{}}'
   run_hook "$HOOK" "$input"
-  assert_json_deny "SECURITY_STAMP_MISSING" "SX cd /other && git commit (repo decouple) → fail-closed"
+  assert_exit 0 "GSD-3: literal outside cd → not this repo's commit → gate skipped"
+  assert_stderr_contains "outside this repository" "GSD-3 exemption must be announced via NOTICE"
+}
+
+# (SX hole 보존 — GSD-3 이후에도 유지되는 fail-closed) 이동 대상이 **변수**면
+# 대상 저장소를 증명할 수 없다 → 게이트 유지 (repo decouple 구멍은 계속 닫힘).
+test_sx_cd_variable_then_commit_failclosed() {
+  _sx_git_init_baseline
+  _sx_seed_standard_dod_no_security
+  printf '# changed\n' > "$SANDBOX/CHANGELOG.md"
+  git -C "$SANDBOX" add CHANGELOG.md
+  local input='{"tool_input":{"command":"cd \"$OTHER\" && git commit -m x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SECURITY_STAMP_MISSING" "SX cd \$OTHER && git commit (target unprovable) → fail-closed"
 }
 
 # (SX hole R2 — env wrapper) `env git add s.py; git commit` → 면제 미시도.
@@ -1600,7 +1620,8 @@ main() {
   run_test test_sx_plain_lone_commit_multiword_still_passes     "$HOOK"
   # SX hole-fix R2 (codex integration review R2 High): non-git first clause skip
   run_test test_sx_command_wrapper_then_commit_failclosed       "$HOOK"
-  run_test test_sx_cd_other_then_commit_failclosed              "$HOOK"
+  run_test test_sx_cd_other_then_commit_exempt_gsd3             "$HOOK"
+  run_test test_sx_cd_variable_then_commit_failclosed           "$HOOK"
   run_test test_sx_env_wrapper_then_commit_failclosed           "$HOOK"
   run_test test_sx_true_then_commit_failclosed                  "$HOOK"
   run_test test_sx_echo_then_commit_failclosed                  "$HOOK"

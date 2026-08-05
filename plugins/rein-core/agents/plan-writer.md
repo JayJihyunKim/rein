@@ -128,7 +128,15 @@ validator 통과 직후 다음 수행:
 
 Skill tool 로 `codex-review` 호출:
 
-- prompt: `[NON_INTERACTIVE] spec review for plan: <plan-path>. Validate scope coverage and implementation feasibility.`
+- prompt 는 **두 줄**로 구성한다 (spec-writer 와 동일 규약):
+  - **첫 줄 = `[NON_INTERACTIVE] spec review for plan: <plan-path>`** — 첫 줄에는 **경로만** 두고, 뒤에 마침표나 지시문을 붙이지 않는다.
+  - **둘째 줄 = `Validate scope coverage and implementation feasibility.`**
+- ⚠️ 경로 뒤에 문장을 이어 쓰면 래퍼가 그 전체를 대상 경로로 파싱한다. 같은 문서인데도 회차 예산 키가 갈라져 상한이 우회되고(codex-review skill §10), 컨텍스트 조립도 오염된다.
+- 예시:
+  ```
+  [NON_INTERACTIVE] spec review for plan: docs/plans/2026-06-02-example.md
+  Validate scope coverage and implementation feasibility.
+  ```
 - skill 이 default (gpt-5.5 / high / read-only) 로 codex exec 실행
 - 결과 verdict 캡처 (PASS / NEEDS-FIX / REJECT)
 
@@ -149,6 +157,18 @@ Skill tool 로 `codex-review` 호출:
    ```
    reviewer 문자열의 `-automated` suffix 는 trail 추적 시 수동/자동 구분.
 2. handoff to `subagent-driven-development` (또는 `superpowers:executing-plans`).
+
+**회차 예산 소진 (래퍼 exit 6 + `round-budget-exceeded` 진단)**:
+
+1. **stamp 생성 안 함**, **재호출 금지** — 리뷰가 수행되지 않았다.
+2. 지금까지 받은 지적과 남은 쟁점을 요약해 **즉시 사용자에게 넘긴다**. 스스로 `[MAX_ROUNDS:]` 를 올려 재시도하는 것은 계약 위반이다 (codex-review skill §10).
+3. 사용자에게: "계획 검토를 [N]회 돌렸지만 아직 수렴하지 않았습니다. 남은 쟁점은 [평문 요약]. 계속 검토할지, 지금 상태로 진행할지 정해주세요."
+
+**회차 카운터 불가 (래퍼 exit 7 + `round-budget-unavailable` 진단)**:
+
+1. **stamp 생성 안 함.** 예산 소진이 아니라 카운터를 읽거나 쓸 수 없는 상태이며, 리뷰 자체가 수행되지 않았다.
+2. 사람 핸드오프가 아니라 **인프라 복구**가 필요하다. 진단이 가리키는 원인(디렉토리 권한 / 손상된 카운터 파일)을 사용자에게 그대로 전달하고, 해소 후 재호출한다.
+3. 사용자에게: "검토 횟수를 기록하는 파일에 문제가 있어 검토를 시작하지 못했습니다. [원인 평문]. 해결 후 다시 시도하겠습니다."
 
 **NEEDS-FIX 또는 REJECT**:
 

@@ -53,7 +53,7 @@ _sr1b_git_commit_file() {
 #   and the source edit succeeds (bug). Post-fix the gate iterates orphan
 #   .reviewed markers and blocks (exit 2).
 test_orphan_reviewed_with_stale_spec_blocks() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
   echo "# Spec v2 (edited after review, no post-edit hook ran)" > "$spec_file"
@@ -88,7 +88,7 @@ test_orphan_reviewed_with_stale_spec_blocks() {
 #   .pending was already cleared by mark-spec-reviewed and no new edit
 #   happened). Must remain allowed.
 test_orphan_reviewed_with_fresh_spec_allows() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
   echo "# Spec v1 (reviewed, untouched after review)" > "$spec_file"
@@ -116,7 +116,7 @@ test_orphan_reviewed_with_fresh_spec_allows() {
 # F3 (fail-closed): orphan .reviewed without a valid reviewed= timestamp →
 #   cannot prove freshness → block. Mirrors SR-1's strict-ISO-shape check.
 test_orphan_reviewed_with_garbled_timestamp_fails_closed() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
   echo "# Spec" > "$spec_file"
@@ -143,8 +143,7 @@ test_orphan_reviewed_with_garbled_timestamp_fails_closed() {
 #   (no spec review markers at all). Spec gate must remain permissive — this
 #   is the "fresh repo / no spec yet reviewed" case.
 test_no_markers_allows() {
-  seed_dod "dod-2026-04-13-test.md"
-
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   # Either .spec-reviews dir exists but is empty, or doesn't exist. Both
   # must allow.
   mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
@@ -171,7 +170,7 @@ test_no_markers_allows() {
 #   prior version had mtime == reviewed which made the test pass even if
 #   the orphan branch accidentally ran, since `-gt` would be false).
 test_pending_plus_reviewed_uses_sr1_branch_only() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   mkdir -p "$SANDBOX/specs"
   local spec_file="$SANDBOX/specs/api-design.md"
   echo "# Spec" > "$spec_file"
@@ -218,7 +217,7 @@ test_pending_plus_reviewed_uses_sr1_branch_only() {
 #   recognised AND that the bumped mtime is ignored. This is SOUND: clean +
 #   committer ≤ reviewed means the content was integrated before review.
 test_cherrypick_mtimefp_provenance_mtime_bump_allows() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   _sr1b_git_init
   mkdir -p "$SANDBOX/docs/specs"
   local spec_file="$SANDBOX/docs/specs/wave.md"
@@ -256,7 +255,7 @@ test_cherrypick_mtimefp_provenance_mtime_bump_allows() {
 #   could NOT have included it, so it must block. Exit 2 proves committer-time
 #   (not author-time) is the signal: author-time would wrongly allow this.
 test_cherrypick_mtimefp_provenance_integrated_after_review_blocks() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   _sr1b_git_init
   mkdir -p "$SANDBOX/docs/specs"
   local spec_file="$SANDBOX/docs/specs/wave.md"
@@ -288,7 +287,7 @@ test_cherrypick_mtimefp_provenance_integrated_after_review_blocks() {
 #   working-tree content matches the reviewed content → block. Guards the TIER 2
 #   dirty branch for the newly-recognised provenance class.
 test_cherrypick_mtimefp_provenance_dirty_fails_closed() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   _sr1b_git_init
   mkdir -p "$SANDBOX/docs/specs"
   local spec_file="$SANDBOX/docs/specs/wave.md"

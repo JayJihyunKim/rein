@@ -114,6 +114,11 @@ EOF
 path=$SANDBOX/docs/specs/sample-spec.md
 created=2026-06-05T00:00:00
 EOF
+  # GSD-2 (2026-08-05): 미리뷰 차단은 활성 작업이 참조하는 문서에만 발동한다.
+  # 이 시나리오의 관심사(차단 메시지의 teach-forward 형식)를 새 계약 위에서
+  # 유지하도록, 문서를 참조하는 활성 DoD 를 심는다.
+  seed_dod "dod-2026-06-05-sample.md" '# DoD: sample
+- 설계: docs/specs/sample-spec.md'
   # Edit a NON-test source file so the tests/ TDD exemption does not apply.
   touch "$SANDBOX/scripts/foo.sh"
 

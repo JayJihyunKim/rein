@@ -116,7 +116,7 @@ Wrapper 가 context assembly, envelope 4 slots, codex exec, stamp 생성을 담�
 
 - stdin `< /dev/null` 로 명시 close
 - 출력은 `> <file> 2>&1` 로 직접 파일에 쓰고 `Read` 로 읽기. `| tail -N` 금지 (EOF 까지 버퍼링)
-- codex 실행 후 stamp 생성은 수동. wrapper 가 자동화하는 `diff_base` / `review_round` 필드를 caller 가 직접 채워야 함
+- codex 실행 후 stamp 생성은 수동. wrapper 가 자동으로 채우는 `diff_base` 를 caller 가 직접 넣어야 함 (`review_round` 는 수동 스키마 전용 필드로, wrapper 는 쓰지 않는다 — 회차 강제는 §10 카운터가 담당)
 
 Hang 감지 + 복구: §8 Error Handling 참고.
 
@@ -137,7 +137,9 @@ Hang 감지 + 복구: §8 Error Handling 참고.
 
 **sonnet 셀프리뷰**: 변경 diff 를 직접 확인하고, stamp 에 `reviewer: self-review` 기록.
 
-Round 관리: stamp 의 `review_round` 필드에 현재 회차를 기록한다. 같은 사이클 내 재리뷰는 Round 를 증가시키며 `codex exec resume --last` 로 이전 세션 컨텍스트를 유지한다 (§7).
+Round 관리: 회차는 래퍼가 사이클 단위로 계수하며 상한을 **코드로 강제**한다 (§10). 같은 사이클 내 재리뷰는 `codex exec resume --last` 로 이전 세션 컨텍스트를 유지한다 (§7).
+
+> 2026-08-04 정정: 이전 판은 "stamp 의 `review_round` 필드에 회차를 기록한다" 고 서술했으나 **그 필드는 존재한 적이 없다**. 래퍼에 회차 개념 자체가 없었고, 상한은 산문 지시로만 존재해 두 번 무력화됐다 (13회차 무보고 연속 실행 / 종결 지시 후 5회차 폭주). §10 이 이를 코드 계약으로 대체한다.
 
 ---
 
@@ -189,7 +191,7 @@ ok 21 - test-codex-model-profile-routing
 
 **검증 깊이 (확정)**: 형식만. 래퍼는 `command:` 를 **재실행하지 않고**, output 과 exit_code 의 진위를 확인하지 않는다. 형식은 갖췄지만 거짓인 증거는 기존대로 codex 가 잡는다 — 유효 블록은 PROMPT_BODY 원문 위치에 그대로 보존되고, envelope 의 `evidence_manifest:` 슬롯(블록별 claim/command/exit_code 요약)과 Claim Audit sub-item 7 로 codex 에 구조화 전달된다. 블록 밖 잔존 정량 매칭은 비차단 advisory (`WARNING: [codex-review][readiness-advisory]`) + envelope `unbacked_quant_flags:` 슬롯으로 전달된다.
 
-### 4.2 exit code 4 / 5 — 판별 계약 + 호출자 행동 (review-readiness 거부 / 래퍼 timeout)
+### 4.2 exit code 4 / 5 / 6 — 판별 계약 + 호출자 행동 (준비도 거부 / 래퍼 timeout / 회차 예산 소진)
 
 **호출자 행동 표**:
 
@@ -199,6 +201,7 @@ ok 21 - test-codex-model-profile-routing
 | 4 (거부 진단행 0 — advisory 경고·발췌 내용 무관) | codex 실행 실패 passthrough (드묾 — `CODEX_RC` passthrough 와의 이론적 겹침) | 기존 실행 실패 경로와 동일 — Sonnet fallback 후보 (§4 본문). |
 | 5 (+진단행 — `ERROR: [codex-review][review-timeout]` 로 **시작하는** stderr 라인 ≥1) | 래퍼 소유 timeout (정지 판정 종료 — verdict 없음, 표식 무접촉) | **즉시 대체 리뷰** (Sonnet fallback, `fallback_reason: codex_timeout` 재사용). 재시도·재호출 없음. 재리뷰 카운트(§3 escalation) 비포함 — 리뷰가 완료되지 않았다. |
 | 5 (진단행 0) | codex 자체 exit 5 passthrough | 기존 실행 실패 처리 (Sonnet fallback 후보) 그대로. |
+| 6 (+진단행 — `ERROR: [codex-review][round-budget-exceeded]`) | 이 사이클의 리뷰 회차 예산 소진 — codex 미호출 (비용 0), 표식 무접촉 (§10) | **재호출 금지.** 지금까지의 지적과 남은 쟁점을 요약해 **사람에게 넘긴다**. Sonnet fallback 비대상 — codex 실행 실패가 아니라 예산 소진이며, 폴백으로 새면 상한이 무의미해진다. 예산이 더 필요하다고 판단하면 사람의 승인을 받은 뒤에만 `[MAX_ROUNDS:<n>]` 을 선언해 재호출한다 (선언은 기록에 남는다). |
 
 **호출자 판별 계약 (기계 계약 — 사람 판독 아님)**:
 
@@ -210,6 +213,13 @@ codex 실행실패 := exit == 4 AND 거부 진단행 0  → 기존 실행 실패
 앵커행        := 정확히 "ERROR: [codex-review][review-timeout]" 로 시작하는 stderr 라인 (라인 시작 anchored — substring 검색 금지)
 래퍼 timeout  := exit == 5 AND 앵커행 ≥ 1  → 즉시 대체 리뷰 (Sonnet fallback, fallback_reason: codex_timeout). 재시도·재호출 없음. 재리뷰 카운트(§3 escalation) 비포함 — 리뷰가 완료되지 않았다
 codex passthrough := exit == 5 AND 앵커행 0 → 기존 실행 실패 처리 (Sonnet fallback 후보) 그대로
+
+예산 진단행    := 정확히 "ERROR: [codex-review][round-budget-exceeded]" 로 시작하는 stderr 라인 (라인 시작 anchored — substring 검색 금지)
+예산 소진      := exit == 6 AND 예산 진단행 ≥ 1  → 재호출 금지, 사람에게 핸드오프. Sonnet fallback 비대상. 리뷰가 수행되지 않았으므로 회차도 소모되지 않는다
+codex passthrough := exit == 6 AND 예산 진단행 0 → 기존 실행 실패 처리 (Sonnet fallback 후보) 그대로
+
+카운터 진단행  := 정확히 "ERROR: [codex-review][round-budget-unavailable]" 로 시작하는 stderr 라인 (라인 시작 anchored)
+카운터 불가    := exit == 7 AND 카운터 진단행 ≥ 1  → **예산 소진이 아니다.** 카운터 디렉토리 쓰기 불가 또는 count 손상으로 예산을 강제할 수 없는 상태다. 사람 핸드오프가 아니라 **인프라 복구**(권한 수정 / 손상 파일 제거) 후 재호출. Sonnet fallback 비대상 — 예산을 강제할 수 없는 채로 리뷰를 통과시키면 안 된다
 ```
 
 substring 이 아니라 **라인 시작 anchored 접두사**로 판별하는 이유: 발췌·기존 진단 등 다른 stderr 내용에 예약 문자열이 섞여도(래퍼의 발췌 소독 — 발췌 내 예약 태그를 `[readiness-…]` 로 치환 — 이 1차 차단, 접두사 anchoring 이 2차 방어) 판별이 오염되지 않는다. advisory 는 별도 접두사 `WARNING: [codex-review][readiness-advisory]` (비차단) 이므로, advisory 경고가 방출된 뒤 codex 자신이 exit 4 를 반환하는 조합에서도 stderr 에 거부 진단행이 없어 호출자가 passthrough 로 정확히 분류한다.
@@ -237,7 +247,7 @@ exit 5 앵커도 동일 원리로 **라인 시작 anchored — substring 검색 
 - `cycle` — 해당 작업 사이클 식별자 (DoD slug 또는 PR 번호)
 - `scope` — 변경 범위 요약 (파일 수 또는 모듈명)
 - `files_reviewed` — 리뷰 대상 파일 수
-- `review_round` — 같은 사이클 내 N번째 리뷰
+- `review_round` — 같은 사이클 내 N번째 리뷰. **수동 stamp 스키마 전용** — 래퍼가 생성하는 stamp 에는 이 필드가 없으며(있었던 적도 없다), 회차 계수·상한 강제는 §10 의 카운터가 담당한다. 아래 수동 예시들에 남아 있는 값은 사람이 적는 참고 기록이다
 - `fallback_reason` — `none` | `codex_timeout` | `codex_error_<code>`
 - `resolution` — `passed` | `needs-fix-round-N` | `escalated_to_human`
 - `remaining_issues` — `none` 또는 잔존 이슈 요약
@@ -423,7 +433,7 @@ config(`codex-models.sh`) 의 전 후보가 부재해도 "빈 모델 → `-m` �
 입력 prompt:
 
 ```
-[NON_INTERACTIVE] spec review for plan: docs/plans/2026-04-20-v011-workflow-hardening.md.
+[NON_INTERACTIVE] spec review for plan: docs/plans/2026-04-20-v011-workflow-hardening.md
 Validate scope coverage and implementation feasibility.
 ```
 
@@ -453,6 +463,14 @@ non-interactive mode 는 **두 경로** 로 쓰인다:
 **Spec review 모드 감지**: prompt 첫 줄이 `[NON_INTERACTIVE] spec review for plan:` 또는 `[NON_INTERACTIVE] spec review for design:` 형식으로 시작하면 spec-review 서브플로우로 분기.
 
 **spec-review 모드는 review-readiness 사전검사 대상이 아니다** — 사전검사·정량/PASS 휴리스틱·`evidence_manifest:` 슬롯 전부 skip (사전검사는 code-review 모드 한정, §2 요청서 작성 규약 / §4.1 참조). spec-review 지시문의 "PASS"·"coverage" 류 관행 토큰이 false-positive 로 자동 경로를 차단하지 않도록 하기 위함이다.
+
+**문서 리뷰의 판정 축 (2026-08-04)**: spec-review 모드는 코드 리뷰와 **다른 슬롯 세트**를 받는다. 래퍼가 결정 건전성 / 범위·추적성 / 주장 감사 3개 슬롯과 판정 규율 3종을 방출하며, 코드 결함·테스트 정합 슬롯은 방출하지 않는다.
+
+- 판정 축은 **결정·범위·추적성** 이다. 구현 수준 결함(오류 경로·자원 수명주기·버퍼링 방식·자료구조 선택)은 verdict 에 반영하지 않고 "구현 단계 이관" 참고사항으로 분류한다 — 문서는 실행할 수 없어 그런 주장을 검증할 수단이 없고, 코드 리뷰 게이트가 실물을 놓고 판정한다.
+- 같은 성격의 지적은 적용 대상 전체를 **한 회차에 일괄 열거**한다 (입력·대상별 분할 지적 금지).
+- 저장소에 없는 일반 규칙을 근거로 반려하지 않는다 — "저장소 계약 위반" 과 "일반론 참고사항" 을 분리 표기하며 후자는 verdict 를 승격시키지 않는다.
+
+> 배경: 이전 판에는 모드 분기가 없어 문서 리뷰에도 코드 리뷰 슬롯이 그대로 나갔다. 즉 계획서를 놓고 "resource leak 을 찾아라" 라고 지시한 셈이고, 리뷰어가 파일 핸들 수명주기를 소송한 것은 지시대로 수행한 결과였다. 그 지적에 대응하려면 구현 세부를 문서 본문에 쌓아야 해서 리뷰 표면이 자가증식했다 (실측: 설계 리뷰 41회·계획 리뷰 26회, 구현 코드 0줄).
 
 Spec review 서브플로우 동작:
 
@@ -514,3 +532,28 @@ resume 된 세션은 원 세션의 model, reasoning effort, sandbox mode 를 그
 > 3회차 리뷰에도 High N건이 남아 사람 에스컬레이션이 필요해요. stamp 의 `resolution: escalated_to_human` 확인하고 잔존 이슈를 직접 처리해 주세요.
 
 이 짧은 안내 후에 기존 codex 본문 (Code Defects / Design Alignment / Test Alignment / Claim Audit / `FINAL_VERDICT: <X>`) 를 그대로 emit 한다.
+
+---
+
+## 10. 회차 예산 (round budget)
+
+리뷰 회차 상한은 **래퍼가 강제**한다. 산문 지시가 아니라 코드 계약이다.
+
+| 항목 | 계약 |
+|---|---|
+| 사이클 키 | 문서 리뷰 = 리뷰 대상 문서의 **정규화된 절대 경로** / 코드 리뷰 = 활성 작업 기준서 slug. 키가 다르면 예산은 독립. 정규화하지 않으면 같은 문서를 `docs/x.md` / `./docs/x.md` / 절대 경로로 번갈아 불러 각각 새 예산을 받는 우회가 생긴다 |
+| 기본 상한 | **5회차** (§3 의 "3회차 High 잔존 → 사람 에스컬레이션" 에 2회 여유) |
+| 계수 대상 | **미통과 회차만.** 통과(PASS)는 사이클 종료이므로 카운터를 제거한다 |
+| 계수 시점 | **verdict 가 확정된 뒤** 1회. 상한 판정만 spawn 이전에 한다. 리뷰가 수행되지 않은 종료 — 준비도 거부(4)·모델 오류(3)·워치독 정지(5) — 는 예산을 소모하지 않는다 (§4.2 의 "재리뷰 카운트 비포함" 과 정합) |
+| 초과 시 | codex 를 실행하지 않고 **exit 6** + 앵커 진단. 표식 계열 파일 무접촉 |
+| 연장 | **프롬프트 첫 줄이 `[MAX_ROUNDS:5]` 하나뿐일 때만** 선언으로 인정한다 (정수 1~999). 기본 상한을 넘기는 선언은 stderr 경고 + 카운터 이력에 기록된다 — **조용한 연장 경로는 없다** |
+| 마커 오인 방지 | 본문 어디에 있는 마커 문자열도 선언으로 해석하지 않고 **원문 그대로 보존한다**. 위치 제한이 없던 이전 판에서는 이전 리뷰 출력이나 문서 예시를 인용하기만 해도, "사용자는 `[MAX_ROUNDS:8]` 을 승인하지 않았다" 같은 문장으로도 상한이 올라갔다 — 사람 승인 없이 예산이 늘어나는 경로였다. 첫 줄 단독이지만 정수가 아닌 표기도 선언이 아니며 본문이 유지된다 |
+| 상태 파일 | `trail/dod/.review-rounds/<키 해시>` (key / count / limit / updated / extensions). 기록은 키별 락 안에서 파일을 다시 읽어 증가시키고 임시파일+교체로 원자화한다 |
+| 카운터 불가 | 디렉토리 쓰기 불가·count 손상은 예산 소진이 **아니다** — 별도 앵커 + exit 7. 손상 시 0 으로 되돌리지 않는다 (되돌리면 카운터를 훼손하는 것만으로 예산이 무한 리셋된다) |
+| 동시성 한계 | 판정과 기록이 codex 실행 시간만큼 떨어져 있어, 상한 직전 **동시 진입 k 건은 모두 통과**할 수 있다 (최대 k-1 회 초과, k 에 상한 없음). 초과분이 기록된 뒤의 호출은 정상 거부된다. 엄격히 막으려면 만료 가능한 진행 중 예약이 필요한데, 만료를 짧게 잡으면 정상 리뷰를 죽이고 길게 잡으면 강제 종료된 리뷰가 회차를 문다 — 유실 방지를 택하고 한계를 남긴 사용자 결정 (2026-08-04) |
+| 연장 이력의 수명 | 연장 선언은 선언 즉시 stderr 경고로 드러나고, 카운터가 살아있는 동안 그 파일의 이력에 남는다. **사이클이 통과로 끝나면 카운터와 함께 이력도 정리된다** — 세션을 넘는 영구 감사 기록이 아니다 |
+| 위협 모델 | 이 예산은 **정직한 에이전트의 규율 장치**다. 카운터 파일을 지우면 0회차로 돌아가고, 그 디렉토리를 지키는 훅은 없다. 대체 리뷰어 경로가 예산을 확인하지 않는 것도 문서 규정으로만 막혀 있다. 적대적 우회 하드닝은 범위 밖이며, 막는 대상은 "고치다 보니 무한히 재리뷰하게 되는" 발산이다. 다만 **의도치 않은 파일 파괴**(카운터 파일 또는 그 디렉토리가 심볼릭 링크인 경우)는 거부한다 — 판정 초입에서 검사해 mkdir·읽기 이전에 exit 7 로 중단하고, 미통과 기록은 락 안에서, 통과 정리는 rm 직전에 각각 재검사한다 (통과 정리 실패도 표식 없이 exit 7) |
+
+**호출자(에이전트) 규약**: exit 6 을 받으면 **재호출하지 않는다.** 지금까지의 지적과 남은 쟁점을 요약해 사람에게 넘긴다. 연장이 필요하다는 판단은 사람의 승인 사항이며, 에이전트가 스스로 `[MAX_ROUNDS:]` 를 올려 재시도하는 것은 이 계약의 위반이다.
+
+> 배경: 회차 상한이 산문 지시로만 존재하던 동안 두 번 무력화됐다 — 보고 없이 13회차 연속 실행, 그리고 사람의 종결 지시 이후 5회차 추가 실행(설계 문서 도장이 무효화되며 병렬 작업자 전원이 편집 차단됨). 산문으로 한 줄 더 쓰는 처방은 이미 두 번 반증됐으므로 채택하지 않았다.

@@ -194,7 +194,17 @@ bg_extract_command() {
 #
 #   Reads $COMMAND from the caller's scope.
 command_invokes() {
-  local pattern="$1"
-  printf '%s' "$COMMAND" | grep -qE \
+  local pattern="$1" _ci_cmd="$COMMAND"
+  # GSD-3 (dod-2026-08-05-gate-scope-defects): heredoc 본문 줄은 데이터이지
+  # 실행 절이 아니다 — 매칭 입력에서 소거한다 (원문 불변). grep 이 행 단위라
+  # `^` 가 본문 줄머리에도 앵커돼, 파일에 기록될 텍스트의 `git commit` 줄이
+  # 실행으로 오인됐다. 소거 로직은 git-subcommand-model.sh 의 SSOT 헬퍼를
+  # 공유한다 (twin matcher 판정 동등성) — 모델 lib 는 순수 정의 파일이라
+  # 이 방향의 source 의존은 부작용이 없다. 미로드 환경(모델을 source 하지
+  # 않는 호출자)에서는 소거 없이 기존 동작 유지 (보수 방향 fail-closed).
+  if declare -F git_model_strip_heredocs >/dev/null 2>&1; then
+    _ci_cmd=$(git_model_strip_heredocs "$_ci_cmd")
+  fi
+  printf '%s' "$_ci_cmd" | grep -qE \
     "(^|[;&|(])[[:space:]]*((env|sudo|command|nohup|time|exec)[[:space:]]+|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*($pattern)"
 }

@@ -47,7 +47,7 @@ _seed_unreviewed_spec() {
 #   → spec gate must SKIP its block and allow the edit (exit 0).
 #   Pre-fix: exit 2 (global block). Post-fix: exit 0.
 test_tests_path_allowed_with_unreviewed_spec() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   _seed_unreviewed_spec
 
   local input='{
@@ -60,7 +60,7 @@ test_tests_path_allowed_with_unreviewed_spec() {
 
 # F1b: tests/scripts/ subtree (the actual incident-blocked path family).
 test_tests_scripts_path_allowed_with_unreviewed_spec() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   _seed_unreviewed_spec
 
   local input='{
@@ -75,7 +75,7 @@ test_tests_scripts_path_allowed_with_unreviewed_spec() {
 #   a NON-tests source file → spec gate must STILL block (exit 2). This proves
 #   the exemption only frees tests/, not real source.
 test_non_tests_source_still_blocked_with_unreviewed_spec() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   _seed_unreviewed_spec
 
   local input='{
@@ -88,7 +88,7 @@ test_non_tests_source_still_blocked_with_unreviewed_spec() {
 
 # F2b: a src/ file is also still blocked (second non-tests sample).
 test_src_file_still_blocked_with_unreviewed_spec() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   _seed_unreviewed_spec
 
   local input='{
@@ -103,7 +103,7 @@ test_src_file_still_blocked_with_unreviewed_spec() {
 #   'tests' but is NOT under PROJECT_DIR/tests/ must NOT be exempted — it is
 #   real source and must stay blocked.
 test_tests_substring_not_under_tests_dir_still_blocked() {
-  seed_dod "dod-2026-04-13-test.md"
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
   _seed_unreviewed_spec
 
   # Under src/, file named tests-helper.ts — must NOT match the tests/ exemption.

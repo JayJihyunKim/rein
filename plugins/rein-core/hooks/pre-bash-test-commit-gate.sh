@@ -1338,8 +1338,22 @@ flush_plan_coverage_dirty() {
 # matcher — embedding the ERE inside the literal alternation would mis-order
 # alternation precedence. The canonical $GIT_COMMIT_ERE skips git global
 # options + multi-space and closes `commit` on a shell-token boundary.
+# GSD-3 (dod-2026-08-05-gate-scope-defects): 커밋 감지를 한 번 계산해 아래
+# 세 게이트(coverage flush / 리뷰 표식 / 커밋 메시지 포맷)가 공유한다.
+# 리터럴 절대경로 cd 로 저장소 밖에 들어간 커밋(샌드박스 재현 스크립트)은
+# 이 저장소의 커밋이 아니므로 게이트 대상에서 제외한다 — 변수/불명 cd 는
+# 기존대로 판정 (사용자 확정: 확실할 때만 면제, FN 금지).
+GIT_COMMIT_GATED=false
+if command_invokes "$GIT_COMMIT_ERE"; then
+  if git_commit_outside_repo_cd "$COMMAND" "$PROJECT_DIR"; then
+    echo "NOTICE: [test-commit-gate] git commit runs under a literal cd outside this repository — commit gates skipped for this command (sandbox commit, not this repo)." >&2
+  else
+    GIT_COMMIT_GATED=true
+  fi
+fi
+
 if command_invokes "pytest|jest|vitest|mocha|npm run test|npm test|yarn test|pnpm test|python -m pytest|npx jest|npx vitest|bash tests/" \
-   || command_invokes "$GIT_COMMIT_ERE"; then
+   || [ "$GIT_COMMIT_GATED" = true ]; then
   # X3.B.2: flush plan-coverage dirty list BEFORE legacy marker scan.
   flush_plan_coverage_dirty
   flush_rc=$?
@@ -1397,7 +1411,8 @@ fi
 
 # --- Codex 리뷰 stamp 검사 (git commit 시) ([P3]~[P6]) ---
 # GMF-1: canonical $GIT_COMMIT_ERE (was literal "git commit").
-if command_invokes "$GIT_COMMIT_ERE"; then
+# GSD-3: 샌드박스 커밋(리터럴 밖 cd)은 위에서 면제 — GIT_COMMIT_GATED 공유.
+if [ "$GIT_COMMIT_GATED" = true ]; then
   if ! check_review_stamp "committing"; then
     exit 2
   fi
@@ -1413,7 +1428,8 @@ fi
 # 추출 로직 자체는 lib/extract-commit-msg.py 에 분리 (bash 의
 # $(cmd <<HEREDOC) + `|| true` 파서 한계를 피하기 위함).
 # GMF-1: canonical $GIT_COMMIT_ERE (was literal "git commit").
-if command_invokes "$GIT_COMMIT_ERE"; then
+# GSD-3: 샌드박스 커밋(리터럴 밖 cd)은 메시지 포맷 강제 대상도 아니다.
+if [ "$GIT_COMMIT_GATED" = true ]; then
   EXTRACT_SCRIPT="$SCRIPT_DIR/lib/extract-commit-msg.py"
   # Helper 누락은 fail-open 으로 두지 않는다. heredoc 우회와 같은 silent
   # bypass 를 막기 위해, helper 가 없거나 python3 가 동작하지 않으면 BLOCK.
