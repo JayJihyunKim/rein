@@ -1,12 +1,12 @@
 reviewer: sonnet-fallback
-timestamp: 2026-08-07T14:35:05
+timestamp: 2026-08-07T15:00:36
 cycle: release-v166
-scope: 릴리스 델타 누적 6회차 — CI python/PyYAML 결정론화 (macOS 러너 정책 로더 fail-open 실측 대응)
-files_reviewed: 13
-review_round: 6
+scope: 릴리스 델타 누적 7회차 — routing-map 표 파서 바이트 안전 재작성 (awk 다중바이트 구현편차 클래스 종결, 잔존 0 전수 확인)
+files_reviewed: 14
+review_round: 7
 fallback_reason: codex_error_1
 resolution: passed
-remaining_issues: Low 백로그 3 (PyYAML 부재 시 정책 무시 무경고 — stderr 1줄 안내 후보, drift-boundary T8, preamble 노이즈)
+remaining_issues: Low advisory 1 (헤더 2앵커 순서 불문 — 향후 표 행 추가 시 이론적 오매칭, 리뷰어 advisory)
 model: gpt-5.6-sol
 effort: high
 effort_source: computed

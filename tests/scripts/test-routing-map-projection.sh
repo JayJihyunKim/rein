@@ -19,25 +19,29 @@ if [ "$bytes" -gt "$MAX_BYTES" ]; then
   exit 1
 fi
 
-# 표 1열(작업 유형) 추출 helper. $2=헤더 식별 정규식(첫 데이터 표를 고름).
-# table 헤더행을 만나면 캡처 시작 → 비-파이프 줄에서 종료. separator(---) / 헤더셀 제외.
+# 표 1열(작업 유형) 추출 helper. $2/$3=헤더 식별 substring 2개 (둘 다 포함하는
+# 파이프 줄을 데이터 표 헤더로 판정 → 다음 비-파이프 줄에서 종료).
+#
+# awk 정규식을 다중바이트(한글) 텍스트에 적용하지 않는다 — awk 빌드·로케일
+# 조합에 따라 매칭이 갈려 macOS 러너에서 8행 중 4행이 유실됐다 (2026-08-07
+# 태그 preflight 실측; 로컬 macOS·ubuntu 러너는 통과 — 구현 편차 클래스).
+# index() substring 매칭 + 바이트 단위 cut/sed/grep -F 만 사용해 구현 무관화.
 extract_types() {
-  awk -v hdr="$2" '
-    $0 ~ /^\|/ && $0 ~ hdr { intbl=1; next }
-    intbl && $0 !~ /^\|/ { intbl=0 }
-    intbl {
-      cell=$2
-      gsub(/^[ \t`]+/, "", cell); gsub(/[ \t`]+$/, "", cell)
-      if (cell == "" || cell == "작업 유형") next
-      if (cell ~ /^[-: ]+$/) next
-      print cell
-    }
-  ' FS='|' "$1"
+  awk -v a="$2" -v b="$3" '
+    !intbl && index($0, "|") == 1 && index($0, a) && index($0, b) { intbl=1; next }
+    intbl && index($0, "|") != 1 { exit }
+    intbl { print }
+  ' "$1" \
+    | cut -d'|' -f2 \
+    | sed -e 's/^[ \t`]*//' -e 's/[ \t`]*$//' \
+    | { grep -v '^$' || true; } \
+    | { grep -v '^[-: ]*$' || true; } \
+    | { grep -vxF '작업 유형' || true; }
 }
 
 # (a) 작업유형 라벨 subset — map ⊆ procedure §5
-map_types=$(extract_types "$MAP" "추천 agent")
-proc_types=$(extract_types "$PROC" "에이전트.*스킬")
+map_types=$(extract_types "$MAP" "추천" "agent")
+proc_types=$(extract_types "$PROC" "에이전트" "스킬")
 
 # (a-0) 추출 성공 가드 — 표 헤더 rename / 구조 변경으로 파서가 0건을 뽑으면
 # subset 검사가 공허하게 참(false PASS)이 된다. 양쪽 모두 non-empty + map 은
