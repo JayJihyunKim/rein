@@ -40,7 +40,31 @@ permissions:
   contents: read
 
 jobs:
+  # Preflight (2026-08-07, v1 안전 소릴리스 ③ —
+  # trail/dod/dod-2026-08-07-v1-safety-prerelease.md): 태그 push 가 사전 검증
+  # 없이 배포를 시작하던 결함(감사 보고서 문제 2)의 봉합. 전체 테스트 스위트 +
+  # plugin SSOT drift 검사가 모두 통과해야 publish 가 실행된다.
+  preflight-tests:
+    uses: ./.github/workflows/tests.yml
+
+  preflight-drift:
+    if: github.repository == 'JayJihyunKim/rein-dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Plugin SSOT drift check
+        run: python3 scripts/rein-check-plugin-drift.py
+
   publish:
+    needs: [preflight-tests, preflight-drift]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

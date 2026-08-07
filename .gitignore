@@ -53,6 +53,10 @@ data/processed/
 # rein session-state git snapshot (GS-1) — 훅 생성 git 스냅샷, 매 세션 재생성, commit 배제.
 /.rein/state/
 
+# rein 차단 로그 원문 (v1 안전 소릴리스 ①) — 마스킹 적용본이지만 명령 맥락을
+# 담으므로 로컬 전용. 추적 파일(trail/incidents/blocks.jsonl)은 안전 표현만 기록.
+/.rein/logs/
+
 # rein incident aggregate lock (휘발성 — 매 세션 hook 이 갱신하는 commit noise)
 /trail/incidents/.aggregate.lock
 

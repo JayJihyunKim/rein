@@ -211,9 +211,20 @@ def aggregate(project_dir: Path):
             target = e.get("target", "")
             if not hook or not reason:
                 continue
+            # v1 safety release ①: 테스트 하니스발 이벤트는 incident 승격
+            # 신호에서 제외 (legacy 무필드 레코드는 live 취급 — FN 방지).
+            if e.get("source", "live") == "test":
+                continue
             key = (hook, reason)
             counts[key] += 1
             if len(examples[key]) < 5:
+                # v1 safety release ① (보안 리뷰 Medium): legacy 레코드(source
+                # 필드 없음)의 target 은 마스킹 이전 원문일 수 있다 — 신규
+                # 클론/worktree 는 watermark 부재로 legacy 전량을 재스캔하므로,
+                # 예시를 git 추적 incident 파일로 퍼 나르지 않도록 치환한다
+                # (신규 레코드의 target 은 안전 표현이라 그대로).
+                if "source" not in e:
+                    target = "<legacy-target-redacted>"
                 examples[key].append(target)
 
         if bad_lines:
@@ -429,6 +440,10 @@ def cmd_advisory_summary(args) -> int:
         except json.JSONDecodeError:
             continue
         if since_ts and rec.get("ts", "") < since_ts:
+            continue
+        # v1 safety release ①: 테스트 하니스발 이벤트는 세션 종료 advisory
+        # 카운트에서도 제외 (aggregate() 와 동일 계약).
+        if rec.get("source", "live") == "test":
             continue
         label = rec.get("reason", "")
         if not label:

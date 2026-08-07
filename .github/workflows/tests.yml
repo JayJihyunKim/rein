@@ -2,19 +2,38 @@ name: tests
 
 # rein-dev 메인테이너 전용 테스트 워크플로우.
 # plugin marketplace 흐름 (`/plugin install rein@rein`) 로 사용자가 받는 파일에
-# 포함되지 않는다 (branch-strategy.md 의 "tests/** 는 main 제외" 정책).
-# mirror-to-public.yml 이 이 파일을 public rein 레포로 전송하기 전에
-# strip 하여 이중 방어.
+# 포함되지 않는다 (branch-strategy.md 정책). mirror-to-public.yml 이 이 파일을
+# public rein 레포로 전송하기 전에 strip 하여 이중 방어.
 #
-# 수동 실행 전용. 내부 governance + plugin consistency 테스트가 일반 push/PR
-# 신호를 오염시키지 않도록 자동 CI 에서는 실행하지 않는다.
+# 자동 실행 (2026-08-07, v1 안전 소릴리스 ② —
+# trail/dod/dod-2026-08-07-v1-safety-prerelease.md):
+#   - dev push / PR 에서 전체 스위트 자동 실행 (이전의 "수동 실행 전용" 정책은
+#     감사 보고서 문제 2 판정으로 폐기 — 회귀가 push/PR 에서 자동 검출돼야 함)
+#   - workflow_call: publish-plugin.yml 의 preflight 가 재사용
+#   - 비용 제어: macOS(과금 배수) + Windows advisory 는 dev push 에서 제외,
+#     PR / 수동 실행 / 릴리스 태그(preflight 경유) 에서만 실행
+#
+# 스위트 구성: hooks / scripts / skills / rules / agents / CLI / integration.
+# tests/cli/test-install.sh 는 제외 — v1.0.1 에서 삭제된 install.sh 를 대상으로
+# 하는 죽은 테스트 (정리 백로그, 본 DoD 완료 기록 참조).
 
 on:
   workflow_dispatch:
+  workflow_call:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [main, dev]
+
+# 테스트는 read 권한이면 충분 — push/PR 자동 트리거가 repo 기본 토큰 권한을
+# 상속하지 않도록 명시 (보안 리뷰 Low, publish-plugin.yml 과 동일 원칙).
+permissions:
+  contents: read
 
 jobs:
   # Primary matrix: rein 이 공식 지원하는 플랫폼.
   # ubuntu-latest 는 Linux + WSL2 환경을 대변한다.
+  # dev push 는 ubuntu 만 (빠른 신호 + 과금 절약), PR/dispatch/태그는 macOS 포함.
   tests:
     # 외부로 포크/복제된 저장소에서는 돌지 않도록 방어.
     if: github.repository == 'JayJihyunKim/rein-dev'
@@ -22,7 +41,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: ${{ (github.event_name == 'push' && github.ref_type != 'tag') && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -40,11 +59,27 @@ jobs:
       - name: Run script tests
         run: bash tests/scripts/run-all.sh
 
+      - name: Run skill tests
+        run: bash tests/skills/run-all.sh
+
+      - name: Run rule tests
+        run: bash tests/rules/run-all.sh
+
+      - name: Run agent tests
+        run: bash tests/agents/run-all.sh
+
+      - name: Run CLI tests
+        run: bash tests/rein-test.sh
+
+      - name: Run integration tests
+        run: bash tests/integration/run-all.sh
+
   # Phase 9 Task 9.1 — dual-mode smoke matrix.
   # Advisory: Windows native (Git Bash shell). Rein 은 Windows 에서 WSL2 사용을
   # 권장하므로 native 실패가 릴리스를 막지 않는다. 단, 호환성 회귀 탐지용.
+  # dev push 에서는 제외 (advisory 신호는 PR/릴리스 시점이면 충분).
   tests-windows-advisory:
-    if: github.repository == 'JayJihyunKim/rein-dev'
+    if: github.repository == 'JayJihyunKim/rein-dev' && (github.event_name != 'push' || github.ref_type == 'tag')
     name: tests (windows-latest, advisory)
     runs-on: windows-latest
     continue-on-error: true

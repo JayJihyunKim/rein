@@ -47,6 +47,12 @@ BLOCKS_LOG_JSONL="$PROJECT_DIR/trail/incidents/blocks.jsonl"
 #   Append a JSONL block record and warn when the same (hook, reason) pair
 #   recurs. THRESHOLD counting is per (hook, reason) — not whole-hook — so it
 #   measures a repeating *violation pattern*, matching the aggregate logic.
+#
+#   v1 safety release ① — writing/masking/count live in lib/rein-log-block.py
+#   (SSOT shared with pre-edit-dod-gate.sh). The tracked JSONL gets only a
+#   safe representation (verb + content hash); the masked raw command goes to
+#   the untracked $PROJECT_DIR/.rein/logs/. Records made under REIN_TEST_MODE=1
+#   are tagged source=test and excluded from the repeat count.
 log_block() {
   local reason="$1"
   local target="$2"
@@ -55,37 +61,19 @@ log_block() {
   if [ -z "${PYTHON_RUNNER+x}" ] || [ "${#PYTHON_RUNNER[@]}" -eq 0 ]; then
     return 0
   fi
+  # Helper absent → skip logging (best-effort — never affects the deny path).
+  if [ -z "${BG_LOG_HELPER:-}" ] || [ ! -f "$BG_LOG_HELPER" ]; then
+    return 0
+  fi
   mkdir -p "$(dirname "$BLOCKS_LOG_JSONL")"
-  "${PYTHON_RUNNER[@]}" - "$BG_GUARD_NAME" "$reason" "$target" <<'PY' >> "$BLOCKS_LOG_JSONL" 2>/dev/null || true
-import json, sys
-from datetime import datetime, timezone
-print(json.dumps({
-  "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
-  "hook": sys.argv[1],
-  "reason": sys.argv[2],
-  "target": sys.argv[3],
-}, ensure_ascii=False))
-PY
-
   local count
-  count=$("${PYTHON_RUNNER[@]}" -c "
-import json, sys
-target_hook = sys.argv[1]
-target_reason = sys.argv[2]
-n = 0
-try:
-    with open(sys.argv[3]) as f:
-        for line in f:
-            try:
-                e = json.loads(line)
-                if e.get('hook') == target_hook and e.get('reason') == target_reason:
-                    n += 1
-            except Exception:
-                continue
-except OSError:
-    pass
-print(n)
-" "$BG_GUARD_NAME" "$reason" "$BLOCKS_LOG_JSONL" 2>/dev/null || echo 0)
+  count=$("${PYTHON_RUNNER[@]}" "$BG_LOG_HELPER" \
+    "$BG_GUARD_NAME" "$reason" "$target" \
+    "$BLOCKS_LOG_JSONL" "$PROJECT_DIR/.rein/logs/blocks-raw.jsonl" \
+    command "${REIN_TEST_MODE:-0}" 2>/dev/null || echo 0)
+  case "$count" in
+    ''|*[!0-9]*) count=0 ;;
+  esac
   # Auto mode: silence repeat-violation WARNING (the marker file presence
   # means the user is running a long autonomous cycle and these alerts
   # become noise). Fail-safe: helper absent → emit normally.
@@ -124,6 +112,10 @@ bg_infra_init() {
     echo "[rein] The Bash guard cannot run because the JSON deny emitter (lib/json-deny-emitter.sh) could not be loaded — it may be missing or corrupt. All policy checks are paused until the emitter is restored. Run 'rein update' to repair the installation." >&2
     exit 2
   fi
+  # Block-log SSOT helper (v1 safety release ①). Missing helper degrades to
+  # "no logging" inside log_block — it must NOT fail-close the guard, because
+  # logging is an audit side-channel, not a policy check.
+  BG_LOG_HELPER="$script_dir/lib/rein-log-block.py"
 }
 
 # bg_resolve_python_or_die

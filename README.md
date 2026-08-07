@@ -288,7 +288,7 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.6.5** (2026-08-05) — code review (`/codex-review`) now enforces a round budget (default 5; explicit, logged extension only), design/plan documents are reviewed on document-appropriate criteria instead of code-review instructions, and three gate misfires are fixed: markers pointing outside the repository no longer lock edits, an unreviewed document only blocks work that actually references it, and `git commit` text inside heredocs or literal-path sandbox scripts is no longer mistaken for a real commit (variable paths and this repo's linked worktrees stay gated). ([CHANGELOG](CHANGELOG.md))
+Latest release: **v1.6.6** (2026-08-07) — blocked commands are no longer written verbatim to the git-tracked incident log: the tracked record keeps only the command verb and a content hash, while a masked copy (env-var tokens, Authorization headers, URL credentials) goes to a local untracked log. Test-harness events are tagged and excluded from repeat-violation warnings and incident promotion. ([CHANGELOG](CHANGELOG.md))
 
 Previous: **v1.6.4** (2026-07-27) — the persona picker offers **Create new** directly, switching a persona takes effect immediately in the running session, you can pick or write the greeting yourself, and code review (`/codex-review`) no longer mis-cancels itself while the reviewer is running your tests. ([CHANGELOG](CHANGELOG.md))
 

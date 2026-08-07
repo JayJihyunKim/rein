@@ -7,6 +7,11 @@
 
 REAL_PROJECT_DIR="${REAL_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 
+# v1 안전 소릴리스 ①: 하니스 경유 훅 실행은 차단 로그에 source=test 로 태깅되어
+# 반복 경고 카운트·incident 집계에서 제외된다 (샌드박스 격리에 더한 이중 방어).
+# live 경로를 검증하는 테스트는 호출 시 REIN_TEST_MODE=0 으로 명시 override.
+export REIN_TEST_MODE=1
+
 SANDBOX=""
 HOOK_STDOUT=""
 HOOK_STDERR=""

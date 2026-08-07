@@ -182,6 +182,14 @@ S=$(_mksandbox)
 # Marker from prior session pointing to non-existent DoD.
 echo "path=trail/dod/dod-2026-03-01-gone.md" > "$S/trail/dod/.active-dod"
 
+# Bootstrap markers (BG-1 contract, v1.2.0~): session-start-load-trail.sh 는
+# `.rein/project.json` + `trail/index.md` 둘 다 없으면 조기 exit 0 하므로
+# cleanup 블록에 도달하려면 fixture 가 초기화 완료 상태를 갖춰야 한다.
+# (2026-08-07 수리 — 계약 추가 이후 fixture 미갱신으로 인한 기존 실패)
+mkdir -p "$S/.rein"
+printf '{"mode":"plugin","scope":"project","version":"1.0.0"}\n' > "$S/.rein/project.json"
+printf '# trail/index.md — test fixture\n' > "$S/trail/index.md"
+
 # Invoke session-start hook.
 REIN_PROJECT_DIR_OVERRIDE="$S" \
   bash "$PROJECT_DIR/plugins/rein-core/hooks/session-start-load-trail.sh" >/dev/null 2>/dev/null

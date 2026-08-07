@@ -36,6 +36,7 @@ for test_file in \
   "$SCRIPT_DIR/test-bash-guard-split.sh" \
   "$SCRIPT_DIR/test-bash-dispatcher.sh" \
   "$SCRIPT_DIR/test-pre-bash-safety-guard.sh" \
+  "$SCRIPT_DIR/test-bash-guard-log-redaction.sh" \
   "$SCRIPT_DIR/test-pre-bash-test-commit-gate.sh" \
   "$SCRIPT_DIR/test-security-tier-gate.sh" \
   "$SCRIPT_DIR/test-python-runner.sh" \

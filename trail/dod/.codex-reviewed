@@ -1,15 +1,14 @@
 reviewer: sonnet-fallback
-timestamp: 2026-08-05T06:02:18Z
-cycle: 2026-08-05-release-v165
-scope: 릴리스 버전 표면 + 변경 로그 (로직 무변경)
-files_reviewed: 6
+timestamp: 2026-08-07T12:47:36
+cycle: release-v166
+scope: 버전 승격 2표면 + CHANGELOG v1.6.6 + README KR/EN 엔트리 (버전 문자열·문서 전용 델타)
+files_reviewed: 5
 review_round: 1
 fallback_reason: codex_error_1
 resolution: passed
 remaining_issues: none
-diff_base: f5b80e130c332034257f1c5caff50ba0178eea3c
-model: sonnet
+model: gpt-5.6-sol
 effort: high
-effort_source: marker
+effort_source: computed
 policy_version: 1
-codex_version: (unavailable — usage limit)
+codex_version: codex-cli 0.145.0

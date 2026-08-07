@@ -1,9 +1,6 @@
 reviewer=security-reviewer
-reviewed=2026-08-05T07:09:41Z
+reviewed=2026-08-07T12:54:28Z
 security_level=standard
-cycle=2026-08-05-release-v165
+cycle=release-v166
 verdict=PASS
 mechanism=llm-security-review
-scope=v1.6.5 릴리스 델타 (버전 표면+문서, 로직 무변경) + main 선별 머지 스테이징 검토본 일치 확인
-findings=blocking 0 / informational 0
-notes=릴리스 델타(dev d923bde·9f679e1·6121cc9) 검토 — (1) 코드 로직 변경 0 확인: 커밋 구성 실측 결과 버전 문자열 2줄(plugins/rein-core/.claude-plugin/plugin.json "1.6.5" / scripts/rein.sh VERSION="1.6.5" — 스테이징 blob 에서 직접 확인, 두 표면 일치) + CHANGELOG/README 릴리스 서술 + trail 운영기록·리뷰 표식뿐. 훅/래퍼/테스트 스테이징 내용은 직전 두 PASS 사이클(2026-08-04-review-scope-and-round-budget / 2026-08-05-gate-scope-defects)에서 보안 검토된 바로 그 내용이다. (2) main 스테이징 78파일 = dev 검토본 일치: `git diff dev --cached -- <스테이징 경로 78건>` 차이 0 건 (바이트 동일) — 선별 체크아웃 과정에서의 변조·이탈 없음. (3) 스테이징 목록에 제외 대상·민감 파일 없음(.env/settings.local.json/.claude overlay/docs\/specs 부재). (4) 공개 문서 델타(CHANGELOG·README 양어) 스캔: 사실 서술만, 시크릿·주입 표면 0, 보안 동작 서술(워크트리 차단 유지 포함)이 실제 구현과 일치. 버전 등급(사용자 결정 patch, 기계 판정 minor 병기)은 문서에 정직 기록됨 — 보안 무관.

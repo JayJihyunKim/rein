@@ -2,7 +2,7 @@
 
 ## 행동 강령
 
-DoD 작성 직후 본 표로 1순위 조합을 확인. 상세는 routing-procedure.md.
+DoD 작성 직후 본 표로 1순위 조합을 확인.
 
 | 작업 유형 | 추천 agent | 추천 skill | DoD 작성 |
 |---|---|---|---|
@@ -15,5 +15,4 @@ DoD 작성 직후 본 표로 1순위 조합을 확인. 상세는 routing-procedu
 | 문서 작성 | `rein:docs-writer` | — | 대상 독자 |
 | 보안 리뷰 | `rein:security-reviewer` | — | 위협 모델 |
 
-> 이 표는 routing-procedure.md §5 의 압축 projection 이다 (SSOT=§5).
-> 상세: plugins/rein-core/rules/routing-procedure.md
+> routing-procedure.md §5 의 압축 projection (SSOT=§5).

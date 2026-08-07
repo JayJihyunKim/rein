@@ -76,39 +76,26 @@ log_block() {
   if [ -z "${PYTHON_RUNNER+x}" ] || [ "${#PYTHON_RUNNER[@]}" -eq 0 ]; then
     return 0
   fi
+  # v1 safety release ① — 기록·마스킹·카운트는 lib/rein-log-block.py SSOT
+  # (bash-guard-infra.sh 의 log_block 과 공유). 이 게이트의 target 은 파일
+  # 경로/짧은 리터럴이므로 path 모드 (마스킹 적용, 해시 축약 없음). helper
+  # 부재 시 로깅만 생략 — 차단 판정에는 영향 없음.
+  local _lb_helper="$SCRIPT_DIR/lib/rein-log-block.py"
+  if [ ! -f "$_lb_helper" ]; then
+    return 0
+  fi
   mkdir -p "$(dirname "$BLOCKS_LOG_JSONL")"
-  "${PYTHON_RUNNER[@]}" - "pre-edit-dod-gate" "$reason" "$target" <<'PY' >> "$BLOCKS_LOG_JSONL" 2>/dev/null || true
-import json, sys
-from datetime import datetime, timezone
-print(json.dumps({
-  "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
-  "hook": sys.argv[1],
-  "reason": sys.argv[2],
-  "target": sys.argv[3],
-}, ensure_ascii=False))
-PY
-
-  # hook+reason 조합별로 카운트 (aggregate THRESHOLD 와 동일 기준).
-  # 전체 hook 누적이 아닌 "동일 위반 패턴" 반복을 정확히 측정하기 위함.
+  # hook+reason 조합별 카운트 (aggregate THRESHOLD 와 동일 기준). source=test
+  # 레코드는 카운트에서 제외 — 테스트 하니스 이벤트가 반복 경고를 오염시키지
+  # 않도록 (legacy 무필드 레코드는 live 취급).
   local count
-  count=$("${PYTHON_RUNNER[@]}" -c "
-import json, sys
-target_hook = 'pre-edit-dod-gate'
-target_reason = sys.argv[1]
-n = 0
-try:
-    with open(sys.argv[2]) as f:
-        for line in f:
-            try:
-                e = json.loads(line)
-                if e.get('hook') == target_hook and e.get('reason') == target_reason:
-                    n += 1
-            except Exception:
-                continue
-except OSError:
-    pass
-print(n)
-" "$reason" "$BLOCKS_LOG_JSONL" 2>/dev/null || echo 0)
+  count=$("${PYTHON_RUNNER[@]}" "$_lb_helper" \
+    "pre-edit-dod-gate" "$reason" "$target" \
+    "$BLOCKS_LOG_JSONL" "$PROJECT_DIR/.rein/logs/blocks-raw.jsonl" \
+    path "${REIN_TEST_MODE:-0}" 2>/dev/null || echo 0)
+  case "$count" in
+    ''|*[!0-9]*) count=0 ;;
+  esac
   # Auto mode: silence repeat-violation WARNING (the marker file presence
   # means the user is running a long autonomous cycle).
   local _auto_silent=0

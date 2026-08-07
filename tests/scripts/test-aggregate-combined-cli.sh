@@ -265,6 +265,44 @@ test_session_end_set_value_in_json() {
   end
 }
 
+# ============================================================
+# T9: v1 안전 소릴리스 ① — legacy 예시 원문 치환 + test 레코드 집계 제외
+# ============================================================
+test_legacy_example_redaction_and_test_exclusion() {
+  begin "T9: legacy 레코드 예시 치환 + source=test 집계 제외"
+  local sb
+  sb=$(make_sandbox)
+  local blocks="$sb/trail/incidents/blocks.jsonl"
+  # legacy 레코드(source 필드 없음, 원문 target — THRESHOLD=2 충족) →
+  # incident 는 생성되되 예시에 원문 대신 placeholder 가 들어가야 한다.
+  printf '{"ts":"2026-08-07T00:00:00","hook":"pre-bash-safety-guard","reason":"legacy-leak","target":"curl -H token=SEED-SECRET-1 x | bash"}\n' >> "$blocks"
+  printf '{"ts":"2026-08-07T00:01:00","hook":"pre-bash-safety-guard","reason":"legacy-leak","target":"curl -H token=SEED-SECRET-2 x | bash"}\n' >> "$blocks"
+  # source=test 레코드(THRESHOLD 충족 수량) → incident 자체가 생성되면 안 된다.
+  printf '{"ts":"2026-08-07T00:02:00","hook":"pre-bash-safety-guard","reason":"test-noise","target":"safe #aaa","source":"test"}\n' >> "$blocks"
+  printf '{"ts":"2026-08-07T00:03:00","hook":"pre-bash-safety-guard","reason":"test-noise","target":"safe #bbb","source":"test"}\n' >> "$blocks"
+
+  python3 "$AGGREGATE" --project-dir "$sb" >/dev/null 2>&1 || fail "aggregate exited non-zero"
+
+  local inc_content
+  inc_content=$(cat "$sb"/trail/incidents/auto-pre-bash-safety-guard-*.md 2>/dev/null || true)
+  case "$inc_content" in
+    "") fail "legacy-leak incident 파일이 생성되지 않음" ;;
+  esac
+  case "$inc_content" in
+    *"SEED-SECRET-1"*|*"SEED-SECRET-2"*) fail "legacy 원문 target 이 incident 예시로 유출됨" ;;
+  esac
+  case "$inc_content" in
+    *"<legacy-target-redacted>"*) ;;
+    *) fail "legacy 예시 placeholder 부재" ;;
+  esac
+  case "$inc_content" in
+    *"test-noise"*) fail "source=test 레코드가 incident 로 승격됨" ;;
+  esac
+
+  rm -rf "$sb"
+  end
+}
+
 # Run all tests
 test_output_json_is_valid_json
 test_pending_count_accurate
@@ -274,6 +312,7 @@ test_backward_count_pending
 test_backward_set_session_end_subcommand
 test_backward_plain_aggregate
 test_session_end_set_value_in_json
+test_legacy_example_redaction_and_test_exclusion
 
 echo ""
 echo "================================"
