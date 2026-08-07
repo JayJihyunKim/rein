@@ -47,6 +47,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # python3 + PyYAML 을 결정론적으로 고정 — macOS 러너 시스템 파이썬은
+      # PyYAML 이 없어 정책 로더가 fail-open(정책 무시)으로 동작, 정책 토글
+      # 테스트가 러너에서만 실패했다 (2026-08-07 태그 preflight 실측).
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: python3 -m pip install --quiet pyyaml
+
       - name: Show toolchain versions
         run: |
           bash --version

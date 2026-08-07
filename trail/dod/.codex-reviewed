@@ -1,12 +1,12 @@
 reviewer: sonnet-fallback
-timestamp: 2026-08-07T14:14:40
+timestamp: 2026-08-07T14:35:05
 cycle: release-v166
-scope: 릴리스 델타 누적 5회차 — main 트리 의존 테스트 3건 SKIP 가드 (validator plan / settings 별칭 / branch-strategy 참조) + main worktree 7스위트 전체 초록 실측
-files_reviewed: 12
-review_round: 5
+scope: 릴리스 델타 누적 6회차 — CI python/PyYAML 결정론화 (macOS 러너 정책 로더 fail-open 실측 대응)
+files_reviewed: 13
+review_round: 6
 fallback_reason: codex_error_1
 resolution: passed
-remaining_issues: Low 백로그 2 (drift-boundary T8 main 조건 — preflight 경로 밖, preamble 노이즈)
+remaining_issues: Low 백로그 3 (PyYAML 부재 시 정책 무시 무경고 — stderr 1줄 안내 후보, drift-boundary T8, preamble 노이즈)
 model: gpt-5.6-sol
 effort: high
 effort_source: computed
