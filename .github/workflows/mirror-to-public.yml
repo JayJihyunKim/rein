@@ -68,6 +68,16 @@ jobs:
             git commit -m "chore: strip maintainer-only tests workflow for public"
           fi
 
+          # Strip publish workflow. Publishing runs from rein-dev only; on
+          # public it referenced the (stripped) reusable tests.yml, making the
+          # workflow file invalid — every mirror push surfaced a 0s failed run
+          # (2026-08-07 v1.6.6 preflight 개편 후 실측 5건). Root fix: publish
+          # never belongs on public.
+          if [ -f .github/workflows/publish-plugin.yml ]; then
+            git rm -q .github/workflows/publish-plugin.yml
+            git commit -m "chore: strip maintainer-only publish workflow for public"
+          fi
+
           # Strip maintainer-only govcheck workflow. `govcheck.yml` validates
           # the rein-dev governance surface (AGENTS.md, hooks, scripts/rein-*).
           # It is not useful in user projects (branch-strategy.md §

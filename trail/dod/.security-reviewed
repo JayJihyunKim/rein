@@ -1,6 +1,6 @@
 reviewer=security-reviewer
-reviewed=2026-08-07T15:01:04Z
+reviewed=2026-08-07T15:30:31Z
 security_level=standard
-cycle=release-v166
+cycle=mirror-publish-strip
 verdict=PASS
 mechanism=llm-security-review
