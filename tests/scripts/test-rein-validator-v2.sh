@@ -279,13 +279,21 @@ fi
 rm -rf "$SANDBOX"
 
 # ---- Test 9: Existing plan (governance-integrity) still validates via v2.
+# docs/plans/** 는 dev 전용(main 제외 정책) — main 트리에서 도는 preflight 는
+# 대상 실파일이 없으므로 SKIP (2026-08-07 태그 preflight 실측. 회귀 가치는
+# dev CI 가 유지).
 echo "### Test 9: 기존plan_플랜커맨드_exit0"
-python3 "$VALIDATOR" plan "$PROJECT_DIR/docs/plans/2026-04-21-governance-integrity-plan.md" >/dev/null 2>&1
-rc=$?
-if [ "$rc" -eq 0 ]; then
-  _pass "existing governance plan via 'plan' subcommand → exit 0"
+_t9_plan="$PROJECT_DIR/docs/plans/2026-04-21-governance-integrity-plan.md"
+if [ ! -f "$_t9_plan" ]; then
+  echo "  SKIP: dev 전용 plan 부재 (main 트리) — Test 9 건너뜀"
 else
-  _fail "existing governance plan via 'plan' subcommand → expected 0, got $rc"
+  python3 "$VALIDATOR" plan "$_t9_plan" >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    _pass "existing governance plan via 'plan' subcommand → exit 0"
+  else
+    _fail "existing governance plan via 'plan' subcommand → expected 0, got $rc"
+  fi
 fi
 
 # ---- Test 10 (H2, 2026-04-22 retro-review-sweep):

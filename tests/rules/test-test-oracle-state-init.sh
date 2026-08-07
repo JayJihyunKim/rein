@@ -101,7 +101,12 @@ else
 fi
 
 echo "### Test 5: branch-strategy.md 에 test-oracle.json 언급 or .rein-state 제외"
-if grep -qE '\.rein-state|test-oracle\.json' "$BRANCH"; then
+# .claude/rules/branch-strategy.md 는 dev 전용(main 제외 정책) — main 트리
+# preflight 에서는 대상이 없으므로 SKIP (2026-08-07 태그 preflight 실측 클래스,
+# dev CI 가 회귀 가치 유지).
+if [ ! -f "$BRANCH" ]; then
+  echo "  SKIP: dev 전용 branch-strategy.md 부재 (main 트리) — Test 5 건너뜀"
+elif grep -qE '\.rein-state|test-oracle\.json' "$BRANCH"; then
   _pass "branch-strategy.md 제외 목록에 포함"
 else
   _fail "branch-strategy.md 제외 목록 없음"

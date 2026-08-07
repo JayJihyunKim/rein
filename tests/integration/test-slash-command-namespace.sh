@@ -31,7 +31,11 @@ SKILLS_DIR="$PROJECT_DIR/plugins/rein-core/skills"
 SETTINGS_JSON="$PROJECT_DIR/.claude/settings.json"
 
 [ -d "$SKILLS_DIR" ]    || { echo "FAIL: missing $SKILLS_DIR" >&2; exit 1; }
-[ -f "$SETTINGS_JSON" ] || { echo "FAIL: missing $SETTINGS_JSON" >&2; exit 1; }
+# .claude/settings.json 은 dev 전용(main 제외 정책) — 부재 = 별칭 사전등록
+# 없음이므로 검사 E 의 계약을 자명하게 충족한다. main 트리 preflight 에서
+# 부재를 실패로 처리하던 것을 정정 (2026-08-07 태그 preflight 실측).
+SETTINGS_PRESENT=1
+[ -f "$SETTINGS_JSON" ] || SETTINGS_PRESENT=0
 
 FAIL_COUNT=0
 fail() { echo "FAIL: $1" >&2; FAIL_COUNT=$((FAIL_COUNT + 1)); }
@@ -145,6 +149,10 @@ fi
 
 # Assert E — settings.json has no pre-registered aliases (alias is opt-in
 # user customization). Either no `aliases` key OR an empty `aliases` map.
+# 파일 부재(main 트리) = 별칭 0 건과 등가 — 검사 통과.
+if [ "$SETTINGS_PRESENT" = "0" ]; then
+  ALIAS_COUNT=0
+else
 ALIAS_COUNT=$(python3 - "$SETTINGS_JSON" <<'PY'
 import json, sys
 try:
@@ -155,6 +163,7 @@ a = d.get("aliases", {})
 print(len(a) if isinstance(a, dict) else -1)
 PY
 )
+fi
 case "$ALIAS_COUNT" in
   0)
     ok "E: .claude/settings.json has no pre-registered aliases (opt-in)"
