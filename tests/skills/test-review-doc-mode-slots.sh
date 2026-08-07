@@ -163,7 +163,10 @@ echo "-- DM8: 코드 리뷰 envelope 전문 골든 비교 (공백·개행·순�
 # 골든 갱신은 의도적 변경일 때만: REIN_GOLDEN_UPDATE=1 로 재실행.
 GOLDEN="$REAL_PROJECT_DIR/tests/fixtures/envelope-code-review.golden"
 normalize_envelope() {
-  sed -E 's/[0-9a-f]{40}/<SHA>/g; s/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}/<ISO>/g' "$1"
+  # ISO 정규화는 오프셋형(+09:00/+0900)과 UTC 'Z' 접미형을 모두 치환한다 —
+  # Linux 러너의 date -u 경로는 Z 형을 방출해 오프셋 전용 패턴이 놓쳤다
+  # (2026-08-07 첫 Linux CI 실측 — DM8 골든 flake).
+  sed -E 's/[0-9a-f]{40}/<SHA>/g; s/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([+-][0-9]{2}:?[0-9]{2}|Z)?/<ISO>/g' "$1"
 }
 e2e_setup
 run_wrapper "code review please"

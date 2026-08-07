@@ -44,7 +44,15 @@ jd=".claude/cache/jobs"
 [ "$(cat $jd/$jid.exit)" = "0" ] || {
   echo "FAIL[a]: exit='$(cat $jd/$jid.exit)' want='0'" >&2; exit 1
 }
-[ ! -f "$jd/$jid.pid" ] || {
+# .pid 제거는 .status 기록 *다음* 이다 (wrapper 계약: status → meta → rm pid).
+# status=success 관측 직후엔 정착 창이 실존하므로 짧게 재시도 (Linux CI 실측
+# 2026-08-07 — 러너 부하에서 창을 밟아 flake). 계약 자체(완료 후 제거)는 유지.
+pid_gone=0
+for _i in 1 2 3 4 5 6 7 8 9 10; do
+  [ ! -f "$jd/$jid.pid" ] && { pid_gone=1; break; }
+  sleep 0.2
+done
+[ "$pid_gone" = "1" ] || {
   echo "FAIL[a]: .pid should be removed after completion" >&2; exit 1
 }
 # finished_at + exit_code in meta

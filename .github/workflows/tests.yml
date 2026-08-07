@@ -57,21 +57,27 @@ jobs:
         run: bash tests/hooks/run-all.sh
 
       - name: Run script tests
+        if: ${{ !cancelled() }}
         run: bash tests/scripts/run-all.sh
 
       - name: Run skill tests
+        if: ${{ !cancelled() }}
         run: bash tests/skills/run-all.sh
 
       - name: Run rule tests
+        if: ${{ !cancelled() }}
         run: bash tests/rules/run-all.sh
 
       - name: Run agent tests
+        if: ${{ !cancelled() }}
         run: bash tests/agents/run-all.sh
 
       - name: Run CLI tests
+        if: ${{ !cancelled() }}
         run: bash tests/rein-test.sh
 
       - name: Run integration tests
+        if: ${{ !cancelled() }}
         run: bash tests/integration/run-all.sh
 
   # Phase 9 Task 9.1 — dual-mode smoke matrix.

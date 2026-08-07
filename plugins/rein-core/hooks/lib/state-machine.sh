@@ -91,12 +91,30 @@ JSON
 acquire_state_lock() {
   local mode="${1:-x}"
   _state_machine_ensure_dir
+  local timeout_ms="${REIN_STATE_LOCK_TIMEOUT_MS:-10000}"
   if command -v flock >/dev/null 2>&1; then
-    exec 9>"$STATE_LOCK"
+    # v1.6.6 hotfix (첫 Linux CI 실측 — T9): 이 경로는 open 실패·flock 실패를
+    # 모두 무시하고 return 0 하는 fail-open 이었다. macOS 는 flock 부재로 mkdir
+    # 경로만 검증돼 와서 숨어 있었음. open 실패(예: lock 경로가 디렉토리)는
+    # 획득 실패로 전파한다 (bash 비-POSIX 모드에서 exec 리다이렉션 실패는
+    # 쉘을 죽이지 않고 비-0 을 반환).
+    if ! exec 9>"$STATE_LOCK" 2>/dev/null; then
+      echo "[rein] state-machine: cannot open lock file ($STATE_LOCK)." >&2
+      return 2
+    fi
+    # flock 도 mkdir 백엔드와 같은 timeout 계약을 따른다 (-w 는 초 단위,
+    # util-linux 는 소수 허용). 실패 시 fd 정리 + 실패 전파.
+    local timeout_s flock_rc=0
+    timeout_s=$(awk -v ms="$timeout_ms" 'BEGIN{printf "%.3f", ms/1000}')
     case "$mode" in
-      s) flock -s 9 ;;
-      *) flock -x 9 ;;
+      s) flock -s -w "$timeout_s" 9 || flock_rc=$? ;;
+      *) flock -x -w "$timeout_s" 9 || flock_rc=$? ;;
     esac
+    if [ "$flock_rc" -ne 0 ]; then
+      exec 9>&- 2>/dev/null || true
+      echo "[rein] state-machine: lock contended >${timeout_ms}ms ($STATE_LOCK). Stale lock — check running hooks." >&2
+      return 2
+    fi
     REIN_STATE_LOCK_BACKEND="flock"
     return 0
   fi
@@ -105,7 +123,6 @@ acquire_state_lock() {
   # Tighter polling (10ms) + longer timeout (default 10000ms) handles high-
   # contention bursts like 100x concurrent append_journal — codex Round 1 T4 fix.
   # REIN_STATE_LOCK_TIMEOUT_MS overrides the ceiling (tests force fast failure).
-  local timeout_ms="${REIN_STATE_LOCK_TIMEOUT_MS:-10000}"
   local waited_ms=0
   while ! mkdir "$STATE_LOCK.d" 2>/dev/null; do
     [ "$waited_ms" -ge "$timeout_ms" ] && {
