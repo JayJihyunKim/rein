@@ -78,6 +78,12 @@ emit_file_block() {
 rm -f "$PROJECT_DIR/trail/dod/.session-has-src-edit" 2>/dev/null
 # .incident-decision-deferred 는 세션 스코프 — 새 세션에서 재질문 되도록 삭제
 rm -f "$PROJECT_DIR/trail/dod/.incident-decision-deferred" 2>/dev/null
+# post-agent-review-trigger.sh 의 중복 안내 억제 캐시(코드리뷰 Medium 시정,
+# Phase 7 웨이브 3 ③-d — round 2 로 `.rein/cache/` 로 경로 정정, 그 훅의
+# 헤더 주석 참조: git 이 추적/열거하는 위치는 changeset digest 계산에
+# 섞여 들어간다) — 세션 스코프, 새 세션에서는 이전 세션의 마지막 digest
+# 를 잊고 처음 마주치는 실 digest 에 다시 안내한다.
+rm -f "$PROJECT_DIR/.rein/cache/review-nudge/last-digest" 2>/dev/null
 
 # active-dod-choice session flag sweep — select-active-dod.sh 의 "세션당 1회
 # 로그" 세마포어가 세션 종료 시 누락되어 누적되는 현상 보완. 1시간 초과된

@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://rein.dev/schemas/testing-config.schema.json",
+  "title": "Rein v2 testing configuration (.rein/policy/testing.yaml)",
+  "$comment": "REFERENCE ONLY — not loaded at runtime (plan Task 4.3 Steps 2). The single authoritative validator is plugins/rein-core/rein/capabilities/testing/capability.py:parse_testing_config, built on the D3 subset YAML parser (plugins/rein-core/rein/kernel/yaml_subset.py). This JSON Schema exists purely for human readers and editor/IDE autocompletion — it documents the same closed schema the runtime loader enforces (spec §5.2), but the runtime never reads this file.",
+  "description": "Declares the test commands a project runs, so the tests_passed Evidence eligibility gate (spec §5.2) can recognize a runtime-observed command as declared. File location is fixed at the project-root-relative path `.rein/policy/testing.yaml` (plan D1); this schema documents its shape only, not its path.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["testing"],
+  "properties": {
+    "testing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commands"],
+      "properties": {
+        "commands": {
+          "type": "array",
+          "description": "Declared test commands, evaluated top-to-bottom. A runtime-observed command is eligible for tests_passed only if it matches one entry's `run` exactly, or `run` plus additional trailing arguments (spec §5.2 condition 1).",
+          "items": { "$ref": "#/$defs/command" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "run", "tag"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier for this declared command within the file."
+        },
+        "run": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The declared command string. A runtime-observed command is eligible only if its tokens equal these tokens exactly, or extend them with additional trailing arguments."
+        },
+        "tag": {
+          "type": "string",
+          "enum": ["code", "docs", "sensitive"],
+          "description": "Which Tag ChangeSet (rein/engine/tags.py TAG_NAMES) this command's tests_passed Evidence is scoped to."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "testing": {
+        "commands": [
+          { "id": "unit", "run": "pytest tests/unit", "tag": "code" }
+        ]
+      }
+    }
+  ]
+}

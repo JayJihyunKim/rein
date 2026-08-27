@@ -1,6 +1,6 @@
 ---
 name: codex-review
-description: "Codex CLI 코드 리뷰 모드. stamp 생성, severity escalation, Sonnet fallback, 동일 사이클 resume --last 허용. rein 의 리뷰 게이트(`trail/dod/.codex-reviewed`) 를 생성하는 유일한 스킬."
+description: "Codex CLI 코드 리뷰 모드. PASS 시 v2 code_review 증거 발급, severity escalation, Sonnet fallback, 동일 사이클 resume --last 허용. rein 의 코드리뷰 게이트 통과 증거를 발급하는 유일한 스킬."
 ---
 
 # Codex Review Skill (Mode A)
@@ -9,28 +9,28 @@ description: "Codex CLI 코드 리뷰 모드. stamp 생성, severity escalation,
 
 코드 리뷰 전용 — rein 의 리뷰 게이트 생성 스킬. `/codex-review` 슬래시 명령으로 호출한다.
 
-이 스킬은 **리뷰 gate** 다. 실행 결과로 `trail/dod/.codex-reviewed` stamp 를 생성하며, 이 stamp 가 있어야만 `pre-bash-test-commit-gate.sh` 가 `git commit` / `pytest` 를 허용한다.
+이 스킬은 **리뷰 gate** 다. PASS 회차에서 `bin/rein issue-evidence code_review --verdict PASS --reviewed-digest <D>` 로 v2 code_review 증거를 발급하며, 커밋 시점에 `pre-bash-commit-review-gate.sh`(Phase 7 웨이브 3 ③-c 신설 — 구 `pre-bash-test-commit-gate.sh`, ③-c 삭제 완료, 의 코드 리뷰 축 후속)가 이 v2 증거만으로 `git commit` 허용 여부를 판정한다. **Phase 7 웨이브 3 ③-d (2026-08-24)** 로 legacy stamp(`trail/dod/.codex-reviewed`/`.review-pending`) 의 write·read 경로가 전부 제거됐다 — 위 v2 발급이 이 스킬의 유일한 기록 절차이며, dual-read 전환기 서술은 더 이상 유효하지 않다. (테스트 실행 자체는 GUARD-1 이후 이 리뷰 게이트 대상이 아니다 — pre-bash-commit-discipline-gate.sh 의 동일 지점 주석 참조.)
 
-Second opinion (brainstorm 반박, spec sanity, refactor tradeoff 이중 검증) 이 필요하면 `/codex-review` 가 아니라 `/codex-ask` 를 사용한다 — stamp 를 생성하지 않는 별도 스킬.
+Second opinion (brainstorm 반박, spec sanity, refactor tradeoff 이중 검증) 이 필요하면 `/codex-review` 가 아니라 `/codex-ask` 를 사용한다 — v2 증거를 발급하지 않는 별도 스킬.
 
 ### Mode 대비
 
 | 항목         | Mode A (`/codex-review`)                                                | Mode B (`/codex-ask`)                                                                  |
 | ------------ | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | 용도         | 리뷰 게이트                                                             | Second opinion                                                                         |
-| Stamp 생성   | **필수** (`.codex-reviewed`)                                            | **절대 금지**                                                                          |
+| 리뷰 결과 기록 | **필수** (v2 code_review 증거 발급)                                    | **절대 금지**                                                                          |
 | Resume --last | 같은 사이클 내 허용                                                    | **금지** — 매번 새 세션                                                                |
 | Sandbox      | 상황별 (기본 read-only)                                                 | 항상 `read-only`                                                                       |
 | **Fallback** | codex 실행 **실패** 시에만 Sonnet/code-reviewer/human fallback 허용 (§4) | **same-session Claude fallback 금지**. 독립 reviewer 부재 시 degraded / no-second-opinion 으로 명시 |
 
-Fallback 정책 비대칭 이유: Mode A 는 "리뷰가 어떤 형태로든 수행되어 stamp 가 생성" 되는 것이 게이트 통과의 전제이므로 codex 실행 실패 시 차순위 reviewer 로 대체할 수 있다. Mode B 는 "독립 관점" 자체가 가치이므로 same-session Claude 가 대신하면 본질이 깨진다 — 호출자는 결과 없이 작업을 계속하거나, 별도 시점에 Mode B 를 다시 시도한다.
+Fallback 정책 비대칭 이유: Mode A 는 "리뷰가 어떤 형태로든 수행되어 v2 증거가 발급" 되는 것이 게이트 통과의 전제이므로 codex 실행 실패 시 차순위 reviewer 로 대체할 수 있다. Mode B 는 "독립 관점" 자체가 가치이므로 same-session Claude 가 대신하면 본질이 깨진다 — 호출자는 결과 없이 작업을 계속하거나, 별도 시점에 Mode B 를 다시 시도한다.
 
 ---
 
 ## 2. Running a review
 
 `/codex-review` 는 `scripts/rein-codex-review.sh` wrapper 를 호출한다.
-Wrapper 가 context assembly, envelope 4 slots, codex exec, stamp 생성을 담당한다.
+Wrapper 가 context assembly, envelope 4 slots, codex exec, PASS 시 v2 code_review 증거 발급을 담당한다.
 
 ### Usage
 
@@ -58,11 +58,11 @@ Wrapper 가 context assembly, envelope 4 slots, codex exec, stamp 생성을 담�
 - exit 4 판별 계약 + 호출자 행동: §4.2 (Sonnet 폴백 비대상)
 - spec-review 모드는 사전검사 비대상: §6.7
 
-### Mode 별 stamp 규칙 (CRITICAL)
+### Mode 별 기록 규칙 (CRITICAL)
 
-- **Code review mode**: PASS 시 `trail/dod/.codex-reviewed` 생성 (test/commit gate 통과용). `.review-pending` 이 있으면 제거. stamp 에 `diff_base: <sha>` 라인 포함 (GI-codex-review-diff-base).
-- **Spec review mode (plan 또는 design)**: `.codex-reviewed` **절대 생성 안 함**. `.review-pending` 도 건드리지 않음. verdict 만 stdout 으로 방출. caller 가 `bash "${CLAUDE_PLUGIN_ROOT:-$PWD}/scripts/rein-mark-spec-reviewed.sh" <path> <reviewer>` 를 별도로 호출해 `trail/dod/.spec-reviews/*.reviewed` 를 생성할 책임.
-- Rationale: `.codex-reviewed` 는 code commit/test gate. spec review 가 이를 찍으면 코드 변경 없이도 gate 통과 → rein 규율 붕괴.
+- **Code review mode**: PASS 시 `bin/rein issue-evidence code_review --verdict PASS --reviewed-digest <D>` 로 v2 증거 발급 (commit gate 통과용). digest 는 리뷰 대상 diff 범위(`HEAD~1` 체인 기반)에서 산정한다 (Phase 7 웨이브 3 ③-d — 이전에는 stamp 의 `diff_base:` 필드에서 읽었지만, stamp 자체가 제거되면서 매 실행 시 직접 재산정으로 전환됐다, GI-codex-review-diff-base 후속).
+- **Spec review mode (plan 또는 design)**: code_review v2 증거를 **절대 발급 안 함**. legacy marker 는 이미 존재하지 않으므로 건드릴 대상도 없음. verdict 만 stdout 으로 방출. caller 가 `bash "${CLAUDE_PLUGIN_ROOT:-$PWD}/scripts/rein-mark-spec-reviewed.sh" <path> <reviewer>` 를 별도로 호출해 `trail/dod/.spec-reviews/*.reviewed` 를 생성할 책임 (spec-review 축은 이번 웨이브의 존속 예외).
+- Rationale: code_review v2 증거는 code commit gate 전용. spec review 가 이를 발급하면 코드 변경 없이도 gate 통과 → rein 규율 붕괴.
 
 ### Legacy interactive model selection
 
@@ -109,14 +109,14 @@ Wrapper 가 context assembly, envelope 4 slots, codex exec, stamp 생성을 담�
 
 - wrapper 는 stdin 으로 prompt 를 받는다. **항상 file redirect (`< /tmp/<file>`)** 사용 — pipe (`printf '...' | bash wrapper.sh`) 는 pre-bash-safety-guard 가 차단 (stdin 명령 source 검증 불가)
 - prompt 작성: Write 도구로 `/tmp/codex-prompt.txt` 등에 작성 후 redirect
-- 출력은 wrapper 가 stamp 생성 + stdout 요약을 동기 반환. `> /tmp/<output>.log 2>&1` 형태로 직접 파일에 쓰고 Read 로 확인. `| tail -N` 추가 pipe 는 불필요
-- stamp (`trail/dod/.codex-reviewed`) 생성은 **foreground 동기 실행** 가정 위에서 동작. background 전환 시 stamp 가 비정상 상태로 남을 수 있음 — `.review-pending` 은 남고 `.codex-reviewed` 는 미생성되는 staleness 가능
+- 출력은 wrapper 가 PASS 시 v2 발급 + stdout 요약을 동기 반환. `> /tmp/<output>.log 2>&1` 형태로 직접 파일에 쓰고 Read 로 확인. `| tail -N` 추가 pipe 는 불필요
+- v2 발급은 **foreground 동기 실행** 가정 위에서 동작. background 전환 시 발급이 누락된 채 프로세스만 죽을 수 있음 — legacy stamp 안전망이 없으므로(③-d), 이 경우 "리뷰는 됐는데 기록이 없다"가 곧 "리뷰가 안 된 것"과 동일하게 취급된다 — 재실행 필요
 
 **Direct codex exec 경로** (§2 "Legacy interactive model selection" 의 수동 조립):
 
 - stdin `< /dev/null` 로 명시 close
 - 출력은 `> <file> 2>&1` 로 직접 파일에 쓰고 `Read` 로 읽기. `| tail -N` 금지 (EOF 까지 버퍼링)
-- codex 실행 후 stamp 생성은 수동. wrapper 가 자동으로 채우는 `diff_base` 를 caller 가 직접 넣어야 함 (`review_round` 는 수동 스키마 전용 필드로, wrapper 는 쓰지 않는다 — 회차 강제는 §10 카운터가 담당)
+- codex 실행 후 v2 발급은 수동으로 caller 가 `bin/rein issue-evidence code_review --verdict <V> --reviewed-digest <D>` 를 직접 호출한다 (`review_round` 는 §10 카운터가 담당하며 발급 인자에 포함되지 않는다)
 
 Hang 감지 + 복구: §8 Error Handling 참고.
 
@@ -132,10 +132,10 @@ Hang 감지 + 복구: §8 Error Handling 참고.
 | Medium만 있음  | > 3줄     | 수정 후 **codex 재리뷰** (Round 증가)                              |
 | Medium만 있음  | ≤ 3줄     | 수정 후 **sonnet 셀프리뷰**                                        |
 | Low만 있음     | 무관      | 수정 후 **sonnet 셀프리뷰**                                        |
-| 이슈 없음      | —         | **통과** — stamp 생성 (§5)                                         |
-| 3회차에도 High | —         | **사람에게 에스컬레이션** — stamp `resolution: escalated_to_human` |
+| 이슈 없음      | —         | **통과** — v2 code_review 증거 발급 (§5)                            |
+| 3회차에도 High | —         | **사람에게 에스컬레이션** — 기록 없음 (PASS 가 아니므로 발급 대상 아님) |
 
-**sonnet 셀프리뷰**: 변경 diff 를 직접 확인하고, stamp 에 `reviewer: self-review` 기록.
+**sonnet 셀프리뷰**: 변경 diff 를 직접 확인하고, PASS 판정이면 §5 발급을 그대로 수행한다 (발급 자체에는 reviewer 구분 필드가 없다 — 사람 보고 문구에서만 "self-review" 로 구분한다).
 
 Round 관리: 회차는 래퍼가 사이클 단위로 계수하며 상한을 **코드로 강제**한다 (§10). 같은 사이클 내 재리뷰는 `codex exec resume --last` 로 이전 세션 컨텍스트를 유지한다 (§7).
 
@@ -148,18 +148,18 @@ Round 관리: 회차는 래퍼가 사이클 단위로 계수하며 상한을 **�
 Codex 실패 (에러/타임아웃) 시 Sonnet 기반 대체 리뷰 경로:
 
 1. **Codex 리뷰 실행** — §2 절차로 `codex exec`
-2. **성공 시** — §5 stamp 생성 후 종료
+2. **성공 시** — §5 v2 발급 후 종료
 3. **실패 시 (에러/타임아웃)** — sonnet 폴백 리뷰 실행
    - `code-reviewer` 스킬 호출, 또는
    - `general-purpose` 에이전트 (model: sonnet) 로 이관
-4. **폴백 성공 시** — stamp 에 `reviewer: sonnet-fallback` + `fallback_reason: codex_timeout` (또는 해당 에러 코드) 기록 후 종료
+4. **폴백 성공 시** — §5 v2 발급을 그대로 수행하고, 사람 보고 문구에서 "sonnet 폴백, 사유: codex_timeout" (또는 해당 에러 코드) 처럼 밝힌 뒤 종료 (발급 인자 자체에는 fallback 사유 필드가 없다)
 5. **폴백도 실패 시** — 작업 중단, 사용자에게 보고
 
 **중요**: "codex 리뷰 결과가 부족해서" 등은 폴백 사유가 아니다. 에러/타임아웃 같은 **실행 실패** 만 폴백을 허용한다.
 
 **모델 설정 에러(종료 코드 3)는 폴백 대상이 아니다.** 래퍼가 exit 3 으로 종료하면 codex 가 모델명을 거부한 것(upstream rename 등)이다. sonnet 폴백으로 넘기면 잘못된 모델 설정이 가려지므로, 폴백하지 말고 `plugins/rein-core/config/codex-models.sh` 의 `CODE_GATE_MODEL` 을 codex 의 최신 모델명으로 갱신하도록 사용자에게 안내한다. 래퍼가 경로와 현재 값을 stderr 로 출력한다.
 
-**review-readiness 거부(종료 코드 4 + 거부 진단행)도 폴백 대상이 아니다.** codex 실행 실패가 아니라 요청서 결함이므로, sonnet 폴백으로 새면 요청서 결함이 가려진다 (exit 3 과 동일한 비대상 원리). 준비도 거부는 codex spawn **이전**에만 발생하며 (비용 0), stamp 계열 파일(`.codex-reviewed`/`.review-pending`/`.spec-reviews/*`)을 건드리지 않는다. 호출자는 stderr 안내대로 요청서를 수정한 뒤 재호출한다 — 문법은 §4.1, 판별 계약과 호출자 행동은 §4.2.
+**review-readiness 거부(종료 코드 4 + 거부 진단행)도 폴백 대상이 아니다.** codex 실행 실패가 아니라 요청서 결함이므로, sonnet 폴백으로 새면 요청서 결함이 가려진다 (exit 3 과 동일한 비대상 원리). 준비도 거부는 codex spawn **이전**에만 발생하며 (비용 0), v2 발급을 시도하지 않고 존속하는 `.spec-reviews/*` 도 건드리지 않는다. 호출자는 stderr 안내대로 요청서를 수정한 뒤 재호출한다 — 문법은 §4.1, 판별 계약과 호출자 행동은 §4.2.
 
 ### 4.1 증거 블록 문법 (`[EVIDENCE]`)
 
@@ -199,9 +199,9 @@ ok 21 - test-codex-model-profile-routing
 |---|---|---|
 | 4 (+거부 진단행 — `ERROR: [codex-review][readiness-reject]` 로 시작하는 stderr 라인) | review-readiness 거부 — codex 미호출 (비용 0) | stderr 안내대로 요청서를 수정(증거 블록 추가 또는 형식 교정)해 **재호출**. Sonnet fallback 비대상 — codex 실행 실패가 아니라 요청서 결함이므로 fallback 으로 새면 결함이 가려진다 (exit 3 과 동일한 비대상 원리). 재리뷰 카운트(§3 escalation)에 포함하지 않는다 — 리뷰가 수행되지 않았다. |
 | 4 (거부 진단행 0 — advisory 경고·발췌 내용 무관) | codex 실행 실패 passthrough (드묾 — `CODEX_RC` passthrough 와의 이론적 겹침) | 기존 실행 실패 경로와 동일 — Sonnet fallback 후보 (§4 본문). |
-| 5 (+진단행 — `ERROR: [codex-review][review-timeout]` 로 **시작하는** stderr 라인 ≥1) | 래퍼 소유 timeout (정지 판정 종료 — verdict 없음, 표식 무접촉) | **즉시 대체 리뷰** (Sonnet fallback, `fallback_reason: codex_timeout` 재사용). 재시도·재호출 없음. 재리뷰 카운트(§3 escalation) 비포함 — 리뷰가 완료되지 않았다. |
+| 5 (+진단행 — `ERROR: [codex-review][review-timeout]` 로 **시작하는** stderr 라인 ≥1) | 래퍼 소유 timeout (정지 판정 종료 — verdict 없음, v2 발급 미시도) | **즉시 대체 리뷰** (Sonnet fallback, 사유 `codex_timeout` 재사용). 재시도·재호출 없음. 재리뷰 카운트(§3 escalation) 비포함 — 리뷰가 완료되지 않았다. |
 | 5 (진단행 0) | codex 자체 exit 5 passthrough | 기존 실행 실패 처리 (Sonnet fallback 후보) 그대로. |
-| 6 (+진단행 — `ERROR: [codex-review][round-budget-exceeded]`) | 이 사이클의 리뷰 회차 예산 소진 — codex 미호출 (비용 0), 표식 무접촉 (§10) | **재호출 금지.** 지금까지의 지적과 남은 쟁점을 요약해 **사람에게 넘긴다**. Sonnet fallback 비대상 — codex 실행 실패가 아니라 예산 소진이며, 폴백으로 새면 상한이 무의미해진다. 예산이 더 필요하다고 판단하면 사람의 승인을 받은 뒤에만 `[MAX_ROUNDS:<n>]` 을 선언해 재호출한다 (선언은 기록에 남는다). |
+| 6 (+진단행 — `ERROR: [codex-review][round-budget-exceeded]`) | 이 사이클의 리뷰 회차 예산 소진 — codex 미호출 (비용 0), v2 발급 미시도 (§10) | **재호출 금지.** 지금까지의 지적과 남은 쟁점을 요약해 **사람에게 넘긴다**. Sonnet fallback 비대상 — codex 실행 실패가 아니라 예산 소진이며, 폴백으로 새면 상한이 무의미해진다. 예산이 더 필요하다고 판단하면 사람의 승인을 받은 뒤에만 `[MAX_ROUNDS:<n>]` 을 선언해 재호출한다 (선언은 기록에 남는다). |
 
 **호출자 판별 계약 (기계 계약 — 사람 판독 아님)**:
 
@@ -234,125 +234,43 @@ exit 5 앵커도 동일 원리로 **라인 시작 anchored — substring 검색 
 
 ---
 
-## 5. Stamp 생성 (필수)
+## 5. 리뷰 결과 기록 — v2 발급 (필수, PASS 회차 한정)
 
-리뷰 완료 후 반드시 `trail/dod/.codex-reviewed` 를 생성한다. stamp 없으면 `pre-bash-test-commit-gate.sh` 가 커밋을 차단한다.
+**Phase 7 웨이브 3 ③-d (2026-08-24) 갱신.** 이전에는 이 절이 `trail/dod/.codex-reviewed` legacy stamp 를 생성하는 절차였다. ③-d 로 legacy 리뷰 표식 3종(`.codex-reviewed`/`.review-pending`/`.security-reviewed`)의 write·read 경로가 전부 제거되면서, PASS 판정 회차에서 `bin/rein issue-evidence code_review --verdict PASS --reviewed-digest <D>` 를 호출하는 것이 **유일한 기록 절차**가 됐다. 이 호출이 없으면(또는 exit 0 이 아니면) `pre-bash-commit-review-gate.sh`(구 `pre-bash-test-commit-gate.sh` 후속, ③-c 삭제 완료)가 커밋을 차단한다 — 더 이상 대신 참조할 legacy stamp 가 없다.
 
-**Plan A Phase 6 이후**: `scripts/rein-codex-review.sh` wrapper 가 code-review mode PASS 시 자동 생성한다. 아래 필드 규격은 wrapper 가 emit 하는 포맷의 canonical 정의이며, Sonnet 셀프리뷰 / 수동 경로에서는 여전히 caller 가 같은 필드로 stamp 를 생성한다.
+**Plan A Phase 6 이후 / ③-a~③-d 계승**: `scripts/rein-codex-review.sh` wrapper 가 code-review mode PASS 시 이 발급을 자동 호출한다. Sonnet 셀프리뷰 / 수동 경로에서도 caller 가 동일한 발급 호출을 직접 수행한다.
 
-### 5.1 Stamp 필드
+### 5.1 발급 인자
 
-- `reviewer` — `codex` | `sonnet-fallback` | `self-review`
-- `timestamp` — ISO 8601 UTC (`$(date -u +%Y-%m-%dT%H:%M:%S)`)
-- `cycle` — 해당 작업 사이클 식별자 (DoD slug 또는 PR 번호)
-- `scope` — 변경 범위 요약 (파일 수 또는 모듈명)
-- `files_reviewed` — 리뷰 대상 파일 수
-- `review_round` — 같은 사이클 내 N번째 리뷰. **수동 stamp 스키마 전용** — 래퍼가 생성하는 stamp 에는 이 필드가 없으며(있었던 적도 없다), 회차 계수·상한 강제는 §10 의 카운터가 담당한다. 아래 수동 예시들에 남아 있는 값은 사람이 적는 참고 기록이다
-- `fallback_reason` — `none` | `codex_timeout` | `codex_error_<code>`
-- `resolution` — `passed` | `needs-fix-round-N` | `escalated_to_human`
-- `remaining_issues` — `none` 또는 잔존 이슈 요약
+v2 발급은 `--verdict`와 `--reviewed-digest` 두 인자만 받는다 (`plugins/rein-core/rein/cli/issue_evidence.py::issue()`). 과거 legacy stamp 가 담던 부가 정보(`reviewer`/`cycle`/`scope`/`files_reviewed`/`fallback_reason`/`resolution`/`remaining_issues`/실행 증빙 5필드 `model`/`effort`/`effort_source`/`policy_version`/`codex_version`)는 **더 이상 durable 하게 저장되지 않는다** — 이 정보가 필요하면 §9 "사용자 안내" 문구에 그대로 담아 그 회차의 채팅 응답에만 남긴다. `reviewed-digest` 는 §2 "Mode 별 기록 규칙"이 서술한 대로 diff 범위(`HEAD~1` 체인 기반)로 매 실행 직접 산정한다.
 
-**실행 증빙 5필드** (additive — 기존 필드의 이름·순서·포맷 불변, 커밋 게이트 파서는 이 필드들에 비의존):
-
-- `model` — 실제 게이트 실행 모델 (`CODE_GATE_MODEL` 해석 결과, 예: `gpt-5.6-sol`)
-- `effort` — 실제 적용된 reasoning effort (`low` | `medium` | `high`)
-- `effort_source` — effort 결정 경로: `marker`(유효 `[EFFORT:]` 마커) | `computed`(변경 규모 산출) | `computed+floor`(산출 low → 위험도 floor 로 medium 승격) | `fail_closed`(측정 실패 폴백)
-- `policy_version` — config 의 `CODE_ROUTING_POLICY_VERSION`. config 부재로 canonical fallback 실행 시 `0` (내장 폴백 실행 식별용)
-- `codex_version` — stamp 작성 시점 `codex --version` best-effort 1회 해석. 실패/빈 출력 시 `(unavailable)` (순수 증빙 필드 — 해석 실패가 stamp 작성을 막지 않음)
+- `reviewer` 구분(`codex` / `sonnet-fallback` / `self-review`)은 §9 사용자 안내 문구로만 남는다.
+- `review_round`(같은 사이클 내 N번째 리뷰)는 발급 인자가 아니다 — 회차 계수·상한 강제는 언제나 §10 의 카운터가 전담한다 (legacy stamp 시절에도 래퍼 발급 stamp 에는 이 필드가 없었다).
 
 ### 5.2 정상 통과 (codex)
 
 ```bash
-cat > trail/dod/.codex-reviewed << STAMP
-reviewer: codex
-timestamp: $(date -u +%Y-%m-%dT%H:%M:%S)
-cycle: [DoD slug]
-scope: [변경 범위 요약]
-files_reviewed: [변경 파일 수]
-review_round: [N번째 리뷰]
-fallback_reason: none
-resolution: passed
-remaining_issues: none
-model: [CODE_GATE_MODEL 해석 결과, 예: gpt-5.6-sol]
-effort: [low|medium|high]
-effort_source: [marker|computed|computed+floor|fail_closed]
-policy_version: [CODE_ROUTING_POLICY_VERSION, canonical fallback 시 0]
-codex_version: [codex --version 1줄, 실패 시 (unavailable)]
-STAMP
+"${CLAUDE_PLUGIN_ROOT:-$PWD/plugins/rein-core}/bin/rein" issue-evidence code_review \
+  --verdict PASS --reviewed-digest "$REIN_REVIEWED_DIGEST"
 ```
+
+성공(exit 0) 시 사람 보고에는 "codex 리뷰 통과, 기록됨"을 담는다 (§9).
 
 ### 5.3 Sonnet Fallback
 
-```bash
-cat > trail/dod/.codex-reviewed << STAMP
-reviewer: sonnet-fallback
-timestamp: $(date -u +%Y-%m-%dT%H:%M:%S)
-cycle: [DoD slug]
-scope: [변경 범위 요약]
-files_reviewed: [변경 파일 수]
-review_round: [N번째 리뷰]
-fallback_reason: codex_timeout
-resolution: passed
-remaining_issues: none
-model: [CODE_GATE_MODEL 해석 결과, 예: gpt-5.6-sol]
-effort: [low|medium|high]
-effort_source: [marker|computed|computed+floor|fail_closed]
-policy_version: [CODE_ROUTING_POLICY_VERSION, canonical fallback 시 0]
-codex_version: [codex --version 1줄, 실패 시 (unavailable)]
-STAMP
-```
+발급 호출 자체는 5.2 와 동일하다 — `reviewer`/`fallback_reason` 을 구분할 인자가 없으므로, §9 사용자 안내 문구에서 "codex 실행 실패로 sonnet 폴백 리뷰로 통과, 사유: codex_timeout(또는 해당 코드)" 를 명시한다.
 
 ### 5.4 Sonnet 셀프리뷰 (Low/경미한 Medium)
 
-```bash
-cat > trail/dod/.codex-reviewed << STAMP
-reviewer: self-review
-timestamp: $(date -u +%Y-%m-%dT%H:%M:%S)
-cycle: [DoD slug]
-scope: [변경 범위 요약]
-files_reviewed: [변경 파일 수]
-review_round: [N번째 리뷰]
-fallback_reason: none
-resolution: passed
-remaining_issues: none
-prior_reviewer: codex
-prior_max_severity: [medium 또는 low]
-model: [CODE_GATE_MODEL 해석 결과, 예: gpt-5.6-sol]
-effort: [low|medium|high]
-effort_source: [marker|computed|computed+floor|fail_closed]
-policy_version: [CODE_ROUTING_POLICY_VERSION, canonical fallback 시 0]
-codex_version: [codex --version 1줄, 실패 시 (unavailable)]
-STAMP
-```
+발급 호출은 5.2 와 동일하다. §9 사용자 안내 문구에서 "직전 codex 리뷰의 Low/Medium(≤3줄) 지적을 수정한 뒤 self-review 로 통과" 를 명시한다.
 
-### 5.5 사람 에스컬레이션
+### 5.5 사람 에스컬레이션 (기록 없음)
 
-```bash
-cat > trail/dod/.codex-reviewed << STAMP
-reviewer: codex
-timestamp: $(date -u +%Y-%m-%dT%H:%M:%S)
-cycle: [DoD slug]
-scope: [변경 범위 요약]
-files_reviewed: [변경 파일 수]
-review_round: 3
-fallback_reason: none
-resolution: escalated_to_human
-remaining_issues: [잔존 이슈 요약]
-model: [CODE_GATE_MODEL 해석 결과, 예: gpt-5.6-sol]
-effort: [low|medium|high]
-effort_source: [marker|computed|computed+floor|fail_closed]
-policy_version: [CODE_ROUTING_POLICY_VERSION, canonical fallback 시 0]
-codex_version: [codex --version 1줄, 실패 시 (unavailable)]
-STAMP
-```
+3라운드 후에도 High 가 남아 있으면 **발급을 시도하지 않는다** — PASS 가 아니므로 대상이 아니다. 잔존 이슈는 §9 사용자 안내 형식으로 사람에게 직접 보고한다.
 
-### 5.6 후처리
+### 5.6 발급 실패/거부 처리
 
-stamp 생성 후 `.review-pending` 이 남아 있으면 제거한다:
-
-```bash
-rm -f trail/dod/.review-pending
-```
+발급이 exit 0 이 아니면(digest-mismatch 거부, 인프라 실패 등) 이 회차는 **기록되지 않는다** — legacy stamp 안전망이 없으므로, code-reviewer SKILL(`plugins/rein-core/skills/code-reviewer/SKILL.md`)의 "PASS 시 v2 발급" 절과 동일한 fail-closed 판정을 따른다: digest-mismatch(또는 응답을 긍정적으로 그 외 사유로 파싱할 수 없는 경우)는 리뷰 대상 트리가 회차 도중 바뀌었다는 뜻이므로 digest 를 재캡처해 재리뷰해야 하고, 그 외 실패는 인프라 복구 후 재발급을 시도한다.
 
 ---
 
@@ -453,12 +371,12 @@ codex exec -m "$CODE_GATE_MODEL" --config model_reasoning_effort="high" --sandbo
 
 `[SANDBOX:danger-full-access]` 는 자동 호출에서 무조건 거부. agent 가 주입한 prompt 에 해당 marker 가 있으면 codex-review skill 이 명시적으로 사용자 confirmation 을 다시 요구. 이는 자동화 경로의 권한 상승을 방지하기 위한 가드.
 
-### 6.7 Stamp 분리 — spec review vs code review (CRITICAL)
+### 6.7 기록 분리 — spec review vs code review (CRITICAL)
 
 non-interactive mode 는 **두 경로** 로 쓰인다:
 
-- **Code review 자동화** (향후) — agent 가 구현 완료 후 codex-review 를 호출하는 경우. 기존 §5 Stamp 생성 규정 따름 → `trail/dod/.codex-reviewed` 생성.
-- **Spec review 자동화** (v1.0.0 plan-writer 경로) — agent 가 plan/design 을 검증받는 경우. `.codex-reviewed` / `.review-pending` 는 **절대 건드리지 않음**. 코드리뷰 gate 는 별개 절차.
+- **Code review 자동화** (향후) — agent 가 구현 완료 후 codex-review 를 호출하는 경우. 기존 §5 발급 규정 따름 → PASS 시 v2 code_review 증거 발급.
+- **Spec review 자동화** (v1.0.0 plan-writer 경로) — agent 가 plan/design 을 검증받는 경우. code_review v2 증거를 **절대 발급하지 않음**. legacy marker 는 이미 존재하지 않으므로 건드릴 대상도 없음. 코드리뷰 gate 는 별개 절차.
 
 **Spec review 모드 감지**: prompt 첫 줄이 `[NON_INTERACTIVE] spec review for plan:` 또는 `[NON_INTERACTIVE] spec review for design:` 형식으로 시작하면 spec-review 서브플로우로 분기.
 
@@ -475,14 +393,14 @@ non-interactive mode 는 **두 경로** 로 쓰인다:
 Spec review 서브플로우 동작:
 
 1. codex exec 실행 → verdict 캡처 (PASS / NEEDS-FIX / REJECT)
-2. **`.codex-reviewed` stamp 생성하지 않음** (코드리뷰 게이트 오염 방지)
-3. **`.review-pending` 건드리지 않음** (`rm` 금지)
-4. PASS 시 caller (plan-writer 등) 가 책임지고 `bash "${CLAUDE_PLUGIN_ROOT:-$PWD}/scripts/rein-mark-spec-reviewed.sh" <path> <reviewer>` 호출 — 이는 spec-review 전용 stamp (`trail/dod/.spec-reviews/<hash>.reviewed`) 생성
-5. NEEDS-FIX/REJECT 시 caller 가 handoff (stamp 생성 안 함)
+2. **code_review v2 증거를 발급하지 않음** (코드리뷰 게이트 오염 방지)
+3. legacy marker 는 이미 존재하지 않으므로 건드릴 대상도 없음
+4. PASS 시 caller (plan-writer 등) 가 책임지고 `bash "${CLAUDE_PLUGIN_ROOT:-$PWD}/scripts/rein-mark-spec-reviewed.sh" <path> <reviewer>` 호출 — 이는 spec-review 전용 stamp (`trail/dod/.spec-reviews/<hash>.reviewed`) 생성 (spec-review 축은 이번 웨이브의 존속 예외)
+5. NEEDS-FIX/REJECT 시 caller 가 handoff (spec-review stamp 생성 안 함)
 
-**왜 분리?**: `.codex-reviewed` 는 `pre-bash-test-commit-gate.sh` 의 코드 commit gate. spec review 에서 이 stamp 가 찍히면 코드 변경 없이도 gate 통과 가능해져 rein 규율이 깨짐.
+**왜 분리?**: code_review v2 증거는 `pre-bash-commit-review-gate.sh`(구 `pre-bash-test-commit-gate.sh` 후속, ③-c 삭제 완료) 의 코드 commit gate 축 전용. spec review 에서 이 증거가 발급되면 코드 변경 없이도 gate 통과 가능해져 rein 규율이 깨짐.
 
-**Sonnet fallback 분기도 동일**: spec review 모드에서 codex 실패로 code-reviewer fallback 이 호출되더라도 `.codex-reviewed` 생성 금지. code-reviewer skill 이 spec-review context 를 인식할 수 있도록 prompt 전달 경로에서 `[NON_INTERACTIVE] spec review` prefix 보존.
+**Sonnet fallback 분기도 동일**: spec review 모드에서 codex 실패로 code-reviewer fallback 이 호출되더라도 code_review v2 증거 발급 금지. code-reviewer skill 이 spec-review context 를 인식할 수 있도록 prompt 전달 경로에서 `[NON_INTERACTIVE] spec review` prefix 보존.
 
 ---
 
@@ -496,7 +414,7 @@ echo "new prompt" | codex exec resume --last
 
 resume 된 세션은 원 세션의 model, reasoning effort, sandbox mode 를 그대로 이어받는다.
 
-**사이클 경계**: 새 DoD, 새 PR, 새 기능 개발로 전환될 때는 resume 하지 않고 새 `codex exec` 세션으로 시작한다. Second opinion 용도로는 절대 이 스킬이 아니라 `/codex-ask` 를 사용한다 (stamp 미생성 + resume 금지).
+**사이클 경계**: 새 DoD, 새 PR, 새 기능 개발로 전환될 때는 resume 하지 않고 새 `codex exec` 세션으로 시작한다. Second opinion 용도로는 절대 이 스킬이 아니라 `/codex-ask` 를 사용한다 (v2 증거 미발급 + resume 금지).
 
 ---
 
@@ -505,13 +423,12 @@ resume 된 세션은 원 세션의 model, reasoning effort, sandbox mode 를 그
 - `codex --version` 또는 `codex exec` 가 non-zero exit → 즉시 중단 + 보고. 재시도 전 사용자 지시 요청.
 - 고위험 플래그 (`--full-auto`, `--sandbox danger-full-access`, `--skip-git-repo-check`) 사용 전 `AskUserQuestion` 으로 허가 획득 (이미 허가되지 않은 경우).
 - 경고/부분 결과가 포함된 출력은 요약 후 `AskUserQuestion` 으로 조정 방향을 확인.
-- Codex 실행 실패 → §4 Sonnet fallback 경로. 실패 사유를 stamp `fallback_reason` 필드에 기록.
+- Codex 실행 실패 → §4 Sonnet fallback 경로. 실패 사유는 §9 사용자 안내 문구에 담는다 (더 이상 저장할 stamp 필드가 없다).
 - **Hang 증상 탐지** (§2 실행 모드 절 참고):
   - codex 프로세스가 수 분 이상 진행 없음 + CPU 0 + 네트워크 연결 0개 → Bash 도구 auto-background 전환으로 stdin 이 unix socket 에 붙어 sandbox/auth 초기화가 멈춤
   - 체크: `lsof -p <pid> -i` 결과 비어있으면 API 요청 미도달. `ps -o stat,%cpu,etime -p <pid>` 로 Sleep + 0% CPU 확인
   - 대응: kill 후 **foreground + stdin close + 직접 파일 출력** 형태로 재호출 (wrapper 경로 권장)
-  - stamp 상태 정리: hang 이 발생한 사이클은 `.review-pending` 만 남고 `.codex-reviewed` 가 미생성된 staleness 가 흔함. 재호출 전 `ls trail/dod/.review-pending .codex-reviewed` 로 현재 상태 확인, 필요시 `.review-pending` 은 유지 (재리뷰 필요 signal)
-  - 배경: `plugins/rein-core/rules/background-jobs.md` 예외 절 + `trail/dod/dod-2026-04-22-codex-foreground-policy.md`
+  - 기록 상태 정리 (Phase 7 웨이브 3 ③-d 갱신): legacy stamp 가 없으므로 "hang 이 발생한 사이클이 절반만 기록된 상태로 남는" staleness 자체가 구조적으로 사라졌다 — v2 발급은 원자적 all-or-nothing(호출 자체가 성공/실패)이다. 재호출 전에는 그 회차가 v2 발급까지 도달했는지(사람 보고 문구 또는 §9 결과)만 확인하면 된다.
 
 ---
 
@@ -526,10 +443,13 @@ resume 된 세션은 원 세션의 model, reasoning effort, sandbox mode 를 그
 > 리뷰에서 N건 수정이 필요해요 — [Severity 요약, 예: "Medium printf 형식 + Low 테스트 stderr 미검증"]. [고치고 재리뷰 또는 sonnet 셀프리뷰 — escalation 규칙 §3 따라].
 
 **Sonnet fallback 통과** (§4 — codex 실행 실패 한정. §3 의 sonnet self-review 와 다른 path):
-> codex 가 떠지지 않아 sonnet 폴백 리뷰로 통과시켰습니다. stamp 에 `reviewer: sonnet-fallback` + `fallback_reason: <코드>` 기록되어 있어요.
+> codex 가 떠지지 않아 sonnet 폴백 리뷰로 통과시켰습니다 (사유: <코드>). 통과 증거가 기록됐어요.
 
 **3회차에도 High 잔존 → 사람 에스컬레이션**:
-> 3회차 리뷰에도 High N건이 남아 사람 에스컬레이션이 필요해요. stamp 의 `resolution: escalated_to_human` 확인하고 잔존 이슈를 직접 처리해 주세요.
+> 3회차 리뷰에도 High N건이 남아 사람 에스컬레이션이 필요해요. 이 회차는 기록되지 않았습니다 — 잔존 이슈를 직접 처리한 뒤 다시 리뷰해 주세요.
+
+**PASS 이지만 기록 실패** (v2 발급이 exit 0 이 아님 — §5.6):
+> 리뷰 자체는 통과했지만 이번 회차는 기록되지 않았어요 — [사유]. digest 재캡처 후 재리뷰가 필요합니다.
 
 이 짧은 안내 후에 기존 codex 본문 (Code Defects / Design Alignment / Test Alignment / Claim Audit / `FINAL_VERDICT: <X>`) 를 그대로 emit 한다.
 
@@ -545,7 +465,7 @@ resume 된 세션은 원 세션의 model, reasoning effort, sandbox mode 를 그
 | 기본 상한 | **5회차** (§3 의 "3회차 High 잔존 → 사람 에스컬레이션" 에 2회 여유) |
 | 계수 대상 | **미통과 회차만.** 통과(PASS)는 사이클 종료이므로 카운터를 제거한다 |
 | 계수 시점 | **verdict 가 확정된 뒤** 1회. 상한 판정만 spawn 이전에 한다. 리뷰가 수행되지 않은 종료 — 준비도 거부(4)·모델 오류(3)·워치독 정지(5) — 는 예산을 소모하지 않는다 (§4.2 의 "재리뷰 카운트 비포함" 과 정합) |
-| 초과 시 | codex 를 실행하지 않고 **exit 6** + 앵커 진단. 표식 계열 파일 무접촉 |
+| 초과 시 | codex 를 실행하지 않고 **exit 6** + 앵커 진단. v2 발급 미시도 |
 | 연장 | **프롬프트 첫 줄이 `[MAX_ROUNDS:5]` 하나뿐일 때만** 선언으로 인정한다 (정수 1~999). 기본 상한을 넘기는 선언은 stderr 경고 + 카운터 이력에 기록된다 — **조용한 연장 경로는 없다** |
 | 마커 오인 방지 | 본문 어디에 있는 마커 문자열도 선언으로 해석하지 않고 **원문 그대로 보존한다**. 위치 제한이 없던 이전 판에서는 이전 리뷰 출력이나 문서 예시를 인용하기만 해도, "사용자는 `[MAX_ROUNDS:8]` 을 승인하지 않았다" 같은 문장으로도 상한이 올라갔다 — 사람 승인 없이 예산이 늘어나는 경로였다. 첫 줄 단독이지만 정수가 아닌 표기도 선언이 아니며 본문이 유지된다 |
 | 상태 파일 | `trail/dod/.review-rounds/<키 해시>` (key / count / limit / updated / extensions). 기록은 키별 락 안에서 파일을 다시 읽어 증가시키고 임시파일+교체로 원자화한다 |

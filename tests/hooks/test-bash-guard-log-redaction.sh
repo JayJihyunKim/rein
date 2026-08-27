@@ -4,16 +4,25 @@
 # v1 안전 소릴리스 ① (trail/dod/dod-2026-08-07-v1-safety-prerelease.md):
 # 차단 로그의 민감정보 봉합 계약을 행위로 고정한다.
 #
-# 계약 (audit 2026-08-05 문제 1 개선 방향):
+# 계약 (audit 2026-08-05 문제 1 개선 방향; R2/R5 는 F4 — Phase 7 웨이브 4
+# 코드 리뷰 3회차 — 로 raw 계약 현행화):
 #   [R1] git 추적 파일(trail/incidents/blocks.jsonl)에 차단된 명령의 원문·
 #        비밀값을 기록하지 않는다 — 안전 표현(동사 + 내용 해시)만 기록.
-#   [R2] 원문(마스킹 적용본)은 git 비추적 로컬 로그(.rein/logs/blocks-raw.jsonl)
-#        에만 남는다. token / password / Authorization / URL credential 패턴은
-#        기록 전에 <REDACTED> 치환.
+#   [R2] 원문(마스킹 + 경로 정규화 적용본)은 로컬 로그(.rein/logs/blocks-raw.jsonl)
+#        에 남는다. token / password / Authorization / URL credential 패턴은
+#        기록 전에 <REDACTED> 치환되고, 사적 절대경로(`/Users/<user>/...` 등)는
+#        `<HOME>` 으로 축약된다(rein-log-block.py 모듈 docstring R6 참조) —
+#        이 축약은 아래 [R5]의 git-비추적 여부와 무관하게 항상 적용된다.
+#        rein 은 사용자 프로젝트에 `.rein/logs/` 의 gitignore 규칙을 만들어
+#        주지 않으므로(실측 0건), "git 비추적이라 안전하다" 는 전제에
+#        기대지 않는다.
 #   [R3] 테스트발 이벤트는 source=test 로 태깅되고 반복 경고 카운트에서 제외.
 #        legacy 레코드(source 필드 없음)는 live 로 취급 (FN 방지).
 #   [R4] raw 로그는 크기 상한 회전 (무한 성장 금지).
-#   [R5] .rein/logs/ 는 저장소 .gitignore 로 제외.
+#   [R5] .rein/logs/ 는 이 저장소(rein-dev) 자체의 .gitignore 로 제외돼 있다
+#        — 메인테이너 dogfood 환경의 부가 방어일 뿐, [R2]의 마스킹/경로
+#        축약이 기대는 전제는 아니다(사용자 프로젝트에는 이 규칙이 자동으로
+#        따라가지 않는다).
 #   [R6] 차단 동작 자체(JSON deny)는 불변 — 로깅은 판정에 영향 없음.
 #
 # Sandbox: test-harness.sh 가 훅 + lib/ 전체를 temp sandbox 로 복사하고
@@ -34,7 +43,25 @@ RAW_REL=".rein/logs/blocks-raw.jsonl"
 # run_hook_env ENV_MODE HOOK_NAME STDIN_JSON
 #   run_hook 등가 + REIN_TEST_MODE 를 명시 지정 (harness 전역 export 와 무관하게
 #   live/test 경로를 케이스별로 제어).
+# lib/rein-log-block.py 의 마스킹은 v2 SSOT(rein.shadow.masking) 위임이고,
+# 그 import 는 self-location(realpath 기준 3단계 상위)으로 패키지 부모를
+# 찾는다. 샌드박스의 훅 사본은 `$SANDBOX/.claude/hooks/lib/` 에 놓이므로
+# 패키지 부모는 `$SANDBOX/.claude` 가 된다 — 실제 rein 패키지를 그 자리에
+# 링크해야 배포 트리와 동등해진다 (없으면 마스킹이 fail-closed placeholder
+# 로 대체돼 이 스위트의 [R1]/[R2] 계약을 검증할 수 없다).
+#
+# 이 링크를 test-harness.sh 의 sandbox_setup 으로 올리면 안 된다: 일부
+# 스위트는 **패키지 부재 자체가 계약**이다 (예: test-active-task-authority-
+# switch.sh 의 "전환 확인 불가 → fail-closed" 케이스). 전역화하면 그 차단
+# 검증이 조용히 무력화된다 (2026-08-25 웨이브 4 실측 — 전역화 시 해당
+# 스위트 2건 FAIL). 그래서 다른 스위트들과 같은 per-test 링크 방식을 쓴다.
+_link_rein_package() {
+  mkdir -p "$SANDBOX/.claude"
+  ln -sfn "$REAL_PROJECT_DIR/plugins/rein-core/rein" "$SANDBOX/.claude/rein"
+}
+
 run_hook_env() {
+  _link_rein_package
   local test_mode="$1"
   local hook_name="$2"
   local stdin_json="${3:-\{\}}"

@@ -107,7 +107,7 @@ if tool == "Write":
         out("SKIP")
 elif tool in ("Edit", "MultiEdit"):
     # MultiEdit 실계약은 tool_input.edits[*].file_path (edit 별 경로 — 여러
-    # 파일 혼합 가능, post-edit-review-gate.sh 의 수집 순서와 동일). per-edit
+    # 파일 혼합 가능, post-edit-src-touch-marker.sh 의 수집 순서와 동일). per-edit
     # 경로가 없으면 top-level file_path 로 fallback (Edit 단건 / 변형 스키마).
     # (codex review 2026-07-13 R2 High)
     raw_edits = ti.get("edits")

@@ -18,7 +18,7 @@ description: same-tree edit-only parallel worker dispatched by the parallel-exec
 
 ## 금지 (부모 소유)
 
-`edit_only` 워커는 **부작용 없는 편집만** 한다. 다음 전부 금지: **커밋 금지** · 스테이징(`git add`) · 브랜치 조작 · 리뷰/보안 stamp(`.codex-reviewed`·`.security-reviewed`·`.spec-reviews/*.reviewed`) 생성 · trail 기록(`trail/inbox/`·`trail/index.md`) · 전체 포매터·변경성 테스트·코드젠·패키지 설치 등 변경성(mutating) 명령 · 선언 scope 밖 쓰기. 위는 부모(메인 세션)가 웨이브 단위 1회 수행 — 워커는 **편집 + 결과 반환** 만.
+`edit_only` 워커는 **부작용 없는 편집만** 한다. 다음 전부 금지: **커밋 금지** · 스테이징(`git add`) · 브랜치 조작 · 리뷰/보안 v2 증거 발급(`bin/rein issue-evidence code_review|security_review`) 및 `.spec-reviews/*.reviewed` 생성(legacy `.codex-reviewed`/`.security-reviewed` stamp 는 Phase 7 웨이브 3 ③-d 로 write 경로 자체가 제거됨) · trail 기록(`trail/inbox/`·`trail/index.md`) · 전체 포매터·변경성 테스트·코드젠·패키지 설치 등 변경성(mutating) 명령 · 선언 scope 밖 쓰기. 위는 부모(메인 세션)가 웨이브 단위 1회 수행 — 워커는 **편집 + 결과 반환** 만.
 
 ## 구조화 결과 반환 계약
 

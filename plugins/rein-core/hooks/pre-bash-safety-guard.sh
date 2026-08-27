@@ -56,6 +56,8 @@ fi
 # [I6] infra integrity — load + verify the JSON deny emitter (exit 2 on fail).
 bg_infra_init "$SCRIPT_DIR"
 
+. "$SCRIPT_DIR/lib/shadow-capture.sh" 2>/dev/null && shadow_capture_init "pre-bash-safety-guard"  # plan Task 2.8 — shadow capture (fire-and-forget)
+
 INPUT=$(cat)
 
 # [I1] infra integrity — resolve python3 (exit 2 on fail).

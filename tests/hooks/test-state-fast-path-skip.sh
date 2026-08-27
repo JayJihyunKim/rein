@@ -3,8 +3,11 @@
 #
 # design ref: docs/specs/2026-05-21-area-c-state-machine.md
 #   §8.4 산출물 (X4.C.3 — hook 별 state read + fast-path skip):
-#     T1 (a) pre-edit-dod-gate: state.mode=source_edit + file in dirty_files
+#     T1 (a) pre-edit-coverage-gate: state.mode=source_edit + file in dirty_files
 #             → DoD validator subprocess skip (NOTICE 출력)
+#             (feature-builder-refactor task step 1, 2026-08-14: this fast-
+#             path skip + its NOTICE moved from pre-edit-dod-gate.sh to the
+#             new pre-edit-coverage-gate.sh, Marker B relocation)
 #     T2 (b) post-edit-design-plan-coverage-rule: effective_mode=answer
 #             → envelope inject skip (stdout 빈)
 #     T3 (c) post-edit-routing-procedure-rule: effective_mode=answer
@@ -90,11 +93,11 @@ with open(out_path, "w") as f:
 PY
 }
 
-# T1: pre-edit-dod-gate fast-path skip on dirty_files match.
+# T1: pre-edit-coverage-gate fast-path skip on dirty_files match.
 # Scenario: state.mode=source_edit + dirty_files=[abs(scripts/foo.py)],
 # Edit on scripts/foo.py → validator subprocess skipped (stderr NOTICE).
 t1_pre_edit_dod_gate_fast_path() {
-  start_test "T1: pre-edit-dod-gate fast-path skip when mode=source_edit + file in dirty_files"
+  start_test "T1: pre-edit-coverage-gate fast-path skip when mode=source_edit + file in dirty_files"
   mk_sandbox
   # Required scaffold: active DoD + plan + 매트릭스 (validator 가 통과되려면 일관성 필요)
   mkdir -p "$SANDBOX/trail/dod" "$SANDBOX/trail/inbox" "$SANDBOX/scripts" \
@@ -146,7 +149,7 @@ print(json.dumps({"tool_input": {"file_path": sys.argv[1]}}))
   local stderr
   stderr=$(printf '%s' "$input" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" \
              REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
-             bash "$PLUGIN_ROOT/hooks/pre-edit-dod-gate.sh" 2>&1 >/dev/null)
+             bash "$PLUGIN_ROOT/hooks/pre-edit-coverage-gate.sh" 2>&1 >/dev/null)
   local rc=$?
   assert_eq "exit_rc" "0" "$rc"
   assert_contains "fast_path_notice" "$stderr" "state.fast-path"
@@ -352,7 +355,9 @@ print(json.dumps({"tool_input": {"file_path": sys.argv[1]}}))
     CURRENT_FAILS=$((CURRENT_FAILS + 1))
   fi
 
-  # 5.4 pre-edit-dod-gate (legacy: validator subprocess runs, no fast-path skip)
+  # 5.4 pre-edit-coverage-gate (legacy: validator subprocess runs, no
+  # fast-path skip) — feature-builder-refactor task step 1 moved this logic
+  # here from pre-edit-dod-gate.sh (Marker B relocation).
   # 시나리오: state-machine.sh 부재 + dirty_files 매칭 의도 있어도 → legacy path.
   # 5.3 에서 생성한 .pending marker 가 spec-review gate 를 차단하므로 skip.
   touch "$SANDBOX/trail/dod/.skip-spec-gate"
@@ -400,11 +405,11 @@ print(json.dumps({"tool_input": {"file_path": sys.argv[1]}}))
   local out_pre stderr_pre
   stderr_pre=$(printf '%s' "$input3" | env CLAUDE_PLUGIN_ROOT="$SANDBOX_PLUGIN" \
               REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
-              bash "$SANDBOX_PLUGIN/hooks/pre-edit-dod-gate.sh" 2>&1 >/dev/null)
+              bash "$SANDBOX_PLUGIN/hooks/pre-edit-coverage-gate.sh" 2>&1 >/dev/null)
   local pre_rc=$?
   rcs="$rcs pre=$pre_rc"
   if [ "$pre_rc" != "0" ]; then
-    echo "  FAIL [pre-edit-dod-gate fail-soft]: rc=$pre_rc stderr='$stderr_pre'" >&2
+    echo "  FAIL [pre-edit-coverage-gate fail-soft]: rc=$pre_rc stderr='$stderr_pre'" >&2
     CURRENT_FAILS=$((CURRENT_FAILS + 1))
   fi
   # state-machine.sh 부재 → fast-path NOTICE 출력되지 않아야 함 (legacy path)
@@ -465,7 +470,9 @@ print(json.dumps({"tool_input": {"file_path": sys.argv[1]}}))
     CURRENT_FAILS=$((CURRENT_FAILS + 1))
   fi
 
-  # 6.4 pre-edit-dod-gate — state.json 부재 → fast-path NOTICE 없음, 정상 validator 경로
+  # 6.4 pre-edit-coverage-gate — state.json 부재 → fast-path NOTICE 없음, 정상
+  # validator 경로 (feature-builder-refactor task step 1 moved this here
+  # from pre-edit-dod-gate.sh, Marker B relocation).
   cat > "$SANDBOX/scripts/foo.py" <<'PY'
 print("hello")
 PY
@@ -510,7 +517,7 @@ print(json.dumps({"tool_input": {"file_path": sys.argv[1]}}))
   local stderr_pre
   stderr_pre=$(printf '%s' "$input3" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" \
               REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
-              bash "$PLUGIN_ROOT/hooks/pre-edit-dod-gate.sh" 2>&1 >/dev/null)
+              bash "$PLUGIN_ROOT/hooks/pre-edit-coverage-gate.sh" 2>&1 >/dev/null)
   assert_not_contains "no_fastpath_when_state_absent" "$stderr_pre" "state.fast-path"
   end_test
   rm_sandbox

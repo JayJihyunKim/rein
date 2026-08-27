@@ -4,6 +4,22 @@
 CLI modes:
     rein-policy-loader.py <hook-name>
         Hook toggle (Task 2.7). Exit 0 if enabled, 1 if disabled.
+        NOTE: exit 1 is AMBIGUOUS with a loader crash (SyntaxError, any
+        uncaught exception also exit 1) — legacy consumers only, do not add
+        new callers to this form. New callers should use --strict below.
+    rein-policy-loader.py --strict <hook-name>
+        Hook toggle, STRICT contract (Phase 7 wave 3 ③-c code review round 1
+        High fix). Exit 0 if enabled (or usage without a hook-name arg —
+        fail-open), 78 (EX_CONFIG) if explicitly disabled by user policy.
+        Every OTHER exit code (including 1, and any interpreter-level
+        failure that never reaches this line at all — SyntaxError etc.) is
+        reserved for "the loader itself failed to run" and must NOT be read
+        as "disabled" by the caller. See the --strict branch in main() for
+        the full rationale. Only the two commit-gate hooks
+        (pre-bash-commit-discipline-gate.sh / pre-bash-commit-review-gate.sh)
+        use this mode as of ③-c; other hook consumers still use the legacy
+        bare-hook-name form above unchanged (migrating them is a separate
+        cycle's decision).
     rein-policy-loader.py --rule-override <rule-name>
         Rule override (Task 2.8). Print override body to stdout if defined,
         else print nothing. Always exit 0.
@@ -65,6 +81,14 @@ PROFILE_HOOK_DEFAULTS = {
 # take precedence over the umbrella value. Hooks not listed here are unaffected
 # by any umbrella value.
 #
+# Value shape: a single string (one umbrella hop) OR a tuple of strings (an
+# ORDERED CHAIN of umbrella hops — Phase 7 wave 3 ③-c). is_enabled() checks
+# hops in the given order and stops at the FIRST one that is actually present
+# in hooks.yaml (bool shorthand or {enabled: ...} mapping); an absent/
+# unsupported-shape hop is skipped, not treated as a decision. A bare string
+# is normalized to a 1-tuple at lookup time, so every existing single-hop
+# entry below keeps working unchanged.
+#
 # - bootstrap-gate: toggles both the pre-edit and pre-tool-use-bash variants of
 #   the bootstrap gate (Wave 2 bootstrap gate split).
 # - pre-bash-guard: legacy compatibility umbrella (HK-2, cc-feature-adoption
@@ -72,11 +96,40 @@ PROFILE_HOOK_DEFAULTS = {
 #   pre-bash-test-commit-gate.sh. A project that disabled the old single hook
 #   via `pre-bash-guard: false` keeps BOTH halves disabled through this
 #   umbrella; explicit per-hook entries still override it.
+# - pre-edit-dod-gate: legacy compatibility umbrella (Phase 7 wave 3 ③-b
+#   code review round 1 fix — same pattern/precedent as pre-bash-guard
+#   above). pre-edit-dod-gate.sh was retired and replaced by two successor
+#   hooks: pre-edit-discipline-gate.sh (the v1-surviving discipline gates)
+#   and pre-edit-task-gate.sh (the active-task axis v2 wrapper). A project
+#   that disabled the old single hook via `pre-edit-dod-gate: false` keeps
+#   BOTH successors disabled through this umbrella, preserving the intent
+#   behind the old toggle; explicit per-hook entries
+#   (`pre-edit-discipline-gate` / `pre-edit-task-gate`) still override it.
+# - pre-bash-commit-discipline-gate / pre-bash-commit-review-gate: legacy
+#   compatibility 2-HOP chain (Phase 7 wave 3 ③-c — same precedent as
+#   pre-edit-dod-gate above, but one level deeper). pre-bash-test-commit-
+#   gate.sh was retired and replaced by two successor hooks: this key's
+#   discipline gate (coverage-matrix + commit-message-format, the v1-
+#   surviving axis) and pre-bash-commit-review-gate.sh (the codex/security
+#   review-stamp axis). The chain has TWO hops rather than one because
+#   pre-bash-test-commit-gate.sh was ITSELF already a split-off successor
+#   of the original single pre-bash-guard.sh and was registered under that
+#   umbrella (see the `pre-bash-guard` entry above) — a project that
+#   disabled that very first hook via `pre-bash-guard: false` must keep
+#   disabling every hook descended from it, however many times it has
+#   since split. So: an explicit `pre-bash-test-commit-gate: false` (hop 1)
+#   disables both of today's successors, and if that key is itself absent,
+#   an explicit `pre-bash-guard: false` (hop 2) still reaches them.
+#   Explicit per-hook entries always override both hops.
 UMBRELLA_KEYS = {
     "pre-edit-trail-bootstrap-gate": "bootstrap-gate",
     "pre-tool-use-bash-bootstrap-gate": "bootstrap-gate",
     "pre-bash-safety-guard": "pre-bash-guard",
     "pre-bash-test-commit-gate": "pre-bash-guard",
+    "pre-edit-discipline-gate": "pre-edit-dod-gate",
+    "pre-edit-task-gate": "pre-edit-dod-gate",
+    "pre-bash-commit-discipline-gate": ("pre-bash-test-commit-gate", "pre-bash-guard"),
+    "pre-bash-commit-review-gate": ("pre-bash-test-commit-gate", "pre-bash-guard"),
 }
 
 
@@ -87,7 +140,7 @@ UMBRELLA_KEYS = {
 # presets from CUSTOM_PERSONA_DIR after validation (containment + UTF-8 decode
 # + char cap); anything unresolvable downgrades to DEFAULT_PERSONA (fail-safe)
 # so the hook never points at a missing file.
-KNOWN_PERSONA_PRESETS = {"boss-ace", "jennie"}
+KNOWN_PERSONA_PRESETS = {"boss-ace", "jennie", "choi-haengbae"}
 PERSONA_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 DEFAULT_PERSONA = "boss-ace"
 # Custom persona tier — resolved relative to the current working directory
@@ -163,8 +216,12 @@ def is_enabled(hook_name: str) -> bool:
 
     Resolution order:
         1. Explicit per-hook entry (bool shorthand or {enabled: ...} mapping)
-        2. Umbrella key (e.g. `bootstrap-gate`) when the hook is registered in
-           UMBRELLA_KEYS and the individual entry is absent
+        2. Umbrella key chain (e.g. `bootstrap-gate`, or a multi-hop chain
+           like `(pre-bash-test-commit-gate, pre-bash-guard)`) when the hook
+           is registered in UMBRELLA_KEYS and the individual entry is absent.
+           Hops are tried in order; the first hop actually present in
+           hooks.yaml decides — an absent/unsupported-shape hop is skipped,
+           not treated as a decision (Phase 7 wave 3 ③-c multi-level form).
         3. profile-driven default from PROFILE_HOOK_DEFAULTS
         4. Built-in default = True
     """
@@ -179,13 +236,18 @@ def is_enabled(hook_name: str) -> bool:
         return normalized
     # raw is None or unsupported shape -> fall through.
 
-    # 2. umbrella key fallback (Wave 2 Task 1.5)
-    umbrella_key = UMBRELLA_KEYS.get(hook_name)
-    if umbrella_key is not None:
-        umbrella_raw = data.get(umbrella_key)
-        umbrella_normalized = _normalize_enabled(umbrella_raw)
-        if umbrella_normalized is not None:
-            return umbrella_normalized
+    # 2. umbrella key fallback (Wave 2 Task 1.5; Phase 7 wave 3 ③-c extends
+    # this to an ORDERED CHAIN of hops — a bare string is a 1-hop chain, a
+    # tuple is checked in order and the first hop present in hooks.yaml wins).
+    umbrella_entry = UMBRELLA_KEYS.get(hook_name)
+    if umbrella_entry is not None:
+        umbrella_keys = (umbrella_entry,) if isinstance(umbrella_entry, str) else umbrella_entry
+        for umbrella_key in umbrella_keys:
+            umbrella_raw = data.get(umbrella_key)
+            umbrella_normalized = _normalize_enabled(umbrella_raw)
+            if umbrella_normalized is not None:
+                return umbrella_normalized
+            # this hop absent/unsupported -> try the next hop in the chain
 
     # 3. profile-driven default
     profile_default = _profile_default(data, hook_name)
@@ -574,10 +636,59 @@ def get_all_rule_overrides() -> dict:
 def main() -> int:
     if len(sys.argv) < 2:
         print(
-            "usage: rein-policy-loader.py <hook-name> | --rule-override <rule-name> | --meta-check-policy | --persona | --persona-file | --persona-greeting <name> | --turn-brief",
+            "usage: rein-policy-loader.py <hook-name> | --strict <hook-name> | --rule-override <rule-name> | --meta-check-policy | --persona | --persona-file | --persona-greeting <name> | --turn-brief",
             file=sys.stderr,
         )
         return 0  # fail-open - never block a hook due to internal usage error
+
+    if sys.argv[1] == "--strict":
+        # Phase 7 wave 3 ③-c code review round 1 fix (High) — hook toggle
+        # query with an UNAMBIGUOUS "explicitly disabled" signal, distinct
+        # from a loader/interpreter fault. rc 0 = enabled (or usage without a
+        # hook-name arg, mirroring the fail-open no-arg branch above). rc 78
+        # (sysexits.h EX_CONFIG — configuration error) = the hook is
+        # explicitly disabled by user policy. Every OTHER exit path (1, 2,
+        # an uncaught exception, or a SyntaxError that aborts the
+        # interpreter before this line even runs) is reserved for "the
+        # loader itself failed to run" — those are NOT config values a
+        # caller should read as "disabled".
+        #
+        # This split exists because the legacy bare-hook-name contract
+        # (0=enabled / 1=disabled, default mode below) is AMBIGUOUS with a
+        # plain python interpreter failure: a SyntaxError in this very file,
+        # or any uncaught exception, ALSO exits 1. A caller consuming the
+        # legacy contract cannot tell "user explicitly disabled this hook"
+        # apart from "the loader is broken" — and a broken loader must never
+        # silently turn a gate off. Phase 7 wave 3 ③-c review round 1 (High)
+        # reproduced exactly this: swapping in a syntactically broken
+        # rein-policy-loader.py made the two new commit-gate hooks' old
+        # `rc==1 -> exit 0` branch treat the crash as a policy disable
+        # (fail-open hole). rc 78 was picked because sysexits.h reserves it
+        # for EX_CONFIG and it collides with neither rc 1 (python
+        # exception/SyntaxError) nor rc 2 (this interpreter's other
+        # process-level failure class) — a caller can safely treat "0=on,
+        # 78=explicitly off, anything else=loader failure -> fail closed
+        # (keep the gate active)".
+        #
+        # Only the two NEW commit-gate hooks
+        # (pre-bash-commit-discipline-gate.sh / pre-bash-commit-review-
+        # gate.sh) call this mode as of ③-c — every other existing hook
+        # consumer (pre-edit-*, other pre-bash-*) still uses the legacy
+        # bare-hook-name form below UNCHANGED; migrating them to --strict is
+        # a separate cycle's decision, not bundled into this fix.
+        #
+        # Version-skew safety: an OLDER loader binary (pre-③-c-fix, no
+        # --strict branch) falls through to ITS OWN legacy default mode
+        # below and evaluates is_enabled("--strict") — "--strict" is never a
+        # real hook name in any project's hooks.yaml, so it is never
+        # explicitly disabled and is_enabled() returns True (built-in
+        # default), so the old loader exits 0. A caller-side version skew
+        # (new hook script paired with an old loader binary) therefore
+        # always resolves to "enabled" — the safe (gate-stays-active)
+        # direction, never a silent disable.
+        if len(sys.argv) < 3:
+            return 0  # fail-open: missing hook-name arg, same as bare usage
+        return 0 if is_enabled(sys.argv[2]) else 78
 
     if sys.argv[1] == "--rule-override":
         # Task 2.8 CLI: print override body (or nothing) and always exit 0.

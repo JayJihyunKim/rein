@@ -12,8 +12,13 @@
 #   - floor-promote           (MP3, spec §4.3)  risk-path floor: computed low → medium
 #   - marker-over-floor       (MP3, spec §4.3)  valid [EFFORT:] marker beats floor (E5)
 #   - spec-mode-skip          (MP3, spec §4.3)  spec-review mode never applies the floor
-#   - stamp-evidence          (MP4, spec §4.4)  5 additive stamp fields + real source path
-#   - commit-gate-regression  (MP4, spec §4.4)  pre-bash-test-commit-gate parser unbroken
+#   - stamp-evidence          (MP4, spec §4.4)  RETIRED Phase 7 웨이브 3 ③-d — legacy
+#                                               stamp write 경로 자체가 제거됨 (Group 6
+#                                               자신의 헤더 — 정당 소멸, 부재 증명으로 대체)
+#   - commit-gate-regression  (MP4, spec §4.4)  RETIRED Phase 7 웨이브 3 ③-d — Part A(legacy
+#                                               파서 직접 호출)는 정당 소멸, Part B(diff_base
+#                                               파싱)는 test-codex-review-stale-stamp.sh 로
+#                                               대체 (Group 7 자신의 헤더 참조)
 #   - marker-rejection        (MP5, spec §4.5)  ultra/max/xhigh rejected with own reason
 #   - auto-vocab              (MP5, spec §4.5)  _compute_effort vocabulary stays low|medium|high
 #
@@ -34,8 +39,13 @@
 #   C) source seam: `source` the wrapper with stdin </dev/null, override
 #      globals (CHANGED_FILES / REVIEW_SUBJECT / ...) and call
 #      _risk_floor_matches / _compute_effort / _resolve_diff_base directly.
-#   D) hook sandbox: pre-bash-test-commit-gate.sh + hooks/lib copied, extended
-#      (12-field) stamp fixtures, JSON-on-stdin behavioural run.
+#   D) RETIRED (Phase 7 웨이브 3 ③-d, 2026-08-24) — was: v2 authority module,
+#      extended (12-field) stamp fixtures parsed via a direct Python import
+#      of rein.engine.authority._legacy_code_review_status. That import
+#      target no longer exists — the legacy dual-read layer was fully
+#      deleted from authority.py this wave. Group 7's own header records the
+#      정당 소멸 (Part A) / 대체 (Part B, → test-codex-review-stale-stamp.sh)
+#      disposition.
 #
 # The existing codex-review suites are NOT modified (separate regression).
 
@@ -45,15 +55,16 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REAL_PROJECT_DIR="${REAL_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 WRAPPER="$REAL_PROJECT_DIR/plugins/rein-core/scripts/rein-codex-review.sh"
 CONF="$REAL_PROJECT_DIR/plugins/rein-core/config/codex-models.sh"
-GATE_HOOK="$REAL_PROJECT_DIR/plugins/rein-core/hooks/pre-bash-test-commit-gate.sh"
+# Phase 7 웨이브 3 ③-d: AUTHORITY_MODULE_PARENT / HOOKSB / GATE_STATUS
+# (Seam D — extended-stamp legacy parser regression) 는 그 import 대상
+# (rein.engine.authority._legacy_code_review_status) 자체가 삭제되어
+# 함께 제거됐다 — Group 7 자신의 헤더(정당 소멸 Part A) 참조.
 
 TEST_COUNT=0
 FAIL_COUNT=0
 SANDBOX=""
-HOOKSB=""
 TMPROOT=""
 WRAP_RC=0
-GATE_RC=0
 
 fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); echo "  FAIL: $1" >&2; }
 check() { TEST_COUNT=$((TEST_COUNT + 1)); if eval "$1"; then echo "  ok: $2"; else fail "$2"; fi; }
@@ -255,71 +266,18 @@ floor_match() {
 }
 
 # ------------------------------------------------------------
-# Seam D — commit-gate hook sandbox (extended-stamp regression).
+# Seam D — RETIRED (Phase 7 웨이브 3 ③-d, 2026-08-24).
+#
+# 이전에는 여기서 rein.engine.authority 의 legacy dual-read 파서
+# (_legacy_code_review_status 등)를 직접 import 하는 헬퍼 3종(hook_setup/
+# hook_teardown/write_ext_code_stamp)과 legacy_code_review_status() 를
+# 정의했다. ③-d 로 그 함수들이 authority.py 에서 완전히 삭제되면서 이
+# 헬퍼들은 import 자체가 실패하는 죽은 코드가 됐다 — Group 7 자신의 헤더
+# (정당 소멸 Part A) 참조. 완전히 제거한다.
 # ------------------------------------------------------------
-hook_setup() {
-  HOOKSB=$(mktemp -d "/tmp/codex-mpr-gate-XXXXXX")
-  mkdir -p "$HOOKSB/.claude/hooks/lib" "$HOOKSB/trail/dod"
-  cp "$GATE_HOOK" "$HOOKSB/.claude/hooks/pre-bash-test-commit-gate.sh"
-  chmod +x "$HOOKSB/.claude/hooks/pre-bash-test-commit-gate.sh"
-  if [ -d "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib" ]; then
-    cp -R "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/." "$HOOKSB/.claude/hooks/lib/"
-  elif [ -d "$REAL_PROJECT_DIR/.claude/hooks/lib" ]; then
-    cp -R "$REAL_PROJECT_DIR/.claude/hooks/lib/." "$HOOKSB/.claude/hooks/lib/"
-  fi
-  printf '# DoD: mpr-gate-test\n- placeholder\n' \
-    > "$HOOKSB/trail/dod/dod-2026-07-10-mpr-gate-test.md"
-}
-
-hook_teardown() {
-  [ -n "$HOOKSB" ] && [ -d "$HOOKSB" ] && rm -rf "$HOOKSB"
-  HOOKSB=""
-}
-
-# write_ext_code_stamp <verdict> <reviewed_at|skip> — the EXTENDED (12-field)
-# stamp: existing 7 fields in original order + the 5 additive evidence fields
-# (spec §4.4). The gate parser must keep reading only reviewed_at:/verdict:/
-# cycle: and stay indifferent to the new trailing fields.
-write_ext_code_stamp() {
-  local ver="$1" rat="$2"
-  local f="$HOOKSB/trail/dod/.codex-reviewed"
-  : > "$f"
-  if [ "$rat" != "skip" ]; then printf 'reviewed_at: %s\n' "$rat" >> "$f"; fi
-  printf 'reviewer: codex\n' >> "$f"
-  printf 'diff_base: N/A\n' >> "$f"
-  printf 'verdict: %s\n' "$ver" >> "$f"
-  printf 'cycle: mpr-cycle\n' >> "$f"
-  printf 'scope: wrapper-generated\n' >> "$f"
-  printf 'active_dod: trail/dod/dod-2026-07-10-mpr-gate-test.md\n' >> "$f"
-  printf 'model: gpt-test-gate\n' >> "$f"
-  printf 'effort: medium\n' >> "$f"
-  printf 'effort_source: computed+floor\n' >> "$f"
-  printf 'policy_version: 7\n' >> "$f"
-  printf 'codex_version: codex-stub 9.9.9\n' >> "$f"
-}
-
-write_sec_stamp() {
-  local f="$HOOKSB/trail/dod/.security-reviewed"
-  : > "$f"
-  printf 'reviewer=security-reviewer\n' >> "$f"
-  printf 'reviewed=2026-06-16T02:00:00Z\n' >> "$f"
-  printf 'security_level=standard\n' >> "$f"
-  printf 'cycle=mpr-cycle\n' >> "$f"
-  printf 'verdict=PASS\n' >> "$f"
-  printf 'mechanism=llm-security-review\n' >> "$f"
-}
-
-run_gate() {
-  printf '%s' '{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}' \
-    | REIN_PROJECT_DIR_OVERRIDE="$HOOKSB" \
-      bash "$HOOKSB/.claude/hooks/pre-bash-test-commit-gate.sh" \
-      > "$HOOKSB/gate-out.txt" 2> "$HOOKSB/gate-err.txt"
-  GATE_RC=$?
-}
 
 cleanup() {
   sandbox_teardown
-  hook_teardown
   [ -n "${TMPROOT:-}" ] && [ -d "$TMPROOT" ] && rm -rf "$TMPROOT"
 }
 trap cleanup EXIT
@@ -366,8 +324,17 @@ rm -rf "$_SEDIR"
 # ------------------------------------------------------------
 # Group 2 — canonical-fallback (MP2-canonical-fallback-on-config-absent,
 # spec §4.2 / §8 #2). Config 전 후보 부재 → 내장 canonical 로 -m 항상 전달
-# (무모델 호출 0건) + stderr 경고 정확히 1회 + stamp policy_version: 0.
+# (무모델 호출 0건) + stderr 경고 정확히 1회.
 # Clean tree → effort 도 fail-closed 페어의 high 로 수렴.
+#
+# "stamp policy_version: 0" 항목 처분 (Phase 7 웨이브 3 ③-d, 정당 소멸):
+# write_code_review_stamp() 는 더 이상 파일을 쓰지 않고, v2 발급이 받는
+# 인자는 verdict/reviewed-digest 뿐이라 policy_version 을 실을 곳이 없다
+# (codex-review SKILL §5.1 "실행 증빙 필드는 더 이상 durable 하게 저장되지
+# 않는다" 참조) — 이 특정 필드값의 durable 기록은 후계가 없는 정보
+# 손실이며, ③-d 가 받아들인 설계 결정이다. 대신 이 시나리오가 "발급
+# 경로에 도달했다"는 사실만 stderr 로 규명한다(이 스위트는 bin/rein 을
+# 링크하지 않으므로 항상 캡처 없음 ERROR 로 빠진다).
 # ------------------------------------------------------------
 echo "-- group 2: canonical-fallback"
 sandbox_setup noconf
@@ -379,8 +346,8 @@ assert_grep 'model_reasoning_effort="high"' "$SANDBOX/args.txt" \
   "config 부재 + 측정불가 → canonical effort high"
 _warns=$(grep -c "canonical" "$SANDBOX/err.txt" 2>/dev/null || true)
 assert_eq "$_warns" "1" "config 전 후보 부재 → canonical 경고 정확히 1회"
-assert_grep_e '^policy_version:[[:space:]]*0$' "$SANDBOX/trail/dod/.codex-reviewed" \
-  "canonical fallback 실행 → stamp policy_version: 0"
+assert_grep "no review-start subject digest was captured" "$SANDBOX/err.txt" \
+  "canonical fallback 실행 → v2 발급 경로 진입(bin/rein 미링크로 캡처없음 ERROR, non-fatal)"
 sandbox_teardown
 
 sandbox_setup newconf
@@ -471,120 +438,71 @@ sandbox_teardown
 
 # ------------------------------------------------------------
 # Group 6 — stamp-evidence (MP4-stamp-evidence-fields-additive,
-# spec §4.4 / §8 #7). PASS 도장에 5필드 추가 + 기존 7필드 잔존 +
-# effort_source 가 시나리오별 실제 경로를 기록.
+# spec §4.4 / §8 #7). 원래 취지: PASS 도장에 실행 증빙 5필드(model/effort/
+# effort_source/policy_version/codex_version)가 추가되고 기존 7필드가
+# 잔존하는지 검증.
+#
+# Phase 7 웨이브 3 ③-d (2026-08-24) 처분: **정당 소멸**. write_code_review_
+# stamp() 는 더 이상 어떤 파일도 쓰지 않는다(rein-codex-review.sh 자신의
+# "Phase 7 wave 3 ③-d retired the legacy code-review stamp file" 주석
+# 참조) — v2 발급이 받는 인자는 verdict/reviewed-digest 뿐이라 model/
+# effort/effort_source/policy_version/codex_version 을 실을 필드 자체가
+# 없다. 이 정보의 "기록" 은 이제 durable 하지 않다(사람 대면 stderr 로만
+# 노출, codex-review SKILL §5.1 참조) — 되살릴 후계 파일 계약이 없으므로
+# 무대체가 아니라 "그 계약 자체가 스펙 결정으로 소멸"이다.
+#
+# 하지만 **"effort 값이 올바르게 계산된다"는 사실 자체는 후계 커버리지가
+# 있다** — Group 2~5 가 이미 같은 4개 시나리오(computed/marker/computed+
+# floor/fail_closed) 각각에서 codex 실행 인자(`--config model_reasoning_
+# effort="..."`, STUB_ARGS_OUT/args.txt)로 정확히 같은 값을 고정한다.
+# 도장에 "기록"되는지는 소멸했지만 "계산·전달"되는지는 그대로 잠겨 있다.
+# 아래는 그 소멸 자체(파일이 이제 전혀 생성되지 않음)를 고정하는 부재
+# 증명 회귀 가드다.
 # ------------------------------------------------------------
-echo "-- group 6: stamp-evidence"
+echo "-- group 6: stamp-evidence (정당 소멸 — 부재 증명으로 대체, effort 값 자체는 Group 2~5 커버)"
 
-# (a) computed 경로 + 전체 필드 세트.
 sandbox_setup newconf
 stage_file "util.sh" 5
 run_wrapper "code review please"
-STAMP="$SANDBOX/trail/dod/.codex-reviewed"
-check '[ -f "$STAMP" ]' "PASS → 도장 생성"
-# 기존 7필드 잔존 (additive 계약).
-assert_grep_e '^reviewed_at: '            "$STAMP" "기존 필드 reviewed_at: 잔존"
-assert_grep_e '^reviewer: '               "$STAMP" "기존 필드 reviewer: 잔존"
-assert_grep_e '^diff_base: '              "$STAMP" "기존 필드 diff_base: 잔존"
-assert_grep_e '^verdict: PASS$'           "$STAMP" "기존 필드 verdict: PASS 잔존"
-assert_grep_e '^cycle:'                   "$STAMP" "기존 필드 cycle: 잔존"
-assert_grep_e '^scope: wrapper-generated$' "$STAMP" "기존 필드 scope: 잔존"
-assert_grep_e '^active_dod:'              "$STAMP" "기존 필드 active_dod: 잔존"
-# 신규 5필드.
-assert_grep_e '^model:[[:space:]]*gpt-test-gate$' "$STAMP" "신규 필드 model: 게이트 모델 기록"
-assert_grep_e '^effort:[[:space:]]*low$'          "$STAMP" "신규 필드 effort: 실제 적용값(low)"
-assert_grep_e '^effort_source:[[:space:]]*computed$' "$STAMP" "effort_source: computed (산출 경로)"
-assert_grep_e '^policy_version:[[:space:]]*7$'    "$STAMP" "policy_version: config 값(7) 기록"
-assert_grep_e '^codex_version:[[:space:]]*codex-stub 9\.9\.9$' "$STAMP" \
-  "codex_version: CODEX_BIN --version 1행 기록"
-sandbox_teardown
-
-# (b) marker 경로.
-sandbox_setup newconf
-stage_file "util.sh" 5
-run_wrapper "[EFFORT:high] code review please"
-assert_grep_e '^effort:[[:space:]]*high$' "$SANDBOX/trail/dod/.codex-reviewed" \
-  "marker 시나리오 → effort: high"
-assert_grep_e '^effort_source:[[:space:]]*marker$' "$SANDBOX/trail/dod/.codex-reviewed" \
-  "marker 시나리오 → effort_source: marker"
-sandbox_teardown
-
-# (c) computed+floor 경로.
-sandbox_setup newconf
-stage_file "hooks/x.sh" 5
-run_wrapper "code review please"
-assert_grep_e '^effort:[[:space:]]*medium$' "$SANDBOX/trail/dod/.codex-reviewed" \
-  "floor 승격 시나리오 → effort: medium"
-assert_grep_e '^effort_source:[[:space:]]*computed\+floor$' "$SANDBOX/trail/dod/.codex-reviewed" \
-  "floor 승격 시나리오 → effort_source: computed+floor"
-sandbox_teardown
-
-# (d) fail_closed 경로 (clean tree → 측정 불가).
-sandbox_setup newconf
-run_wrapper "code review please"
-assert_grep_e '^effort:[[:space:]]*high$' "$SANDBOX/trail/dod/.codex-reviewed" \
-  "fail-closed 시나리오 → effort: high (페어)"
-assert_grep_e '^effort_source:[[:space:]]*fail_closed$' "$SANDBOX/trail/dod/.codex-reviewed" \
-  "fail-closed 시나리오 → effort_source: fail_closed"
+check '[ ! -e "$SANDBOX/trail/dod/.codex-reviewed" ]' \
+  "PASS 이후에도 legacy stamp 파일이 전혀 생성되지 않음 (③-d write 경로 전면 제거)"
 sandbox_teardown
 
 # ------------------------------------------------------------
 # Group 7 — commit-gate-regression (MP4-commit-gate-parser-unbroken,
-# spec §4.4 / §8 #7). 확장(12필드) 도장으로 게이트 판정이 기존과 동일:
-# PASS+fresh → 통과, NEEDS-FIX → 차단, 시각 파싱불가 → fail-closed 차단.
-# 게이트 소스는 본 사이클에서 무변경 — 행위 회귀 고정.
+# spec §4.4 / §8 #7). 원래 취지: 확장(12필드) 도장으로 파서 판정이 기존과
+# 동일한지(PASS+fresh → pass, NEEDS-FIX → fail, 시각 파싱불가 →
+# fail(fail-closed)) 검증.
+#
+# Phase 7 웨이브 3 ③-d (2026-08-24) 처분: **정당 소멸(Part A) + 대체
+# (Part B)**.
+#
+# Part A (Seam D — legacy_code_review_status() 로 rein.engine.authority.
+# _legacy_code_review_status 를 직접 호출하는 파서 무결성 검사)는 정당
+# 소멸이다: ③-d 로 authority.py 의 legacy dual-read 계층 전체(`legacy_
+# status`/`_legacy_code_review_status`/`_legacy_security_review_status`/
+# `_parse_codex_marker`/`_parse_stamp_field`/`_normalize_iso`, 타입
+# `LegacyStatus`/`LEGACY_PASS`/`LEGACY_FAIL`/`LEGACY_ABSENT`/`SOURCE_
+# LEGACY`)가 코드에서 완전히 삭제됐다(authority.py 자신의 "Phase 7 웨이브
+# 3 ③-d — legacy read 계층 전체 제거" 주석 참조, 실측: `grep -n "^def "
+# authority.py` 에 이 함수들이 더 이상 없음) — import 자체가 실패하므로
+# 이 Part 는 근본적으로 재현 불가능하다. 확장 필드가 붙어도 파서가
+# 깨지지 않는다는 취지의 판정부 자체가 소멸했다 — 재도입하려면 spec §3.6
+# 자체의 재개정(수동 governance acceptance)이 선행돼야 한다(authority.py
+# 자신의 주석이 명시).
+#
+# Part B (_resolve_diff_base() 가 확장 도장의 diff_base: 필드를 그대로
+# 채택하는지 검증)는 **대체** — tests/skills/test-codex-review-stale-
+# stamp.sh 의 Test C("plausible_legacy_marker_content_is_fully_ignored")
+# 가 정확히 같은 함수를 정확히 같은 방식(BASE_SHA=HEAD~1, .codex-reviewed
+# 에 fresh + 유효 조상 SHA 시드)으로 실행해, ③-d 이후 이 함수가 stamp
+# 내용과 무관하게 항상 HEAD~1 을 채택함을 고정한다 — 이 Group 이 만들던
+# 것과 같은 BASE_SHA=HEAD~1 픽스처였으므로 원래도 "파서가 stamp 를 읽어서
+# 우연히 같은 값에 도달"했는지 "무조건 HEAD~1 이라 같은 값"인지 이
+# assertion 하나만으로는 구분되지 않았다 — stale-stamp 스위트의 Test A(
+# stamp 없음)/Test D(적대적 stamp)가 그 구분을 실제로 제공한다.
 # ------------------------------------------------------------
-echo "-- group 7: commit-gate-regression"
-hook_setup
-write_ext_code_stamp "PASS" "2026-06-16T01:00:00Z"
-write_sec_stamp
-run_gate
-assert_eq "$GATE_RC" "0" "확장 도장 PASS+fresh → 게이트 exit 0"
-check '[ ! -s "$HOOKSB/gate-out.txt" ]' \
-  "확장 도장 PASS+fresh → JSON deny 미발화 (커밋 통과)"
-
-write_ext_code_stamp "NEEDS-FIX" "2026-06-16T01:00:00Z"
-run_gate
-assert_grep "CODE_REVIEW_NOT_PASSED" "$HOOKSB/gate-out.txt" \
-  "확장 도장 verdict NEEDS-FIX → 기존 판정대로 차단"
-assert_grep '"permissionDecision"' "$HOOKSB/gate-out.txt" \
-  "NEEDS-FIX 차단이 JSON deny 로 발화"
-
-write_ext_code_stamp "PASS" "skip"
-run_gate
-assert_grep "CODE_REVIEW_NOT_PASSED" "$HOOKSB/gate-out.txt" \
-  "확장 도장 + reviewed_at 부재 → fail-closed 차단 (기존과 동일)"
-hook_teardown
-
-# 래퍼측 도장 파서 회귀: 확장 도장의 diff_base:/reviewed_at: 파싱이 기존과
-# 동일하게 동작 (fresh stamp → 저장된 diff_base 채택).
-mk_fixture "$FIX2"
-( cd "$FIX2" && git commit --allow-empty -q -m second )
-BASE_SHA=$(git -C "$FIX2" rev-parse HEAD~1)
-cat > "$FIX2/trail/dod/.codex-reviewed" <<STAMP
-reviewed_at: 2099-01-01T00:00:00Z
-reviewer: codex
-diff_base: ${BASE_SHA}
-verdict: PASS
-cycle: mpr-cycle
-scope: wrapper-generated
-active_dod: trail/dod/dod-x.md
-model: gpt-test-gate
-effort: medium
-effort_source: computed+floor
-policy_version: 7
-codex_version: codex-stub 9.9.9
-STAMP
-_db_out=$(
-  export REIN_PROJECT_DIR_OVERRIDE="$FIX2"
-  # shellcheck disable=SC1090
-  source "$WRAPPER" </dev/null >/dev/null 2>&1
-  set +eu +o pipefail 2>/dev/null
-  PROJECT_DIR="$FIX2"
-  _resolve_diff_base
-)
-assert_eq "$_db_out" "$BASE_SHA" \
-  "확장 도장에서 _resolve_diff_base 가 저장된 diff_base 를 그대로 채택 (파서 비파손)"
+echo "-- group 7: commit-gate-regression (정당 소멸 Part A — import 대상 소멸 / 대체 Part B — test-codex-review-stale-stamp.sh Test C가 계승)"
 
 # ------------------------------------------------------------
 # Group 8 — marker-rejection (MP5-ultra-max-xhigh-rejected-with-reason,

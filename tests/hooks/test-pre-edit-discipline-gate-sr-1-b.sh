@@ -1,0 +1,336 @@
+#!/bin/bash
+# tests/hooks/test-pre-edit-discipline-gate-sr-1-b.sh
+#
+# Phase 7 웨이브 3 ③-b (편집 게이트 교대): pre-edit-dod-gate.sh 삭제 후
+# spec-review-gate 축은 pre-edit-discipline-gate.sh 가 이어받는다. 이 파일이
+# 검증하는 orphan .reviewed 백스톱은 활성작업(active-task) 축과 무관하므로
+# 파일명만 새 훅으로 rename, 로직/단언은 불변.
+#
+# SR-1.b — pre-edit spec gate backstop for orphan .reviewed (without .pending).
+#
+# Bug class: SR-1 fix's backstop (a) only runs when a .pending marker exists.
+# If post-edit-spec-review-gate.sh fails to fire (hooks disabled, external IDE
+# write, git checkout restoring a spec, MultiEdit JSON parse failure → exit 0)
+# the new .pending is never created. The old .reviewed lingers as an orphan
+# and the spec gate silently passes — source edits proceed with unreviewed
+# spec changes. SR-1 pre-existing trust boundary, not a new gap.
+#
+# Fix: extend pre-edit-discipline-gate.sh spec gate to also iterate *.reviewed
+# markers that have no matching .pending sibling. For each orphan, compare
+# the spec file's mtime against the reviewed= timestamp. mtime > reviewed →
+# stale → block. Missing/garbled reviewed= or unreadable mtime → fail-closed.
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/test-harness.sh"
+
+# Compute the deterministic 16-char shasum hash the gate uses to key markers.
+_sr1b_compute_hash() {
+  local input="$1"
+  printf '%s' "$input" | shasum 2>/dev/null | cut -c1-16
+}
+
+# Initialise the sandbox as a git work-tree so TIER 2 (git-time fallback for
+# retrospective provenance markers) is exercised. The gate sanitises git env
+# (env -u GIT_DIR ...) and runs `git -C "$PROJECT_DIR"`, so a real .git under
+# $SANDBOX is what it discovers.
+_sr1b_git_init() {
+  git -C "$SANDBOX" init -q 2>/dev/null
+  git -C "$SANDBOX" config user.email "test@rein.local"
+  git -C "$SANDBOX" config user.name "rein test"
+}
+
+# Commit a tracked file with explicit author/committer dates. Cherry-pick /
+# rebase preserve AUTHOR date but rewrite COMMITTER date — so passing them
+# separately models that exact divergence. Dates use explicit +0000 so the
+# resulting %at/%ct epochs are timezone-deterministic and comparable to the
+# gate's UTC-anchored reviewed= parse.
+#   $1 = absolute file path inside $SANDBOX
+#   $2 = author date  (e.g. "2026-01-01T00:00:00 +0000")
+#   $3 = committer date (optional; defaults to $2)
+_sr1b_git_commit_file() {
+  local f="$1" adate="$2" cdate="${3:-$2}"
+  local rel="${f#"$SANDBOX"/}"
+  git -C "$SANDBOX" add -- "$rel" 2>/dev/null
+  GIT_AUTHOR_DATE="$adate" GIT_COMMITTER_DATE="$cdate" \
+    git -C "$SANDBOX" commit -q -m "add $rel" >/dev/null 2>&1
+}
+
+# F1 (RED→GREEN proof): orphan .reviewed + spec mtime newer than reviewed=
+#   must be blocked. Pre-fix this falls through to "no .pending found" branch
+#   and the source edit succeeds (bug). Post-fix the gate iterates orphan
+#   .reviewed markers and blocks (exit 2).
+test_orphan_reviewed_with_stale_spec_blocks() {
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# Spec v2 (edited after review, no post-edit hook ran)" > "$spec_file"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(_sr1b_compute_hash "$spec_file")
+  # Only .reviewed exists (.pending was never created — hook missed the edit).
+  # reviewed= is in the past; spec was edited just now → mtime > reviewed.
+  {
+    echo "path=$spec_file"
+    echo "reviewer=codex"
+    echo "reviewed=2026-01-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  # Make spec mtime explicitly newer than 2026-01-01.
+  touch -t 202606010000 "$spec_file" 2>/dev/null || touch -d "2026-06-01" "$spec_file" 2>/dev/null
+
+  # Confirm there is no .pending sibling (orphan condition).
+  [ ! -f "$SANDBOX/trail/dod/.spec-reviews/${hash}.pending" ] || fail "test setup: .pending should not exist"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "orphan .reviewed + stale spec must block (post-edit hook missed; spec edited after review)"
+}
+
+# F2 (no regression): orphan .reviewed + spec mtime ≤ reviewed= → allow.
+#   The review was performed AFTER the last spec edit (normal flow where
+#   .pending was already cleared by mark-spec-reviewed and no new edit
+#   happened). Must remain allowed.
+test_orphan_reviewed_with_fresh_spec_allows() {
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# Spec v1 (reviewed, untouched after review)" > "$spec_file"
+
+  # Spec mtime is older than reviewed=.
+  touch -t 202601010000 "$spec_file" 2>/dev/null || touch -d "2026-01-01" "$spec_file" 2>/dev/null
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(_sr1b_compute_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=codex"
+    echo "reviewed=2026-06-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "orphan .reviewed + fresh review must allow (spec was reviewed after its last edit)"
+}
+
+# F3 (fail-closed): orphan .reviewed without a valid reviewed= timestamp →
+#   cannot prove freshness → block. Mirrors SR-1's strict-ISO-shape check.
+test_orphan_reviewed_with_garbled_timestamp_fails_closed() {
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# Spec" > "$spec_file"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(_sr1b_compute_hash "$spec_file")
+  # Garbled reviewed= violates the ISO 8601 shape regex.
+  {
+    echo "path=$spec_file"
+    echo "reviewer=codex"
+    echo "reviewed=not-a-timestamp"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "orphan .reviewed with garbled timestamp must fail-closed (cannot prove freshness)"
+}
+
+# F4 (no regression): no .reviewed and no .pending → pre-existing behavior
+#   (no spec review markers at all). Spec gate must remain permissive — this
+#   is the "fresh repo / no spec yet reviewed" case.
+test_no_markers_allows() {
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
+  # Either .spec-reviews dir exists but is empty, or doesn't exist. Both
+  # must allow.
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "empty .spec-reviews/ must remain permissive"
+}
+
+# F5 (no regression): when both .pending and .reviewed coexist, the SR-1
+#   branch handles freshness comparison and the new orphan branch must NOT
+#   double-check (avoid duplicate work + ensure SR-1 semantics unchanged).
+#   This fixture mirrors SR-1's test_gate_allows_when_reviewed_fresher_than_pending.
+#
+#   The fixture is deliberately constructed so the SR-1 vs orphan branches
+#   would DISAGREE if the orphan branch ran: SR-1 compares created= vs
+#   reviewed= (created < reviewed → allow), but the spec mtime is set
+#   STRICTLY NEWER than reviewed= so the orphan branch (which compares spec
+#   mtime to reviewed=) would block. Exit 0 therefore proves the orphan
+#   branch is correctly skipped when .pending exists (codex R1 Medium fix —
+#   prior version had mtime == reviewed which made the test pass even if
+#   the orphan branch accidentally ran, since `-gt` would be false).
+test_pending_plus_reviewed_uses_sr1_branch_only() {
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
+  mkdir -p "$SANDBOX/specs"
+  local spec_file="$SANDBOX/specs/api-design.md"
+  echo "# Spec" > "$spec_file"
+
+  # Spec mtime STRICTLY NEWER than reviewed=. NOTE: `touch -t` uses local
+  # time but the gate compares against reviewed= as UTC (writer uses
+  # `date -u`). We therefore set the spec ~1 month after reviewed= so the
+  # offset gap is irrelevant in any time zone. If the orphan branch
+  # accidentally ran, `spec_mtime_epoch -gt reviewed_epoch` would be true
+  # → exit 2. The SR-1 branch (created= 2026-01-01 ≤ reviewed= 2026-06-01)
+  # allows → exit 0. The skip-when-pending-exists guard is the only way
+  # exit 0 survives both branches.
+  touch -t 202607010000 "$spec_file" 2>/dev/null || touch -d "2026-07-01" "$spec_file" 2>/dev/null
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(_sr1b_compute_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "created=2026-01-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.pending"
+  {
+    echo "path=$spec_file"
+    echo "reviewer=codex"
+    echo "reviewed=2026-06-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "coexisting .pending+.reviewed must follow SR-1 branch (allow when created ≤ reviewed), not orphan branch (which would block since spec mtime > reviewed=)"
+}
+
+# F6 (RED→GREEN proof — mtime false-positive removed, soundly): a contentless
+#   orphan .reviewed whose provenance is the retrospective "cherry-pick-mtime-fp"
+#   class. This models the ACTUAL incident: the spec was committed before review
+#   (committer date ≤ reviewed=) and never re-committed, but a later checkout /
+#   branch-switch / rotation bumped only the filesystem mtime to AFTER reviewed=.
+#   Pre-fix the provenance is unrecognised → TIER 3 mtime → mtime > reviewed →
+#   false block. Post-fix the provenance is recognised → TIER 2 committer-time →
+#   committer ≤ reviewed + clean → allow. Exit 0 proves the provenance is
+#   recognised AND that the bumped mtime is ignored. This is SOUND: clean +
+#   committer ≤ reviewed means the content was integrated before review.
+test_cherrypick_mtimefp_provenance_mtime_bump_allows() {
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
+  _sr1b_git_init
+  mkdir -p "$SANDBOX/docs/specs"
+  local spec_file="$SANDBOX/docs/specs/wave.md"
+  echo "# Spec (committed pre-review, only mtime bumped since)" > "$spec_file"
+
+  # Committed in the PAST (author == committer ≤ reviewed): a normal commit that
+  # predates review and was NOT re-integrated since.
+  _sr1b_git_commit_file "$spec_file" "2026-01-01T00:00:00 +0000" "2026-01-01T00:00:00 +0000"
+
+  # Plain checkout / rotation bumps only the filesystem mtime → set it > reviewed.
+  touch -t 202607010000 "$spec_file" 2>/dev/null || touch -d "2026-07-01" "$spec_file" 2>/dev/null
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(_sr1b_compute_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=retrospective-cherry-pick-mtime-fp-2026-05-29"
+    echo "reviewed=2026-03-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 0 ] || fail "cherry-pick-mtime-fp provenance + committer date ≤ reviewed + clean must allow (a bumped mtime alone must not block)"
+}
+
+# F7 (no false-negative — content integrated AFTER review is blocked): the
+#   critical soundness test. The spec's content was AUTHORED before review
+#   (author date ≤ reviewed=) but INTEGRATED into this branch after review
+#   (committer date > reviewed=) — exactly a cherry-pick/rebase of a
+#   pre-review-authored commit landing after the review. The reviewed content
+#   could NOT have included it, so it must block. Exit 2 proves committer-time
+#   (not author-time) is the signal: author-time would wrongly allow this.
+test_cherrypick_mtimefp_provenance_integrated_after_review_blocks() {
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
+  _sr1b_git_init
+  mkdir -p "$SANDBOX/docs/specs"
+  local spec_file="$SANDBOX/docs/specs/wave.md"
+  echo "# Spec authored pre-review but integrated (committed) after review" > "$spec_file"
+
+  # Author date PAST (≤ reviewed), committer date FUTURE (> reviewed): a commit
+  # cherry-picked/integrated into this branch only after the review happened.
+  _sr1b_git_commit_file "$spec_file" "2026-01-01T00:00:00 +0000" "2026-06-01T00:00:00 +0000"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(_sr1b_compute_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=retrospective-cherry-pick-mtime-fp-2026-05-29"
+    echo "reviewed=2026-03-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "spec integrated (committed) after review must block — committer-time > reviewed; author-time being ≤ reviewed must NOT allow it (no false-negative)"
+}
+
+# F8 (fail-closed on dirty): recognised provenance, author date ≤ reviewed (would
+#   allow if clean), but the spec has an UNCOMMITTED change. Cannot prove the
+#   working-tree content matches the reviewed content → block. Guards the TIER 2
+#   dirty branch for the newly-recognised provenance class.
+test_cherrypick_mtimefp_provenance_dirty_fails_closed() {
+  seed_dod "dod-2026-04-13-test.md" "# DoD: test (GSD-2: references the specs used by this suite so blocking asserts stay on the related path)\n- 설계: specs/api-design.md specs/api.md specs/auth.md specs/consistency-test.md specs/dedup-test.md specs/deleted.md specs/detail.md specs/missing.md specs/test-spec.md specs/test.md docs/specs/wave.md docs/specs/2026-04-15-spec-review-enforcement-design.md"
+  _sr1b_git_init
+  mkdir -p "$SANDBOX/docs/specs"
+  local spec_file="$SANDBOX/docs/specs/wave.md"
+  echo "# Spec (committed clean)" > "$spec_file"
+  _sr1b_git_commit_file "$spec_file" "2026-01-01T00:00:00 +0000" "2026-01-01T00:00:00 +0000"
+
+  # Now make the work-tree dirty (uncommitted edit).
+  echo "# uncommitted change" >> "$spec_file"
+
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(_sr1b_compute_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "reviewer=retrospective-cherry-pick-mtime-fp-2026-05-29"
+    echo "reviewed=2026-03-01T00:00:00"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.reviewed"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
+    "tool_result": {}
+  }'
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
+  [ $? -eq 2 ] || fail "cherry-pick-mtime-fp provenance with a dirty work-tree must fail-closed (cannot prove content matches review)"
+}
+
+# =================================================================
+# RUN ALL TESTS
+# =================================================================
+
+run_test test_orphan_reviewed_with_stale_spec_blocks pre-edit-discipline-gate.sh
+run_test test_orphan_reviewed_with_fresh_spec_allows pre-edit-discipline-gate.sh
+run_test test_orphan_reviewed_with_garbled_timestamp_fails_closed pre-edit-discipline-gate.sh
+run_test test_no_markers_allows pre-edit-discipline-gate.sh
+run_test test_pending_plus_reviewed_uses_sr1_branch_only pre-edit-discipline-gate.sh
+run_test test_cherrypick_mtimefp_provenance_mtime_bump_allows pre-edit-discipline-gate.sh
+run_test test_cherrypick_mtimefp_provenance_integrated_after_review_blocks pre-edit-discipline-gate.sh
+run_test test_cherrypick_mtimefp_provenance_dirty_fails_closed pre-edit-discipline-gate.sh
+
+summary

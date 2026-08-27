@@ -1,0 +1,52 @@
+# 기본 Policy 세트 — push tier, 항상 성립하는 하한선 (plan Task 4.4,
+# spec §3.6/§11.1).
+#
+# spec §11.1 원문: "push → tests_passed 요구" / spec §3.6 원문(강제
+# 시점 설명): "push 는 tests_passed 추가" — "추가" 라는 표현은 push 가
+# commit tier 의 code_review 요구 위에 tests_passed 를 더 얹는다는
+# 뜻이다. 이 파일은 그 하한선(code_review)만 담당한다.
+#
+# tests_passed 의 조건부 활성(§5.2 "미선언 프로젝트 처리" 확정 문구:
+# "기본 Policy 세트의 tests_passed 요구 조항은 testing.configured fact
+# 가 true 일 때만 활성화된다")은 같은 디렉토리의 push-testing.yaml 이
+# 별도 정책으로 얹는다.
+#
+# 왜 한 파일에 조건부로 넣지 못하는가 (kernel/policy.py 로더 계약):
+# policy YAML 파일 1개는 정확히 (trigger, when, require, failure_mode)
+# 1개 tuple 만 표현한다 — 최상위는 반드시 매핑이고(다중 문서·시퀀스
+# 최상위 금지, kernel/yaml_subset.py), POLICY_FIELDS 4개 밖 키(예:
+# "push:"/"testing_configured:" 같은 서브 매핑)는 로드 시점 명시
+# 에러다. 즉 "같은 trigger 에 서로 다른 require 리스트를 조건부로
+# 얹는" 것은 한 파일로 표현할 수 없고, evaluator(rein/engine/
+# evaluator.py evaluate())가 **같은 이벤트에 매칭된 여러 policy 의
+# require 를 합집합으로 누적**하는 의미론을 그대로 이용해 파일 2개의
+# 조합으로 구성한다:
+#   - push.yaml (이 파일): when 이 command.type 하나만 검사 →
+#     testing.configured 값과 무관하게 항상 매칭 → code_review 상시 요구.
+#   - push-testing.yaml: when 이 command.type + testing.configured
+#     둘 다 검사 → testing.configured 가 정확히 "true" 일 때만 매칭 →
+#     그때만 tests_passed 가 추가로 누적됨.
+# 결과: testing 미설정 push = code_review 만 (이 파일만 매칭) /
+# testing 설정된 push = code_review + tests_passed (두 파일 다 매칭).
+#
+# ── task.exists 조건화 (Phase 7 결정 1) ─────────────────────────────
+# v1 커밋 게이트(`hooks/lib/code-review-gate.sh` 의 `dod_exists`
+# precondition)는 활성 작업이 없으면 애초에 소스 편집 자체가 차단되어
+# "리뷰할 변경이 없다"는 논리로 code_review 를 요구하지 않았다 — push
+# tier 의 code_review 하한선도 commit.yaml 과 동일하게 그 맞물린
+# 논리를 인코딩한다(이 파일이 그 하한선을 담당 — 모듈 상단 주석).
+# 사용자 결정(2026-08-19, `dod-2026-08-19-v2-phase7-legacy.md` 선행
+# 결정 4종 중 1): v1 의미론 유지를 전용 fact 방식(`task.exists`,
+# `testing.configured` 선례와 동일 패턴 — 문법 확장 없음)으로
+# 조건화한다. 계약: 이 조건 추가는 무작업(활성 task 없음) 흐름을 새로
+# 차단하지 않는다 — `task.exists` 가 부재(None)면 이 정책 자체가
+# 미매칭되어 이 요구가 통째로 사라질 뿐, 다른 어떤 편집도 새로 막지
+# 않는다. `push-testing.yaml` 은 이 조건과 별개다 — testing.configured
+# 축은 task.exists 와 무관하게 그대로 유지(이 결정의 범위 밖).
+trigger: tool.pre
+when:
+  command.type: git.push
+  task.exists: "true"
+require:
+  - code_review
+failure_mode: closed

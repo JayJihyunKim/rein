@@ -653,7 +653,10 @@ if [ -s "$SANDBOX/scripts/base-wrapper.sh" ]; then
       "code review please" | bash "$SANDBOX/scripts/base-wrapper.sh" --non-interactive \
       > /dev/null 2>&1
   ) || true
-  # 기준 실행이 남긴 도장/마커 제거 — 신규 실행의 diff 기준점 오염 방지.
+  # Phase 7 웨이브 3 ③-d: legacy .codex-reviewed/.review-pending 는 이제
+  # 아무 코드도 쓰지 않으므로 이 정리는 원리적으로 no-op 다 — 다른
+  # 사이클(예: .review-rounds 카운터)이 남길 수 있는 산출물까지 함께
+  # 정리하는 보수적 방어선으로 그대로 둔다(무해).
   rm -f "$SANDBOX/trail/dod/.codex-reviewed" "$SANDBOX/trail/dod/.review-pending" 2>/dev/null
   run_wrapper "code review please"
   TEST_COUNT=$((TEST_COUNT + 1))
@@ -708,14 +711,21 @@ assert_eq "$readiness_lines" "0" "E7b readiness stderr 0줄"
 assert_file_no_grep "evidence_manifest:" "$CAPTURE" "E7b spec envelope 에 신규 슬롯 부재"
 e2e_teardown
 
-echo "-- E8: verdict 3종 exit 0/1/2 + PASS stamp (수용 9 전반)"
+echo "-- E8: verdict 3종 exit 0/1/2 + PASS v2 발급 경로 (수용 9 전반)"
+# Phase 7 웨이브 3 ③-d: 래퍼는 더 이상 trail/dod/.codex-reviewed legacy
+# stamp 를 쓰지 않는다 — PASS 시 v2 code_review 증거 발급 시도가 유일한
+# 기록 경로다. 이 스위트는 bin/rein 을 링크하지 않으므로 발급은 "캡처된
+# digest 없음" 경로로 빠진다 — non-fatal 이며 stderr 에 ERROR 로그만
+# 남는다.
 e2e_setup
 run_wrapper "$VALID_BLOCK_PROMPT"
 assert_eq "$RC" "0" "E8 PASS → exit 0"
 TEST_COUNT=$((TEST_COUNT + 1))
-if [ -f "$SANDBOX/trail/dod/.codex-reviewed" ]; then echo "  ok: E8 PASS → stamp 생성"
-else fail "E8 PASS 인데 .codex-reviewed 미생성"; fi
-rm -f "$SANDBOX/trail/dod/.codex-reviewed"
+if grep -q "no review-start subject digest was captured" "$SANDBOX/.err.txt"; then
+  echo "  ok: E8 PASS → v2 발급 경로 진입(bin/rein 미링크로 캡처없음 ERROR, non-fatal)"
+else
+  fail "E8 PASS 인데 v2 발급 경로 미진입"
+fi
 FAKE_CODEX_VERDICT="NEEDS-FIX
 needs work" run_wrapper "$VALID_BLOCK_PROMPT"
 assert_eq "$RC" "1" "E8 NEEDS-FIX → exit 1"
@@ -724,26 +734,30 @@ rejected" run_wrapper "$VALID_BLOCK_PROMPT"
 assert_eq "$RC" "2" "E8 REJECT → exit 2"
 e2e_teardown
 
-echo "-- E9: exit 4 경로 stamp/pending/spec-reviews 무접촉 (수용 9 후반)"
+echo "-- E9: exit 4 경로 spec-reviews 무접촉 + v2 발급 미시도 (수용 9 후반)"
+# Phase 7 웨이브 3 ③-d: legacy .codex-reviewed/.review-pending 는 이제
+# 아무 코드도 쓰지 않으므로(write 경로 전면 제거) 임의 파일을 시드해
+# "무변화"를 검사해도 래퍼의 exit-4 경로를 전혀 규명하지 못한다(어떤
+# 경로를 타도 항상 무변화다) — 이 두 seed/cmp 쌍은 정당 소멸시킨다.
+# .spec-reviews 는 존속 예외라 그대로 검증한다. 대신 exit-4(readiness
+# reject, codex 미호출)는 verdict 판정 이전이므로 write_code_review_
+# stamp() 자체가 호출되지 않았음을 stderr 신호로 규명한다(bin/rein
+# 미링크 스위트라 호출됐다면 반드시 ERROR 가 남는다).
 e2e_setup
 mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
-printf 'seed-codex-reviewed\n' > "$SANDBOX/trail/dod/.codex-reviewed"
-printf 'seed-review-pending\n' > "$SANDBOX/trail/dod/.review-pending"
 printf 'seed-spec-reviewed\n' > "$SANDBOX/trail/dod/.spec-reviews/seed.reviewed"
-cp "$SANDBOX/trail/dod/.codex-reviewed" "$SANDBOX/.seed1"
-cp "$SANDBOX/trail/dod/.review-pending" "$SANDBOX/.seed2"
 cp "$SANDBOX/trail/dod/.spec-reviews/seed.reviewed" "$SANDBOX/.seed3"
 run_wrapper "구현 완료. 테스트 21건 GREEN 입니다."
 assert_eq "$RC" "4" "E9 거부 경로 진입"
 TEST_COUNT=$((TEST_COUNT + 1))
-if cmp -s "$SANDBOX/trail/dod/.codex-reviewed" "$SANDBOX/.seed1"; then echo "  ok: E9 .codex-reviewed 무변화"
-else fail "E9 .codex-reviewed 변화/삭제됨"; fi
-TEST_COUNT=$((TEST_COUNT + 1))
-if cmp -s "$SANDBOX/trail/dod/.review-pending" "$SANDBOX/.seed2"; then echo "  ok: E9 .review-pending 무변화"
-else fail "E9 .review-pending 변화/삭제됨"; fi
-TEST_COUNT=$((TEST_COUNT + 1))
 if cmp -s "$SANDBOX/trail/dod/.spec-reviews/seed.reviewed" "$SANDBOX/.seed3"; then echo "  ok: E9 .spec-reviews/seed.reviewed 무변화"
 else fail "E9 .spec-reviews/seed.reviewed 변화/삭제됨"; fi
+TEST_COUNT=$((TEST_COUNT + 1))
+if ! grep -q "no review-start subject digest was captured" "$SANDBOX/.err.txt"; then
+  echo "  ok: E9 v2 발급 경로 미진입 (readiness-reject — write_code_review_stamp 미호출)"
+else
+  fail "E9 readiness-reject 인데 v2 발급 경로에 진입함"
+fi
 e2e_teardown
 
 echo "-- E10: passthrough (a) 무-advisory + fake codex exit 4 (수용 14a)"

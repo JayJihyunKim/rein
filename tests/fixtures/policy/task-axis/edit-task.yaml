@@ -1,0 +1,15 @@
+# .rein/policy/task-axis/edit-task.yaml — active_task 축 전용 정책,
+# Edit 도구 이벤트. `_version.yaml` 의 헤더 주석에 이 디렉토리와 3파일
+# 분할이 왜 필요한지 전체 배경이 있다 — 요지만 반복: 번들 기본 정책은
+# tool.pre 트리거에 아무 policy 도 없어 active_task 를 요구하지 않으므로,
+# 이 축을 위임하려면 REIN_POLICY_DIR 로 별도 주입되는 정책이 필요하다.
+# `when:` 절이 OR 를 지원하지 않아 Edit/Write/MultiEdit 각각 파일 1개씩.
+#
+# v1 대응: hooks/pre-edit-dod-gate.sh 의 PreToolUse(Edit) 분기 — 활성
+# 작업(DoD) 없이 소스 파일 Edit 를 차단하는 지점의 미러.
+trigger: tool.pre
+when:
+  tool: Edit
+require:
+  - active_task
+failure_mode: closed

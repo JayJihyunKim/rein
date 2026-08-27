@@ -23,6 +23,24 @@
 #
 # Sandbox: test-harness.sh 가 대상 훅 + lib/ 를 sandbox 로 복사하고
 #          run_hook 으로 합성 JSON 을 stdin 에 흘려넣어 exit/stdout/stderr 회수.
+#
+# Phase 7 웨이브 3 ③-c 재배치 (2026-08-23): 구 단일 pre-bash-test-commit-
+# gate.sh 는 삭제됐고 두 신설 훅으로 교대됐다 — pre-bash-commit-discipline-
+# gate.sh(coverage/msg 게이팅, v1 존속 규율)와 pre-bash-commit-review-
+# gate.sh(리뷰 stamp 판정, v2 위임). 이 파일의 케이스 중 `assert_not_
+# blocked` 로 끝나는 anchoring 음성 테스트(Suite A 전부 + Suite B 의
+# GUARD-1/GMF-1 non-block 케이스)는 discipline-gate 자신도 동일한
+# git-commit/test-execution 분류 패턴(coverage flush 트리거 + 커밋 메시지
+# 포맷 게이팅)을 재구현하므로 그 훅에 대해서도 그대로 유의미한 회귀
+# 테스트다 — 대상 훅명만 교체.
+#
+# 반면 `assert_json_deny "CODEX_STAMP_MISSING"` 으로 끝나는 true-positive
+# 케이스 3종(compound git commit / git -C . commit / git  commit 더블
+# 스페이스)은 그 reason_code 자체가 [P5] 리뷰 stamp 축 소유이고
+# discipline-gate 는 그 코드를 낼 수 없어 이 파일에서 제거했다 — 이관처는
+# T2 워커의 신설 test-pre-bash-commit-review-gate.sh (또는 v2 pytest, 그
+# 훅이 독자적으로 재구현한 GMF-1 canonical git-subcommand 앵커링을 직접
+# 검증) 다. 상세는 부모 보고서 disposition 표 참조.
 
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -98,7 +116,7 @@ _seed_dod_no_stamps() {
 test_grep_pytest_mention_does_not_trigger_review_gate() {
   _seed_dod_no_stamps
   local input='{"tool_input":{"command":"grep -n \"pytest\" tests/conftest.py"},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   assert_not_blocked "grep \"pytest\" 인자는 테스트 실행이 아님"
 }
 
@@ -106,7 +124,7 @@ test_grep_pytest_mention_does_not_trigger_review_gate() {
 test_npm_pkg_set_test_script_does_not_trigger_review_gate() {
   _seed_dod_no_stamps
   local input='{"tool_input":{"command":"npm pkg set scripts.test=vitest"},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   assert_not_blocked "npm pkg set 값의 vitest 는 테스트 실행이 아님"
 }
 
@@ -114,7 +132,7 @@ test_npm_pkg_set_test_script_does_not_trigger_review_gate() {
 test_grep_git_commit_mention_does_not_trigger_review_gate() {
   _seed_dod_no_stamps
   local input='{"tool_input":{"command":"grep -rn \"git commit\" hooks/"},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   assert_not_blocked "grep \"git commit\" 인자는 커밋이 아님"
 }
 
@@ -130,7 +148,7 @@ test_grep_git_commit_mention_does_not_trigger_review_gate() {
 test_pytest_invocation_not_blocked_by_review_gate() {
   _seed_dod_no_stamps
   local input='{"tool_input":{"command":"pytest tests/"},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   assert_not_blocked "pytest 실행은 stamp gate 대상 아님 (GUARD-1)"
 }
 
@@ -138,47 +156,22 @@ test_pytest_invocation_not_blocked_by_review_gate() {
 test_env_prefixed_pytest_not_blocked_by_review_gate() {
   _seed_dod_no_stamps
   local input='{"tool_input":{"command":"PYTHONPATH=src pytest tests/"},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   assert_not_blocked "env-prefix pytest 실행도 stamp gate 대상 아님 (GUARD-1)"
 }
 
-# 복합 명령의 clause 로 들어간 git commit 은 여전히 발동한다.
-test_compound_git_commit_triggers_review_gate() {
-  _seed_dod_no_stamps
-  local input='{"tool_input":{"command":"cd src && git commit -m \"feat: x\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
-  assert_json_deny "CODEX_STAMP_MISSING" "&& 뒤 실제 git commit 은 차단되어야 함"
-}
-
-# ------------------------------------------------------------
-# GMF-1 (docs/specs/2026-06-12-gate-misfire-fixes.md §3.1): canonical
-# "git commit" SSOT — multi-space + git global-option forms now drive the
-# commit gate (true-positive), while mentions stay non-matching. This is the
-# cross-consumer regression: the same shared model that the classifier /
-# dispatcher use also governs the gate-internal command_invokes.
-# ------------------------------------------------------------
-
-# git -C . commit (global option between git and commit) 은 실제 커밋 → 차단.
-test_canonical_git_dash_C_commit_triggers_review_gate() {
-  _seed_dod_no_stamps
-  local input='{"tool_input":{"command":"git -C . commit -m \"feat: x\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
-  assert_json_deny "CODEX_STAMP_MISSING" "git -C . commit 은 실제 커밋 — 차단되어야 함"
-}
-
-# git  commit (더블스페이스) 도 실제 커밋 → 차단.
-test_canonical_git_double_space_commit_triggers_review_gate() {
-  _seed_dod_no_stamps
-  local input='{"tool_input":{"command":"git  commit -m \"feat: x\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
-  assert_json_deny "CODEX_STAMP_MISSING" "git  commit (더블스페이스) 은 실제 커밋 — 차단되어야 함"
-}
+# test_compound_git_commit_triggers_review_gate /
+# test_canonical_git_dash_C_commit_triggers_review_gate /
+# test_canonical_git_double_space_commit_triggers_review_gate (GMF-1 canonical
+# "git commit" SSOT true-positive 3종, CODEX_STAMP_MISSING 단언) — ③-c
+# 재배치로 이 파일에서 제거됐다. 파일 헤더 + 부모 보고서 disposition 표
+# 참조.
 
 # git commit-graph write 은 다른 서브커맨드 — 차단 금지 (shell-token 경계).
 test_git_commit_graph_mention_not_blocked() {
   _seed_dod_no_stamps
   local input='{"tool_input":{"command":"git commit-graph write"},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   assert_not_blocked "git commit-graph write 은 commit 게이트 대상 아님 (shell-token 경계)"
 }
 
@@ -338,7 +331,7 @@ test_sudo_wrapped_destructive_git_is_blocked() {
 test_env_wrapped_pytest_not_blocked_by_review_gate() {
   _seed_dod_no_stamps
   local input='{"tool_input":{"command":"env PYTHONPATH=src pytest tests/"},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   assert_not_blocked "env wrapper pytest 도 stamp gate 대상 아님 (GUARD-1)"
 }
 
@@ -359,17 +352,16 @@ test_cat_env_examples_plural_is_blocked() {
 
 main() {
   # Suite A — 분류기 false-positive 미차단 (review gate → test-commit-gate)
-  run_test test_grep_pytest_mention_does_not_trigger_review_gate       pre-bash-test-commit-gate.sh
-  run_test test_npm_pkg_set_test_script_does_not_trigger_review_gate   pre-bash-test-commit-gate.sh
-  run_test test_grep_git_commit_mention_does_not_trigger_review_gate   pre-bash-test-commit-gate.sh
-  # Suite B — 커밋 true-positive 차단 + 테스트 비차단 (GUARD-1) (→ test-commit-gate)
-  run_test test_pytest_invocation_not_blocked_by_review_gate           pre-bash-test-commit-gate.sh
-  run_test test_env_prefixed_pytest_not_blocked_by_review_gate         pre-bash-test-commit-gate.sh
-  run_test test_compound_git_commit_triggers_review_gate               pre-bash-test-commit-gate.sh
-  # Suite B (GMF-1) — canonical commit SSOT cross-consumer regression
-  run_test test_canonical_git_dash_C_commit_triggers_review_gate       pre-bash-test-commit-gate.sh
-  run_test test_canonical_git_double_space_commit_triggers_review_gate pre-bash-test-commit-gate.sh
-  run_test test_git_commit_graph_mention_not_blocked                   pre-bash-test-commit-gate.sh
+  run_test test_grep_pytest_mention_does_not_trigger_review_gate       pre-bash-commit-discipline-gate.sh
+  run_test test_npm_pkg_set_test_script_does_not_trigger_review_gate   pre-bash-commit-discipline-gate.sh
+  run_test test_grep_git_commit_mention_does_not_trigger_review_gate   pre-bash-commit-discipline-gate.sh
+  # Suite B — 커밋 true-positive 차단 + 테스트 비차단 (GUARD-1) (→ discipline-gate)
+  run_test test_pytest_invocation_not_blocked_by_review_gate           pre-bash-commit-discipline-gate.sh
+  run_test test_env_prefixed_pytest_not_blocked_by_review_gate         pre-bash-commit-discipline-gate.sh
+  # Suite B (GMF-1) canonical-commit true-positive 3종(compound / -C . /
+  # 더블스페이스, CODEX_STAMP_MISSING 단언) 은 ③-c 재배치로 제거됨 — 파일
+  # 헤더 + 부모 보고서 disposition 표 참조.
+  run_test test_git_commit_graph_mention_not_blocked                   pre-bash-commit-discipline-gate.sh
   # Suite C — .env 읽기 분류기 (→ safety-guard)
   run_test test_cat_env_example_is_not_blocked                         pre-bash-safety-guard.sh
   run_test test_echo_mentioning_env_read_is_not_blocked                pre-bash-safety-guard.sh
@@ -392,7 +384,7 @@ main() {
   run_test test_cat_env_secret_is_blocked                              pre-bash-safety-guard.sh
   run_test test_cat_envrc_is_blocked                                   pre-bash-safety-guard.sh
   run_test test_sudo_wrapped_destructive_git_is_blocked                pre-bash-safety-guard.sh
-  run_test test_env_wrapped_pytest_not_blocked_by_review_gate          pre-bash-test-commit-gate.sh
+  run_test test_env_wrapped_pytest_not_blocked_by_review_gate          pre-bash-commit-discipline-gate.sh
   # Suite E2 — codex R2 fix (safe-template prefix must not fail open)
   run_test test_cat_env_example_dot_secret_is_blocked                  pre-bash-safety-guard.sh
   run_test test_cat_env_examples_plural_is_blocked                     pre-bash-safety-guard.sh

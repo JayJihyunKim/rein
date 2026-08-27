@@ -75,8 +75,36 @@ sandbox_setup() {
 }
 
 sandbox_teardown() {
+  # Bounded retry (Phase 7 wave 3 ③-b code review round 3, Medium —
+  # 재현 완료: `bash tests/hooks/run-all.sh` 1회 실행에서 "Directory not
+  # empty" 9건 + `/tmp/dod-test-*` 신규 잔존 7건 관측). 원인: 몇몇
+  # tests/hooks/*.sh (예: test-active-task-authority-switch.sh) 는 실제
+  # rein 파이썬 패키지를 샌드박스에 심볼릭 링크한다(`$SANDBOX/.claude/rein`
+  # → plugins/rein-core/rein). 그 상태에서 훅이 hooks/lib/shadow-capture.sh
+  # 의 fire-and-forget 배경 서브셸(disown 된 python)을 태우면, 그
+  # 프로세스는 훅 자신이 exit 한 뒤에도 살아남아 `$SANDBOX/.rein/...` 에
+  # corpus 기록을 계속 시도한다 — 바로 다음의 즉시 `rm -rf` 와 경쟁한다.
+  #
+  # 이 지연은 훅 자신의 exit code/판정과 무관한 순수 관측 지연이다(shadow
+  # capture 계약: 실패/지연이 훅 판정에 영향을 주지 않는다 — hooks/lib/
+  # shadow-capture.sh 헤더 참조). 그래서 수리는 판정 로직이나 shadow-
+  # capture.sh 자체를 건드리지 않고, teardown 만 몇 차례 짧게 재시도해
+  # 그 비동기 기록의 꼬리를 흡수한다. 총 상한 ~2초(0.1초 × 최대 20회) —
+  # 어떤 테스트 단언도 이 타이밍에 의존하지 않는다(teardown 인프라 한정,
+  # tests/hooks/test-sandbox-teardown-retry.sh 가 재시도 로직 자체를
+  # 결정론적으로 고정한다). 상한을 다 써도 지우지 못하면 stderr 로만
+  # 알리고 넘어간다 — teardown 실패가 테스트 판정 자체를 흔들면 안 된다.
   if [ -n "$SANDBOX" ] && [ -d "$SANDBOX" ]; then
-    rm -rf "$SANDBOX"
+    local _attempt=0
+    while [ "$_attempt" -lt 20 ]; do
+      rm -rf "$SANDBOX" 2>/dev/null
+      [ -d "$SANDBOX" ] || break
+      _attempt=$((_attempt + 1))
+      sleep 0.1
+    done
+    if [ -d "$SANDBOX" ]; then
+      echo "sandbox_teardown: could not fully remove $SANDBOX after retrying (leaked background writer?)" >&2
+    fi
   fi
   SANDBOX=""
 }
@@ -423,6 +451,122 @@ with_missing_python() {
   # path (e.g. from a prior assertion) doesn't leak through.
   hash -r 2>/dev/null || true
   _FAKE_DIRS+=("$d")
+}
+
+# with_mktemp_tracker LOGFILE
+#   Wrap `mktemp` so every path it hands back is (a) still created for real
+#   (delegates to the real system mktemp, resolved via `command -v` BEFORE
+#   this helper's own tmpdir is prepended to PATH, so there is no recursion)
+#   and (b) appended to LOGFILE, one path per line. The wrapper is
+#   argument-transparent — it forwards "$@" untouched — so a caller that
+#   passes a template (e.g. `mktemp "$dir/.foo.XXXXXX"`) behaves exactly as
+#   it would against the real binary; only bare `mktemp` (no args) is
+#   platform-dependent, same as without this wrapper.
+#
+#   Use this to catch a caller that creates a temp file/dir via mktemp but
+#   forgets to remove it on some code path (e.g. an early `exit` before the
+#   function's own cleanup line runs) — a resource leak that a plain
+#   assert_exit/assert_file_* check cannot see, since the leaked path's name
+#   is chosen at runtime and never surfaces in the caller's own output.
+#   After the code under test has run, read LOGFILE and check each recorded
+#   path with `[ -e "$path" ]`: still present = leaked (fail), gone = it was
+#   consumed and cleaned up as expected (a file that a caller legitimately
+#   `mv`s to a final destination also counts as "gone", not a leak).
+#
+#   Composes with the other with_fake_* helpers (same _ORIG_PATH/_FAKE_DIRS
+#   bookkeeping, restored together by a single cleanup_fakes call).
+with_mktemp_tracker() {
+  local logfile="$1"
+  local real_mktemp d
+  real_mktemp=$(command -v mktemp) || return 1
+  : > "$logfile" || return 1
+  d=$(mktemp -d "/tmp/fake-mktemp-XXXXXX") || return 1
+  cat > "$d/mktemp" <<EOF
+#!/usr/bin/env bash
+out=\$('$real_mktemp' "\$@") || exit \$?
+printf '%s\n' "\$out" >> '$logfile'
+printf '%s\n' "\$out"
+EOF
+  chmod +x "$d/mktemp"
+  [ -z "$_ORIG_PATH" ] && _ORIG_PATH="$PATH"
+  export PATH="$d:$PATH"
+  _FAKE_DIRS+=("$d")
+}
+
+# with_fake_mktemp_failing
+#   Build a tmpdir containing a `mktemp` executable that ALWAYS fails
+#   (prints nothing, exits 1) — simulates a broken `mktemp` (full disk,
+#   unwritable TMPDIR, missing coreutils) for a test that needs to verify
+#   a caller fails closed rather than silently treating the empty `$(mktemp)`
+#   capture as success.
+#
+#   Unlike the other with_fake_* helpers above, this one does NOT export
+#   PATH itself and does NOT register with _FAKE_DIRS/_ORIG_PATH. Reason:
+#   this repo's own test harness (run_hook's `tmp_stdout=$(mktemp)` /
+#   `tmp_stderr=$(mktemp)`) and the hook code under test both call bare
+#   `mktemp` with no distinguishing template argument — a global PATH
+#   override would break run_hook's own bookkeeping calls in the SAME
+#   shell, not just the hook subprocess being exercised. Instead this
+#   helper only creates the fake dir and prints its path on stdout so the
+#   caller can scope the override to a single subprocess invocation, e.g.:
+#     local fakedir; fakedir=$(with_fake_mktemp_failing)
+#     PATH="$fakedir:$PATH" bash "$SANDBOX/.claude/hooks/some-hook.sh" ...
+#   The caller is responsible for `rm -rf "$fakedir"` when done (no
+#   cleanup_fakes hookup, since it was never added to _FAKE_DIRS).
+with_fake_mktemp_failing() {
+  local d
+  d=$(mktemp -d "/tmp/fake-mktemp-fail-XXXXXX") || return 1
+  cat > "$d/mktemp" <<'EOF'
+#!/usr/bin/env bash
+# Always fail, no output — simulates mktemp exhaustion/unwritable TMPDIR.
+exit 1
+EOF
+  chmod +x "$d/mktemp"
+  printf '%s\n' "$d"
+}
+
+# with_fake_mktemp_succeeding_readonly
+#   Build a tmpdir containing a `mktemp` executable that ALWAYS "succeeds"
+#   (exit 0, prints a path) but the path it hands back cannot be written to
+#   (chmod 400) — simulates the fault class mktemp exhaustion/unwritable-
+#   TMPDIR fakes above do NOT cover: mktemp itself works fine (the create
+#   syscall it does succeeds), yet whatever the caller does with the
+#   returned path next (append data into it, for example) silently fails.
+#   A caller that only checks "did mktemp exit 0 and does the path exist"
+#   treats this as a healthy temp file and never notices the fault unless
+#   it also checks the *next* operation on that path.
+#
+#   Every file this fixture hands out lives inside its own returned
+#   directory (never system /tmp directly), so a single
+#   `chmod -R u+w "$d" && rm -rf "$d"` after the test cleans up everything
+#   it created — no strays outside the fixture's own tmpdir. Ignores its
+#   arguments (like with_fake_mktemp_failing above) rather than delegating
+#   to the real mktemp, since the fault being simulated is independent of
+#   whatever template the caller passed.
+#
+#   Same non-global-PATH contract as with_fake_mktemp_failing above (see
+#   its header for the full rationale) — the caller must scope this to a
+#   single subprocess invocation (e.g. via _run_hook_with_fake_mktemp) and
+#   is responsible for restoring write permission before `rm -rf` (a
+#   caller relying on cleanup_fakes/_FAKE_DIRS won't get that for free,
+#   since this helper — like with_fake_mktemp_failing — never registers
+#   itself there).
+with_fake_mktemp_succeeding_readonly() {
+  local d
+  d=$(mktemp -d "/tmp/fake-mktemp-ro-XXXXXX") || return 1
+  mkdir -p "$d/out" || return 1
+  cat > "$d/mktemp" <<EOF
+#!/usr/bin/env bash
+# Always "succeed": hand back a path to a real, existing file that has no
+# write permission — mktemp's own job (allocate a unique path, create it)
+# looks like it worked; only a later write into that path fails.
+out="$d/out/ro-\$\$-\$RANDOM"
+: > "\$out" || exit 1
+chmod 400 "\$out" 2>/dev/null
+printf '%s\n' "\$out"
+EOF
+  chmod +x "$d/mktemp"
+  printf '%s\n' "$d"
 }
 
 # cleanup_fakes

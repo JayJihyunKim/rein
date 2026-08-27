@@ -1,0 +1,49 @@
+# 기본 Policy 세트 — push tier, tests_passed 조건부 활성 (plan Task 4.4,
+# spec §5.2 "미선언 프로젝트 처리" 확정 결정 원문 인용):
+#
+#   "기본 Policy 세트의 tests_passed 요구 조항은 testing.configured
+#   fact 가 true 일 때만 활성화된다(온보딩 마찰 방지 — 미선언
+#   프로젝트의 push 를 막지 않고 doctor 가 설정을 안내). 프로젝트가
+#   policy 를 직접 켜서 강제하는 경우, 미선언 상태의 tests_passed
+#   요구는 정상 평가 BLOCK 이다(reason = "선언된 테스트 명령 없음";
+#   판단 실패가 아니므로 failure_mode 비적용)."
+#
+# push.yaml(같은 디렉토리)과 짝을 이루는 파일이다 — 두 파일이 만드는
+# 조합 방식은 push.yaml 주석 참조. 이 파일의 when 이 push.yaml 보다
+# 조건이 하나 더 많다(command.type + testing.configured) — 그래서
+# testing.configured 가 "true" 가 아니면(부재 포함) 이 정책은 아예
+# 매칭되지 않고, tests_passed 는 요구되지 않는다(TDD Red 단계·중간
+# commit 과차단 금지 — spec §11.1 목적).
+#
+# ── fact 타입 계약 (반드시 확인) ──────────────────────────────────
+# kernel D3 YAML subset 파서(rein/kernel/yaml_subset.py `_parse_scalar`)
+# 는 bool/None 자동 변환을 하지 않는다 — 모든 스칼라는 원문 그대로의
+# 문자열로 반환된다(anchor/alias/flow style 자체가 비지원이라 YAML
+# 네이티브 bool 표기도 애초에 지원 대상이 아니다). 그래서 policy
+# `when:` 절의 비교값은 항상 문자열이고, kernel/policy.py
+# `_validate_when` 도 이를 강제한다(entry 는 반드시 str). evaluator
+# (rein/engine/evaluator.py) 의 매칭은 `context.fact(key) != value`
+# 리터럴 비교이므로, 매칭이 성립하려면 fact 쪽도 정확히 문자열
+# "true" 를 내야 한다 — Python bool True 는 "true" 와 항상 다르므로
+# (`True != "true"`) 매칭되지 않는다.
+#
+# `testing.configured` fact 를 실제로 계산해 등록하는 resolver 는 이
+# 태스크 시점 기준 코드에 아직 없다 — rein/capabilities/testing/
+# capability.py 모듈 docstring 이 "이 fact 재료(파일 존재 여부)를
+# 제공하지만 fact resolver 자체는 정의하지 않는다"고 명시하며, 실제
+# FactResolverRegistry 등록·배선은 kernel/engine 배선 코드 영역이라
+# 이 policy 세트 작업(scope: policies/**.yaml + 이 파일과 짝인 계약
+# 테스트) 범위 밖이다. 이 파일은 그 resolver 가 반드시 지켜야 할
+# **문자열 계약**("true" / 부재)을 고정하고, 계약 테스트
+# (tests/contract/test_default_policy_matrix.py)가 EvaluationContext 에
+# facts={"testing.configured": "true"} 를 직접 주입해 이 계약대로
+# 매칭이 성립함을 실증한다. 향후 실제 resolver 구현체가 Python bool
+# 을 낸다면 이 정책은 절대 매칭되지 않으므로(항상 unconfigured 로
+# 취급) 배선 시점에 문자열 변환이 필요하다.
+trigger: tool.pre
+when:
+  command.type: git.push
+  testing.configured: "true"
+require:
+  - tests_passed
+failure_mode: closed

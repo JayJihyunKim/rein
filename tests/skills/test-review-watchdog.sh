@@ -80,6 +80,18 @@ assert_contains() {
     *) fail "$3 (missing '$2')" ;;
   esac
 }
+# assert_not_contains — Phase 7 웨이브 3 ③-d 재조준 신설. legacy stamp 파일
+# 부재 검사(assert_file_absent)가 항상 참이라 더 이상 아무것도 구분하지
+# 못하게 된 시나리오(W3/W11 등, verdict 판정 전 종료)에서, "v2 발급 경로
+# 자체에 진입하지 않았다"를 stderr 신호(있었다면 반드시 남았을 문구의
+# 부재)로 규명하는 데 쓴다.
+assert_not_contains() {
+  TEST_COUNT=$((TEST_COUNT + 1))
+  case "$1" in
+    *"$2"*) fail "$3 (unexpectedly present: '$2')" ;;
+    *) echo "  ok: $3" ;;
+  esac
+}
 assert_ge() {
   TEST_COUNT=$((TEST_COUNT + 1))
   if [ "$1" -ge "$2" ] 2>/dev/null; then echo "  ok: $3"
@@ -206,12 +218,14 @@ readiness_listing() {
   ls "$SANDBOX/tmpdir"/rein-readiness.* 2>/dev/null | sort
 }
 
+# Phase 7 웨이브 3 ③-d — legacy 리뷰 표식 3종(.codex-reviewed/.review-
+# pending/.security-reviewed) 의 write 경로가 전부 제거되어 이 두 항목은
+# 항상 부재다(cksum 대상에서 자연 소멸). .spec-reviews 는 존속 예외라
+# 그대로 스냅샷 대상으로 남는다.
 dod_snapshot() {
   (
     cd "$SANDBOX" || exit 0
     {
-      [ -f trail/dod/.codex-reviewed ] && cksum trail/dod/.codex-reviewed
-      [ -f trail/dod/.review-pending ] && cksum trail/dod/.review-pending
       [ -d trail/dod/.spec-reviews ] && find trail/dod/.spec-reviews -type f -exec cksum {} \; 2>/dev/null
       true
     } | sort
@@ -304,7 +318,13 @@ FAKE_CODEX_DELAY=1 FAKE_CODEX_VERDICT='FINAL_VERDICT: PASS' \
   run_wrapper_supervised 15 "code review please"
 assert_eq "$RC" "0" "W1 상한 전 완료 → exit 0"
 assert_contains "$OUT" "FINAL_VERDICT: PASS" "W1 stdout 에 verdict"
-assert_file_exists "$SANDBOX/trail/dod/.codex-reviewed" "W1 .codex-reviewed 생성"
+# Phase 7 웨이브 3 ③-d: 래퍼는 더 이상 trail/dod/.codex-reviewed legacy
+# stamp 를 쓰지 않는다 — PASS 시 v2 code_review 증거 발급 시도가 유일한
+# 기록 경로다. 이 스위트는 bin/rein 을 링크하지 않으므로(watchdog 생존
+# 계약이 검증 대상이지 v2 발급 자체가 아니다) 발급은 "캡처된 digest
+# 없음" 경로로 빠진다 — non-fatal 이며 stderr 에 ERROR 로그만 남는다.
+assert_contains "$ERR" "no review-start subject digest was captured" \
+  "W1 v2 발급 경로 진입(bin/rein 미링크로 캡처없음 ERROR, non-fatal)"
 TEST_COUNT=$((TEST_COUNT + 1))
 if [ -s "$CAPTURE" ]; then echo "  ok: W1 FAKE_CODEX_CAPTURE 에 envelope 존재 (파일 redirect 하 stdin 계약 동일)"
 else fail "W1 FAKE_CODEX_CAPTURE 에 envelope 존재 (캡처 비어있음/없음)"; fi
@@ -338,8 +358,15 @@ assert_contains "$ERR" "effort=" "W3 앵커행에 effort 포함"
 assert_contains "$ERR" "elapsed=" "W3 앵커행에 elapsed 포함"
 assert_contains "$ERR" "after 1s primary cap" "W3 앵커행에 cap 값 포함 (계약 필드 완결 — codex R1 Test PARTIAL)"
 assert_contains "$OUT" "partial-marker" "W3 부분 스풀 best-effort 방출"
-assert_file_absent "$SANDBOX/trail/dod/.codex-reviewed" "W3 .codex-reviewed 미생성"
-assert_file_absent "$SANDBOX/trail/dod/.review-pending" "W3 .review-pending 미생성"
+# Phase 7 웨이브 3 ③-d: legacy stamp 파일은 애초에 어디서도 쓰이지 않으므로
+# (write 경로 전면 제거) 이 두 파일 부재 검사는 항상 참이라 더 이상 아무
+# 것도 구분하지 못한다 — 이 시나리오가 실제로 규명해야 하는 것은
+# "verdict 판정 전에 종료됐으니 write_code_review_stamp() 자체가 호출되지
+# 않았다"는 사실이다. bin/rein 미링크 스위트라 호출됐다면 반드시
+# "no review-start subject digest was captured" ERROR 가 stderr 에 남는다
+# — 그 부재가 후계 증거다.
+assert_not_contains "$ERR" "no review-start subject digest was captured" \
+  "W3 v2 발급 경로 미진입 (verdict 판정 전 종료 — write_code_review_stamp 미호출)"
 e2e_teardown
 
 # ============================================================
@@ -647,7 +674,9 @@ e2e_setup
 mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
 printf 'path=/x/plan-foo.md\nreviewer=t\nreviewed=2026-07-22T00:00:00\n' \
   > "$SANDBOX/trail/dod/.spec-reviews/plan-foo.reviewed"
-printf 'pending\n' > "$SANDBOX/trail/dod/.review-pending"
+# Phase 7 웨이브 3 ③-d: .review-pending 은 어디서도 쓰이지 않으므로(write
+# 경로 전면 제거) 더 이상 시드할 대상이 아니다 — dod_snapshot() 도 이제
+# .spec-reviews 만 관측한다(존속 예외).
 w11_snap_before=$(dod_snapshot)
 FAKE_CODEX_PARTIAL="partial-marker" FAKE_CODEX_STALL=1 \
   REIN_WATCHDOG_CAP_OVERRIDE=1 REIN_WATCHDOG_INTERVAL_OVERRIDE=1 REIN_WATCHDOG_GRACE_OVERRIDE=1 REIN_WATCHDOG_LEVEL_LEASE_OVERRIDE=1 \
@@ -659,8 +688,13 @@ assert_ge "$(count_anchor "$SANDBOX/.err.txt")" 1 "W11 review-timeout 앵커행 
 # 직접 관측 (codex R1 Test PARTIAL — 기본 120/180/300 매핑 자체는 모드 무분기
 # 공용 함수라 W12 단위 seam 이 고정).
 assert_contains "$ERR" "after 1s primary cap" "W11 앵커행에 cap 값 포함 (동일 resolver 소비 직접 관측)"
-assert_file_absent "$SANDBOX/trail/dod/.codex-reviewed" "W11 .codex-reviewed 미생성"
-assert_eq "$(dod_snapshot)" "$w11_snap_before" "W11 표식 스냅샷 불변 (.review-pending/.spec-reviews 무접촉)"
+# Phase 7 웨이브 3 ③-d: legacy stamp 부재 검사는 항상 참이라 더 이상
+# 아무것도 구분하지 못한다 — verdict 판정 전 정지 종료이므로
+# write_code_review_stamp() 자체가 호출되지 않았음을 stderr 신호(있었다면
+# 반드시 남았을 문구의 부재)로 규명한다.
+assert_not_contains "$ERR" "no review-start subject digest was captured" \
+  "W11 v2 발급 경로 미진입 (정지 판정 — write_code_review_stamp 미호출)"
+assert_eq "$(dod_snapshot)" "$w11_snap_before" "W11 표식 스냅샷 불변 (.spec-reviews 무접촉)"
 e2e_teardown
 
 # ============================================================

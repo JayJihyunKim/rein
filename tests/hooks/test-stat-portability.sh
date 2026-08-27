@@ -259,7 +259,21 @@ test_portable_date_ymd_to_epoch_invalid_returns_empty() {
 # ============================================================
 test_hooks_source_portable_lib() {
   begin "test_hooks_source_portable_lib"
-  for f in pre-edit-dod-gate.sh pre-bash-safety-guard.sh pre-bash-test-commit-gate.sh trail-rotate.sh session-start-load-trail.sh stop-session-gate.sh; do
+  # pre-edit-dod-gate.sh retired (Phase 7 웨이브 3 ③-b, edit-gate rotation,
+  # 2026-08-21) — replaced by pre-edit-discipline-gate.sh (inherits its body,
+  # and thus its portable.sh dependency, almost verbatim) and its new sibling
+  # pre-edit-task-gate.sh (also sources lib/portable.sh at the same top-of-
+  # file position as every other gate, even though it does not currently
+  # call a portable_stat_size/mtime helper directly — confirmed by direct
+  # inspection of the shipped hook, not assumed).
+  #
+  # pre-bash-test-commit-gate.sh retired (Phase 7 웨이브 3 ③-c, commit-gate
+  # rotation, 2026-08-23) — replaced by pre-bash-commit-discipline-gate.sh
+  # (inherits the portable.sh dependency almost verbatim) and its new
+  # sibling pre-bash-commit-review-gate.sh (also sources lib/portable.sh at
+  # the same top-of-file position as every other gate — confirmed by direct
+  # inspection of the shipped hook, not assumed).
+  for f in pre-edit-discipline-gate.sh pre-edit-task-gate.sh pre-bash-safety-guard.sh pre-bash-commit-discipline-gate.sh pre-bash-commit-review-gate.sh trail-rotate.sh session-start-load-trail.sh stop-session-gate.sh; do
     local path="$HOOKS_DIR/$f"
     if [ ! -f "$path" ]; then
       fail "hook missing: $f"

@@ -1,0 +1,147 @@
+# rein v2 배포 기본 Tag 분류 규칙 (plan Task 2.4 — spec §3.3, plan D7).
+#
+# - Tag 는 code / docs / sensitive 3종뿐이다.
+# - 위에서 아래로 첫 매치가 이긴다 — 겹침(우선순위)은 선언 순서로 해소.
+#   sensitive 블록이 항상 앞: 겹치면 보수적으로 sensitive 로 간다.
+# - 이 파일은 어떤 행동도 결정하지 않는다. Requirement 연결은
+#   Tag -> Policy -> Requirements 경유만 존재한다 (Tag 직접 차단 경로 없음).
+# - 문법은 D3 yaml subset (블록 매핑 + block sequence) 안에서만 쓴다.
+#
+# pattern 의미론 (rein/engine/tags.py):
+# - '/' 가 없는 pattern 은 경로의 basename 과 매칭 (fnmatch, 대소문자 구분)
+# - '/' 가 있는 pattern 은 repo-relative 전체 경로와 매칭 ('*' 는 '/' 포함)
+rules:
+  # ── sensitive — 자격증명·키·보안 설정 (겹침 시 최우선) ──────────
+  - tag: sensitive
+    pattern: ".env"
+  - tag: sensitive
+    pattern: ".env.*"
+  - tag: sensitive
+    pattern: "*.pem"
+  - tag: sensitive
+    pattern: "*.key"
+  - tag: sensitive
+    pattern: "*.p12"
+  - tag: sensitive
+    pattern: "*.pfx"
+  - tag: sensitive
+    pattern: "*.keystore"
+  - tag: sensitive
+    pattern: "id_rsa*"
+  - tag: sensitive
+    pattern: "id_ed25519*"
+  - tag: sensitive
+    pattern: "id_ecdsa*"
+  - tag: sensitive
+    pattern: "*credentials*"
+  - tag: sensitive
+    pattern: "secrets/*"
+  - tag: sensitive
+    pattern: "*/secrets/*"
+  - tag: sensitive
+    pattern: ".netrc"
+  - tag: sensitive
+    pattern: ".npmrc"
+  - tag: sensitive
+    pattern: ".pypirc"
+  - tag: sensitive
+    pattern: ".htpasswd"
+  # 클라우드 서비스계정 JSON 키 — basename 관례 (GCP/Firebase 류).
+  # 일반 *.json 은 code 로 분류되므로(아래) 이 규칙들이 code 규칙보다
+  # 먼저 선언돼 있어야 우선한다.
+  - tag: sensitive
+    pattern: "*firebase-adminsdk*.json"
+  - tag: sensitive
+    pattern: "*service-account*.json"
+  - tag: sensitive
+    pattern: "gcp-sa-key.json"
+  # Docker 자격증명 (base64 auth 내장) — 경로 문맥으로 한정
+  - tag: sensitive
+    pattern: ".docker/config.json"
+  - tag: sensitive
+    pattern: "*/.docker/config.json"
+  # kubeconfig — basename 'config' 단독은 과잉 매칭(일반 config 파일
+  # 전부 sensitive 화)이라 쓰지 않는다. '.kube/config' 경로 문맥으로만
+  # 한정한다.
+  - tag: sensitive
+    pattern: ".kube/config"
+  - tag: sensitive
+    pattern: "*/.kube/config"
+  # ── code — 소스·스크립트·동작에 영향을 주는 설정 코드 ──────────
+  - tag: code
+    pattern: "*.py"
+  - tag: code
+    pattern: "*.pyi"
+  - tag: code
+    pattern: "*.sh"
+  - tag: code
+    pattern: "*.bash"
+  - tag: code
+    pattern: "*.zsh"
+  - tag: code
+    pattern: "*.js"
+  - tag: code
+    pattern: "*.mjs"
+  - tag: code
+    pattern: "*.cjs"
+  - tag: code
+    pattern: "*.ts"
+  - tag: code
+    pattern: "*.tsx"
+  - tag: code
+    pattern: "*.jsx"
+  - tag: code
+    pattern: "*.go"
+  - tag: code
+    pattern: "*.rs"
+  - tag: code
+    pattern: "*.rb"
+  - tag: code
+    pattern: "*.php"
+  - tag: code
+    pattern: "*.c"
+  - tag: code
+    pattern: "*.h"
+  - tag: code
+    pattern: "*.cc"
+  - tag: code
+    pattern: "*.cpp"
+  - tag: code
+    pattern: "*.hpp"
+  - tag: code
+    pattern: "*.java"
+  - tag: code
+    pattern: "*.kt"
+  - tag: code
+    pattern: "*.swift"
+  - tag: code
+    pattern: "*.sql"
+  - tag: code
+    pattern: "*.yaml"
+  - tag: code
+    pattern: "*.yml"
+  - tag: code
+    pattern: "*.toml"
+  - tag: code
+    pattern: "*.json"
+  - tag: code
+    pattern: "Makefile"
+  - tag: code
+    pattern: "Dockerfile*"
+  # ── docs — 문서·라이선스·docs 트리 ─────────────────────────────
+  - tag: docs
+    pattern: "*.md"
+  - tag: docs
+    pattern: "*.markdown"
+  - tag: docs
+    pattern: "*.rst"
+  - tag: docs
+    pattern: "*.adoc"
+  - tag: docs
+    pattern: "*.txt"
+  - tag: docs
+    pattern: "docs/*"
+  - tag: docs
+    pattern: "LICENSE*"
+  - tag: docs
+    pattern: "NOTICE*"

@@ -10,12 +10,14 @@
 #   - GI-codex-review-envelope-context-missing
 #   - GI-codex-review-wrapper-script
 #
-# CRITICAL invariant (Plan A Phase 6 Task 6.3 Step 3, spec B / SKILL §6.6):
-#   In spec-review mode, this wrapper MUST NOT create or modify
-#   trail/dod/.codex-reviewed, and MUST NOT touch trail/dod/.review-pending.
-#   The test/commit Bash gate depends on .codex-reviewed as a
-#   code-review stamp — spec-review writes would let reviewers bypass the
-#   gate without a real code review. Regression tests live in
+# CRITICAL invariant (Plan A Phase 6 Task 6.3 Step 3, spec B / SKILL §6.6;
+# legacy stamp mechanism retired Phase 7 wave 3 ③-d — this wrapper no longer
+# writes any code-review marker file at all):
+#   In spec-review mode, this wrapper MUST NOT issue v2 code_review evidence
+#   (bin/rein issue-evidence code_review). The commit gate's sole record of a
+#   code review is now v2 evidence (digest-bound, issued via `bin/rein
+#   issue-evidence code_review`) — spec-review issuance would let reviewers
+#   bypass the gate without a real code review. Regression tests live in
 #   tests/skills/test-codex-review-wrapper.sh (verifications 5 + 6).
 #
 # Injection seam (test hook):
@@ -65,8 +67,9 @@ fi
 # PD-2 (2026-05-19): sanity-check PROJECT_DIR before cd'ing into it and
 # stamping there. The inline resolution above falls back to $PWD when
 # CLAUDE_PROJECT_DIR is unset — if the wrapper is invoked from the wrong
-# directory that silently makes codex review an unrelated tree and writes
-# the .codex-reviewed stamp outside the repo. Fail loudly instead.
+# directory that silently makes codex review an unrelated tree and issues
+# v2 evidence (or writes other trail/dod artifacts) outside the repo. Fail
+# loudly instead.
 #   - trail/ must exist (every rein project root has it).
 #   - if PROJECT_DIR is inside a git repo, it must BE the toplevel (a
 #     subdirectory would put trail/dod writes off the repo root).
@@ -758,8 +761,8 @@ SPEC_REVIEW_SUBJECT=""
 # pipefail/SIGPIPE class as D1 — `head -1` exits after the first line, so a
 # prompt larger than the pipe buffer SIGPIPEs printf (141) and the if-condition
 # goes false DESPITE a marker match. Worst case: a large spec-review prompt is
-# misclassified as code-review and writes the code-gate stamp (.codex-reviewed)
-# — gate pollution. Parameter expansion has no pipeline (no SIGPIPE window);
+# misclassified as code-review and issues v2 code_review evidence for it —
+# gate pollution. Parameter expansion has no pipeline (no SIGPIPE window);
 # the downstream grep/sed then run on a single small line.
 PROMPT_FIRST_LINE="${PROMPT_BODY%%$'\n'*}"
 if printf '%s' "$PROMPT_FIRST_LINE" | grep -qE "$SPEC_REVIEW_PLAN_RE"; then
@@ -823,50 +826,23 @@ fi
 # ---- Context assembly (Task 6.1 Step 4). ------------------------------
 
 # 4a. diff_base.
-#   Preference: latest .codex-reviewed stamp's diff_base: line → HEAD~1 →
-#   empty tree (pre-commit, no HEAD).
+#   HEAD~1 → empty tree (pre-commit, no HEAD).
+#
+#   Phase 7 wave 3 ③-d: this used to prefer the latest legacy review-stamp
+#   file's `diff_base:` line before falling through to HEAD~1. That legacy
+#   stamp mechanism (write + read, retired this wave) is gone — v2 evidence
+#   issuance is the sole record now, and it doesn't carry a diff_base field
+#   consumers here can read. Dropping the stamp-preference branch is a
+#   no-op in practice, not a behavior change: the branch's own staleness
+#   self-heal discarded the stamp's diff_base the instant HEAD moved past
+#   the stamp's own reviewed-at timestamp (i.e. right after the reviewed
+#   commit landed), so the stamp path was already dead weight for anything
+#   but a same-cycle re-review — and in that narrow window HEAD had not
+#   moved, so the stamp's diff_base and HEAD~1 were the same commit anyway.
+#   HEAD~1 alone reproduces the real-world behavior exactly.
 EMPTY_TREE_SHA="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 _resolve_diff_base() {
-  local stamp="$PROJECT_DIR/trail/dod/.codex-reviewed"
-  if [ -f "$stamp" ]; then
-    # Staleness self-healing (묶음 C Phase 2):
-    # stamp.reviewed_at < HEAD commit ISO → ignore stamp + fall through to HEAD~1.
-    # NOTE: actual wrapper schema field is `reviewed_at:` (write_code_review_stamp L772).
-    # python3 exit: 0 = stale (s < h), 1 = fresh, 2 = parse failure (fail-safe = stale).
-    local stamp_iso head_iso
-    stamp_iso=$(grep -E '^reviewed_at:' "$stamp" | head -1 | sed 's/^reviewed_at:[[:space:]]*//')
-    head_iso=$(git -C "$PROJECT_DIR" log -1 --format=%cI HEAD 2>/dev/null || true)
-    if [ -n "$stamp_iso" ] && [ -n "$head_iso" ]; then
-      python3 -c '
-import sys
-from datetime import datetime
-try:
-  s = datetime.fromisoformat(sys.argv[1].replace("Z","+00:00"))
-  h = datetime.fromisoformat(sys.argv[2])
-  sys.exit(0 if s < h else 1)
-except Exception:
-  sys.exit(2)
-' "$stamp_iso" "$head_iso" 2>/dev/null
-      local rc=$?
-      # rc=1 (fresh) → use stamp's diff_base. rc=0 (stale) or rc=2 (parse fail) → fall through.
-      if [ "$rc" = "1" ]; then
-        local base
-        base=$(grep -E '^diff_base:' "$stamp" | head -1 | sed 's/^diff_base:[[:space:]]*//' || true)
-        # GE-2: a fresh stamp's stored diff_base must be a real commit reachable
-        # from HEAD. Verify object existence + commit type (rev-parse ^{commit})
-        # AND HEAD-ancestry (merge-base --is-ancestor). A forged / orphan /
-        # other-branch SHA fails one of these → fall through to HEAD~1 (same
-        # fail-safe as OQ-3) so it cannot be injected as the review diff base.
-        if [ -n "$base" ] \
-           && git -C "$PROJECT_DIR" rev-parse --verify --quiet "${base}^{commit}" >/dev/null 2>&1 \
-           && git -C "$PROJECT_DIR" merge-base --is-ancestor "$base" HEAD 2>/dev/null; then
-          printf '%s' "$base"
-          return 0
-        fi
-      fi
-    fi
-  fi
   # HEAD~1 if it exists.
   if git -C "$PROJECT_DIR" rev-parse HEAD~1 >/dev/null 2>&1; then
     git -C "$PROJECT_DIR" rev-parse HEAD~1
@@ -906,9 +882,290 @@ _resolve_commit_iso() {
 DIFF_BASE_ISO=$(_resolve_commit_iso "$DIFF_BASE")
 HEAD_ISO=$(_resolve_commit_iso "HEAD")
 
+# ---- v2 certified review-subject paths (single-source path list). -----
+#
+# self-location (CLAUDE_PLUGIN_ROOT 미의존 — 이 저장소의 기지 gotcha,
+# reference_skill_bash_no_plugin_root_env 메모 참조): 이 스크립트는 두
+# 레이아웃 어느 쪽에도 있을 수 있다(파일 헤더 "경로 해석은
+# location-agnostic" 절 — codex-models.sh 후보 목록과 동일 원리):
+#   - plugin 레이아웃: <plugin-root>/scripts/rein-codex-review.sh
+#     → bin/rein 은 $_script_dir/../bin/rein
+#   - 메인테이너 repo-root 폴백: <repo-root>/scripts/rein-codex-review.sh
+#     → bin/rein 은 $_script_dir/../plugins/rein-core/bin/rein
+# 두 후보 다 없으면(구 설치/미이관 tarball) v2 는 조용히 미가용 —
+# CLAUDE_PLUGIN_ROOT 후보는 일부러 넣지 않는다(그 변수는 스킬 Bash 환경
+# 등에서 비어 있는 채로 "값 없음"이 아니라 "호출 결함"이 될 수 있다는
+# 선례가 있어, self-location 만으로 충분한 지점에서는 기대지 않는다).
+#
+# _rein_v2_bin — stdout: 첫 번째로 존재하는 후보의 절대경로, 없으면 빈
+# 문자열. 실패를 신호할 필요가 없다(빈 문자열 자체가 "가용 후보 없음"을
+# 뜻한다) — 항상 exit 0.
+_rein_v2_bin() {
+  local c
+  for c in "$_script_dir/../bin/rein" "$_script_dir/../plugins/rein-core/bin/rein"; do
+    if [ -f "$c" ]; then
+      printf '%s' "$c"
+      return 0
+    fi
+  done
+  printf ''
+}
+
+# _rein_v2_invoke <issue-evidence 하위 인자...>
+#   `<python> <bin/rein> issue-evidence code_review <args...>` 를 30초
+#   safety-net timeout 아래 실행한다 — 값은 hooks/lib/code-review-gate.sh
+#   의 REIN_CRG_DELEGATE_TIMEOUT_S=30 관례와 동일 상수·동일 근거(정상
+#   지연 예산이 아니라 진짜 멈춤에 대한 방어)를 그대로 따른다. macOS BSD
+#   에는 기본 GNU timeout 이 없을 수 있어 그 경우 감싸지 않은 채 호출을
+#   계속한다(code-review-gate.sh:246-249 와 동일 폴백 — 기능은 유지,
+#   시간 상한만 사라짐).
+#
+#   호출자 계약(bash 3.2 호환 — local 배열 반환 대신 전역 변수 두 개):
+#     _rein_v2_invoke_out — 캡처된 stdout (stderr 는 버린다 — v2 자신의
+#       stderr 상세는 이 래퍼가 그대로 relay 할 계약이 아니다. 호출자는
+#       stdout JSON 과 종료코드만으로 판단한다).
+#     _rein_v2_invoke_rc  — 종료코드. bin/rein 후보 자체가 없으면(호출
+#       시도조차 하지 않음) 127 로 균일 처리 — 다른 모든 비-zero 종료와
+#       마찬가지로 호출자가 "이번 cycle 은 v2 없이 진행" 으로 처리한다.
+#   이 함수 자신은 항상 exit 0 으로 반환한다(모든 실패를 두 전역 변수로만
+#   신호) — `set -euo pipefail` 아래에서 호출자가 별도 `|| ...` 없이 bare
+#   statement 로 불러도 errexit 를 유발하지 않는다.
+_rein_v2_invoke() {
+  local bin
+  bin="$(_rein_v2_bin)"
+  if [ -z "$bin" ]; then
+    _rein_v2_invoke_out=""
+    _rein_v2_invoke_rc=127
+    return 0
+  fi
+
+  local -a py_arr=(python3)
+  if [ -n "${PYTHON_RUNNER+x}" ] && [ "${#PYTHON_RUNNER[@]}" -gt 0 ]; then
+    py_arr=("${PYTHON_RUNNER[@]}")
+  fi
+
+  _rein_v2_invoke_out=""
+  _rein_v2_invoke_rc=0
+  if command -v timeout >/dev/null 2>&1; then
+    _rein_v2_invoke_out=$(REIN_PROJECT_ROOT="$PROJECT_DIR" timeout 30 \
+      "${py_arr[@]}" "$bin" issue-evidence code_review "$@" 2>/dev/null) \
+      || _rein_v2_invoke_rc=$?
+  else
+    _rein_v2_invoke_out=$(REIN_PROJECT_ROOT="$PROJECT_DIR" \
+      "${py_arr[@]}" "$bin" issue-evidence code_review "$@" 2>/dev/null) \
+      || _rein_v2_invoke_rc=$?
+  fi
+}
+
+# _CERTIFIED_REVIEW_PATHS / REIN_REVIEWED_DIGEST — ONE atomic subject
+# snapshot at review start (2026-08-20 code review round 3 refinement,
+# High-1). Before this fix the wrapper fetched the certified path list
+# (`--print-subject-paths`) HERE and the digest (`--print-digest`)
+# separately much later, right before spawning codex (see the removed
+# "v2 evidence issuance wiring" digest-capture block that used to precede
+# "Main orchestration" — collapsed into this single call). A path-fetch
+# failure there was non-fatal (review proceeded tracked-only) while the
+# LATER digest capture could still independently succeed — two points of
+# failure that could disagree, so evidence could end up certifying a
+# subject the reviewer never actually saw (e.g. untracked code that
+# appeared between the two calls). `bin/rein issue-evidence <capability>
+# --print-subject` (Phase 7 웨이브 3 ③-a High-1 in `rein/cli/
+# issue_evidence.py`) returns BOTH values from one JSON line, computed from
+# the SAME changeset snapshot inside a single Python process — there is no
+# window between "certified paths" and "the digest" for the tree to change.
+#
+# Earlier `--print-subject-paths` (this block) also replaced a prior "union
+# in ALL untracked files, unfiltered" fix, which broke the golden wrapper
+# suite (fixtures seed untracked doc files) and had a real production
+# regression: a stray untracked operational note (e.g.
+# `trail/incidents/*.md`, which routinely lingers in this repo) would flip
+# a clean post-commit review from commit_range into working_tree mode,
+# reviewing only the note instead of the actual committed diff. That
+# lesson still holds: the certified set is exactly what `changeset.
+# review_digest` (rein/platform/git/facts.py::review_digest, spec §3.6
+# "리뷰 digest 범위" 절) hashes — WORKTREE staged/unstaged/untracked MINUS
+# the review-exemption allowlist (*.md anywhere, docs/**, trail/**).
+# Untracked files that are ONLY on the allowlist are not part of that
+# certified set and must not affect collection or mode.
+#
+# Single source (no bash re-enumeration of the allowlist — that would
+# duplicate the boundary): the JSON `paths` field is exactly `rein.
+# platform.git.facts.review_subject_paths()`'s output, the same function
+# `review_digest()` itself delegates to (parsed here with the python
+# runner — no bash JSON parser).
+#
+# code-review 모드 한정 — spec-review 는 이 값을 쓰지 않는다(코드 diff
+# 리뷰가 아니므로, 4a 의 `DIFF_BASE="N/A"` 강제와 동일 이유). 조회
+# 실패(비-zero rc, 빈 stdout, JSON 파싱 실패, mktemp 실패 중 어느 것이든)
+# 는 codex 호출 자체를 막지 않는다 — NOTICE 후 세 변수 모두 fail-closed
+# 초기값으로 진행한다 (_CERTIFIED_REVIEW_PATHS 는 tracked-only 로 자연스럽게
+# fallback, _CERTIFIED_HAS_UNTRACKED_FILE=0 이면 _resolve_review_subject()
+# 가 commit_range 로 fallback, REIN_REVIEWED_DIGEST 가 빈 값이면 아래 "v2
+# evidence issuance" 절이 `-n` 체크로 발급 자체를 시도하지 않는다). Phase 7
+# 웨이브 3 ③-d 이후로는 이 조회 실패가 더 이상 non-fatal 이 아니다 — 레거시
+# stamp 가 없으므로, 단일 실패 지점이 곧 "이 cycle 은 아무 기록도 남기지
+# 못함"이다(`write_code_review_stamp()` 가 ERROR 로 알린다).
+_CERTIFIED_REVIEW_PATHS=""
+_CERTIFIED_HAS_UNTRACKED_FILE=0
+REIN_REVIEWED_DIGEST=""
+if [ "$REIN_REVIEW_MODE" = "code-review" ]; then
+  _rein_v2_invoke --print-subject
+  _v2subj_parsed=""
+  _v2subj_paths_file=""
+  if [ "$_rein_v2_invoke_rc" -eq 0 ] && [ -n "$_rein_v2_invoke_out" ]; then
+    _v2subj_py=(python3)
+    if [ -n "${PYTHON_RUNNER+x}" ] && [ "${#PYTHON_RUNNER[@]}" -gt 0 ]; then
+      _v2subj_py=("${PYTHON_RUNNER[@]}")
+    fi
+    # NUL-safe boundary (Phase 7 wave 3 ③-a code review round 4, High-1
+    # re-fix). The earlier "dumb wire format" (subject on stdout line 1,
+    # one path per remaining line, bash splits with `head`/`tail`)
+    # re-corrupted exactly the paths it was meant to certify: git allows
+    # newline-containing filenames, and `review_subject_paths()` returns
+    # them RAW (untracked paths are not git-quoted the way `git diff
+    # --name-only` output is) — a single path like `dir/line\nbreak.py`
+    # printed on its own `print(p)` line became TWO lines, i.e. two
+    # paths, once bash re-split on newline. All structural work now
+    # happens INSIDE this one python process; only boundary-safe scalars
+    # cross back into bash:
+    #   stdout line 1 = subject (digest or sentinel — a scalar, never
+    #     contains a newline).
+    #   stdout line 2 = "1"/"0" — whether the certified path set
+    #     contains an untracked file. Computed HERE (python calls `git
+    #     ls-files --others --exclude-standard -z` itself and intersects
+    #     by exact raw bytes) so `_resolve_review_subject()` below no
+    #     longer needs to re-derive this in bash via `grep -Fxf` against
+    #     a newline-joined path list — that grep was itself exposed to
+    #     the same re-splitting corruption this fix removes.
+    #   the certified path LIST never crosses back through bash text — it
+    #   is written directly to $_v2subj_paths_file, NUL-delimited
+    #   (`path\0path\0...`), for bash to read with `while IFS= read -r
+    #   -d ''` only (the collection union below, "4b. Changed files").
+    # Any parse failure (non-JSON output, missing "subject" key, "paths"
+    # not a list, git/file-write failure) exits 1 so the invariant below
+    # ("no valid parse -> all three variables stay at their fail-closed
+    # initializers") holds — no head/tail newline parsing of the path
+    # list remains anywhere in this wrapper.
+    _rein_mktemp _v2subj_paths_file || _v2subj_paths_file=""
+    if [ -n "$_v2subj_paths_file" ]; then
+      _v2subj_parsed=$(printf '%s' "$_rein_v2_invoke_out" \
+        | REIN_V2SUBJ_PATHS_FILE="$_v2subj_paths_file" \
+          REIN_V2SUBJ_PROJECT_DIR="$PROJECT_DIR" \
+          "${_v2subj_py[@]}" -c '
+import json
+import os
+import subprocess
+import sys
+
+try:
+    data = json.load(sys.stdin)
+    subject = data["subject"]
+    paths = data["paths"]
+    if not isinstance(subject, str) or not subject:
+        raise ValueError("subject is not a non-empty string")
+    if not isinstance(paths, list):
+        raise ValueError("paths is not a list")
+except Exception:
+    sys.exit(1)
+
+out_file = os.environ.get("REIN_V2SUBJ_PATHS_FILE", "")
+project_dir = os.environ.get("REIN_V2SUBJ_PROJECT_DIR", "")
+if not out_file or not project_dir:
+    sys.exit(1)
+
+has_untracked = "0"
+if paths:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", project_dir, "ls-files", "--others",
+             "--exclude-standard", "-z"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True,
+        )
+    except Exception:
+        sys.exit(1)
+    untracked = set(
+        proc.stdout.decode("utf-8", "surrogateescape").split("\0")
+    )
+    untracked.discard("")
+    if any(p in untracked for p in paths):
+        has_untracked = "1"
+
+try:
+    with open(out_file, "wb") as fh:
+        for p in paths:
+            fh.write(str(p).encode("utf-8", "surrogateescape"))
+            fh.write(b"\0")
+except Exception:
+    sys.exit(1)
+
+sys.stdout.write(subject + "\n")
+sys.stdout.write(has_untracked + "\n")
+' 2>/dev/null) || _v2subj_parsed=""
+    fi
+  fi
+  if [ -n "$_v2subj_parsed" ]; then
+    _v2subj_flag="0"
+    _v2subj_line_idx=0
+    while IFS= read -r _v2subj_line; do
+      _v2subj_line_idx=$((_v2subj_line_idx + 1))
+      if [ "$_v2subj_line_idx" -eq 1 ]; then
+        REIN_REVIEWED_DIGEST="$_v2subj_line"
+      elif [ "$_v2subj_line_idx" -eq 2 ]; then
+        _v2subj_flag="$_v2subj_line"
+      fi
+    done <<< "$_v2subj_parsed"
+    [ "$_v2subj_flag" = "1" ] && _CERTIFIED_HAS_UNTRACKED_FILE=1
+    # Collection union — NUL-aware read only (no newline splitting of the
+    # certified list itself). Each path gets its embedded newlines (if
+    # any) escaped to a literal `\n` (two-char backslash-n) BEFORE joining
+    # into the newline-per-entry bash string this wrapper uses everywhere
+    # downstream (`_changed_files()`'s union, `_risk_floor_matches()`, and
+    # the `changed_files:` block rendered into the codex prompt at
+    # "Context assembly" below) — this is the "display can never re-split
+    # a path" half of the fix: escaping happens once, at the single point
+    # a certified path enters that newline-joined representation, so every
+    # downstream consumer (pattern match AND prompt render) sees exactly
+    # one bash-line per certified path, always.
+    if [ -s "$_v2subj_paths_file" ]; then
+      _v2subj_lines=()
+      while IFS= read -r -d '' _v2subj_p; do
+        # Injective escape — backslash FIRST, then LF (JSON-string-style
+        # order). Escaping LF before backslash would let a real LF and a
+        # literal `\n` (backslash-n) in a filename collapse to the same
+        # rendered form (a literal backslash inserted by the LF-escape
+        # step would itself get backslash-escaped on a later pass),
+        # merging two distinct certified paths under the downstream
+        # `awk '!seen[$0]++'` dedup. Escaping backslash first means the
+        # literal `\n` case ends up as `\\n` (backslash backslash n)
+        # while the real-LF case ends up as `\n` (single backslash n) —
+        # always distinguishable.
+        _v2subj_p="${_v2subj_p//\\/\\\\}"
+        _v2subj_lines+=("${_v2subj_p//$'\n'/\\n}")
+      done < "$_v2subj_paths_file"
+      if [ "${#_v2subj_lines[@]}" -gt 0 ]; then
+        _CERTIFIED_REVIEW_PATHS=$(printf '%s\n' "${_v2subj_lines[@]}")
+      fi
+    fi
+  else
+    # Single failure point (rc!=0, empty stdout, mktemp failure, or
+    # unparseable JSON) — ALL THREE of _CERTIFIED_REVIEW_PATHS /
+    # _CERTIFIED_HAS_UNTRACKED_FILE / REIN_REVIEWED_DIGEST stay at their
+    # fail-closed initializers above. _changed_files()/
+    # _resolve_review_subject() degrade to tracked-only collection, and
+    # the "v2 evidence issuance" step near the end of
+    # write_code_review_stamp() will not even attempt issuance (it gates
+    # on `[ -n "${REIN_REVIEWED_DIGEST:-}" ]`) — there is no path where
+    # the certified-paths half succeeds while the digest half silently
+    # fails (or vice versa), because they now come from one call.
+    echo "NOTICE: [codex-review] v2 certified review-subject snapshot unavailable (bin/rein issue-evidence rc=${_rein_v2_invoke_rc}) — falling back to tracked-only file collection for this cycle; this review cycle will not be able to issue v2 evidence (no digest was captured), so nothing will be recorded and the commit gate will require a re-review." >&2
+  fi
+fi
+
 # 4b. Changed files. We prefer the WORKING TREE first: the union of staged
-# (--cached) and unstaged (working-tree) changes, deduplicated. This matches
-# rein's review-before-commit flow, where the real review subject is staged
+# (--cached), unstaged (working-tree), and the certified review-subject
+# paths above (which already covers untracked CODE — allowlisted untracked
+# files are excluded upstream), deduplicated. This matches rein's
+# review-before-commit flow, where the real review subject is staged
 # (uncommitted) — reviewing it is the whole point of the gate. Only when the
 # working tree is CLEAN (PR flow: everything already committed) do we degrade
 # to the committed range `<DIFF_BASE>..HEAD`, so a PR review still sees its
@@ -918,16 +1175,21 @@ HEAD_ISO=$(_resolve_commit_iso "HEAD")
 # 반환 계약 (spec 2026-07-20 A6): 변경 목록은 stdout, 취득 성공/실패는
 # 종료코드(0=성공, 1=실패). git probe 오류를 `|| true` 로 빈 출력에 삼키면
 # "성공했으나 0건" 과 구분이 안 돼 자가검증 관문이 fail-silent 가 된다 —
-# probe 별 `|| rc=1` 로 명시 캡처 (fail-closed 진리표).
+# probe 별 `|| rc=1` 로 명시 캡처 (fail-closed 진리표). 인증된 경로 목록
+# (_CERTIFIED_REVIEW_PATHS) 취득 실패는 여기서 rc 에 반영하지 않는다 —
+# 그 자체가 non-fatal degrade (위 주석 참조), tracked git probe 의 성공/
+# 실패와는 별개 축이다.
 _changed_files() {
   local staged unstaged worktree out rc=0
   staged=$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null) || rc=1
   unstaged=$(git -C "$PROJECT_DIR" diff --name-only 2>/dev/null) || rc=1
-  # Union of staged + unstaged, drop blank lines, dedup (stable order).
+  # Union of staged + unstaged (tracked, unfiltered — v1 관례 그대로) +
+  # certified review-subject paths (untracked code only, allowlist already
+  # excluded upstream), drop blank lines, dedup (stable order).
   # 순수 텍스트 파이프라인 — 전량 공백(clean tree) 입력 시 grep -v '^$' 가
   # pipefail 아래서 exit 1. 이는 git 오류가 아니라 정상(빈 결과)이므로
   # `|| true` 로 흡수한다 (git probe 의 `|| rc=1` 과 구분).
-  worktree=$(printf '%s\n%s\n' "$staged" "$unstaged" \
+  worktree=$(printf '%s\n%s\n%s\n' "$staged" "$unstaged" "$_CERTIFIED_REVIEW_PATHS" \
     | grep -v '^$' | awk '!seen[$0]++' || true)
   if [ -n "$worktree" ]; then
     out="$worktree"
@@ -954,25 +1216,55 @@ if CHANGED_FILES=$(_changed_files); then CHANGED_FILES_RC=0; else CHANGED_FILES_
 # claims were never compared) false PASS.
 #
 #   - spec        : spec-review mode (the reviewed document is the subject).
-#   - working_tree: the working tree is dirty (staged ∪ unstaged non-empty).
-#                   This is rein's review-before-commit flow; the staged diff
-#                   is the subject, NOT HEAD.
-#   - commit_range: working tree clean (PR flow) → <DIFF_BASE>..HEAD is the
+#   - working_tree: the working tree is dirty — either tracked changes exist
+#                   (staged ∪ unstaged non-empty, v1 semantics) OR the
+#                   certified review-subject path set contains an untracked
+#                   file (untracked CODE exists, allowlist already excluded
+#                   upstream). This is rein's review-before-commit flow; the
+#                   staged diff (plus any certified untracked file) is the
+#                   subject, NOT HEAD.
+#   - commit_range: no tracked changes AND no certified untracked file (PR
+#                   flow, or a working tree whose only untracked files are
+#                   allowlisted docs/trail notes) → <DIFF_BASE>..HEAD is the
 #                   subject (a normal post-commit / PR review).
 #
 # The working_tree vs commit_range split mirrors _changed_files's own
-# preference (working tree first, committed range as the clean-tree degrade)
-# so the label, claim source, and file list never disagree.
+# preference (tracked ∪ certified-untracked first, committed range as the
+# clean-tree degrade) so the label, claim source, and file list never
+# disagree. untracked CODE changes must resolve to working_tree, not
+# commit_range (Wave 3 ③-a High-1) — otherwise the review reads an unrelated
+# committed range while the digest certifies the untracked file. Conversely,
+# an untracked file that is ONLY on the review-exemption allowlist (e.g. a
+# stray `trail/incidents/*.md` note) must NOT flip an otherwise-clean tree
+# into working_tree mode (2026-08-20 refinement — the allowlist-blind
+# "any untracked file" version regressed exactly this case).
 _resolve_review_subject() {
-  local staged unstaged worktree
+  local staged unstaged tracked
   staged=$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null || true)
   unstaged=$(git -C "$PROJECT_DIR" diff --name-only 2>/dev/null || true)
-  worktree=$(printf '%s\n%s\n' "$staged" "$unstaged" | grep -v '^$' || true)
-  if [ -n "$worktree" ]; then
+  tracked=$(printf '%s\n%s\n' "$staged" "$unstaged" | grep -v '^$' || true)
+  if [ -n "$tracked" ]; then
     printf 'working_tree'
-  else
-    printf 'commit_range'
+    return 0
   fi
+  # No tracked changes — working_tree only if the certified path set
+  # (already scoped to non-allowlisted WORKTREE paths) contains an
+  # untracked file. This is now a plain flag check, not a bash-side
+  # re-derivation: `_CERTIFIED_HAS_UNTRACKED_FILE` was computed INSIDE the
+  # python `--print-subject` parse step above (single source of truth —
+  # exact raw-byte intersection against `git ls-files --others
+  # --exclude-standard`, single source stays in `rein/platform/git/
+  # facts.py::review_subject_paths()` for the path list itself). This
+  # function used to redo that intersection itself via `grep -Fxf` against
+  # a newline-joined `_CERTIFIED_REVIEW_PATHS` string — that grep was
+  # exposed to the same newline-re-splitting corruption round-4 High-1
+  # removes (a certified path with an embedded newline could silently
+  # fail to match, or spuriously match, depending on where bash split it).
+  if [ "${_CERTIFIED_HAS_UNTRACKED_FILE:-0}" = "1" ]; then
+    printf 'working_tree'
+    return 0
+  fi
+  printf 'commit_range'
 }
 if [ "$REIN_REVIEW_MODE" = "spec-review" ]; then
   REVIEW_SUBJECT="spec"
@@ -1103,12 +1395,22 @@ _selfverify_check() {
   return 0
 }
 
-# untracked 신규 파일 probe (코드리뷰 R1 High — A1/A6). diff 기반
-# CHANGED_FILES 는 staged/unstaged 만 보므로 "신규 파일만 있는 작업" 이
-# 증거 없이 관문을 통과한다 — ls-files 로 별도 감지. 반환 0 = untracked
-# 존재 또는 probe 실패(fail-closed — 취득 실패와 동일 취급), 1 = 진짜 clean.
-# envelope changed_files 의 의미(staged∪unstaged, B4/B5 계약)는 이 사이클
-# 에서 바꾸지 않는다 — untracked 의 envelope 노출은 후속 사이클.
+# untracked 신규 파일 probe (코드리뷰 R1 High — A1/A6). 2026-08-20 정제
+# (Wave 3 ③-a High-1 재정제) 이후 CHANGED_FILES 는 staged∪unstaged∪
+# "인증된"(허용목록 제외) untracked 만 본다(_changed_files 참조) — 허용목록만
+# 있는 untracked(예: 잔존 `trail/incidents/*.md` 메모)는 이제
+# CHANGED_FILES 를 비운 채로 둔다. 이 probe 는 의도적으로 그 허용목록
+# 필터를 적용하지 않는다 — 자가검증(self-verify) 증거 요구는 리뷰 scope
+# 판정보다 보수적인 편이 안전하다: untracked 파일이 하나라도 있으면
+# "무언가 바뀌었다"는 신호이므로, 그게 허용목록 파일이든 아니든 자가검증
+# 진술(diff_self_review 등)을 요구해도 손해가 없다(반대로 리뷰 scope 를
+# 허용목록 untracked 만으로 working_tree 로 오분류하면 무관한 노트만
+# 리뷰하는 실제 결함이 생긴다 — 그래서 그쪽은 필터를 적용한다). 따라서
+# CHANGED_FILES 가 비어도(허용목록 untracked 만 있는 clean-code 트리) 이
+# probe 는 여전히 발동할 수 있다 — 결함이 아니라 두 관문(리뷰 scope 대
+# 자가검증 요구)이 서로 다른 보수성 방향을 갖는 설계다. 반환 0 =
+# untracked 존재 또는 probe 실패(fail-closed — 취득 실패와 동일 취급),
+# 1 = 진짜 clean.
 _selfverify_untracked_probe() {
   local out
   if out=$(git -C "$PROJECT_DIR" ls-files --others --exclude-standard 2>/dev/null); then
@@ -1283,7 +1585,7 @@ esac
 # and for spec there is no commit diff — in both, the HIGH flag must not apply.
 case "$REVIEW_SUBJECT" in
   working_tree)
-    FRESHNESS_MODE_NOTE='[review subject = working tree (uncommitted)] diff_base 는 staged/unstaged 변경의 기준점이 아니다 — stale-evidence HIGH flag 비적용, advisory 기록만.'
+    FRESHNESS_MODE_NOTE='[review subject = working tree (uncommitted)] diff_base 는 staged/unstaged/certified-untracked 변경의 기준점이 아니다 — stale-evidence HIGH flag 비적용, advisory 기록만.'
     ;;
   spec)
     FRESHNESS_MODE_NOTE='[review subject = spec] commit diff 없음 — freshness 비교 전체 skip.'
@@ -1297,7 +1599,7 @@ esac
 # told it is looking at a committed range when the content is the working tree
 # (B6). Built here as a variable so the envelope heredoc just substitutes it.
 case "$REVIEW_SUBJECT" in
-  working_tree) CHANGED_FILES_LABEL="working tree — staged+unstaged" ;;
+  working_tree) CHANGED_FILES_LABEL="working tree — staged+unstaged+certified-untracked" ;;
   spec)         CHANGED_FILES_LABEL="spec review subject" ;;
   *)            CHANGED_FILES_LABEL="${DIFF_BASE}..HEAD" ;;
 esac
@@ -1364,6 +1666,45 @@ else
   SAD_PATH_DISPLAY="$SAD_PATH"
   SAD_REASON=$(printf '%s' "$SAD_LINE" | cut -f3)
 fi
+
+# ---- v2 evidence issuance wiring (Phase 7 wave 3 step ③-a). -----------
+#
+# 정본 v2 발급 CLI (`bin/rein issue-evidence`) 는 별도 워커가 구현하는
+# 인터페이스다 — 이 래퍼는 그 계약(디딤돌 문서 §interface)에 맞춰서만
+# 호출한다: `--print-subject` 는 exit 0 + stdout 에 JSON 한 줄
+# (`{"subject": ..., "paths": [...]}`), `--verdict PASS --reviewed-digest
+# <D>` 는 exit 0 발급/exit 2 거부(stdout JSON)/exit 1 usage·env 결함.
+# REIN_PROJECT_ROOT 주입은 hooks/lib/code-review-gate.sh::
+# rein_code_review_delegate() 의 위임 관례(이미 확정된 PROJECT_DIR 을
+# 그대로 넘겨 v2 가 독자적으로 다시 유도하지 않게 한다)와 동일하다.
+#
+# `REIN_REVIEWED_DIGEST`(+ `_CERTIFIED_REVIEW_PATHS`) 는 이제 이 지점이
+# 아니라 위쪽 "4b. Changed files" 절 바로 앞의 단일 `--print-subject`
+# 호출에서 **함께** 캡처된다(2026-08-20 code review round 3 정제, High-1
+# — 이전에는 경로 목록을 여기보다 훨씬 앞에서, digest 는 여기서 별도로
+# 캡처해 두 호출 사이에 트리가 바뀔 수 있는 비원자적 구조였다). 그
+# 캡처가 "리뷰가 실제로 검토할 상태(diff base + changed files + active
+# DoD 까지 전부 확정된 직후, 곧 codex 를 spawn하기 전)"보다 이른 지점에서
+# 일어나지만 문제 없다 — 그 사이(자가검증 관문 등)는 트리를 변경하지
+# 않는 순수 판독 단계뿐이고, `REIN_REVIEWED_DIGEST` 가 실제로 대표하는
+# "codex 가 검토할 상태"는 여전히 codex spawn 이전 시점의 스냅샷이다.
+# `write_code_review_stamp()` 의 PASS 경로가 이 값을 그대로 v2 발급
+# 호출에 넘긴다(발급 시점 재계산이 아니라 이 캡처값 그대로 — 재계산하면
+# review 도중 발생한 트리 변경을 v2 가 볼 수 없다).
+#
+# code-review 모드 한정 — spec-review 는 코드 diff 리뷰가 아니므로(4a 의
+# `DIFF_BASE="N/A"` 강제와 동일 이유) v2 code_review evidence 대상이 아니다.
+#
+# 캡처 실패는 codex 호출 자체를 막지 않는다 — `REIN_REVIEWED_DIGEST` 가 빈
+# 값인 채로(위 블록의 단일 실패 지점) 리뷰를 계속한다. 하지만 Phase 7
+# 웨이브 3 ③-d 이후로는 더 이상 "non-fatal" 이라 부를 수 없다: 레거시 stamp
+# 가 사라졌으므로 이 값이 비어 있으면 `write_code_review_stamp()` 가 발급을
+# 시도조차 하지 않고 ERROR 로 알린 뒤 그대로 끝난다 — 이번 cycle 은
+# 아무것도 기록하지 못한다(codex 자신의 리뷰 본문은 stdout 으로 이미
+# 방출됐으므로 사람이 읽을 결과가 유실되지는 않지만, 커밋 게이트가 볼
+# 기록은 없다). 아래 issuance 호출은 `[ -n "${REIN_REVIEWED_DIGEST:-}" ]`
+# 로 그 상태를 그대로 감지한다 — 이 지점에서 다시 초기화하거나 재조회
+# 하지 않는다(재조회하면 원자성 보장이 다시 깨진다).
 
 # ENV-SUBJ A4 (2026-06-11): the selector itself declares Tier 2 as "advisory
 # fallback / non-blocking authority" (select-active-dod.sh header) — it is a
@@ -2723,48 +3064,127 @@ _round_budget_clear() {
   return 0
 }
 
-# ---- Stamp writer (Task 6.3 Step 3). ----------------------------------
+# ---- v2 evidence issuance (Task 6.3 Step 3; sole review record). ------
+#
+# Phase 7 wave 3 ③-d retired the legacy code-review stamp file under
+# trail/dod/ (write AND read paths — the commit gate no longer looks for
+# it). v2
+# evidence issuance (`bin/rein issue-evidence code_review`), which used to
+# be a best-effort PARALLEL record next to the legacy stamp, is now the
+# ONLY record a code-review cycle can produce. There is no more "the
+# legacy stamp above remains the record" fallback — a cycle where issuance
+# does not succeed records literally nothing, and the commit gate (which
+# checks for v2 evidence bound to the current changeset digest) will
+# require a re-review before this changeset can be treated as reviewed.
 
 # write_code_review_stamp <verdict> <reviewer>
-#   Only invoked when REIN_REVIEW_MODE="code-review" AND verdict="PASS".
-#   Creates trail/dod/.codex-reviewed with the mandatory fields,
-#   including diff_base: (GI-codex-review-diff-base).
+#   Only invoked when REIN_REVIEW_MODE="code-review" AND verdict="PASS"
+#   (name kept for call-site continuity — GI-codex-review-diff-base Scope
+#   ID still refers to this function; it no longer writes a stamp file).
 write_code_review_stamp() {
   local verdict="$1"
   local reviewer="${2:-codex}"
-  local stamp="$PROJECT_DIR/trail/dod/.codex-reviewed"
-  local ts
-  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  local cycle=""
-  if [ -n "$SAD_PATH" ]; then
-    cycle=$(basename "$SAD_PATH" .md | sed 's/^dod-//')
+
+  # v2 발급은 리뷰 시작 시점에 캡처해 둔 REIN_REVIEWED_DIGEST(컨텍스트 조립
+  # 절 참조)가 있을 때만 시도한다 — 캡처가 실패했던 cycle(빈 값)은 애초에
+  # 결속할 digest 가 없으므로 제출 자체를 시도하지 않는다. 레거시 시절엔
+  # 이 경우에도 stamp 가 기록을 맡았지만, 이제 이 cycle 은 문자 그대로
+  # 아무것도 기록하지 못한다 — 정직하게 ERROR 로 알린다.
+  if [ -z "${REIN_REVIEWED_DIGEST:-}" ]; then
+    echo "ERROR: [codex-review] no review-start subject digest was captured — cannot issue v2 evidence, so this review cycle recorded NOTHING (verdict=${verdict}, reviewer=${reviewer}). The commit gate will require a re-review — bin/rein issue-evidence code_review is now the only record." >&2
+    return 0
   fi
-  # codex_version 증빙 — 메인 블록이 리뷰 호출 *이전에* best-effort 1회
-  # 해석해 둔 CODEX_VERSION_STR 를 사용한다 (spec 2026-07-10 §4.4). 게이트
-  # 판정에 영향 없는 순수 증빙 필드이므로 미해석/빈 값이 stamp 작성을
-  # 막으면 안 된다 — "(unavailable)" 로 표기.
-  local codex_ver="${CODEX_VERSION_STR:-}"
-  [ -n "$codex_ver" ] || codex_ver="(unavailable)"
-  mkdir -p "$(dirname "$stamp")"
-  # 신규 5필드는 기존 7필드 **뒤에** additive (기존 필드 이름·순서·포맷
-  # 불변 — pre-bash-test-commit-gate.sh 파서는 reviewed_at:/diff_base: 만
-  # 읽으므로 비의존). policy_version 은 canonical fallback 실행 시 0.
-  cat > "$stamp" <<STAMP
-reviewed_at: ${ts}
-reviewer: ${reviewer}
-diff_base: ${DIFF_BASE}
-verdict: ${verdict}
-cycle: ${cycle}
-scope: wrapper-generated
-active_dod: ${SAD_PATH}
-model: ${CODE_GATE_MODEL}
-effort: ${REIN_EFFORT}
-effort_source: ${EFFORT_SOURCE}
-policy_version: ${CODE_ROUTING_POLICY_VERSION:-0}
-codex_version: ${codex_ver}
-STAMP
-  # Clear .review-pending only in code-review mode (never in spec-review).
-  rm -f "$PROJECT_DIR/trail/dod/.review-pending" 2>/dev/null || true
+
+  _rein_v2_invoke --verdict PASS --reviewed-digest "$REIN_REVIEWED_DIGEST"
+  case "$_rein_v2_invoke_rc" in
+    0)
+      echo "NOTICE: [codex-review] v2 evidence recorded (code_review, PASS, digest=${REIN_REVIEWED_DIGEST})." >&2
+      ;;
+    2)
+      # exit 2 = v2 의 명시 거부, stdout 은 {"issued": false, "reason": ...}
+      # JSON. reason 필드만 인용해 알린다 — 상세는 v2 자신의 stderr 에 있으나
+      # (위 _rein_v2_invoke 헤더 — 그대로 relay 할 계약이 아님) 여기서는
+      # reason 인용 + 재리뷰 안내로 충분하다.
+      #
+      # High finding (Phase 7 wave 3 ③-a code review round 4, High-2 —
+      # mirrors rein-mark-security-reviewed.sh's recorder-side fail-closed
+      # rule, round 3's `_msr_reason_ok`) — carried forward unchanged by
+      # ③-d: an unparseable exit-2 response must NOT be read as anything
+      # other than digest-mismatch, because that is the one outcome where
+      # letting it slide would let a mid-review code change count as
+      # reviewed. `_wcrs_reason_ok` flips to 0 ONLY on a clean positive
+      # parse of a non-empty string `reason` field — any exception
+      # (non-JSON stdout, missing/empty/non-string reason) leaves it at its
+      # fail-closed default of 1.
+      _wcrs_reason=""
+      _wcrs_reason_ok=1
+      if [ -n "$_rein_v2_invoke_out" ]; then
+        local -a _wcrs_py=(python3)
+        if [ -n "${PYTHON_RUNNER+x}" ] && [ "${#PYTHON_RUNNER[@]}" -gt 0 ]; then
+          _wcrs_py=("${PYTHON_RUNNER[@]}")
+        fi
+        _wcrs_reason=$(printf '%s' "$_rein_v2_invoke_out" | "${_wcrs_py[@]}" -c '
+import json
+import sys
+
+try:
+    data = json.load(sys.stdin)
+    reason = data.get("reason")
+    if not isinstance(reason, str) or not reason:
+        raise ValueError("reason missing or not a non-empty string")
+except Exception:
+    sys.exit(1)
+sys.stdout.write(reason)
+' 2>/dev/null) && _wcrs_reason_ok=0
+      fi
+      if [ "$_wcrs_reason_ok" -ne 0 ] || [ "$_wcrs_reason" = "digest-mismatch" ]; then
+        # digest-mismatch (positively parsed, or assumed fail-closed
+        # because the response could not be positively parsed to anything
+        # else) means the tree actually changed while this review was in
+        # flight (or we cannot rule that out). Phase 7 wave 3 ③-d: there is
+        # no legacy stamp left to neutralize by recreating the old pending-
+        # review marker (that marker's write/read paths are both retired)
+        # — the digest binding itself is what makes this safe now. No
+        # evidence was issued for the CURRENT tree, so the
+        # commit gate's own digest check will refuse to treat this
+        # changeset as reviewed with no extra bookkeeping required here.
+        # Elevated to ERROR (was WARNING pre-③-d): under the old dual-write
+        # scheme this was non-fatal because the legacy stamp still stood;
+        # now it means the cycle recorded nothing and a re-review is
+        # mandatory, which is exactly what ERROR should signal.
+        if [ "$_wcrs_reason_ok" -ne 0 ]; then
+          echo "ERROR: [codex-review] v2 evidence issuance refused (exit 2) but the response could not be positively parsed to a reason OTHER than digest-mismatch — treating as digest-mismatch (fail-closed). Nothing was recorded this cycle; re-review the current tree before this can count as reviewed." >&2
+        else
+          echo "ERROR: [codex-review] v2 evidence issuance refused — reason: digest-mismatch. The reviewed tree changed during this review — nothing was recorded this cycle; re-review the current tree before this can count as reviewed." >&2
+        fi
+      elif [ "$_wcrs_reason" = "subject-empty" ]; then
+        # subject-empty is NOT a failure (코드리뷰 Medium 시정,
+        # 2026-08-24) — it means the current changeset has no non-
+        # exempt code to review (e.g. every changed file is docs/trail/
+        # allowlisted). spec §3.6's end-state verdict table treats
+        # subject-empty as *satisfied* directly at the authority layer
+        # (rein/capabilities/review/capability.py) — no evidence record
+        # is needed for the commit gate to allow this changeset, so
+        # "nothing was recorded" here is expected, not a gap. Mirrors
+        # rein-mark-security-reviewed.sh's recorder-side treatment of
+        # the same sentinel (that script's --level/--cycle flow, exit 0
+        # normal skip).
+        echo "NOTICE: [codex-review] no v2 evidence was issued because there is nothing non-exempt to bind it to (digest=empty:no-subject) — this is expected when the reviewed changeset is entirely docs/trail/allowlisted content; the commit gate treats this as satisfied without an evidence record." >&2
+      else
+        # Any other POSITIVELY-parsed refusal reason (subject-unresolved/
+        # verdict-not-pass/malformed) is an issuance-machinery condition,
+        # not evidence the reviewed tree changed. It still means nothing
+        # was recorded this cycle — there is no legacy stamp to fall back
+        # on — so the commit gate will require a re-review (or a
+        # successful v2 issuance retry) before this changeset can be
+        # treated as reviewed.
+        echo "WARNING: [codex-review] v2 evidence issuance refused — reason: ${_wcrs_reason}. Nothing was recorded this cycle; the commit gate will require a re-review (or a successful v2 issuance retry) before this changeset counts as reviewed." >&2
+      fi
+      ;;
+    *)
+      echo "NOTICE: [codex-review] v2 evidence issuance did not complete (bin/rein issue-evidence rc=${_rein_v2_invoke_rc}) — nothing was recorded this cycle; the commit gate will require a re-review before this changeset counts as reviewed." >&2
+      ;;
+  esac
 }
 
 # ---- Main orchestration. ----------------------------------------------
@@ -2913,7 +3333,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   printf '%s\n' "$CODEX_OUT" | sed 's/^ERROR: \[codex-review\]\[review-timeout\]/ERROR: [codex-review][review-…]/'
 
   # Fail-soft (방어): codex 가 exit 0 으로 와도 출력에 모델 거부가 섞였으면
-  # 통과 표시(.codex-reviewed)를 만들지 않고 단일 출처 수정을 안내한다.
+  # 통과 표시(v2 evidence 발급)를 시도하지 않고 단일 출처 수정을 안내한다.
   if _detect_model_error "$CODEX_OUT"; then
     _emit_model_failsoft "CODE_GATE_MODEL" "$CODE_GATE_MODEL"
     exit 3
@@ -2951,9 +3371,11 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     fi
     # NEEDS-FIX / REJECT → no stamp.
   else
-    # spec-review mode (CRITICAL): never write .codex-reviewed, never
-    # touch .review-pending. The caller (plan-writer) is responsible for
-    # writing the spec-review stamp via scripts/rein-mark-spec-reviewed.sh.
+    # spec-review mode (CRITICAL): never issue v2 code_review evidence, and
+    # (Phase 7 wave 3 ③-d) there is no legacy code-review marker left to
+    # avoid touching either — the whole mechanism is retired. The caller
+    # (plan-writer) is responsible for writing the spec-review stamp via
+    # scripts/rein-mark-spec-reviewed.sh.
     :
   fi
 

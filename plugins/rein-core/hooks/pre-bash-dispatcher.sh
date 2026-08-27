@@ -26,7 +26,10 @@
 # Exit codes propagate from the first failing downstream helper. Order:
 #   1. pre-tool-use-bash-bootstrap-gate.sh  (always)
 #   2. pre-bash-safety-guard.sh             (always)
-#   3. pre-bash-test-commit-gate.sh         (if classified as test/commit)
+#   3. pre-bash-commit-discipline-gate.sh → pre-bash-commit-review-gate.sh
+#      (if classified as test/commit — Phase 7 웨이브 3 ③-c 교대, 아래 Step 3
+#      의 자체 헤더 참조. 구 단일 pre-bash-test-commit-gate.sh(파일 자체도
+#      ③-c 커밋에서 삭제 완료)는 더 이상 이 매처의 자식이 아니다)
 #   4. pre-tool-use-bash-rules.sh           (if classified as test/build)
 #
 # Plugin runtime guard — outside the plugin runtime (ad-hoc shell invocation),
@@ -207,11 +210,89 @@ invoke_hook_required "$SCRIPT_DIR/pre-bash-safety-guard.sh" "safety guard"
 RC=$?
 [ "$RC" -ne 0 ] && exit "$RC"
 
-# --- Step 3: test-commit gate (conditional, required when triggered) ---
+# --- Step 3: commit review pair (conditional, required when triggered) ---
+#
+# Phase 7 웨이브 3 ③-c (commit-gate 교대, 2026-08-23). 구 단일
+# pre-bash-test-commit-gate.sh 가 이 자리에서 invoke_hook_required 로 한
+# 번에 호출되던 것을, 이제 두 자식으로 쪼갠 pre-bash-commit-discipline-
+# gate.sh(coverage matrix [P2]/[I3] + 커밋 메시지 포맷 [P7]/[I4]/[I5] 등
+# v1 존속 규율)와 pre-bash-commit-review-gate.sh(code_review/security_review
+# 두 축의 v2 authority 위임, ③-c 신설)로 **순서를 보장해 순차** 호출한다.
+#
+# 왜 위 invoke_hook_required 를 그대로 못 쓰는가: 그 helper 는 자식이
+# stdout 에 JSON deny 를 낸 그 자리에서 그대로 relay 하고 종료하는 것을
+# 전제하지 않는다 — 자식이 정확히 하나일 때는 "helper 의 stdout/stderr 를
+# 캡처 없이 곧장 이 프로세스의 것으로 흘려보내고 rc 만 확인"해도 충분했다
+# (그 helper 자신의 docstring 참조 — "Returns the helper's exit code...
+# both are forwarded as-is because we do not capture either stream"). 자식이
+# 둘이 되면서 새로운 클래스의 문제가 생긴다: 선행 자식(discipline-gate)이
+# JSON deny(exit 0 + stdout)를 냈는데도 같은 방식으로 그냥 넘어가면 rc=0
+# 이므로 디스패처가 "통과"로 오인해 후행 자식(review-gate)을 마저 실행하고,
+# 그 자식이 또 다른 사유로 JSON deny 를 내면 이 프로세스의 stdout 에 JSON
+# 오브젝트 2개가 연달아 섞여 나간다 — Claude Code 가 기대하는 hook 출력
+# 계약(단일 JSON 오브젝트)을 깨는 새 결함 클래스다. pre-edit-dispatcher.sh
+# 가 discipline/task/coverage 세 자식을 순차 호출할 때 이미 정확히 같은
+# 문제(같은 근본 원인 — "exit 0 이 곧 통과"라는 낡은 가정이 자식이 둘 이상
+# 일 때 깨진다)를 캡처-릴레이-중단 패턴으로 봉합한 선례가 있다(그 파일의
+# invoke_child() 및 그 헤더의 "자식 응답 계약" 절 참조) — 그 패턴을 여기로
+# 그대로 가져온다. bootstrap(Step 1)/safety(Step 2)와 bash-rules(Step 4)는
+# 여전히 자식이 하나뿐이라 이 클래스의 문제가 없다 — 그 두 Step 은 기존
+# invoke_hook_required/invoke_hook_advisory 그대로 유지한다(범위 밖 — 기존
+# 동작 불변).
+#
+# invoke_bash_child HOOK_FILENAME LABEL — pre-edit-dispatcher.sh 의
+# invoke_child() 와 동일한 계약(그 파일 참조): stdout 만 캡처(_BC_OUT),
+# rc 는 별도 캡처(_BC_RC — stdout 캡처 명령 자체의 $? 를 즉시 읽는다).
+# stderr 는 캡처하지 않고 상속(자식의 [rein]/WARNING/NOTICE 진단이 지연·
+# 순서왜곡 없이 사용자에게 도달해야 한다 — pre-edit-dispatcher.sh 헤더의
+# 동일 원칙). 자식 파일 자체가 없으면(플러그인 설치 손상) 실행을 시도하지
+# 않고 곧바로 fail-closed.
+invoke_bash_child() {
+  local hook="$1"
+  local label="$2"
+  local path="$SCRIPT_DIR/$hook"
+  if [ ! -f "$path" ]; then
+    echo "[rein] Critical Bash gate helper missing: $label ($hook). The plugin install may be corrupted — run 'rein update' to repair." >&2
+    _BC_RC=2
+    _BC_OUT=""
+    return
+  fi
+  _BC_OUT=$(printf '%s' "$INPUT" | bash "$path")
+  _BC_RC=$?
+}
+
 if [ "$CLASS_NEEDS_TC" = "1" ]; then
-  invoke_hook_required "$SCRIPT_DIR/pre-bash-test-commit-gate.sh" "test/commit gate"
-  RC=$?
-  [ "$RC" -ne 0 ] && exit "$RC"
+  for _tc_child_spec in \
+    "pre-bash-commit-discipline-gate.sh|commit discipline gate" \
+    "pre-bash-commit-review-gate.sh|commit review gate"; do
+    _tc_hook="${_tc_child_spec%%|*}"
+    _tc_label="${_tc_child_spec#*|}"
+    invoke_bash_child "$_tc_hook" "$_tc_label"
+    case "$_BC_RC" in
+      0)
+        if [ -n "$_BC_OUT" ]; then
+          # exit 0 + non-empty stdout — JSON deny relay 관례. 그대로 relay
+          # 하고 즉시 종료 (잔여 자식 미실행 — Step 4 도 건너뛴다, 구
+          # invoke_hook_required 경로가 그 자식의 rc=0 을 받은 즉시 Step 4
+          # 로 넘어갔던 것과 달리, JSON deny 는 "이번 Bash 호출은 이미
+          # 최종 응답을 얻었다"는 뜻이라 뒤의 어떤 자식도 실행할 필요가
+          # 없다).
+          printf '%s\n' "$_BC_OUT"
+          exit 0
+        fi
+        # exit 0 + stdout 없음 — 허용, 다음 자식으로.
+        ;;
+      2)
+        # 차단 — 자식이 이미 stderr 에 이유를 냈다. 잔여 자식 미실행.
+        exit 2
+        ;;
+      *)
+        # 비정상 종료 — 게이트 실행 실패를 통과로 삼키지 않는다.
+        echo "[rein] The Bash dispatcher cannot continue because $_tc_hook exited abnormally (rc=$_BC_RC, expected 0 or 2). This is treated as a failure, not a pass — run 'rein update' to check for a corrupted plugin install, or check the child gate's own stderr output above for the underlying cause." >&2
+        exit 2
+        ;;
+    esac
+  done
 fi
 
 # --- Step 4: bash-rules rule injection (conditional, advisory) ---

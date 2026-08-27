@@ -2,9 +2,27 @@
 # test-subagent-review-registered.sh — Plugin-First Restructure Phase 2 Task 2.3.
 #
 # Verifies the subagent-review rule is registered in the rein-core plugin:
-#   (a) pre-bash-test-commit-gate.sh hook script exists in the plugin mirror (HK-2 split successor of the former Bash guard — owns the review-stamp gate).
-#   (b) hooks.json contains a PreToolUse registration with matcher Bash whose
-#       command basename is pre-bash-test-commit-gate.sh.
+#   (a) both ③-c commit-gate successors exist in the plugin mirror (Phase 7
+#       웨이브 3 ③-c, 2026-08-23 갱신: the former single (구)pre-bash-test-
+#       commit-gate.sh — HK-2 split successor of the original Bash guard,
+#       owning the review-evidence gate that enforces subagent-review.md's
+#       "code_review/security_review v2 증거는 실제 리뷰를 거친 후에만
+#       발급" contract at commit time (③-d, 2026-08-24: the legacy
+#       .codex-reviewed/.security-reviewed stamp write path this contract
+#       used to reference was removed outright — v2 evidence issuance is now
+#       the sole recording mechanism) — was deleted and replaced by
+#       pre-bash-commit-discipline-gate.sh (coverage/commit-msg discipline,
+#       no review axis) + pre-bash-commit-review-gate.sh (the actual
+#       review-evidence gate successor, delegating to the v2 engine). Both
+#       are sequential children of pre-bash-dispatcher.sh Step 3 — see that
+#       dispatcher's own header. This check only verifies file presence; the
+#       review-evidence enforcement *content* is covered in depth by
+#       tests/hooks/test-background-jobs-registered.sh's check (c).
+#   (b) hooks.json contains a PreToolUse registration with matcher Agent
+#       whose command basename is pre-tool-use-agent-rules.sh (the dedicated
+#       subagent-review rule-injection hook — unaffected by the ③-c Bash
+#       commit-gate split; this hook lives on the Agent matcher, not Bash,
+#       and is registered directly rather than via any dispatcher).
 #   (c) docs/rules/subagent-review.md exists in the plugin and is sha256-identical
 #       to the source .claude/rules/subagent-review.md.
 #
@@ -16,7 +34,12 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_DIR"
 
 PLUGIN_DIR="plugins/rein-core"
-HOOK_SCRIPT="$PLUGIN_DIR/hooks/pre-bash-test-commit-gate.sh"
+# ③-c split (2026-08-23): the former single pre-bash-test-commit-gate.sh
+# successor set. discipline-gate = coverage/commit-msg discipline (no
+# review-stamp axis); review-gate = the actual review-stamp gate successor
+# (see header above).
+DISCIPLINE_GATE="$PLUGIN_DIR/hooks/pre-bash-commit-discipline-gate.sh"
+REVIEW_GATE="$PLUGIN_DIR/hooks/pre-bash-commit-review-gate.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 RULE_NAME="subagent-review.md"
 PLUGIN_RULE_DOC="$PLUGIN_DIR/rules/$RULE_NAME"
@@ -41,8 +64,9 @@ sha256_of() {
   fi
 }
 
-# (a) Hook script presence in plugin mirror.
-[ -f "$HOOK_SCRIPT" ] || fail "hook script missing: $HOOK_SCRIPT"
+# (a) Hook script presence in plugin mirror — both ③-c successors.
+[ -f "$DISCIPLINE_GATE" ] || fail "hook script missing: $DISCIPLINE_GATE"
+[ -f "$REVIEW_GATE" ] || fail "hook script missing: $REVIEW_GATE"
 
 # (b) hooks.json registration check via Python.
 [ -f "$HOOKS_JSON" ] || fail "hooks.json missing: $HOOKS_JSON"

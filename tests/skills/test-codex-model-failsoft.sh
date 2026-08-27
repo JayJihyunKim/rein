@@ -6,10 +6,23 @@
 # 검증 항목:
 #   T1. 래퍼가 단일 출처(config/codex-models.sh)의 CODE_MODEL 을 -m 으로 전달.
 #   T2. 모델 거부(invalid_request_error / is not supported, exit 1) 시
-#       래퍼가 exit 3 + 단일 출처 경로/변수 안내 + 통과 표시 미생성.
+#       래퍼가 exit 3 (verdict 판정 이전에 종료하므로 v2 발급 시도 자체가 없다).
 #   T3. codex exit 0 이어도 출력에 모델 거부가 섞이면 동일 처리(방어).
-#   T4. config 부재 시 -m 생략(graceful degrade) + 정상 통과 표시 생성.
-#   T5. 정상 모델 PASS → 기존대로 통과 표시 생성(회귀).
+#   T4. config 부재 시 -m 생략(graceful degrade) + 정상 통과.
+#   T5. 정상 모델 PASS → v2 발급 경로 진입(회귀).
+#
+# Phase 7 웨이브 3 ③-d 재조준: 래퍼는 더 이상 trail/dod/.codex-reviewed
+# legacy stamp 를 쓰지 않는다 — PASS 시 `bin/rein issue-evidence
+# code_review` 발급이 유일한 기록 경로다(write_code_review_stamp() 는 이름은
+# 유지하지만 파일을 쓰지 않는다). 이 스위트는 bin/rein 을 sandbox 에 링크
+# 하지 않으므로(모델 fail-soft 감지가 검증 대상이지 v2 발급 자체가 아니다)
+# 발급은 항상 "캡처된 digest 없음" 경로로 빠진다 — 그 경로는 non-fatal
+# (return 0) 이며 stderr 에 ERROR 로그만 남긴다(래퍼 전체 exit code 는
+# 영향받지 않는다). PASS 회차(T1/T5/T7)는 이 stderr ERROR 로 "v2 발급
+# 경로에 실제로 진입했다"를 규명하고, verdict 판정 이전에 종료하는
+# 회차(T2/T3/T6)는 write_code_review_stamp() 자체가 호출되지 않으므로
+# 이 ERROR 가 없어야 한다 — legacy stamp 파일 존재/부재 검사(항상 부재라
+# 더 이상 아무것도 구분하지 못했다)를 이 stderr 신호로 대체한다.
 #
 # 주입 seam: 래퍼는 CODEX_BIN 으로 codex 바이너리를 대체한다. 본 테스트는
 # args 캡처 + 출력/종료코드 제어가 가능한 자체 stub 을 sandbox 에 만든다.
@@ -97,7 +110,8 @@ STUB_ARGS_OUT="$SANDBOX/args.txt" STUB_VERDICT="PASS
 clean" STUB_EXIT=0 run_wrapper "$SANDBOX/err.txt"
 T1_RC=$?
 check '[ "$T1_RC" = "0" ]' "T1/T5 정상 모델 → exit 0 (got $T1_RC)"
-check '[ -f "$SANDBOX/trail/dod/.codex-reviewed" ]' "T5 정상 PASS → 통과 표시 생성"
+check 'grep -q "no review-start subject digest was captured" "$SANDBOX/err.txt"' \
+  "T5 정상 PASS → v2 발급 경로 진입(bin/rein 미링크로 캡처없음 ERROR, non-fatal)"
 check 'grep -q -- "-m gpt-test-code" "$SANDBOX/args.txt"' \
   "T1 CODE_MODEL 이 -m 으로 전달됨 (args: $(cat "$SANDBOX/args.txt" 2>/dev/null))"
 sandbox_teardown
@@ -108,7 +122,8 @@ STUB_VERDICT='ERROR: {"type":"error","error":{"type":"invalid_request_error","me
   STUB_EXIT=1 run_wrapper "$SANDBOX/err.txt"
 T2_RC=$?
 check '[ "$T2_RC" = "3" ]' "T2 모델 거부(exit1) → 래퍼 exit 3 (got $T2_RC)"
-check '[ ! -f "$SANDBOX/trail/dod/.codex-reviewed" ]' "T2 통과 표시 미생성"
+check '! grep -q "no review-start subject digest was captured" "$SANDBOX/err.txt"' \
+  "T2 verdict 판정 이전 종료 → v2 발급 경로 미진입"
 check 'grep -q "codex-models.sh" "$SANDBOX/err.txt"' "T2 안내에 단일 출처 경로 포함"
 check 'grep -q "CODE_MODEL" "$SANDBOX/err.txt"' "T2 안내에 수정 대상 변수명 포함"
 sandbox_teardown
@@ -119,7 +134,8 @@ STUB_VERDICT='ERROR: invalid_request_error: the model is not supported' \
   STUB_EXIT=0 run_wrapper "$SANDBOX/err.txt"
 T3_RC=$?
 check '[ "$T3_RC" = "3" ]' "T3 exit0+거부출력 → 래퍼 exit 3 (got $T3_RC)"
-check '[ ! -f "$SANDBOX/trail/dod/.codex-reviewed" ]' "T3 통과 표시 미생성"
+check '! grep -q "no review-start subject digest was captured" "$SANDBOX/err.txt"' \
+  "T3 verdict 판정 이전 종료 → v2 발급 경로 미진입"
 sandbox_teardown
 
 # ---- T4: config 부재 → canonical 폴백으로 -m 항상 전달 + 정상 통과 ----
@@ -141,7 +157,8 @@ STUB_VERDICT='{"error":{"code":"model_not_found","message":"The model does not e
   STUB_EXIT=1 run_wrapper "$SANDBOX/err.txt"
 T6_RC=$?
 check '[ "$T6_RC" = "3" ]' "T6 model_not_found 문구 → exit 3 (got $T6_RC)"
-check '[ ! -f "$SANDBOX/trail/dod/.codex-reviewed" ]' "T6 통과 표시 미생성"
+check '! grep -q "no review-start subject digest was captured" "$SANDBOX/err.txt"' \
+  "T6 verdict 판정 이전 종료 → v2 발급 경로 미진입"
 sandbox_teardown
 
 # ---- T7: 정상 PASS 리뷰가 거부 문구를 본문에 인용해도 오탐하지 않음 --
@@ -154,7 +171,8 @@ patterns are discussed in this review body.
 FINAL_VERDICT: PASS' STUB_EXIT=0 run_wrapper "$SANDBOX/err.txt"
 T7_RC=$?
 check '[ "$T7_RC" = "0" ]' "T7 거부 문구 인용한 정상 PASS → exit 0 (오탐 없음, got $T7_RC)"
-check '[ -f "$SANDBOX/trail/dod/.codex-reviewed" ]' "T7 정상 PASS → 통과 표시 생성"
+check 'grep -q "no review-start subject digest was captured" "$SANDBOX/err.txt"' \
+  "T7 정상 PASS → v2 발급 경로 진입(bin/rein 미링크로 캡처없음 ERROR, non-fatal)"
 sandbox_teardown
 
 echo "TESTS: $TEST_COUNT, FAILS: $FAIL_COUNT"

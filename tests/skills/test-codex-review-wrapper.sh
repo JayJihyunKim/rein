@@ -14,10 +14,16 @@
 #   1. Fake codex sees envelope with all 4 slots.
 #   2. Missing context → envelope carries "High process gap" header.
 #   3. Tier 1 vs Tier 2 selector produces different active DoD in assembly.
-#   4. Code-review mode + PASS → .codex-reviewed stamp has `diff_base:` line.
-#   5. Spec-review mode + PASS → .codex-reviewed NOT created (mtime unchanged,
-#      .review-pending also unchanged).
-#   6. Spec-review mode + NEEDS-FIX → no stamp (same as code-review).
+#   4. Code-review mode + PASS → v2 code_review evidence issuance path reached
+#      (Phase 7 웨이브 3 ③-d: legacy .codex-reviewed stamp/diff_base: field no
+#      longer exist — write_code_review_stamp() writes no file at all now;
+#      diff_base computation itself is covered separately by
+#      tests/skills/test-codex-review-stale-stamp.sh).
+#   5. Spec-review mode + PASS → no v2 code_review evidence issued
+#      (write_code_review_stamp() never reached — legacy .codex-reviewed/
+#      .review-pending marker checks retired, no writer exists for either).
+#   6. Spec-review mode + NEEDS-FIX → no v2 evidence issued (same as
+#      code-review — verdict gate).
 #
 # Each test runs inside a sandbox (mktemp -d) with:
 #   - .claude/hooks/lib/ (full copy, wrapper sources select-active-dod.sh)
@@ -337,9 +343,17 @@ test_tier2_fallback_chooses_latest_mtime() {
 }
 
 # ------------------------------------------------------------
-# Verification 4: code-review + PASS → stamp has diff_base: line.
+# Verification 4: code-review + PASS → v2 발급 경로 진입 (Phase 7 웨이브 3
+# ③-d 재조준). 래퍼는 더 이상 trail/dod/.codex-reviewed legacy stamp 를
+# 쓰지 않는다 — diff_base: 필드는 stamp 자체가 사라졌으므로 검사 대상이
+# 아니다(diff_base 계산 자체의 회귀는 tests/skills/test-codex-review-
+# stale-stamp.sh 가 전담 — 이제 무조건 HEAD~1/빈 트리). PASS 시 v2
+# code_review 증거 발급이 유일한 기록 경로이며, 이 스위트는 bin/rein 을
+# 링크하지 않으므로 발급은 "캡처된 digest 없음" 경로로 빠진다 — non-
+# fatal 이며 stderr 에 ERROR 로그만 남는다(write_code_review_stamp() 가
+# 실제로 호출됐다는 증거).
 # ------------------------------------------------------------
-test_code_review_pass_stamp_has_diff_base() {
+test_code_review_pass_enters_v2_evidence_issuance_path() {
   seed_design "docs/specs/foo-design.md" "A1"
   seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
   seed_dod "trail/dod/dod-2026-04-21-cr.md" "docs/plans/foo-plan.md" "A1"
@@ -349,59 +363,48 @@ test_code_review_pass_stamp_has_diff_base() {
   run_wrapper "code review" --non-interactive
 
   [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
-  [ -f "$SANDBOX/trail/dod/.codex-reviewed" ] \
-    || fail ".codex-reviewed not created in code-review mode"
-  grep -q '^diff_base:' "$SANDBOX/trail/dod/.codex-reviewed" \
-    || fail ".codex-reviewed missing 'diff_base:' line"
-  grep -q '^verdict:' "$SANDBOX/trail/dod/.codex-reviewed" \
-    || fail ".codex-reviewed missing 'verdict:' line"
+  [ ! -e "$SANDBOX/trail/dod/.codex-reviewed" ] \
+    || fail "legacy .codex-reviewed stamp unexpectedly created (③-d write path removed)"
+  printf '%s' "$RUN_WRAPPER_ERR" | grep -q "no review-start subject digest was captured" \
+    || fail "write_code_review_stamp() ERROR not observed in stderr (v2 issuance path not reached): $RUN_WRAPPER_ERR"
   return 0
 }
 
 # ------------------------------------------------------------
-# Verification 5: spec-review mode + PASS → .codex-reviewed NOT created,
-# .review-pending unchanged (CRITICAL invariant).
+# Verification 5: spec-review mode + PASS → no v2 code_review evidence
+# issued (CRITICAL invariant). Phase 7 웨이브 3 ③-d 재조준: legacy
+# .codex-reviewed/.review-pending 는 write 경로 자체가 전면 제거됐으므로
+# "건드리지 않았다" 를 그 두 파일로 증명하는 절차(사전 시드 + mtime/내용
+# 비교)는 이제 아무것도 구분하지 못한다(무엇을 해도 항상 부재/불변). 이
+# 시나리오가 실제로 규명해야 할 것은 "spec-review 경로는 write_code_
+# review_stamp() 자체를 호출하지 않는다"는 사실이다 — code-review 모드
+# PASS(Verification 4)에서는 bin/rein 미링크로 인해 반드시 남는 "no
+# review-start subject digest was captured" ERROR 가, spec-review 모드
+# 에서는 함수가 아예 호출되지 않으므로 부재해야 한다(그 함수 호출 여부의
+# 유일한 관측 가능 신호).
 # ------------------------------------------------------------
-test_spec_review_pass_no_stamp_created_and_pending_unchanged() {
+test_spec_review_pass_issues_no_v2_evidence() {
   seed_design "docs/specs/foo-design.md" "A1"
   seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
   seed_dod "trail/dod/dod-2026-04-21-sr.md" "docs/plans/foo-plan.md" "A1"
   echo "path=trail/dod/dod-2026-04-21-sr.md" > "$SANDBOX/trail/dod/.active-dod"
 
-  # Pre-create a .review-pending marker to verify wrapper doesn't touch it.
-  echo "preexisting" > "$SANDBOX/trail/dod/.review-pending"
-  local pending_mtime_before
-  pending_mtime_before=$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_mtime)' \
-    "$SANDBOX/trail/dod/.review-pending")
-  local pending_content_before
-  pending_content_before=$(cat "$SANDBOX/trail/dod/.review-pending")
-
-  # Remember .codex-reviewed state (should not exist before).
-  [ ! -f "$SANDBOX/trail/dod/.codex-reviewed" ] \
-    || fail "precondition: .codex-reviewed already exists"
-
-  # Spec-review marker in prompt → wrapper MUST detect and skip stamp.
+  # Spec-review marker in prompt → wrapper MUST detect and skip issuance.
   run_wrapper "[NON_INTERACTIVE] spec review for plan: docs/plans/foo-plan.md" \
               --non-interactive
 
   [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
 
-  # CRITICAL: .codex-reviewed must NOT exist.
-  [ ! -f "$SANDBOX/trail/dod/.codex-reviewed" ] \
-    || fail "CRITICAL: .codex-reviewed was created in spec-review mode (must not happen)"
+  # CRITICAL: no legacy stamp file (never written by anything anymore).
+  [ ! -e "$SANDBOX/trail/dod/.codex-reviewed" ] \
+    || fail "CRITICAL: legacy .codex-reviewed unexpectedly created in spec-review mode"
 
-  # .review-pending must be unchanged (mtime + content identical).
-  [ -f "$SANDBOX/trail/dod/.review-pending" ] \
-    || fail ".review-pending was removed by wrapper (must stay)"
-  local pending_mtime_after
-  pending_mtime_after=$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_mtime)' \
-    "$SANDBOX/trail/dod/.review-pending")
-  [ "$pending_mtime_before" = "$pending_mtime_after" ] \
-    || fail ".review-pending mtime changed (before=$pending_mtime_before after=$pending_mtime_after)"
-  local pending_content_after
-  pending_content_after=$(cat "$SANDBOX/trail/dod/.review-pending")
-  [ "$pending_content_before" = "$pending_content_after" ] \
-    || fail ".review-pending content changed"
+  # CRITICAL: write_code_review_stamp() must not even be reached in
+  # spec-review mode — its distinctive ERROR (emitted whenever it's called
+  # without a bin/rein-backed digest, as in this bin/rein-less suite) must
+  # be absent.
+  printf '%s' "$RUN_WRAPPER_ERR" | grep -q "no review-start subject digest was captured" \
+    && fail "CRITICAL: write_code_review_stamp() was reached in spec-review mode (must not happen): $RUN_WRAPPER_ERR"
 
   # Envelope MUST contain the [NON_INTERACTIVE] marker preserved.
   grep -qF "[NON_INTERACTIVE]" "$RUN_WRAPPER_PROMPT_FILE" \
@@ -414,14 +417,19 @@ test_spec_review_pass_no_stamp_created_and_pending_unchanged() {
 # Verification 6: spec-review mode + NEEDS-FIX → no stamp (same outcome
 # as code-review NEEDS-FIX, but explicitly tested for mode parity).
 # ------------------------------------------------------------
-test_spec_review_needs_fix_no_stamp() {
+# Phase 7 웨이브 3 ③-d 재조준: legacy .codex-reviewed 는 어디서도 쓰이지
+# 않으므로(write 경로 전면 제거) "존재하지 않는다"는 검사는 이제 code-
+# review/spec-review, PASS/NEEDS-FIX 어느 조합이든 항상 참이라 이 두
+# 조합을 서로 구분하지 못한다. NEEDS-FIX 는 애초에 write_code_review_
+# stamp() 호출 조건(verdict=PASS)을 만족하지 못하므로 이 시나리오의
+# 핵심 불변식("NEEDS-FIX 는 기록되지 않는다")은 이미 함수 자체의 verdict
+# 게이트로 구조적으로 보장된다 — 남은 것은 wrapper 가 실제로 정상
+# 종료했는지뿐이다.
+test_spec_review_needs_fix_no_v2_evidence() {
   seed_design "docs/specs/foo-design.md" "A1"
   seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
   seed_dod "trail/dod/dod-2026-04-21-sr2.md" "docs/plans/foo-plan.md" "A1"
   echo "path=trail/dod/dod-2026-04-21-sr2.md" > "$SANDBOX/trail/dod/.active-dod"
-
-  [ ! -f "$SANDBOX/trail/dod/.codex-reviewed" ] \
-    || fail "precondition: .codex-reviewed already exists"
 
   # Force fake codex to emit NEEDS-FIX verdict.
   local tmp_stdout tmp_stderr capture_file stdin_file
@@ -440,20 +448,23 @@ Something needs revision."
       < "$stdin_file" > "$tmp_stdout" 2> "$tmp_stderr"
   )
   local rc=$?
+  local stderr_out
+  stderr_out=$(cat "$tmp_stderr")
   rm -f "$tmp_stdout" "$tmp_stderr" "$stdin_file"
 
-  # NEEDS-FIX in any mode → no stamp.
-  [ ! -f "$SANDBOX/trail/dod/.codex-reviewed" ] \
-    || fail ".codex-reviewed created in spec-review NEEDS-FIX (must not)"
+  # NEEDS-FIX in any mode → no legacy stamp (never written by anything).
+  [ ! -e "$SANDBOX/trail/dod/.codex-reviewed" ] \
+    || fail "legacy .codex-reviewed unexpectedly created in spec-review NEEDS-FIX"
 
-  # Also no stamp when code-review NEEDS-FIX (symmetry check).
-  [ ! -f "$SANDBOX/trail/dod/.review-pending" ] \
-    || fail "(informational) .review-pending exists — not seeded in this test"
+  # NEEDS-FIX → write_code_review_stamp() is not called at all (verdict
+  # gate) → its ERROR signature must be absent.
+  printf '%s' "$stderr_out" | grep -q "no review-start subject digest was captured" \
+    && fail "write_code_review_stamp() was reached for a NEEDS-FIX verdict (must not happen): $stderr_out"
 
   # Exit code: wrapper should NOT hide NEEDS-FIX from the caller. We only
   # require that the wrapper does not claim success (non-zero or caller
   # parses stdout). Accept either non-zero OR zero with NEEDS-FIX on stdout;
-  # primary gate is the stamp assertion above.
+  # primary gate is the assertions above.
   return 0
 }
 
@@ -1313,8 +1324,10 @@ test_changed_files_prefers_staged_over_committed_range() {
   echo "path=trail/dod/dod-2026-06-09-b4.md" > "$SANDBOX/trail/dod/.active-dod"
 
   # (a) Commit an UNRELATED file so DIFF_BASE..HEAD (HEAD~1..HEAD) is
-  #     non-empty. No .codex-reviewed stamp exists → _resolve_diff_base
-  #     resolves to HEAD~1, and `git diff HEAD~1..HEAD` lists this file.
+  #     non-empty. Phase 7 웨이브 3 ③-d: _resolve_diff_base unconditionally
+  #     resolves to HEAD~1 now (no legacy stamp read path left at all — see
+  #     tests/skills/test-codex-review-stale-stamp.sh), and `git diff
+  #     HEAD~1..HEAD` lists this file.
   ( cd "$SANDBOX" \
       && echo "unrelated committed content" > unrelated-committed.txt \
       && git add unrelated-committed.txt \
@@ -1745,9 +1758,9 @@ main() {
   run_test test_envelope_contains_all_4_slots_and_tier1_dod
   run_test test_envelope_high_process_gap_when_dod_missing
   run_test test_tier2_fallback_chooses_latest_mtime
-  run_test test_code_review_pass_stamp_has_diff_base
-  run_test test_spec_review_pass_no_stamp_created_and_pending_unchanged
-  run_test test_spec_review_needs_fix_no_stamp
+  run_test test_code_review_pass_enters_v2_evidence_issuance_path
+  run_test test_spec_review_pass_issues_no_v2_evidence
+  run_test test_spec_review_needs_fix_no_v2_evidence
   run_test test_h1_design_ref_plan_relative_resolves
   run_test test_h1_unresolvable_design_ref_flagged_missing
   run_test test_h2_multiple_plan_refs_flagged_in_envelope
@@ -1937,10 +1950,12 @@ test_freshness_rule_qualified_in_working_tree_mode() {
 # D1 (2026-06-11): fail-soft 가드 SIGPIPE 무력화 회귀.
 # pipefail 아래서 `printf <대용량> | grep -q` 는 grep 조기종료 → printf SIGPIPE(141)
 # → if 조건 전체 거짓 → FINAL_VERDICT 가드 skip → 본문에 인용된 에러패턴을 모델
-# 거부로 오인해 exit 3 (PASS 인데 stamp 미생성). 실측 재현: 본 사이클 Round 1
+# 거부로 오인해 exit 3 (PASS 인데 기록 누락). 실측 재현: 본 사이클 Round 1
 # self-review (wrapper 가 자기 소스의 에러패턴 주석을 리뷰 본문에 인용).
 # 시나리오: 출력 앞부분에 verdict 양식 줄(envelope 인용) + ~800KB filler + 끝부분
-# 에러패턴 인용 + 진짜 FINAL_VERDICT: PASS → wrapper 는 exit 0 + stamp 생성이 정답.
+# 에러패턴 인용 + 진짜 FINAL_VERDICT: PASS → wrapper 는 exit 0 + v2 발급 경로
+# 진입이 정답 (Phase 7 웨이브 3 ③-d 재조준 — legacy stamp 는 이제 검사 대상이
+# 아니다, write_code_review_stamp() 호출 여부를 stderr 로 규명).
 test_model_failsoft_guard_survives_large_output_with_early_verdict_echo() {
   seed_design "docs/specs/foo-design.md" "A1"
   seed_plan "docs/plans/foo-plan.md" "docs/specs/foo-design.md" "A1"
@@ -1960,8 +1975,8 @@ test_model_failsoft_guard_survives_large_output_with_early_verdict_echo() {
   FAKE_CODEX_VERDICT_FILE="$payload_file" run_wrapper "code review please" --non-interactive
 
   [ "$RUN_WRAPPER_RC" = "0" ] || fail "wrapper exit = $RUN_WRAPPER_RC — fail-soft guard defeated by SIGPIPE/pipefail (expected PASS exit 0)"
-  [ -f "$SANDBOX/trail/dod/.codex-reviewed" ] \
-    || fail "stamp not created despite FINAL_VERDICT: PASS in large output"
+  printf '%s' "$RUN_WRAPPER_ERR" | grep -q "no review-start subject digest was captured" \
+    || fail "write_code_review_stamp() ERROR not observed despite FINAL_VERDICT: PASS in large output (v2 issuance path not reached): $RUN_WRAPPER_ERR"
   return 0
 }
 
@@ -1969,9 +1984,12 @@ test_model_failsoft_guard_survives_large_output_with_early_verdict_echo() {
 # `printf <대용량 prompt> | head -1 | grep -q` 도 D1 과 동일 클래스 — head -1
 # 조기종료가 printf SIGPIPE(141)를 유발, pipefail 아래서 첫 줄이 spec marker 와
 # "매치했는데도" 조건이 거짓 → spec 리뷰가 code-review 로 오분류. 최악의 결과:
-# spec 리뷰가 코드 게이트 stamp(.codex-reviewed)를 생성 (규율 구멍).
-# 시나리오: spec marker 첫 줄 + ~1.5MB 본문 → spec-review 모드 유지(stamp 미생성
-# + spec N/A 표기)가 정답.
+# spec 리뷰가 코드 게이트 v2 증거를 발급 (규율 구멍). Phase 7 웨이브 3 ③-d
+# 재조준: legacy stamp(.codex-reviewed)는 이제 검사 대상이 아니다(write 경로
+# 자체가 없다) — write_code_review_stamp() 가 아예 호출되지 않았는지를
+# stderr 로 규명한다.
+# 시나리오: spec marker 첫 줄 + ~1.5MB 본문 → spec-review 모드 유지(v2 발급
+# 시도 없음 + spec N/A 표기)가 정답.
 test_spec_mode_detection_survives_large_prompt() {
   seed_design "docs/specs/2026-06-11-big.md" "A1"
 
@@ -1985,9 +2003,12 @@ $(yes 'large prompt body line to exceed the pipe buffer for the sigpipe window' 
   # spec-review 모드 증거: active DoD 가 spec N/A sentinel 로 표기.
   grep -qF "(N/A for fresh spec review)" "$RUN_WRAPPER_PROMPT_FILE" \
     || fail "spec marker missed on large prompt — mode misclassified as code-review (SIGPIPE)"
-  # 규율 핵심: spec 리뷰는 코드 게이트 stamp 를 절대 만들지 않는다.
-  [ -f "$SANDBOX/trail/dod/.codex-reviewed" ] \
-    && fail "spec review created .codex-reviewed stamp (code-gate pollution)"
+  # 규율 핵심: spec 리뷰는 코드 게이트 v2 증거를 절대 발급하지 않는다 —
+  # write_code_review_stamp() 자체가 호출되지 않았어야 한다.
+  printf '%s' "$RUN_WRAPPER_ERR" | grep -q "no review-start subject digest was captured" \
+    && fail "spec review reached write_code_review_stamp() (code-gate pollution): $RUN_WRAPPER_ERR"
+  [ ! -e "$SANDBOX/trail/dod/.codex-reviewed" ] \
+    || fail "spec review created legacy .codex-reviewed (code-gate pollution)"
   return 0
 }
 

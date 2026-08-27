@@ -152,19 +152,31 @@ fi
 ok "Fixture B: hooks.yaml malformed -> loader exit 0 + stderr warning"
 
 # -----------------------------------------------------------------------------
-# Fixture C: hooks.yaml malformed -> ACTUAL gate hook (pre-edit-dod-gate.sh)
-# stays non-blocking. Per plan §644 Round 6 fix, fixture must exercise the
-# caller hook, not just the loader in isolation. The hook's policy check
-# block (Task 2.7) must fall through on fail-open and let the hook reach its
-# normal logic. We feed it a trail/* path (line 170 exemption) so the hook
-# proceeds to its own exit 0 — proving the policy block did not trigger an
-# early exit/fail under malformed hooks.yaml.
+# Fixture C: hooks.yaml malformed -> ACTUAL gate hook stays non-blocking.
+# Per plan §644 Round 6 fix, fixture must exercise the caller hook, not just
+# the loader in isolation. The hook's policy check block (Task 2.7) must fall
+# through on fail-open and let the hook reach its normal logic. We feed it a
+# trail/* path (line 170 exemption) so the hook proceeds to its own exit 0 —
+# proving the policy block did not trigger an early exit/fail under malformed
+# hooks.yaml.
+#
+# Phase 7 웨이브 3 ③-b (편집 게이트 교대): pre-edit-dod-gate.sh 는 삭제되고
+# pre-edit-discipline-gate.sh + pre-edit-task-gate.sh 로 교대된다. 이 두 훅은
+# 각자 자기 이름의 GMF-4 정책 토글 키를 갖는다(`pre-edit-discipline-gate` /
+# `pre-edit-task-gate` — task-gate 도 "own key" 로 자체 토글을 조회한다, 그
+# 훅 자신의 "Policy toggle" 주석 참조. 이전 개정에서 "task-gate 는 자체
+# 토글이 없다"고 적었던 것은 오기였다). 두 훅의 GMF-4 코드 모양은 동일
+# (resolve_python 직후 loader 호출, resolver-after 순서)하므로, 라이브 훅
+# 프로세스를 통한 malformed-YAML fail-open 검증은 discipline-gate.sh 하나만
+# 대표로 실행하고(중복된 배관을 두 번 반복하지 않기 위해), 구 키
+# umbrella 매핑이 두 훅 모두에 실제로 적용되는지는 loader CLI 를 직접
+# 호출하는 Fixture D(아래)가 커버한다.
 # -----------------------------------------------------------------------------
 C_DIR="$TMP_ROOT/C"
 mkdir -p "$C_DIR/.rein/policy"
 cp "$B_DIR/.rein/policy/hooks.yaml" "$C_DIR/.rein/policy/hooks.yaml"
 
-GATE_HOOK="$PROJECT_DIR/plugins/rein-core/hooks/pre-edit-dod-gate.sh"
+GATE_HOOK="$PROJECT_DIR/plugins/rein-core/hooks/pre-edit-discipline-gate.sh"
 [ -f "$GATE_HOOK" ] || fail "Fixture C setup: gate hook missing at $GATE_HOOK"
 
 # Edit/Write input shape Claude Code passes to PreToolUse hooks. Use a
@@ -173,9 +185,20 @@ GATE_INPUT='{"tool_input":{"file_path":"trail/foo.md"}}'
 
 C_STDERR="$C_DIR/stderr"
 C_STDOUT="$C_DIR/stdout"
+# Round 2 code review fix (Medium): `VAR=val cmd1 | cmd2` scopes VAR to cmd1
+# ONLY — a shell env-assignment prefix binds to the single simple command it
+# precedes, and bash never propagates it across a `|` to a later command in
+# the same pipeline. The previous form here put CLAUDE_PLUGIN_ROOT on
+# `printf`, not on `bash "$GATE_HOOK"`, so the gate hook process never saw
+# it — its "if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]" policy-toggle branch was
+# silently skipped every run, and this fixture passed for the wrong reason
+# (the trail/* path exemption alone). Moving the assignment onto the
+# right-hand side of the pipe scopes it to the command that actually needs
+# it.
 set +e
-( cd "$C_DIR" && CLAUDE_PLUGIN_ROOT="$PROJECT_DIR/plugins/rein-core" \
-    printf '%s' "$GATE_INPUT" | bash "$GATE_HOOK" \
+( cd "$C_DIR" && \
+    printf '%s' "$GATE_INPUT" \
+    | CLAUDE_PLUGIN_ROOT="$PROJECT_DIR/plugins/rein-core" bash "$GATE_HOOK" \
     >"$C_STDOUT" 2>"$C_STDERR" )
 C_RC=$?
 set -e
@@ -184,6 +207,47 @@ set -e
   echo "  gate hook stdout:" >&2; cat "$C_STDOUT" >&2
   fail "Fixture C: expected gate hook exit 0 with malformed hooks.yaml + trail/* path, got $C_RC"
 }
-ok "Fixture C: hooks.yaml malformed -> gate hook (pre-edit-dod-gate.sh) exit 0 (non-blocking via fail-open)"
+if ! grep -q -i "warning" "$C_STDERR"; then
+  echo "  gate hook stderr captured:" >&2
+  cat "$C_STDERR" >&2
+  fail "Fixture C: expected the policy loader's 'warning: failed to parse ...' on stderr (proves the plugin-mode branch actually ran) — got nothing. If this fails, CLAUDE_PLUGIN_ROOT is not reaching the gate hook process."
+fi
+ok "Fixture C: hooks.yaml malformed -> gate hook (pre-edit-discipline-gate.sh) exit 0 (non-blocking via fail-open) + loader warning surfaced (plugin-mode branch actually exercised)"
 
-echo "test-policy-yaml-fails-open: OK (3/3 fixtures)"
+# -----------------------------------------------------------------------------
+# Fixture D: legacy `pre-edit-dod-gate` toggle key (Phase 7 wave 3 ③-b code
+# review round 1 fix). rein-policy-loader.py's UMBRELLA_KEYS now maps this
+# retired hook name to BOTH successor hooks (pre-edit-discipline-gate.sh +
+# pre-edit-task-gate.sh) — same precedent as the pre-bash-guard umbrella. A
+# project that had `pre-edit-dod-gate: false` set before the pre-edit-dod-
+# gate.sh retirement must keep BOTH successors disabled after upgrading (the
+# user's stated intent survives the hook-name churn), while unrelated hooks
+# (e.g. pre-edit-coverage-gate, which was never part of pre-edit-dod-gate.sh
+# in the first place) must stay unaffected. This exercises the loader CLI
+# directly (Task 2.7 mode: exit 0 = enabled, exit 1 = disabled) rather than a
+# live hook process — same style as Fixture B above.
+# -----------------------------------------------------------------------------
+D_DIR="$TMP_ROOT/D"
+mkdir -p "$D_DIR/.rein/policy"
+cat >"$D_DIR/.rein/policy/hooks.yaml" <<'YAML'
+pre-edit-dod-gate: false
+YAML
+
+set +e
+( cd "$D_DIR" && python3 "$LOADER" "pre-edit-discipline-gate" )
+D_DISCIPLINE_RC=$?
+( cd "$D_DIR" && python3 "$LOADER" "pre-edit-task-gate" )
+D_TASK_RC=$?
+( cd "$D_DIR" && python3 "$LOADER" "pre-edit-coverage-gate" )
+D_COVERAGE_RC=$?
+set -e
+
+[ "$D_DISCIPLINE_RC" = "1" ] \
+  || fail "Fixture D: legacy pre-edit-dod-gate:false should disable pre-edit-discipline-gate via umbrella (expected exit 1, got $D_DISCIPLINE_RC)"
+[ "$D_TASK_RC" = "1" ] \
+  || fail "Fixture D: legacy pre-edit-dod-gate:false should disable pre-edit-task-gate via umbrella (expected exit 1, got $D_TASK_RC)"
+[ "$D_COVERAGE_RC" = "0" ] \
+  || fail "Fixture D: legacy pre-edit-dod-gate:false must NOT affect unrelated hooks like pre-edit-coverage-gate (expected exit 0/enabled, got $D_COVERAGE_RC)"
+ok "Fixture D: legacy pre-edit-dod-gate toggle key umbrella-maps to both pre-edit-discipline-gate and pre-edit-task-gate, leaves unrelated hooks unaffected"
+
+echo "test-policy-yaml-fails-open: OK (4/4 fixtures)"

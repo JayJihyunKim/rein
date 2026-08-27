@@ -31,6 +31,7 @@ ok() {
 
 BOSS="$PRESET_DIR/boss-ace.md"
 JENNIE="$PRESET_DIR/jennie.md"
+CHOI="$PRESET_DIR/choi-haengbae.md"
 [ -f "$BOSS" ] || fail "builtin preset missing: $BOSS"
 [ -f "$JENNIE" ] || fail "builtin preset missing: $JENNIE"
 
@@ -117,7 +118,7 @@ print("%s: greeting=%r (len=%d) OK" % (label, greeting, len(greeting)))
 PYEOF
 }
 
-for spec in "boss-ace:$BOSS" "jennie:$JENNIE"; do
+for spec in "boss-ace:$BOSS" "jennie:$JENNIE" "choi-haengbae:$CHOI"; do
   label="${spec%%:*}"
   file="${spec#*:}"
   if OUT="$(check_preset "$label" "$file")"; then

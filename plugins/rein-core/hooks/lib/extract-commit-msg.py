@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Extract the commit message first-line from a raw bash COMMAND string.
 
-Used by pre-bash-test-commit-gate.sh to validate conventional commit format in a way
-that is robust against three historical bugs:
+Used by pre-bash-commit-discipline-gate.sh (Phase 7 wave 3 ③-c — successor of
+the retired pre-bash-test-commit-gate.sh) to validate conventional commit
+format in a way that is robust against three historical bugs:
 
   1) Compound commands like `<commit-cmd> && git tag -m "..."` where the
      previous extractor conflated the tag's -m argument with the commit's.

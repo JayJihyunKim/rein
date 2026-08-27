@@ -34,7 +34,7 @@ import re
 import sys
 
 # Sync contract: loader KNOWN_PERSONA_PRESETS == this set (see module docstring).
-BUILTIN_PRESETS = {"boss-ace", "jennie"}
+BUILTIN_PRESETS = {"boss-ace", "jennie", "choi-haengbae"}
 
 NAME_RE = re.compile(r"^[a-z0-9-]{1,32}$")
 MAX_BODY_CHARS = 4000

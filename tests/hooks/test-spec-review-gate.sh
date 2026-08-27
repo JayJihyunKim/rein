@@ -2,6 +2,14 @@
 # tests/hooks/test-spec-review-gate.sh
 # Comprehensive test suite for spec review enforcement
 # Test harness: tests/hooks/lib/test-harness.sh
+#
+# Phase 7 웨이브 3 ③-b (편집 게이트 교대): pre-edit-dod-gate.sh 는 삭제되고
+# pre-edit-discipline-gate.sh + pre-edit-task-gate.sh 로 교대된다. spec-review
+# 축(post-edit-spec-review-gate.sh 가 만든 .pending/.reviewed 표식을 pre-edit
+# 시점에 판정)은 discipline-gate 가 이어받는다 — 이 파일의 모든 테스트는
+# 활성작업(active-task) 축과 무관(전부 seed_dod 로 pending DoD 를 심어 두므로
+# 예전에도 active-task 축은 항상 ALLOW 였다)하므로 pre-edit-dod-gate.sh 호출을
+# pre-edit-discipline-gate.sh 로 기계적으로 교체했을 뿐 단언 로직은 불변이다.
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/test-harness.sh"
 
@@ -165,8 +173,8 @@ test_gate_blocks_unreviewed_spec() {
     "tool_result": {}
   }'
 
-  # pre-edit-dod-gate should block
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  # pre-edit-discipline-gate should block
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "should block when unreviewed spec exists"
 }
 
@@ -195,7 +203,7 @@ test_gate_allows_reviewed_spec() {
     "tool_result": {}
   }'
 
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 0 ] || fail "should allow when spec is reviewed"
 }
 
@@ -215,7 +223,7 @@ test_gate_ignores_deleted_spec() {
     "tool_result": {}
   }'
 
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 0 ] || fail "should ignore markers for deleted specs"
 }
 
@@ -241,7 +249,7 @@ test_gate_respects_bypass_file() {
     "tool_result": {}
   }'
 
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 0 ] || fail "should allow when bypass file exists"
 }
 
@@ -255,7 +263,7 @@ test_gate_no_spec_reviews_dir() {
     "tool_result": {}
   }'
 
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 0 ] || fail "should allow when no spec-reviews directory"
 }
 
@@ -280,7 +288,7 @@ test_gate_multiple_unreviewed_specs() {
     "tool_result": {}
   }'
 
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "should block when multiple unreviewed specs exist"
 }
 
@@ -507,7 +515,7 @@ test_gate_blocks_stale_reviewed_when_pending_newer() {
     "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
     "tool_result": {}
   }'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "should block when reviewed is stale (pending newer than reviewed)"
 }
 
@@ -534,7 +542,7 @@ test_gate_allows_when_reviewed_fresher_than_pending() {
     "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
     "tool_result": {}
   }'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 0 ] || fail "should allow when reviewed is fresher than pending"
 }
 
@@ -560,7 +568,7 @@ test_gate_blocks_when_reviewed_timestamp_missing() {
     "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
     "tool_result": {}
   }'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "should block (fail-closed) when reviewed timestamp is missing"
 }
 
@@ -589,7 +597,7 @@ test_gate_blocks_when_reviewed_timestamp_garbled() {
     "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
     "tool_result": {}
   }'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "should block (fail-closed) when a timestamp is garbled / non-ISO"
 }
 
@@ -623,7 +631,7 @@ test_respec_after_review_blocks_source_edit() {
     "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
     "tool_result": {}
   }'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$src_input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$src_input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "source edit must be blocked after spec is re-edited without re-review"
 }
 
@@ -708,7 +716,7 @@ test_orphan_content_sha_match_allows_despite_mtime() {
   set_file_mtime "specs/api-design.md" "2026-05-01"   # mtime > reviewed
 
   local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 0 ] || fail "content_sha match must allow despite bumped mtime (FP regression)"
 }
 
@@ -733,7 +741,7 @@ test_orphan_content_sha_mismatch_blocks() {
   set_file_mtime "specs/api-design.md" "2026-05-01"
 
   local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "content_sha mismatch must block (content changed after review)"
 }
 
@@ -761,7 +769,7 @@ test_orphan_retro_clean_checkout_allows() {
   set_file_mtime "specs/api-design.md" "2026-05-01"   # mtime > reviewed (old logic would block)
 
   local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 0 ] || fail "retro marker + clean checkout (commit<=reviewed) must allow"
 }
 
@@ -788,7 +796,7 @@ test_orphan_retro_dirty_blocks() {
   set_file_mtime "specs/api-design.md" "2026-05-01"
 
   local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "retro marker + dirty working tree must block"
 }
 
@@ -814,7 +822,7 @@ test_orphan_retro_commit_after_review_blocks() {
   set_file_mtime "specs/api-design.md" "2026-05-10"   # mtime < reviewed (old logic would allow)
 
   local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "retro marker + commit after review must block"
 }
 
@@ -840,7 +848,7 @@ test_orphan_retro_untracked_blocks() {
   set_file_mtime "specs/api-design.md" "2026-05-01"
 
   local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "retro marker + untracked spec must fail-closed (block)"
 }
 
@@ -863,7 +871,7 @@ test_orphan_non_retro_mtime_block_preserved() {
   set_file_mtime "specs/api-design.md" "2026-05-01"   # mtime > reviewed
 
   local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "non-retro contentless orphan must keep mtime-block behavior"
 }
 
@@ -884,7 +892,7 @@ test_orphan_non_retro_mtime_allow_preserved() {
   set_file_mtime "specs/api-design.md" "2026-05-01"   # mtime < reviewed
 
   local input='{"tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"}, "tool_result": {}}'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 0 ] || fail "non-retro contentless orphan must keep mtime-allow behavior"
 }
 
@@ -922,7 +930,7 @@ test_skip_spec_gate_consumed_after_one_edit() {
   }'
 
   # ① first edit: bypass applies → allowed, marker consumed.
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 0 ] || fail "first edit with .skip-spec-gate should be allowed"
   # `! -e` (not `! -f`): proof must reject ANY remaining path type, matching the
   # hook's fail-closed proof.
@@ -931,7 +939,7 @@ test_skip_spec_gate_consumed_after_one_edit() {
   assert_file_contains "trail/incidents/auto-mode-bypass.log" "skip-spec-gate consumed"
 
   # ② second edit: marker gone, unreviewed spec still present → blocked.
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "second edit must be blocked (one-shot bypass already consumed)"
 }
 
@@ -958,7 +966,7 @@ test_skip_spec_gate_fail_closed_when_unremovable() {
     "tool_result": {}
   }'
 
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "must fail-closed (block) when .skip-spec-gate cannot be removed"
   # honest-audit: a fail-closed path must NOT claim "consumed"; it records the
   # consume_failed outcome instead (codex R1 Medium).
@@ -978,7 +986,7 @@ test_skip_spec_gate_fail_closed_when_unremovable() {
 # so the next source edit is not blocked (fail-open). Fix (routing pattern):
 # each fail-open path drops a generic conservative marker
 # (trail/dod/.spec-review-gen-failed) recording cause=, and the success path
-# auto-heals it (rm -f). pre-edit-dod-gate.sh glob-blocks on the marker, with
+# auto-heals it (rm -f). pre-edit-discipline-gate.sh glob-blocks on the marker, with
 # a one-shot consume-on-use bypass (trail/dod/.skip-spec-gen-gate).
 # =================================================================
 
@@ -1137,7 +1145,7 @@ test_m4_consumer_blocks_when_marker_present() {
     "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
     "tool_result": {}
   }'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "should block when spec-review-gen-failed marker present"
 }
 
@@ -1148,7 +1156,7 @@ test_m4_consumer_allows_when_marker_absent() {
     "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
     "tool_result": {}
   }'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 0 ] || fail "should allow when no spec-review-gen-failed marker"
 }
 
@@ -1166,11 +1174,11 @@ test_m4_bypass_consumed_after_one_edit() {
     "tool_result": {}
   }'
   # ① bypass applies → allowed, bypass consumed.
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 0 ] || fail "first edit with .skip-spec-gen-gate should be allowed"
   [ ! -e "$SANDBOX/$M4_BYPASS_MARKER" ] || fail "bypass marker must be consumed after first edit"
   # ② bypass gone, conservative marker remains → re-blocked.
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "second edit must be re-blocked (one-shot bypass consumed)"
 }
 
@@ -1186,7 +1194,7 @@ test_m4_bypass_fail_closed_when_unremovable() {
     "tool_input": {"file_path": "'$SANDBOX'/src/auth.ts"},
     "tool_result": {}
   }'
-  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" > /dev/null 2>&1
+  REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" > /dev/null 2>&1
   [ $? -eq 2 ] || fail "must fail-closed (block) when bypass marker cannot be removed"
 }
 
@@ -1203,7 +1211,7 @@ test_m4_bypass_reason_sanitized_in_stderr() {
     "tool_result": {}
   }'
   local err
-  err=$(REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" <<< "$input" 2>&1 >/dev/null)
+  err=$(REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" <<< "$input" 2>&1 >/dev/null)
   if printf '%s' "$err" | LC_ALL=C grep -q "$(printf '\033')"; then
     fail "ESC control char must be stripped from bypass reason echo"
   fi
@@ -1214,68 +1222,68 @@ test_m4_bypass_reason_sanitized_in_stderr() {
 # RUN ALL TESTS
 # =================================================================
 
-run_test test_canonical_path_docs_specs post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_canonical_path_docs_plans post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_canonical_path_specs_root post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_canonical_path_plans_root post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_non_canonical_src_file post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_non_canonical_readme post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_canonical_deeply_nested_specs post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_canonical_deeply_nested_plans post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_false_positive_specs_in_filename post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_false_positive_plans_in_dir post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_canonical_path_docs_specs post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_canonical_path_docs_plans post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_canonical_path_specs_root post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_canonical_path_plans_root post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_non_canonical_src_file post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_non_canonical_readme post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_canonical_deeply_nested_specs post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_canonical_deeply_nested_plans post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_false_positive_specs_in_filename post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_false_positive_plans_in_dir post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
 
-run_test test_gate_blocks_unreviewed_spec post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_allows_reviewed_spec post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_ignores_deleted_spec post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_respects_bypass_file post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_no_spec_reviews_dir post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_multiple_unreviewed_specs post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_post_edit_hook_hash_consistency post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_gate_blocks_unreviewed_spec post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_gate_allows_reviewed_spec post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_gate_ignores_deleted_spec post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_gate_respects_bypass_file post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_gate_no_spec_reviews_dir post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_gate_multiple_unreviewed_specs post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_post_edit_hook_hash_consistency post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
 
-run_test test_multiedit_extracts_all_files post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_multiedit_deduplicates_files post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_multiedit_extracts_all_files post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_multiedit_deduplicates_files post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
 
-run_test test_helper_marks_spec_reviewed post-edit-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
-run_test test_helper_normalizes_relative_paths post-edit-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
+run_test test_helper_marks_spec_reviewed post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh rein-mark-spec-reviewed.sh
+run_test test_helper_normalizes_relative_paths post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh rein-mark-spec-reviewed.sh
 
-run_test test_post_edit_removes_stale_reviewed_on_respec post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_blocks_stale_reviewed_when_pending_newer post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_allows_when_reviewed_fresher_than_pending post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_blocks_when_reviewed_timestamp_missing post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_gate_blocks_when_reviewed_timestamp_garbled post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_respec_after_review_blocks_source_edit post-edit-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
+run_test test_post_edit_removes_stale_reviewed_on_respec post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_gate_blocks_stale_reviewed_when_pending_newer post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_gate_allows_when_reviewed_fresher_than_pending post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_gate_blocks_when_reviewed_timestamp_missing post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_gate_blocks_when_reviewed_timestamp_garbled post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_respec_after_review_blocks_source_edit post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh rein-mark-spec-reviewed.sh
 
 # Writer content_sha anchor
-run_test test_helper_writes_content_sha post-edit-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
-run_test test_helper_fails_on_unhashable_spec post-edit-spec-review-gate.sh pre-edit-dod-gate.sh rein-mark-spec-reviewed.sh
+run_test test_helper_writes_content_sha post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh rein-mark-spec-reviewed.sh
+run_test test_helper_fails_on_unhashable_spec post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh rein-mark-spec-reviewed.sh
 
 # SR-1.b orphan backstop — content-based staleness (mtime FP fix)
-run_test test_orphan_content_sha_match_allows_despite_mtime post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_orphan_content_sha_mismatch_blocks post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_orphan_retro_clean_checkout_allows post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_orphan_retro_dirty_blocks post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_orphan_retro_commit_after_review_blocks post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_orphan_retro_untracked_blocks post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_orphan_non_retro_mtime_block_preserved post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_orphan_non_retro_mtime_allow_preserved post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_orphan_content_sha_match_allows_despite_mtime post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_orphan_content_sha_mismatch_blocks post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_orphan_retro_clean_checkout_allows post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_orphan_retro_dirty_blocks post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_orphan_retro_commit_after_review_blocks post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_orphan_retro_untracked_blocks post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_orphan_non_retro_mtime_block_preserved post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_orphan_non_retro_mtime_allow_preserved post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
 
 # M1 — .skip-spec-gate one-shot consumption + fail-closed
-run_test test_skip_spec_gate_consumed_after_one_edit post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_skip_spec_gate_fail_closed_when_unremovable post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_skip_spec_gate_consumed_after_one_edit post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_skip_spec_gate_fail_closed_when_unremovable post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
 
 # M4 — generator fail-open conservative marker (3 paths + auto-heal)
-run_test test_m4_noncache_python_unresolved_creates_marker post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_m4_json_parse_failure_creates_marker post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_m4_cache_path_python_unresolved_creates_marker post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_m4_success_path_autoheals_marker post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_m4_non_spec_edit_does_not_autoheal_marker post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_m4_noncache_python_unresolved_creates_marker post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_m4_json_parse_failure_creates_marker post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_m4_cache_path_python_unresolved_creates_marker post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_m4_success_path_autoheals_marker post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_m4_non_spec_edit_does_not_autoheal_marker post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
 
 # M4 — consumer glob-block + one-shot bypass consume
-run_test test_m4_consumer_blocks_when_marker_present post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_m4_consumer_allows_when_marker_absent post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_m4_bypass_consumed_after_one_edit post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_m4_bypass_fail_closed_when_unremovable post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
-run_test test_m4_bypass_reason_sanitized_in_stderr post-edit-spec-review-gate.sh pre-edit-dod-gate.sh
+run_test test_m4_consumer_blocks_when_marker_present post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_m4_consumer_allows_when_marker_absent post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_m4_bypass_consumed_after_one_edit post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_m4_bypass_fail_closed_when_unremovable post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_m4_bypass_reason_sanitized_in_stderr post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
 
 summary

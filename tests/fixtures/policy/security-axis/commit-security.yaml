@@ -1,0 +1,25 @@
+# .rein/policy/security-axis/commit-security.yaml — security_review 축
+# 전용 정책 (Task 6.1 본작업, security_review 축 전환). `_version.yaml`
+# 의 헤더 주석에 이 디렉토리가 왜 별도로 존재하는지 전체 배경이 있다 —
+# 요지만 반복: 번들 기본 커밋 정책(policies/default/commit.yaml)은
+# code_review 만 요구하고 security_review 는 요구하지 않으므로, 이
+# 축을 위임하려면 security_review 를 요구하는 정책이 REIN_POLICY_DIR
+# 로 별도 주입되어야 한다. 이 파일 하나가 그 요구를 표현한다.
+#
+# v1 대응: hooks/pre-bash-test-commit-gate.sh 의 [P6]/M2 — 커밋
+# 시점에 보안 리뷰 표식을 요구하는 지점의 미러. v1 은 면제 2종(경량
+# 등급 RT-1 + 보안-surface)이 성립하면 이 요구 자체를 skip 하는데,
+# 그 면제 판정은 v2 위임 **이전**(hooks/lib/security-review-gate.sh
+# 의 rein_check_security_review_stamp())에서 이미 끝나 있다 — 면제가
+# 성립하면 이 정책이 매칭되는 위임 자체가 아예 일어나지 않는다. 그래서
+# 이 정책 파일 자신은 면제 로직을 전혀 모르는 단순한 무조건 요구로
+# 남겨도 안전하다(호출자가 이미 걸러낸 뒤에만 도달하는 정책).
+#
+# 스키마는 policies/default/commit.yaml 과 완전히 같은 4필드 — 다른
+# 점은 require 값 하나(code_review → security_review)뿐이다.
+trigger: tool.pre
+when:
+  command.type: git.commit
+require:
+  - security_review
+failure_mode: closed

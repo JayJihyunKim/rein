@@ -76,7 +76,14 @@ fi
 # bash-guard-infra log_block 함수 e2e 호출은 BLOCKS_LOG_JSONL / BG_GUARD_NAME /
 # python helper 등 의존성이 많아 격리 어려움. 대신 static grep 으로 `incidents-to-rule`
 # WARNING 직전에 `is_auto_mode` 분기가 도입됐는지 검증.
-for f in plugins/rein-core/hooks/lib/bash-guard-infra.sh plugins/rein-core/hooks/pre-edit-dod-gate.sh; do
+#
+# pre-edit-dod-gate.sh retired (Phase 7 웨이브 3 ③-b, edit-gate rotation,
+# 2026-08-21) — its own log_block() (with the same is_auto_mode-guarded
+# WARNING) is duplicated verbatim into BOTH successor hooks
+# (pre-edit-discipline-gate.sh and pre-edit-task-gate.sh, each still keeps
+# its own local copy rather than sharing one — same convention as every
+# other gate hook in this repo), so both are checked here.
+for f in plugins/rein-core/hooks/lib/bash-guard-infra.sh plugins/rein-core/hooks/pre-edit-discipline-gate.sh plugins/rein-core/hooks/pre-edit-task-gate.sh; do
   # 같은 함수 안에 'incidents-to-rule' 과 'is_auto_mode' 가 공존하는지 확인
   if ! grep -q "incidents-to-rule" "$f"; then
     echo "FAIL [c-$f-missing-incidents-to-rule-emit]" >&2
@@ -95,16 +102,22 @@ done
 # Functional check — sourcing the helper from any hook that uses the
 # `if declare -F is_auto_mode && is_auto_mode; then exit 0; fi` pattern
 # returns 0 (skip) when marker present.
+#
+# pre-edit-dod-gate.sh retired (Phase 7 웨이브 3 ③-b, edit-gate rotation,
+# 2026-08-21) — replaced by pre-edit-discipline-gate.sh + pre-edit-task-
+# gate.sh, both of which carry their own is_auto_mode call (confirmed by
+# direct inspection of the shipped hooks).
 for hook in plugins/rein-core/hooks/session-start-load-trail.sh \
             plugins/rein-core/hooks/stop-session-gate.sh \
-            plugins/rein-core/hooks/pre-edit-dod-gate.sh; do
+            plugins/rein-core/hooks/pre-edit-discipline-gate.sh \
+            plugins/rein-core/hooks/pre-edit-task-gate.sh; do
   if ! grep -q "is_auto_mode" "$hook"; then
     echo "FAIL [d-$hook-missing-is_auto_mode-call]" >&2
     FAILED=$((FAILED+1))
   fi
 done
 if [ "$FAILED" -eq 0 ]; then
-  echo "OK [d-3-hooks-call-is_auto_mode]"
+  echo "OK [d-4-hooks-call-is_auto_mode]"
 fi
 
 if [ "$FAILED" -gt 0 ]; then

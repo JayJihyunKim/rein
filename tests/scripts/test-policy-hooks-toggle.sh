@@ -52,6 +52,21 @@ run_loader() {
   echo "$rc"
 }
 
+# run_loader_strict — same as run_loader but invokes the STRICT contract
+# (Phase 7 wave 3 ③-c code review round 1 High fix): `--strict <hook-name>`,
+# where rc 78 (EX_CONFIG) means "explicitly disabled" and rc 0 means
+# "enabled". Used by Fixtures O/P below.
+run_loader_strict() {
+  local workdir="$1"
+  local hook="$2"
+  local stderr_file="$3"
+  set +e
+  ( cd "$workdir" && python3 "$LOADER" --strict "$hook" 2>"$stderr_file" )
+  local rc=$?
+  set -e
+  echo "$rc"
+}
+
 # -----------------------------------------------------------------------------
 # Fixture A: hook enabled by default (entry omitted from yaml)
 # -----------------------------------------------------------------------------
@@ -213,4 +228,85 @@ rc="$(run_loader "$J_DIR" "post-edit-plan-coverage" "$J_STDERR")"
 grep -q -i "unknown profile" "$J_STDERR" || fail "Fixture J: missing 'unknown profile' warning"
 ok "Fixture J: unknown profile -> warning + fall-through enabled"
 
-echo "test-policy-hooks-toggle: OK (10/10 fixtures)"
+# -----------------------------------------------------------------------------
+# Fixture K/L/M/N: 2-hop 승계 우선순위 (Phase 7 wave 3 ③-c 리뷰 1회차
+# Medium 수리) — pre-bash-commit-discipline-gate.sh /
+# pre-bash-commit-review-gate.sh 둘 다 UMBRELLA_KEYS 에
+# ("pre-bash-test-commit-gate", "pre-bash-guard") 2-hop 체인으로 등록돼
+# 있다(rein-policy-loader.py 참조). 개별 키가 최우선, hop1 이 hop2 보다
+# 먼저 결정된다는 것을 두 successor 훅 모두에 대해 실측한다.
+# -----------------------------------------------------------------------------
+
+# K: 개별 키가 hop1 umbrella 보다 우선 (discipline-gate)
+K_DIR="$TMP_ROOT/K"
+mkdir -p "$K_DIR/.rein/policy"
+cat >"$K_DIR/.rein/policy/hooks.yaml" <<'YAML'
+pre-bash-commit-discipline-gate: true
+pre-bash-test-commit-gate: false
+YAML
+K_STDERR="$K_DIR/stderr"
+rc="$(run_loader "$K_DIR" "pre-bash-commit-discipline-gate" "$K_STDERR")"
+[ "$rc" = "0" ] || fail "Fixture K: explicit per-hook key must override hop1 umbrella (pre-bash-test-commit-gate: false), got $rc"
+ok "Fixture K: pre-bash-commit-discipline-gate explicit true overrides hop1 pre-bash-test-commit-gate:false"
+
+# L: hop1 이 present 이면 hop2 는 참조되지 않음 (discipline-gate)
+L_DIR="$TMP_ROOT/L"
+mkdir -p "$L_DIR/.rein/policy"
+cat >"$L_DIR/.rein/policy/hooks.yaml" <<'YAML'
+pre-bash-test-commit-gate: true
+pre-bash-guard: false
+YAML
+L_STDERR="$L_DIR/stderr"
+rc="$(run_loader "$L_DIR" "pre-bash-commit-discipline-gate" "$L_STDERR")"
+[ "$rc" = "0" ] || fail "Fixture L: hop1 present (true) must decide before hop2 is consulted (pre-bash-guard:false ignored), got $rc"
+ok "Fixture L: pre-bash-commit-discipline-gate — hop1 pre-bash-test-commit-gate:true wins over hop2 pre-bash-guard:false"
+
+# M: 개별 키가 hop1 umbrella 보다 우선 (review-gate — 같은 조합, 다른 훅)
+M_DIR="$TMP_ROOT/M"
+mkdir -p "$M_DIR/.rein/policy"
+cat >"$M_DIR/.rein/policy/hooks.yaml" <<'YAML'
+pre-bash-commit-review-gate: true
+pre-bash-test-commit-gate: false
+YAML
+M_STDERR="$M_DIR/stderr"
+rc="$(run_loader "$M_DIR" "pre-bash-commit-review-gate" "$M_STDERR")"
+[ "$rc" = "0" ] || fail "Fixture M: explicit per-hook key must override hop1 umbrella (pre-bash-test-commit-gate: false), got $rc"
+ok "Fixture M: pre-bash-commit-review-gate explicit true overrides hop1 pre-bash-test-commit-gate:false"
+
+# N: hop1 이 present 이면 hop2 는 참조되지 않음 (review-gate)
+N_DIR="$TMP_ROOT/N"
+mkdir -p "$N_DIR/.rein/policy"
+cat >"$N_DIR/.rein/policy/hooks.yaml" <<'YAML'
+pre-bash-test-commit-gate: true
+pre-bash-guard: false
+YAML
+N_STDERR="$N_DIR/stderr"
+rc="$(run_loader "$N_DIR" "pre-bash-commit-review-gate" "$N_STDERR")"
+[ "$rc" = "0" ] || fail "Fixture N: hop1 present (true) must decide before hop2 is consulted (pre-bash-guard:false ignored), got $rc"
+ok "Fixture N: pre-bash-commit-review-gate — hop1 pre-bash-test-commit-gate:true wins over hop2 pre-bash-guard:false"
+
+# -----------------------------------------------------------------------------
+# Fixture O/P: --strict 모드 계약 (Phase 7 wave 3 ③-c 리뷰 1회차 High 수리)
+# -----------------------------------------------------------------------------
+
+# O: --strict + 명시 disable -> exit 78 (EX_CONFIG)
+O_DIR="$TMP_ROOT/O"
+mkdir -p "$O_DIR/.rein/policy"
+cat >"$O_DIR/.rein/policy/hooks.yaml" <<'YAML'
+pre-bash-commit-discipline-gate: false
+YAML
+O_STDERR="$O_DIR/stderr"
+rc="$(run_loader_strict "$O_DIR" "pre-bash-commit-discipline-gate" "$O_STDERR")"
+[ "$rc" = "78" ] || fail "Fixture O: --strict explicit disable expected exit 78 (EX_CONFIG), got $rc"
+ok "Fixture O: --strict + explicit disable -> exit 78 (EX_CONFIG)"
+
+# P: --strict + 무설정 -> exit 0 (enabled, fail-open default)
+P_DIR="$TMP_ROOT/P"
+mkdir -p "$P_DIR"
+[ ! -e "$P_DIR/.rein/policy/hooks.yaml" ] || fail "Fixture P setup: yaml should not exist"
+P_STDERR="$P_DIR/stderr"
+rc="$(run_loader_strict "$P_DIR" "pre-bash-commit-discipline-gate" "$P_STDERR")"
+[ "$rc" = "0" ] || fail "Fixture P: --strict with no policy configured expected exit 0 (enabled default), got $rc"
+ok "Fixture P: --strict + no config -> exit 0 (enabled)"
+
+echo "test-policy-hooks-toggle: OK (16/16 fixtures)"

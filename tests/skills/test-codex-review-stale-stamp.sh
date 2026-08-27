@@ -1,19 +1,44 @@
 #!/bin/bash
 # tests/skills/test-codex-review-stale-stamp.sh
-# Unit tests for scripts/rein-codex-review.sh::_resolve_diff_base staleness self-healing
-# (묶음 C — wrapper context lifecycle hardening, Phase 2).
+# Unit tests for scripts/rein-codex-review.sh::_resolve_diff_base
+# (묶음 C — wrapper context lifecycle hardening, Phase 2 — 원 스위트 목적).
 #
-# Scope IDs covered:
-#   - wrapper-detects-stale-stamp-when-reviewed-at-iso-before-head-commit-iso
-#   - wrapper-treats-iso-parse-failure-as-stale-fail-safe
-#   - wrapper-stale-stamp-falls-back-to-head-tilde-1-then-empty-tree
+# Phase 7 웨이브 3 ③-d 전수 재조준. `_resolve_diff_base()` 의 legacy
+# `trail/dod/.codex-reviewed` stamp 읽기 경로(fresh/stale 판정 + diff_base
+# 필드 채택 + GE-2 조상 검증) 전체가 이 웨이브에서 제거됐다 — 함수는 이제
+# 무조건 `HEAD~1` → (부재 시) 빈 트리 SHA 순으로만 판정한다
+# (rein-codex-review.sh 자신의 "Phase 7 wave 3 ③-d" 주석 참조: "Dropping
+# the stamp-preference branch is a no-op in practice, not a behavior
+# change" — 원래도 stamp 의 staleness self-heal 이 HEAD 이동 직후 즉시
+# stamp 를 버렸으므로, 사실상 stamp 경로가 항상 죽은 무게였다는 설명).
+#
+# 원 스위트의 8개 케이스(1~4, 6~8)는 전부 이 제거된 stamp 판정부(신선도
+# 비교/파싱 실패 fail-safe/조상 위조 거부)를 검증했다 — 함수가 stamp 를
+# 아예 읽지 않게 된 지금은 "정당 소멸": 무대체가 아니라, 아래 재구성된
+# 4개 케이스(A~D)가 그 자리를 대체한다 — "stamp 내용이 무엇이든(신선하든
+# 오래됐든 파싱 불가든 조작됐든) 완전히 무시되고 HEAD~1/빈 트리만 쓰인다"
+# 는 단일 불변식으로 원 8개 케이스의 의도(신선도/파싱/위조 각각의 개별
+# 판정 분기가 더 이상 존재하지 않는다는 사실 자체)를 전부 흡수한다. 원
+# Test 5("stamp 없음 → HEAD~1")만 이 재조준에서도 그대로 유효해 Test A로
+# 남는다.
+#
+# Scope IDs covered (④ 새 프레임 — 원 3개는 이 웨이브로 소멸, 후계 표기):
+#   - wrapper-diff-base-unconditionally-head-tilde-1-ignores-any-stamp (신설,
+#     구 wrapper-detects-stale-stamp-when-reviewed-at-iso-before-head-commit-iso
+#     + wrapper-treats-iso-parse-failure-as-stale-fail-safe 의 후계 — 두
+#     판정 분기 자체가 사라졌으므로 "무조건 무시" 로 흡수)
+#   - wrapper-stale-stamp-falls-back-to-head-tilde-1-then-empty-tree (존속 —
+#     이제 "stale" 조건 없이 항상 성립)
 #
 # Scenarios:
-#   1. Fresh stamp (reviewed_at = HEAD ISO + 1초) → use stamp.diff_base
-#   2. Stale stamp (reviewed_at far in past) → ignore + HEAD~1 fallback
-#   3. Parse failure (reviewed_at = "garbage") → fail-safe + HEAD~1 fallback
-#   4. Initial commit (HEAD~1 absent) + stale stamp → EMPTY_TREE_SHA
-#   5. (regression) No stamp → HEAD~1 fallback
+#   A. No stamp at all → HEAD~1 (regression, 원 Test 5 그대로)
+#   B. No stamp, HEAD~1 absent (initial commit) → EMPTY_TREE_SHA (원 Test 4 를
+#      stamp 없이 일반화 — 빈 트리 폴백 자체는 stamp 유무와 무관하다)
+#   C. "그럴듯한" stamp(신선한 timestamp + 실제 조상 SHA인 diff_base, 원
+#      Test 1/2/3 을 하나로 병합) → 완전히 무시되고 HEAD~1 그대로
+#   D. 적대적 stamp(위조 SHA / 다른 브랜치 SHA / orphan SHA, 원 Test 6/7/8
+#      을 하나로 병합) → 역시 완전히 무시되고 HEAD~1 그대로 (판정부 자체가
+#      없으니 위조 인젝션 표면도 없다)
 
 set -u
 
@@ -44,7 +69,7 @@ if [ ! -f "$WRAPPER" ]; then
   exit 1
 fi
 
-# Helper: build sandbox with git repo + selector lib stub + fixture stamp.
+# Helper: build sandbox with git repo + selector lib stub.
 _mksandbox() {
   local dir
   dir=$(mktemp -d)
@@ -73,154 +98,75 @@ _get_diff_base() {
   ' _ "$sandbox" "$WRAPPER"
 }
 
-# ---- Test 1: Fresh stamp + valid ancestor diff_base → use stored diff_base.
-# GE-2: a fresh stamp's diff_base must now also be a real ancestor commit, so
-# this test uses HEAD~1 (real ancestor) instead of a fabricated SHA.
-echo "### Test 1: wrapper_uses_stamp_diff_base_when_stamp_is_fresh_and_valid_ancestor"
-S=$(_mksandbox)
-git -C "$S" commit --allow-empty -q -m "first commit"
-git -C "$S" commit --allow-empty -q -m "second commit"
-git -C "$S" commit --allow-empty -q -m "third commit"
-HEAD_ISO=$(git -C "$S" log -1 --format=%cI HEAD)
-# Fresh: stamp_iso > head_iso (e.g. 1 hour later)
-FRESH_ISO=$(python3 -c "
-from datetime import datetime, timedelta
-h = datetime.fromisoformat('$HEAD_ISO')
-print((h + timedelta(hours=1)).isoformat())
-")
-REAL_BASE=$(git -C "$S" rev-parse HEAD~1)   # real ancestor of HEAD
-cat > "$S/trail/dod/.codex-reviewed" <<EOF
-reviewed_at: $FRESH_ISO
-reviewer: codex
-diff_base: $REAL_BASE
-verdict: PASS
-cycle: test
-scope: test
-active_dod: trail/dod/dod-foo.md
-EOF
-result=$(_get_diff_base "$S")
-if [ "$result" = "$REAL_BASE" ]; then
-  _pass "fresh stamp + valid ancestor → stored diff_base ($result)"
-else
-  _fail "expected fresh valid-ancestor diff_base=$REAL_BASE, got: $result"
-fi
-rm -rf "$S"
-
-# ---- Test 2: Stale stamp → ignore + HEAD~1 fallback.
-echo "### Test 2: wrapper_detects_stale_stamp_when_reviewed_at_iso_before_head_commit_iso"
+# ---- Test A: No stamp at all → HEAD~1 (regression, 원 Test 5).
+echo "### Test A: no_legacy_marker_present_falls_back_to_head_tilde_1"
 S=$(_mksandbox)
 git -C "$S" commit --allow-empty -q -m "first commit"
 git -C "$S" commit --allow-empty -q -m "second commit"
 HEAD_TILDE_1=$(git -C "$S" rev-parse HEAD~1)
-FAKE_BASE="deadbeef0000000000000000000000000000bbbb"
-cat > "$S/trail/dod/.codex-reviewed" <<EOF
-reviewed_at: 2020-01-01T00:00:00Z
-reviewer: codex
-diff_base: $FAKE_BASE
-verdict: PASS
-cycle: test
-scope: test
-active_dod: trail/dod/dod-foo.md
-EOF
+# No .codex-reviewed file (never written by anything anymore — ③-d).
 result=$(_get_diff_base "$S")
 if [ "$result" = "$HEAD_TILDE_1" ]; then
-  _pass "stale stamp ignored → HEAD~1 ($result)"
-elif [ "$result" = "$FAKE_BASE" ]; then
-  _fail "stale stamp NOT detected — wrapper used stale diff_base ($FAKE_BASE)"
+  _pass "no legacy marker → HEAD~1 ($result)"
 else
-  _fail "stale stamp expected HEAD~1=$HEAD_TILDE_1, got: $result"
+  _fail "expected HEAD~1=$HEAD_TILDE_1, got: $result"
 fi
 rm -rf "$S"
 
-# ---- Test 3: Parse failure → fail-safe + HEAD~1 fallback.
-echo "### Test 3: wrapper_treats_iso_parse_failure_as_stale_fail_safe"
-S=$(_mksandbox)
-git -C "$S" commit --allow-empty -q -m "first commit"
-git -C "$S" commit --allow-empty -q -m "second commit"
-HEAD_TILDE_1=$(git -C "$S" rev-parse HEAD~1)
-FAKE_BASE="deadbeef0000000000000000000000000000cccc"
-cat > "$S/trail/dod/.codex-reviewed" <<EOF
-reviewed_at: not-an-iso-timestamp-garbage
-reviewer: codex
-diff_base: $FAKE_BASE
-EOF
-result=$(_get_diff_base "$S")
-if [ "$result" = "$HEAD_TILDE_1" ]; then
-  _pass "parse failure → fail-safe HEAD~1 ($result)"
-elif [ "$result" = "$FAKE_BASE" ]; then
-  _fail "parse failure NOT fail-safed — wrapper used stamp diff_base ($FAKE_BASE)"
-else
-  _fail "parse failure expected HEAD~1=$HEAD_TILDE_1, got: $result"
-fi
-rm -rf "$S"
-
-# ---- Test 4: Initial commit (HEAD~1 absent) + stale stamp → EMPTY_TREE_SHA.
-echo "### Test 4: wrapper_stale_stamp_falls_back_to_empty_tree_when_no_head_tilde_1"
+# ---- Test B: No stamp, HEAD~1 absent (initial commit) → EMPTY_TREE_SHA.
+echo "### Test B: no_legacy_marker_initial_commit_falls_back_to_empty_tree"
 S=$(_mksandbox)
 git -C "$S" commit --allow-empty -q -m "only commit"
-FAKE_BASE="deadbeef0000000000000000000000000000dddd"
-cat > "$S/trail/dod/.codex-reviewed" <<EOF
-reviewed_at: 2020-01-01T00:00:00Z
-diff_base: $FAKE_BASE
-EOF
 result=$(_get_diff_base "$S")
 if [ "$result" = "$EMPTY_TREE_SHA" ]; then
-  _pass "stale + initial commit → EMPTY_TREE_SHA"
+  _pass "initial commit, no legacy marker → EMPTY_TREE_SHA"
 else
   _fail "expected EMPTY_TREE_SHA=$EMPTY_TREE_SHA, got: $result"
 fi
 rm -rf "$S"
 
-# ---- Test 5: No stamp at all → HEAD~1 fallback (regression).
-echo "### Test 5: wrapper_falls_back_to_head_tilde_1_when_no_stamp_present"
+# ---- Test C: plausible-looking stamp (fresh timestamp + real ancestor SHA,
+# consolidates original Tests 1/2/3) → still fully ignored, HEAD~1 wins.
+echo "### Test C: plausible_legacy_marker_content_is_fully_ignored"
 S=$(_mksandbox)
 git -C "$S" commit --allow-empty -q -m "first commit"
 git -C "$S" commit --allow-empty -q -m "second commit"
-HEAD_TILDE_1=$(git -C "$S" rev-parse HEAD~1)
-# No .codex-reviewed file
-result=$(_get_diff_base "$S")
-if [ "$result" = "$HEAD_TILDE_1" ]; then
-  _pass "no stamp → HEAD~1 ($result)"
-else
-  _fail "expected HEAD~1=$HEAD_TILDE_1, got: $result"
-fi
-rm -rf "$S"
-
-# ---- Test 6 (GE-2): Fresh stamp + NON-EXISTENT SHA → fall back to HEAD~1.
-echo "### Test 6: GE2_fresh_stamp_nonexistent_sha_falls_back_to_head_tilde_1"
-S=$(_mksandbox)
-git -C "$S" commit --allow-empty -q -m "first commit"
-git -C "$S" commit --allow-empty -q -m "second commit"
+git -C "$S" commit --allow-empty -q -m "third commit"
 HEAD_TILDE_1=$(git -C "$S" rev-parse HEAD~1)
 HEAD_ISO=$(git -C "$S" log -1 --format=%cI HEAD)
 FRESH_ISO=$(python3 -c "
 from datetime import datetime, timedelta
-print((datetime.fromisoformat('$HEAD_ISO') + timedelta(hours=1)).isoformat())
+h = datetime.fromisoformat('$HEAD_ISO')
+print((h + timedelta(hours=1)).isoformat())
 ")
-FORGED="deadbeef0000000000000000000000000000aaaa"   # not a real object
+REAL_ANCESTOR=$(git -C "$S" rev-parse HEAD~1)
 cat > "$S/trail/dod/.codex-reviewed" <<EOF
 reviewed_at: $FRESH_ISO
 reviewer: codex
-diff_base: $FORGED
+diff_base: $REAL_ANCESTOR
 verdict: PASS
+cycle: test
+scope: test
+active_dod: trail/dod/dod-foo.md
 EOF
 result=$(_get_diff_base "$S")
 if [ "$result" = "$HEAD_TILDE_1" ]; then
-  _pass "fresh + non-existent SHA → HEAD~1 ($result)"
-elif [ "$result" = "$FORGED" ]; then
-  _fail "non-existent SHA accepted unverified ($FORGED)"
+  _pass "fresh-looking legacy marker ignored → HEAD~1 ($result)"
 else
-  _fail "expected HEAD~1=$HEAD_TILDE_1, got: $result"
+  _fail "expected HEAD~1=$HEAD_TILDE_1 regardless of marker content, got: $result"
 fi
 rm -rf "$S"
 
-# ---- Test 7 (GE-2): Fresh stamp + OTHER-BRANCH SHA (not ancestor of HEAD) → HEAD~1.
-echo "### Test 7: GE2_fresh_stamp_other_branch_sha_falls_back_to_head_tilde_1"
+# ---- Test D: adversarial stamp content (forged / other-branch / orphan SHA
+# in diff_base — consolidates original GE-2 Tests 6/7/8) → also fully
+# ignored. There is no ancestor-verification branch to bypass anymore
+# because the stamp is never read at all — this pins that the removal did
+# not silently reopen a forgery-injection surface.
+echo "### Test D: adversarial_legacy_marker_diff_base_is_fully_ignored"
 S=$(_mksandbox)
 git -C "$S" commit --allow-empty -q -m "first commit"
 git -C "$S" commit --allow-empty -q -m "second commit (main)"
 HEAD_TILDE_1=$(git -C "$S" rev-parse HEAD~1)
-# Create a sibling branch commit that is NOT an ancestor of HEAD.
 git -C "$S" checkout -q -b sidebranch HEAD~1
 git -C "$S" commit --allow-empty -q -m "side commit"
 OTHER_BRANCH_SHA=$(git -C "$S" rev-parse HEAD)
@@ -230,6 +176,7 @@ FRESH_ISO=$(python3 -c "
 from datetime import datetime, timedelta
 print((datetime.fromisoformat('$HEAD_ISO') + timedelta(hours=1)).isoformat())
 ")
+FORGED_SHA="deadbeef0000000000000000000000000000aaaa"
 cat > "$S/trail/dod/.codex-reviewed" <<EOF
 reviewed_at: $FRESH_ISO
 reviewer: codex
@@ -238,42 +185,27 @@ verdict: PASS
 EOF
 result=$(_get_diff_base "$S")
 if [ "$result" = "$HEAD_TILDE_1" ]; then
-  _pass "fresh + other-branch SHA (non-ancestor) → HEAD~1 ($result)"
+  _pass "other-branch SHA in legacy marker ignored → HEAD~1 ($result)"
 elif [ "$result" = "$OTHER_BRANCH_SHA" ]; then
-  _fail "other-branch non-ancestor SHA accepted ($OTHER_BRANCH_SHA)"
+  _fail "other-branch non-ancestor SHA leaked through ($OTHER_BRANCH_SHA)"
 else
   _fail "expected HEAD~1=$HEAD_TILDE_1, got: $result"
 fi
-rm -rf "$S"
-
-# ---- Test 8 (GE-2): Fresh stamp + ORPHAN commit SHA (no shared history) → HEAD~1.
-echo "### Test 8: GE2_fresh_stamp_orphan_commit_sha_falls_back_to_head_tilde_1"
-S=$(_mksandbox)
-git -C "$S" commit --allow-empty -q -m "first commit"
-git -C "$S" commit --allow-empty -q -m "second commit"
-HEAD_TILDE_1=$(git -C "$S" rev-parse HEAD~1)
-git -C "$S" checkout -q --orphan orphanbranch
-git -C "$S" commit --allow-empty -q -m "orphan root"
-ORPHAN_SHA=$(git -C "$S" rev-parse HEAD)
-git -C "$S" checkout -q main
-HEAD_ISO=$(git -C "$S" log -1 --format=%cI HEAD)
-FRESH_ISO=$(python3 -c "
-from datetime import datetime, timedelta
-print((datetime.fromisoformat('$HEAD_ISO') + timedelta(hours=1)).isoformat())
-")
+# Re-check with a plain forged (non-existent object) SHA too — same sandbox,
+# same HEAD, only the marker content differs.
 cat > "$S/trail/dod/.codex-reviewed" <<EOF
 reviewed_at: $FRESH_ISO
 reviewer: codex
-diff_base: $ORPHAN_SHA
+diff_base: $FORGED_SHA
 verdict: PASS
 EOF
-result=$(_get_diff_base "$S")
-if [ "$result" = "$HEAD_TILDE_1" ]; then
-  _pass "fresh + orphan SHA (no shared history) → HEAD~1 ($result)"
-elif [ "$result" = "$ORPHAN_SHA" ]; then
-  _fail "orphan SHA accepted ($ORPHAN_SHA)"
+result2=$(_get_diff_base "$S")
+if [ "$result2" = "$HEAD_TILDE_1" ]; then
+  _pass "forged non-existent SHA in legacy marker ignored → HEAD~1 ($result2)"
+elif [ "$result2" = "$FORGED_SHA" ]; then
+  _fail "forged non-existent SHA leaked through unverified ($FORGED_SHA)"
 else
-  _fail "expected HEAD~1=$HEAD_TILDE_1, got: $result"
+  _fail "expected HEAD~1=$HEAD_TILDE_1, got: $result2"
 fi
 rm -rf "$S"
 

@@ -175,7 +175,10 @@ rm -rf "$P"
 
 # ---------- 9b. MULTIEDIT-REAL-SCHEMA-BLOCKED ------------------------------------
 # 실계약: tool_input.edits[*].file_path (per-edit 경로, top-level 없음) —
-# post-edit-review-gate.sh 수집 순서와 동일 (codex R2 High 회귀).
+# post-edit-src-touch-marker.sh 수집 순서와 동일 (codex R2 High 회귀).
+# (Phase 7 웨이브 3 ③-d: 원 인용 대상이던 post-edit-review-gate.sh 는
+# 삭제됨 — 소스 쪽 주석도 함께 이관됐다, 같은 수집 semantics 계승처
+# 재조준일 뿐 이 테스트의 판정 대상 자체는 무변경.)
 P=$(mktemp -d "/tmp/idx-t9b-XXXXXX"); make_project "$P" 24
 PAYLOAD=$(python3 - "$P" <<'PY'
 import json, sys

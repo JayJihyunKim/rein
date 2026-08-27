@@ -69,6 +69,11 @@ grep -q 'jennie' "$PERSONA_YAML" || {
   cat "$PERSONA_YAML" >&2
   exit 1
 }
+grep -q 'choi-haengbae' "$PERSONA_YAML" || {
+  echo "FAIL (b): persona.yaml comments do not mention choi-haengbae" >&2
+  cat "$PERSONA_YAML" >&2
+  exit 1
+}
 grep -q 'preset:' "$PERSONA_YAML" || {
   echo "FAIL (b): persona.yaml comments lack a 'preset:' enable example" >&2
   cat "$PERSONA_YAML" >&2

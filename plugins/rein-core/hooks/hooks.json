@@ -50,7 +50,7 @@
                     },
                     {
                         "type": "command",
-                        "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-dod-gate.sh"
+                        "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-dispatcher.sh"
                     }
                 ]
             },
@@ -80,15 +80,6 @@
                     {
                         "type": "command",
                         "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-hygiene.sh"
-                    }
-                ]
-            },
-            {
-                "matcher": "Edit|Write|MultiEdit",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-review-gate.sh"
                     }
                 ]
             },
@@ -161,6 +152,15 @@
                     {
                         "type": "command",
                         "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-state-journal.sh"
+                    }
+                ]
+            },
+            {
+                "matcher": "Edit|Write|MultiEdit",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-src-touch-marker.sh"
                     }
                 ]
             },

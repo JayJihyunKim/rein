@@ -31,7 +31,7 @@ fi
 
 INPUT=$(cat)
 
-# Extract file_path(s). Same semantics as post-edit-review-gate (Edit/Write +
+# Extract file_path(s). Same semantics as post-edit-src-touch-marker (Edit/Write +
 # MultiEdit edits[]).
 EXTRACTOR="$SCRIPT_DIR/lib/extract-hook-json.py"
 [ -f "$EXTRACTOR" ] || exit 0
@@ -47,7 +47,7 @@ if [ -z "$FILE_PATHS" ]; then
 fi
 [ -z "$FILE_PATHS" ] && exit 0
 
-# Classify path into kind. Source extensions inherit from post-edit-review-gate.
+# Classify path into kind. Source extensions shared with post-edit-src-touch-marker.
 classify_kind() {
   local p="$1" base
   base=$(basename "$p")

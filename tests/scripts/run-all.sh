@@ -13,8 +13,10 @@ TOTAL_FAIL=0
 for test_file in \
   "$SCRIPT_DIR/test-rein-policy-loader-bootstrap-gate.sh" \
   "$SCRIPT_DIR/test-rein-bootstrap-project-non-git.sh" \
+  "$SCRIPT_DIR/test-bootstrap-gitignore.sh" \
   "$SCRIPT_DIR/test-advisory-summary.sh" \
   "$SCRIPT_DIR/test-aggregate-combined-cli.sh" \
+  "$SCRIPT_DIR/test-aggregate-masking-ssot.sh" \
   "$SCRIPT_DIR/test-incident-agent-eligible.sh" \
   "$SCRIPT_DIR/test-rein-govcheck.sh" \
   "$SCRIPT_DIR/test-rein-validator-v2.sh" \
@@ -52,7 +54,6 @@ for test_file in \
   "$SCRIPT_DIR/test-feature-builder-variants.sh" \
   "$SCRIPT_DIR/test-plugin-skills-bundle.sh" \
   "$SCRIPT_DIR/test-version-parity.sh" \
-  "$SCRIPT_DIR/test-rules-prompt-bundle-drift.sh" \
   "$SCRIPT_DIR/test-plugin-drift-detection.sh" \
   "$SCRIPT_DIR/test-heal-legacy-git-env.sh" \
   "$SCRIPT_DIR/test-pln1-execution-strategy.sh" \
@@ -62,6 +63,8 @@ for test_file in \
   "$SCRIPT_DIR/test-persona-lint.sh" \
   "$SCRIPT_DIR/test-persona-preset-greeting.sh" \
   "$SCRIPT_DIR/test-bootstrap-persona-neutral.sh" \
+  "$SCRIPT_DIR/test-mark-security-reviewed.sh" \
+  "$SCRIPT_DIR/test-codex-review-evidence-issuance.sh" \
   "$SCRIPT_DIR/../integration/test-slash-command-namespace.sh"
 do
   echo ""

@@ -140,10 +140,9 @@ Skill tool 로 `codex-review` 호출:
 - skill 이 default (gpt-5.5 / high / read-only) 로 codex exec 실행
 - 결과 verdict 캡처 (PASS / NEEDS-FIX / REJECT)
 
-**CRITICAL — stamp 분리**: 이 spec review 호출은 codex-review skill §6.6 의 "Spec review 서브플로우" 로 분기되어야 한다.
-- `trail/dod/.codex-reviewed` (코드리뷰 게이트 stamp) **건드리지 않음**
-- `trail/dod/.review-pending` **건드리지 않음**
-- spec-review stamp (`trail/dod/.spec-reviews/<hash>.reviewed`) 만 Step 2 에서 plan-writer 가 직접 생성
+**CRITICAL — 기록 분리**: 이 spec review 호출은 codex-review skill §6.7 의 "Spec review 서브플로우" 로 분기되어야 한다.
+- code_review v2 증거(코드리뷰 게이트) **발급하지 않음** — legacy `.codex-reviewed`/`.review-pending` marker 는 Phase 7 웨이브 3 ③-d 로 write 경로 자체가 제거돼 건드릴 대상도 없음
+- spec-review stamp (`trail/dod/.spec-reviews/<hash>.reviewed`) 만 Step 2 에서 plan-writer 가 직접 생성 (spec-review 축은 이번 웨이브의 존속 예외)
 
 코드리뷰 게이트 오염 방지를 위함. prompt 가 `[NON_INTERACTIVE] spec review for plan:` prefix 로 시작해야 skill 이 서브플로우 감지.
 
@@ -201,11 +200,11 @@ plan-writer 완료 보고 — verdict + stamp 생성 여부 + handoff target 명
 
 codex CLI 실행 실패 (에러/타임아웃) 시 codex-review skill 의 Sonnet fallback (§4) 자동 동작 → code-reviewer skill (sonnet) 이 fallback verdict 제공. plan-writer 는 fallback verdict 받아서 그에 따라 PASS / NEEDS-FIX 분기.
 
-**Fallback 경로도 stamp 분리 유지**: code-reviewer skill 이 `.codex-reviewed` stamp 를 만들지 않도록 prompt 에 `[NON_INTERACTIVE] spec review for plan:` prefix 를 보존해 전달. plan-writer 가 PASS 시 spec-review stamp 만 직접 생성 (fallback reviewer 문자열 suffix `-sonnet-fallback` 포함). 코드리뷰 게이트 (`.codex-reviewed`) 는 어떤 경로에서도 건드리지 않음.
+**Fallback 경로도 기록 분리 유지**: code-reviewer skill 이 code_review v2 증거를 발급하지 않도록 prompt 에 `[NON_INTERACTIVE] spec review for plan:` prefix 를 보존해 전달. plan-writer 가 PASS 시 spec-review stamp 만 직접 생성 (fallback reviewer 문자열 suffix `-sonnet-fallback` 포함). 코드리뷰 게이트(code_review v2 증거)는 어떤 경로에서도 건드리지 않음.
 
 ## 사용자 보고 방식
 
-사용자에게 답변하는 채팅 본문에는 내부 식별자 (`stamp`, `verdict`, `.codex-reviewed`, `.spec-reviews/*.pending`, hash 값) 를 노출하지 않는다. 평문으로 다음 흐름을 따른다.
+사용자에게 답변하는 채팅 본문에는 내부 식별자 (`verdict`, `.spec-reviews/*.pending`, digest, hash 값) 를 노출하지 않는다. 평문으로 다음 흐름을 따른다.
 
 - **완료 (설계 검토 통과)**:
   > "plan 작성을 마쳤습니다. 설계 검토도 통과했으니 구현을 시작할 수 있습니다."

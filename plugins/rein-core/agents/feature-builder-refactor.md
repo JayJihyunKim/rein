@@ -74,9 +74,9 @@ rein 게이트(`exit 2`)에 막히면 **환경을 조작해 통과시키지 않�
 [ ] DoD 항목 전체 충족
 [ ] 리팩토링 전 모든 테스트 pass 확인됨
 [ ] 리팩토링 후 모든 기존 테스트 pass 확인됨 (기능 불변 검증)
-[ ] codex 리뷰 실행 완료 (.codex-reviewed stamp 존재)
+[ ] codex 리뷰 실행 완료 (PASS 시 v2 code_review 증거 발급됨)
 [ ] 리뷰 후 추가 수정 시 재리뷰 완료
-[ ] 보안 리뷰 실행 완료 (.security-reviewed stamp 존재, security_tier:light 면 면제)
+[ ] 보안 리뷰 실행 완료 (PASS 시 v2 security_review 증거 발급됨, security_tier:light 면 면제)
 [ ] lint/format 통과
 [ ] Self-review 완료
 [ ] 빠뜨린 규칙 → trail/incidents/ 초안 작성
@@ -84,7 +84,7 @@ rein 게이트(`exit 2`)에 막히면 **환경을 조작해 통과시키지 않�
 
 ## 사용자 보고 방식
 
-사용자에게 답변하는 채팅 본문에는 내부 식별자 (`.codex-reviewed`, `.security-reviewed`, `stamp`, `verdict`) 를 노출하지 않는다. 리팩토링은 "기능 불변 검증" 흐름을 사용자에게 평문으로 설명한다.
+사용자에게 답변하는 채팅 본문에는 내부 식별자 (`verdict`, `digest`, `evidence`, Scope ID) 를 노출하지 않는다. 리팩토링은 "기능 불변 검증" 흐름을 사용자에게 평문으로 설명한다.
 
 - **사전 조사 완료**:
   > "기존 구조와 호출 관계를 파악했습니다. 이제 동작은 그대로 두고 구조만 정리하겠습니다."

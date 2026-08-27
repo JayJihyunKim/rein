@@ -11,6 +11,7 @@ mis-resolved cwd cannot pollute the plugin installation cache.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import subprocess
@@ -53,7 +54,7 @@ POLICY_PERSONA_TEMPLATE = """# .rein/policy/persona.yaml
 # Persona layer — OFF by default (neutral). Only an explicit `enabled: true`
 # activates it; the response rules always win over any persona.
 #
-# Built-in presets: boss-ace, jennie
+# Built-in presets: boss-ace, jennie, choi-haengbae
 # Custom presets live in .rein/policy/persona/<name>.md (create them via the
 # persona skill — ask "페르소나 만들어줘" / "pick a persona").
 #
@@ -156,6 +157,101 @@ def write_text_if_missing(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+# Rein runtime state dirs that must stay OUT of git. Kept in sync with this
+# repo's own .gitignore and with rein/platform/storage/local.py's
+# GITIGNORE_PATTERN ("/.rein/state/").
+REIN_RUNTIME_GITIGNORE_PATTERNS = (
+    "/.rein/state/",
+    "/.rein/cache/",
+    "/.rein/logs/",
+)
+
+
+def ensure_rein_runtime_gitignored(root: Path) -> None:
+    """Idempotently register rein's runtime state dirs in the project's .gitignore.
+
+    Without this, `.rein/state/` (the evidence ledger) is untracked and gets
+    swept into `worktree_changeset()` (git status --untracked-files=all), so the
+    very first evidence issuance changes its own review subject and
+    self-invalidates — the gate fails closed and locks the user out. The storage
+    layer (rein/platform/storage/local.py) already documents that a `.gitignore`
+    `/.rein/state/` pattern guarantees non-tracking; this makes bootstrap
+    actually create it. Existing content and ordering are preserved (append
+    only); patterns already present are not duplicated.
+
+    Threat model: honest user. A symlinked .gitignore is refused via O_NOFOLLOW
+    (this protects the legitimate dotfiles case where .gitignore is a symlink).
+    Hardlinks and other adversarial self-targeting of the write are OUT of scope
+    — rein's threat model is an honest agent/user, not a user attacking their own
+    project (see the release-gate DoD's threat-model note).
+    """
+    gitignore = root / ".gitignore"
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if nofollow == 0:
+        # This platform (e.g. a native-Windows Python) lacks O_NOFOLLOW, so we
+        # cannot atomically refuse a symlinked .gitignore — the append could be
+        # redirected outside the project. rein targets POSIX/WSL; fail loudly
+        # rather than silently weaken the no-symlink-follow contract to
+        # best-effort.
+        fail(
+            "O_NOFOLLOW is unavailable on this platform — cannot safely write "
+            f"{gitignore}. rein requires POSIX/WSL; register /.rein/state/, "
+            "/.rein/cache/, /.rein/logs/ manually."
+        )
+
+    # Read with O_NOFOLLOW so a SYMLINKED .gitignore (which could redirect our
+    # append OUTSIDE the project) is refused atomically at open time — no TOCTOU
+    # window between an is_symlink() check and the write. A symlink here means we
+    # cannot safely register the ignore patterns, so we FAIL the whole bootstrap:
+    # leaving `.rein/state/` untracked while the completion sentinel
+    # (.rein/project.json) is written would stamp the project "bootstrapped" with
+    # the self-invalidation still live.
+    existing = ""
+    try:
+        rfd = os.open(gitignore, os.O_RDONLY | nofollow)
+    except FileNotFoundError:
+        rfd = None  # no .gitignore yet — created fresh below
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            fail(
+                f".gitignore is a symlink: {gitignore} — refusing to follow it. "
+                "Register /.rein/state/, /.rein/cache/, /.rein/logs/ in the real "
+                "file, then re-run."
+            )
+        raise
+    if rfd is not None:
+        with os.fdopen(rfd, "r", encoding="utf-8") as f:
+            existing = f.read()
+
+    # Exact-line match (no strip): git treats a LEADING space as part of the
+    # pattern, so " /.rein/state/" does NOT ignore .rein/state/. Stripping would
+    # false-positive it as already present and skip the real append, reopening
+    # the self-invalidation.
+    present = set(existing.splitlines())
+    missing = [p for p in REIN_RUNTIME_GITIGNORE_PATTERNS if p not in present]
+    if not missing:
+        return
+    prefix = "" if (not existing or existing.endswith("\n")) else "\n"
+    block = prefix + "\n# Rein runtime state — git 미추적 (증거 원장/캐시/로그)\n"
+    block += "\n".join(missing) + "\n"
+
+    # Append with O_NOFOLLOW|O_CREAT — refuses a symlink at WRITE time too,
+    # closing the TOCTOU window (a symlink swapped in after the read above).
+    try:
+        wfd = os.open(
+            gitignore, os.O_WRONLY | os.O_APPEND | os.O_CREAT | nofollow, 0o644
+        )
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            fail(
+                f".gitignore became a symlink during bootstrap: {gitignore} — "
+                "aborting to avoid writing outside the project."
+            )
+        raise
+    with os.fdopen(wfd, "a", encoding="utf-8") as f:
+        f.write(block)
+
+
 def ensure_security_profile(project_root: Path) -> None:
     """Create default `.claude/security/profile.yaml` if absent (SEC-1).
 
@@ -213,6 +309,7 @@ def bootstrap(project_dir: Path, scope: str, version: str) -> tuple[Path, bool]:
     # trail/index.md when emit_file_block tries to read it).
     rein_dir.mkdir(parents=True, exist_ok=True)
     policy_dir.mkdir(parents=True, exist_ok=True)
+    ensure_rein_runtime_gitignored(root)
     write_text_if_missing(policy_dir / "hooks.yaml", POLICY_HOOKS_TEMPLATE)
     write_text_if_missing(policy_dir / "rules.yaml", POLICY_RULES_TEMPLATE)
     write_text_if_missing(policy_dir / "persona.yaml", POLICY_PERSONA_TEMPLATE)

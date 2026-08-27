@@ -16,10 +16,11 @@ for test_file in \
   "$SCRIPT_DIR/test-session-start-bootstrap-helper-refactor.sh" \
   "$SCRIPT_DIR/test-bootstrap-trigger-parity.sh" \
   "$SCRIPT_DIR/test-dod-rotation.sh" \
+  "$SCRIPT_DIR/test-sandbox-teardown-retry.sh" \
   "$SCRIPT_DIR/test-dod-gate.sh" \
-  "$SCRIPT_DIR/test-pre-edit-dod-gate-sr-1-b.sh" \
-  "$SCRIPT_DIR/test-pre-edit-dod-gate-spec-tests-exempt.sh" \
-  "$SCRIPT_DIR/test-pre-edit-dod-gate-pln1-enforce.sh" \
+  "$SCRIPT_DIR/test-pre-edit-discipline-gate-sr-1-b.sh" \
+  "$SCRIPT_DIR/test-pre-edit-discipline-gate-spec-tests-exempt.sh" \
+  "$SCRIPT_DIR/test-pre-edit-gates-pln1-enforce.sh" \
   "$SCRIPT_DIR/test-stop-gate.sh" \
   "$SCRIPT_DIR/test-stop-gate-deadlock.sh" \
   "$SCRIPT_DIR/test-stat-portability.sh" \
@@ -37,18 +38,25 @@ for test_file in \
   "$SCRIPT_DIR/test-bash-dispatcher.sh" \
   "$SCRIPT_DIR/test-pre-bash-safety-guard.sh" \
   "$SCRIPT_DIR/test-bash-guard-log-redaction.sh" \
-  "$SCRIPT_DIR/test-pre-bash-test-commit-gate.sh" \
+  "$SCRIPT_DIR/test-log-block-masking-ssot.sh" \
+  "$SCRIPT_DIR/test-pre-bash-commit-discipline-gate.sh" \
+  "$SCRIPT_DIR/test-pre-bash-commit-review-gate.sh" \
+  "$SCRIPT_DIR/test-code-review-authority-switch.sh" \
+  "$SCRIPT_DIR/test-security-review-authority-switch.sh" \
+  "$SCRIPT_DIR/test-active-task-authority-switch.sh" \
   "$SCRIPT_DIR/test-security-tier-gate.sh" \
   "$SCRIPT_DIR/test-python-runner.sh" \
   "$SCRIPT_DIR/test-extract-hook-json.sh" \
   "$SCRIPT_DIR/test-path-policy.sh" \
   "$SCRIPT_DIR/test-governance-stage.sh" \
   "$SCRIPT_DIR/test-select-active-dod.sh" \
-  "$SCRIPT_DIR/test-pre-edit-dod-gate.sh" \
+  "$SCRIPT_DIR/test-pre-edit-discipline-gate.sh" \
+  "$SCRIPT_DIR/test-pre-edit-task-gate.sh" \
+  "$SCRIPT_DIR/test-pre-edit-coverage-gate.sh" \
+  "$SCRIPT_DIR/test-pre-edit-dispatcher.sh" \
   "$SCRIPT_DIR/test-pre-edit-index-lines.sh" \
   "$SCRIPT_DIR/test-bad-test-candidates-log-format.sh" \
   "$SCRIPT_DIR/test-project-dir-resolution.sh" \
-  "$SCRIPT_DIR/test-post-edit-dispatcher.sh" \
   "$SCRIPT_DIR/test-post-edit-dispatcher-aggregator.sh" \
   "$SCRIPT_DIR/test-post-edit-dispatcher-deprecated.sh" \
   "$SCRIPT_DIR/test-post-edit-parallel-entries.sh" \
@@ -67,8 +75,9 @@ for test_file in \
   "$SCRIPT_DIR/test-post-edit-design-plan-coverage-rule.sh" \
   "$SCRIPT_DIR/test-design-provenance-marker.sh" \
   "$SCRIPT_DIR/test-hooks-json-schema.sh" \
+  "$SCRIPT_DIR/test-hooks-routing-contract.sh" \
   "$SCRIPT_DIR/test-overflow-handoff-no-truncation.sh" \
-  "$SCRIPT_DIR/test-pre-edit-dod-gate-no-orchestrator-ref.sh" \
+  "$SCRIPT_DIR/test-pre-edit-discipline-gate-no-orchestrator-ref.sh" \
   "$SCRIPT_DIR/test-post-edit-dod-routing-check-no-orchestrator-ref.sh" \
   "$SCRIPT_DIR/test-rein-validate-plugin-rules.sh" \
   "$SCRIPT_DIR/test-rein-validate-plugin-rules-hardening.sh" \

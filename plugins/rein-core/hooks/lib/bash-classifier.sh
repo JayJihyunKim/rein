@@ -4,13 +4,19 @@
 # Sourced (not executed). Defines classify_bash_command() that inspects a Bash
 # command string and sets two globals:
 #
-#   CLASS_NEEDS_TC=0|1   — needs pre-bash-test-commit-gate.sh
+#   CLASS_NEEDS_TC=0|1   — needs the commit-gate pair (pre-bash-commit-
+#                          discipline-gate.sh → pre-bash-commit-review-gate.sh,
+#                          Phase 7 wave 3 ③-c successors of the retired
+#                          pre-bash-test-commit-gate.sh — the TC name is kept
+#                          for backward compat, it does not stand for either
+#                          successor's current filename)
 #   CLASS_NEEDS_BR=0|1   — needs pre-tool-use-bash-rules.sh (rule injection)
 #
 # Classification mirrors the `if`-field patterns previously listed in hooks.json
-# for the Bash matcher. Source of truth: the patterns enumerated in
-# pre-bash-test-commit-gate.sh §command_invokes and the hooks.json Bash entries
-# pre v1.4.0.
+# for the Bash matcher. Source of truth (as of ③-c): the patterns enumerated in
+# pre-bash-commit-discipline-gate.sh §command_invokes (originally
+# pre-bash-test-commit-gate.sh, ③-c 삭제 완료, before the ③-c split) and the
+# hooks.json Bash entries pre v1.4.0.
 #
 # Why globals (not stdout): bash subprocesses and pipes erase trailing newlines
 # and complicate rc capture. Globals keep the call site to one assignment-free
@@ -53,10 +59,14 @@ classify_bash_command() {
 
   [ -z "$cmd" ] && return 0
 
-  # --- test-commit-gate triggers ---
+  # --- test-commit-gate triggers (now the pre-bash-commit-discipline-gate.sh
+  # → pre-bash-commit-review-gate.sh pair, ③-c successors of the retired
+  # pre-bash-test-commit-gate.sh) ---
   #
-  # Source: hooks.json pre v1.4.0 + pre-bash-test-commit-gate.sh inner
-  # command_invokes pattern. We match BOTH the bare token (e.g. "pytest") and
+  # Source: hooks.json pre v1.4.0 + the original pre-bash-test-commit-gate.sh
+  # (③-c 삭제 완료; its command_invokes pattern lives on in
+  # pre-bash-commit-discipline-gate.sh today) inner command_invokes pattern.
+  # We match BOTH the bare token (e.g. "pytest") and
   # the trailing-arg form (e.g. "pytest tests/"), because the inner gate uses
   # a substring matcher and would have caught both even when hooks.json's
   # `if` field only listed the trailing-arg form.

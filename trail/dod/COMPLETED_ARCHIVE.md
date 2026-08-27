@@ -5600,3 +5600,125 @@ covers: [watchdog-defers-kill-indefinitely-while-edge-signal-changes-in-30s-wind
 
 approved_by_user: true
 
+---
+## dod-2026-08-09-v2-phase2-cont.md (mtime: 2026-08-09, archived: 2026-08-10)
+# DoD: Rein v2 Phase 2 이어짓기 (날짜 경계 — 2026-08-08 착수분 계속)
+
+- 날짜: 2026-08-09
+- slug: v2-phase2-cont
+- 유형: 구현 (전날 착수한 Phase 2 의 연속 — 원 DoD: `trail/dod/dod-2026-08-08-v2-phase2.md`)
+- plan ref: docs/plans/2026-08-08-rein-v2-governance-orchestration.md
+- 입력: 사용자 포괄 지시 (2026-08-08 "모델 개발 들어가자. 넌 오케스트레이팅만 하고 다른 오빠들 불러서 일을 시켜") + "진행" (2026-08-08) + "응 진행해" (2026-08-09). 자정 경과로 게이트가 당일 기준서를 요구해 원 DoD 를 승계한다.
+- covers: [fact-resolver-computes-only-policy-demanded-facts-once-per-cycle, worktree-and-staged-changesets-produce-content-digest-independent-of-mtime, evidence-expires-when-subject-digest-changes-after-creation, command-classifier-labels-compound-and-expansion-commands-unknown-without-guessing, change-tags-map-paths-to-code-docs-sensitive-and-never-decide-directly, runtime-state-rebuilds-equivalent-decisions-after-sqlite-deletion, local-runtime-storage-stays-untracked-and-new-files-created-mode-0600, masking-engine-serves-both-shadow-sanitization-and-block-log-redaction-as-ssot, shadow-capture-stores-masked-representation-never-raw-commands-from-capture-stage, corpus-import-rejects-cases-failing-sanitization-validation]
+
+## 범위
+
+원 DoD 의 Phase 2 범위 중 **잔여분**:
+
+1. **Task 2.1~2.6 웨이브 마감** — 통합 리뷰(3회차, sonnet 교체 투입) 판정 반영 → 보안 리뷰 → 웨이브 커밋. 리뷰 지적 반영 대상:
+   - **Medium**: `rein/engine/context.py` 의 `FactResolutionError` docstring 이 "전파가 보수적" 이라 주장하나 실측상 근거 없음 — 진입점 크래시는 exit 1 이고 이 저장소 hook 규약에서 exit 1 은 non-blocking(통과)이라 fail-closed 가 아니라 조용한 ALLOW 로 귀결. 현재 도달 불가(runtime 이 resolver 미배선 + hook 미연결)이나 **주장 정정 + 후속 인수 조건 명시**.
+   - **Low**: `runtime.evaluate` 가 `fact_resolvers` 를 노출하지 않아 lazy resolution 이 아직 실사용 경로에 미도달 — 추적 항목으로 기록.
+2. **Task 2.7** Shadow Capture + Corpus 반입 검증 (edit_only 단독 웨이브).
+3. **Task 2.8** v1 hook capture 삽입 (mutating 단독 — SPIKE-2 채택 확정분, live hook 수정이므로 워크트리 격리 권장).
+
+### 범위 외
+
+- Phase 3 착수 (별도 DoD — Task 3.0 진입 게이트).
+- when-경로 failure_mode 분기 본구현 (evaluator 소유 후속 태스크 — 인수 조건으로만 기록).
+
+## 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `plugins/rein-core/rein/engine/context.py` | 수정 — 근거 없는 안전 주장 정정 + 후속 인수 조건 명시 (docstring) |
+| `plugins/rein-core/rein/shadow/**` + `plugins/rein-core/tests/shadow/**` | 신규 — Task 2.7 |
+| Task 2.8 대상 v1 hook + capture lib | 수정/신규 — plan Task 2.8 Files (SPIKE-2 채택분) |
+
+## 검증 기준
+
+- [ ] 통합 리뷰 지적 반영 후 재리뷰 통과 + 보안 리뷰 통과 (표식 신선도 충족).
+- [ ] 전체 v2 스위트 GREEN 유지 (현재 244건 기준선) + v1 행위 불변.
+- [ ] 각 웨이브 델타 ⊆ 선언 scope, 웨이브당 1커밋.
+- [ ] Task 2.8 은 SPIKE-2 보안 권고 3건(마스킹 클래스별 fixture·권한을 판정 조건 포함·append 전 0600 보장)을 인수 조건으로 반영.
+
+## 라우팅 추천
+
+- agent: 서브에이전트 워커 (edit_only 1 + mutating 1) + 독립 리뷰어 + 보안 리뷰어. 부모는 오케스트레이션·barrier·커밋만.
+- skills: `rein:parallel-execute` + 리뷰 대체 경로 (codex 한도 — sonnet 교체 사유 기재) + `rein:security-reviewer`.
+- mcps: 없음
+- rationale: 전날 확립한 운영 패턴 승계 (사용자 지정 오케스트레이터 전담).
+
+approved_by_user: true
+
+---
+## dod-2026-08-10-shadow-path-normalize.md (mtime: 2026-08-10, archived: 2026-08-11)
+# DoD: Shadow 수집 경로 정규화 — 홈 절대경로로 인한 레코드 전량 거부 수리
+
+- 날짜: 2026-08-10
+- slug: shadow-path-normalize
+- 유형: 버그 수정 (Phase 2 잔존 인수 조건 1번 — Phase 3 진입 선행)
+- plan ref: docs/plans/2026-08-08-rein-v2-governance-orchestration.md
+- 입력: 사용자 "다음작업 진행해볼까"(2026-08-10) + 경로 처리 방식 결정 = "프로젝트 기준 상대경로", 범위 결정 = "경로 문제만"
+- covers: [shadow-capture-stores-masked-representation-never-raw-commands-from-capture-stage, corpus-import-rejects-cases-failing-sanitization-validation]
+
+## 배경 — 실측 재현
+
+Phase 2 종료 시점 잔존 1번. 반입 검증의 사적 경로 규칙(설계서 §6.4 명시 요건)이 `/Users/<name>/…`·`/home/<name>/…`·`~/…` 를 거부하는데, **수집 단계에 이를 축약해 주는 처리가 없다**. 결과적으로 절대경로를 담은 레코드는 전부 반입 거부되어 조용히 사라진다.
+
+실측 (2026-08-10, 이 저장소 수집 파일 308건):
+
+- 편집 계열 훅 레코드 9건 — 전부 대상이 빈 문자열이거나 수동 테스트로 넣은 상대경로. **실제 편집 파일 경로가 담긴 레코드 0건**.
+- 재현: 절대경로를 넣어 수집 → 반입 검증이 `private-path` 사유로 거부. 상대경로만 통과.
+- 영향 범위는 이 저장소에 한정되지 않는다 — **홈 아래에 프로젝트를 두는 모든 사용자 + CI 러너(`/home/runner/…`)** 가 동일. 명령 기록 경로도 절대경로가 섞이면 같은 이유로 유실된다.
+
+검증 규칙 자체는 옳다(사용자명 유출 방지). 빠진 것은 반대편 — 수집 단계의 경로 축약.
+
+## 범위
+
+1. **경로 규칙 SSOT 분리** — 사적 경로 정규식이 반입 검증기 안에만 살고 있어, 수집 쪽이 같은 규칙을 재구현하면 두 규칙이 갈라지는 결함 클래스가 다시 열린다(Phase 2 에서 마스킹 규칙으로 4회 반복한 그 클래스). 규칙을 전용 모듈로 옮기고 검출·정규화 두 쓰임이 같은 정의를 소비한다.
+2. **수집 단계 경로 정규화 도입** — 사용자 결정 형태:
+   - 프로젝트 폴더 안 경로 → 프로젝트 루트 기준 상대경로 (`/Users/x/proj/a/b.py` → `a/b.py`)
+   - 프로젝트 밖 홈 경로 → 사용자명 세그먼트만 치환 (`/Users/x/other/y` → `<HOME>/other/y`)
+   - `~/…` 표기·Windows `C:\Users\<name>\…`·`/root/…` 동일 처리
+   - 적용 대상은 명령 기록뿐 아니라 **모든 문자열 필드**(사실·프로젝트 상태·판정 사유) — 차단 사유 메시지에 절대경로가 실려 오는 경로가 실제로 존재한다.
+   - 적용 순서는 구조적 축약(원격 URL) → 경로 정규화 → 마스킹 → 길이 절단. 절단을 마스킹 뒤에 두는 기존 순서 계약을 깨지 않는다.
+3. **프로젝트 루트 전달 경로 연결** — 훅 shim 이 이미 알고 있는 프로젝트 경로를 수집 함수까지 전달.
+4. **회귀 테스트** — 절대경로 → 반입 성공까지 관통하는 검증. 이 결함을 통과시킨 원인이 "임시 디렉토리가 홈 밖이라 테스트가 못 잡음" 이었으므로, 홈 하위 경로를 흉내 낸 입력을 명시적으로 쓴다.
+
+### 범위 외
+
+- 잔존 2번(기록 쓰기 2회 → 1회 통합) — 사용자 결정으로 이번 묶음 제외, 백로그 유지.
+- 반입 검증 규칙의 완화 — 검증은 설계서 요건이므로 그대로 둔다(최후 관문 유지).
+- Phase 3 착수 — 별도 기준서.
+
+## 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `plugins/rein-core/rein/shadow/paths.py` | 신규 — 사적 경로 규칙 단일 정의 + 검출 + 정규화 |
+| `plugins/rein-core/rein/shadow/capture.py` | 수정 — 프로젝트 루트 인자 + 전 문자열 필드 경로 정규화 |
+| `plugins/rein-core/rein/shadow/corpus.py` | 수정 — 자체 정규식 제거, 신규 모듈 규칙 소비 |
+| `plugins/rein-core/hooks/lib/shadow-capture.sh` | 수정 — 프로젝트 경로를 수집 호출에 전달 |
+| `plugins/rein-core/tests/shadow/test_path_normalize.py` | 신규 — 정규화 규칙 + 관통 회귀 |
+| `plugins/rein-core/tests/shadow/test_capture_masked.py` / `test_corpus_import.py` | 수정 — 기존 계약 유지 확인 |
+
+## 검증 기준
+
+- [ ] 절대경로를 담은 편집·명령 레코드가 실제로 파일에 기록됨 (디스크 바이트 검사).
+- [ ] 기록된 내용에 사용자명 문자열 0건 (디스크 바이트 검사).
+- [ ] 프로젝트 안 경로는 상대경로로, 밖 경로는 사용자명만 치환된 형태로 남음.
+- [ ] 반입 검증의 거부 동작 자체는 불변 — 민감정보 포함 케이스는 여전히 거부.
+- [ ] 마스킹·길이 절단 순서 계약 불변 (기존 순서 회귀 테스트 GREEN).
+- [ ] **게이트 불변 계약**: 훅 차단 여부·종료 코드·출력이 변경 전후 동일, 기록 실패는 조용히 무시.
+- [ ] v1 행위 스위트 7종 GREEN + v2 스위트 GREEN (337건 + 신규분).
+- [ ] 코드 리뷰 + 보안 리뷰 통과 후 커밋.
+
+## 라우팅 추천
+
+- agent: `rein:feature-builder-fix` (재현 테스트 선행) + 독립 리뷰어 + `rein:security-reviewer`. 부모는 오케스트레이션·검증·커밋.
+- skills: 리뷰는 codex 사용량 한도 시 대체 경로(사유 기재).
+- mcps: 없음
+- rationale: 재현 가능한 결함이 이미 확정돼 있어 재현-우선 수정 유형에 정확히 대응. 파일 5개가 한 모듈에 몰려 있어 병렬 분할 이득이 없다 — 단일 워커 순차가 맞다.
+
+approved_by_user: true
+

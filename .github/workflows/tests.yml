@@ -13,9 +13,11 @@ name: tests
 #   - 비용 제어: macOS(과금 배수) + Windows advisory 는 dev push 에서 제외,
 #     PR / 수동 실행 / 릴리스 태그(preflight 경유) 에서만 실행
 #
-# 스위트 구성: hooks / scripts / skills / rules / agents / CLI / integration.
-# tests/cli/test-install.sh 는 제외 — v1.0.1 에서 삭제된 install.sh 를 대상으로
-# 하는 죽은 테스트 (정리 백로그, 본 DoD 완료 기록 참조).
+# 스위트 구성: hooks / scripts / skills / rules / agents / CLI / integration (v1)
+# + plugins/rein-core/tests (v2, python unittest — Task 1.9 편입, 별개 step 으로
+# 실행해 실패 원인을 v1/v2 로 구분).
+# (tests/cli/test-install.sh 죽은 테스트는 Phase 6 Task 6.3 폐기 대장으로
+# 2026-08-19 제거 완료 — docs/reports/v2-test-migration-classification.md §5.)
 
 on:
   workflow_dispatch:
@@ -90,6 +92,12 @@ jobs:
       - name: Run integration tests
         if: ${{ !cancelled() }}
         run: bash tests/integration/run-all.sh
+
+      # v2 스위트 (python unittest, py3.9+ stdlib only — 추가 의존 설치 불필요).
+      # v1 스위트와 별개 step — 실패 시 원인이 v1/v2 어느 쪽인지 즉시 구분.
+      - name: Run v2 suite tests (unittest)
+        if: ${{ !cancelled() }}
+        run: python3 -m unittest discover -s plugins/rein-core/tests
 
   # Phase 9 Task 9.1 — dual-mode smoke matrix.
   # Advisory: Windows native (Git Bash shell). Rein 은 Windows 에서 WSL2 사용을

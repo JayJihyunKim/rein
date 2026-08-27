@@ -212,6 +212,11 @@ run_lint "jennie" "$TMP_ROOT/valid.md"
 out_has "L2" || fail "(2b) L2 jennie: 'L2' not in output: $LINT_OUT"
 ok "(2b) L2 rejects builtin name 'jennie'"
 
+run_lint "choi-haengbae" "$TMP_ROOT/valid.md"
+[ "$LINT_RC" = "1" ] || fail "(2c) L2 choi-haengbae: expected exit 1, got $LINT_RC"
+out_has "L2" || fail "(2c) L2 choi-haengbae: 'L2' not in output: $LINT_OUT"
+ok "(2c) L2 rejects builtin name 'choi-haengbae'"
+
 # -----------------------------------------------------------------------------
 # (3) L3 size cap: 4,001 chars -> exit 1 + L3 + current size; exactly 4,000 -> OK.
 # -----------------------------------------------------------------------------

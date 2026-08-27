@@ -1,19 +1,29 @@
 # Shared infra for the PreToolUse(Bash) guard pair.
 #
 # Sourced (NOT exec'd) by:
-#   - pre-bash-safety-guard.sh      (always-on safety guard)
-#   - pre-bash-test-commit-gate.sh  (if-gated test/commit gate)
+#   - pre-bash-safety-guard.sh            (always-on safety guard)
+#   - pre-bash-commit-discipline-gate.sh  (if-gated commit gate, v1-surviving
+#     discipline axis — Phase 7 wave 3 ③-c successor of the retired
+#     pre-bash-test-commit-gate.sh)
+#   - pre-bash-commit-review-gate.sh      (if-gated commit gate, code_review/
+#     security_review v2-delegation axis — ③-c sibling successor, same
+#     retirement)
 #
 # Why a shared lib (HK-2, docs/specs/2026-05-19-cc-feature-adoption.md §HK-2):
 #   The former single Bash guard was split into two hooks so the always-on safety checks
 #   (pipe-to-shell, .env reads, destructive git) do NOT spawn the heavier
 #   test/commit gate on every Bash call. Three infra-integrity points are
-#   COMMON to both scripts and must fail-closed identically in each:
-#     [I1] python3 resolver failure
-#     [I2] hook input JSON parse failure
-#     [I6] JSON deny emitter unavailable/corrupt
-#   They live here so both scripts share one implementation and one message
-#   set. Each script sources this file and is responsible for fail-closing on
+#   COMMON to all three scripts above and must fail-closed identically in
+#   each — with one exception noted below:
+#     [I1] python3 resolver failure                          (all three)
+#     [I2] hook input JSON parse failure                      (all three)
+#     [I6] JSON deny emitter unavailable/corrupt   (safety-guard + discipline
+#          gate only — pre-bash-commit-review-gate.sh deliberately does NOT
+#          call bg_infra_init()/use deny_emit; it relays v2-native DENY JSON
+#          instead of constructing its own, so [I6] does not apply to it —
+#          see that hook's own header for the full rationale)
+#   They live here so all three scripts share one implementation and one
+#   message set. Each script sources this file and is responsible for fail-closing on
 #   its own infra (the source itself is checked by the caller — see
 #   bg_infra_init below).
 #
@@ -48,11 +58,13 @@ BLOCKS_LOG_JSONL="$PROJECT_DIR/trail/incidents/blocks.jsonl"
 #   recurs. THRESHOLD counting is per (hook, reason) — not whole-hook — so it
 #   measures a repeating *violation pattern*, matching the aggregate logic.
 #
-#   v1 safety release ① — writing/masking/count live in lib/rein-log-block.py
-#   (SSOT shared with pre-edit-dod-gate.sh). The tracked JSONL gets only a
-#   safe representation (verb + content hash); the masked raw command goes to
-#   the untracked $PROJECT_DIR/.rein/logs/. Records made under REIN_TEST_MODE=1
-#   are tagged source=test and excluded from the repeat count.
+#   Writing, masking and counting live in lib/rein-log-block.py (SSOT, also
+#   used by the pre-edit gate family). The tracked JSONL gets only a safe
+#   representation (verb + content hash); the raw command goes to
+#   $PROJECT_DIR/.rein/logs/ and is masked + private-path normalized as
+#   well — see that file's docstring for why untracked-ness alone is not a
+#   guarantee. Records made under REIN_TEST_MODE=1 are tagged source=test
+#   and excluded from the repeat count.
 log_block() {
   local reason="$1"
   local target="$2"

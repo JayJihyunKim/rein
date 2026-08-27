@@ -161,7 +161,7 @@ approved_by_user: false  # 승인 시 true 로 교체
 | 1~2개 파일, 기존 패턴 확장만 (위 항목 미해당) | `light` |
 | **판단이 불명확하면** | `standard` (false-negative 방지) |
 
-`security_tier: light` 효과: `approved_by_user: true` 이면 `git commit` 게이트에서 `.security-reviewed` stamp 요구를 건너뜀. **`.codex-reviewed` stamp 는 항상 필수**이며 `light` 여도 면제되지 않는다. 승인 전(`approved_by_user: false`)이거나 `security_tier` 파싱 불가 시 fail-closed — 기존대로 stamp 필요.
+`security_tier: light` 효과: `approved_by_user: true` 이면 `git commit` 게이트에서 v2 security_review 증거 요구를 건너뜀. **v2 code_review 증거는 항상 필수**이며 `light` 여도 면제되지 않는다. 승인 전(`approved_by_user: false`)이거나 `security_tier` 파싱 불가 시 fail-closed — 기존대로 증거 필요.
 
 ### complexity 결정 기준 (RT-2)
 

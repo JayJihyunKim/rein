@@ -1,0 +1,44 @@
+# 기본 Policy 세트 — commit tier (plan Task 4.4, spec §3.6/§11.1).
+#
+# spec §11.1 원문: "commit → code_review만 요구".
+#
+# 트리거 매핑: kernel 이벤트 어휘(rein/kernel/event.py EVENT_TYPES)에는
+# "commit" 이라는 Domain Event 가 없다 — Domain Event 자체가 금지되어
+# 있고(spec §3.2), 의미는 항상 Fact 로 표현된다. 실제 git commit 은
+# tool.pre 이벤트 + command.type=git.commit fact 조합으로 관측된다
+# (rein/engine/command_classifier.py 가 `git commit ...` 을
+# git.<subcommand> 로 분류함을 확인 — tests/unit/test_command_classifier.py
+# SIMPLE_CASES 의 ("git commit -m ...", "git.commit") 케이스).
+#
+# 디렉토리 위치: policies/default/ 하위 — policies/ 직하에는 이미
+# tags.yaml(경로→Tag 분류 규칙, `rules:` 필드 — 이 policy 4필드
+# 스키마와 다른 스키마)이 있다. load_policies(dir) 는 지정된 디렉토리의
+# *.yaml 전부를 이 4필드 policy 스키마로 파싱하므로, 같은 디렉토리에
+# 두면 tags.yaml 로드 시 "unsupported policy field 'rules'" 로 즉시
+# 깨진다. default 세트를 policies/default/ 하위 디렉토리로 분리해
+# tags.yaml 과 물리적으로 격리한다(로더 코드 변경 없이 회피).
+#
+# 커밋 tier 는 하나의 (trigger, when, require) 조합으로 표현 가능하므로
+# 파일 1개만으로 충분하다 — push tier 는 조건부 활성(§5.2)이 필요해
+# push.yaml + push-testing.yaml 두 파일로 나뉜다(그 두 파일 주석 참조).
+#
+# ── task.exists 조건화 (Phase 7 결정 1) ─────────────────────────────
+# v1 커밋 게이트(`hooks/lib/code-review-gate.sh` 의 `dod_exists`
+# precondition)는 활성 작업이 없으면 애초에 소스 편집 자체가 차단되어
+# "리뷰할 변경이 없다"는 논리로 code_review 를 요구하지 않았다 — 이
+# when 절의 `task.exists` 조건은 그 맞물린 논리를 그대로 인코딩한다.
+# 사용자 결정(2026-08-19, `dod-2026-08-19-v2-phase7-legacy.md` 선행
+# 결정 4종 중 1): v1 의미론 유지를 전용 fact 방식(`task.exists`,
+# `testing.configured` 선례와 동일 패턴 — 문법 확장 없음)으로
+# 조건화한다. 계약: 이 조건 추가는 무작업(활성 task 없음) 흐름을 새로
+# 차단하지 않는다 — `task.exists` 가 부재(None)면 이 정책 자체가
+# 미매칭되어 이 요구가 통째로 사라질 뿐, 다른 어떤 편집도 새로 막지
+# 않는다(fact 산출 자체는 `rein.platform.task.facts.task_exists()`,
+# 예외는 흡수하지 않고 그대로 전파 — fail-open 금지).
+trigger: tool.pre
+when:
+  command.type: git.commit
+  task.exists: "true"
+require:
+  - code_review
+failure_mode: closed

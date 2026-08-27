@@ -12,6 +12,8 @@ PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
 DOD_DIR="$PROJECT_DIR/trail/dod"
 SPEC_REVIEWS_DIR="$DOD_DIR/.spec-reviews"
 
+. "$SCRIPT_DIR/lib/shadow-capture.sh" 2>/dev/null && shadow_capture_init "post-edit-spec-review-gate"  # plan Task 2.8 — shadow capture (fire-and-forget)
+
 # M4 (2026-06-16): conservative marker for the THREE fail-open paths below.
 # This hook used to `exit 0` silently when it could not resolve python / parse
 # the JSON, so an unreviewed spec edit produced no .pending marker and the next
@@ -157,6 +159,15 @@ while IFS= read -r FILE_PATH; do
   # 절대경로 정규화
   ABS=$("${PYTHON_RUNNER[@]}" -c "import os,sys; print(os.path.abspath(sys.argv[1]))" "$FILE_PATH" 2>/dev/null)
   [ -z "$ABS" ] && continue
+
+  # code review MEDIUM (2026-08-10): 경로가 확정된 이 지점에서 shadow
+  # capture 에 subject 를 알려준다 — 이 훅은 break 없이 항상 끝까지
+  # 순회하므로, EXIT trap 시점의 루프 변수 $FILE_PATH 는 bash 의
+  # while+read 관용구 특성상 항상 "" 다 (shadow-capture.sh 의
+  # shadow_capture_set_subject 정의부 주석 참조). declare -F 가드는
+  # source 실패/구버전 lib 로 함수가 없을 때도 조용히 skip (게이트
+  # 판정 비간섭 계약 유지).
+  declare -F shadow_capture_set_subject >/dev/null 2>&1 && shadow_capture_set_subject "$ABS"
 
   # canonical 매칭
   is_canonical_spec "$ABS" || continue

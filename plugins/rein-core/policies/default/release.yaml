@@ -1,0 +1,75 @@
+# 기본 Policy 세트 — release tier (plan Task 4.4, spec §3.6/§11.1).
+#
+# spec §11.1 원문: "release → tests_passed + code_review + security_review".
+# push 와 달리 release 는 조건부 완화가 없다 — §5.2 의 조건부 활성은
+# "TDD Red 단계·중간 commit 을 과차단하지 않는다" 는 목적으로 push 에만
+# 부여된 예외이고, release 시점에는 이미 테스트 설정이 갖춰져 있어야
+# 한다는 것이 spec 의 기본 원칙이다. 그래서 이 파일은 세 요구를
+# 조건 없이 한 번에 선언한다(파일 1개로 충분 — commit.yaml 과 동일한
+# 이유로 단일 (trigger, when, require) tuple 로 표현 가능).
+#
+# ── 트리거 매핑은 해석 결정이다 (명시 — 리뷰 재검증 대상) ──────────
+# kernel 이벤트 어휘(rein/kernel/event.py EVENT_TYPES)에 "release" 라는
+# Domain Event 는 없다(Domain Event 자체가 금지, spec §3.2). git
+# 서브커맨드 중에도 "release" 는 없다 — release 는 이 저장소가
+# 관례적으로 수행하는 절차이지 단일 git 동사가 아니다. 이 파일은
+# 이 저장소의 실제 릴리스 절차(.claude/rules/branch-strategy.md
+# "머지 절차" — main 커밋 후 `git tag vX.Y.Z`)를 근거로, release
+# 액션의 관측 가능한 신호를 command.type=git.tag 로 해석했다.
+# rein/engine/command_classifier.py 는 임의 git 서브커맨드를
+# git.<subcommand> 로 분류하므로(`_GIT_SUBCOMMAND` 패턴), `git tag
+# v1.2.3` → git.tag 로 분류됨을 확인했다(단, 이 정확한 조합은 기존
+# tests/unit/test_command_classifier.py SIMPLE_CASES 목록에 명시
+# fixture 로 있지는 않다 — 분류기의 일반 규칙에서 도출한 것).
+#
+# 이 해석의 한계: `git push origin v*` / `git push --tags` 류의 다른
+# release 신호를 쓰는 프로젝트에는 이 매핑이 맞지 않을 수 있다 — 그런
+# 프로젝트는 자체 policy 로 release tier 를 재정의해야 한다. 이 기본
+# 세트는 "git tag 로 릴리스한다"는 이 저장소·전형적 semver 태깅
+# 관례를 기본값으로 채택한 것이며, spec 이 고정한 계약이 아니라 이
+# 태스크의 해석임을 명시한다(다음 리뷰가 이 가정을 재검증해야 한다).
+#
+# ── 알려진 과근사 (사이클 B 리뷰 1회차 Medium 지적 — 의도된 보수 방향) ──
+# `command.type: git.tag` 는 `git tag v1.2.3`(태그 생성 = release) 뿐만
+# 아니라 `git tag`/`git tag -l`(조회), `git tag -d v0.9.0`(삭제),
+# `git tag debug-checkpoint`(release 아닌 임의 태그) 도 전부 매칭한다
+# — command_classifier.py 의 `_classify_git` 은 `tokens[1]`(서브커맨드)
+# 까지만 보고 `git.<subcommand>` 로 분류하며, 그 뒤 인자(`-l`/`-d`/태그
+# 이름 자체)는 전혀 해석하지 않는다(rein/engine/command_classifier.py
+# 모듈 docstring: "인자 수준의 의미 분석은 하지 않는다 — 그것은 해당
+# 명령 라벨에 대한 Policy 소관"). 그래서 이 정책은 release 가 아닌
+# 태그 동작에도 tests_passed+code_review+security_review 를 요구하는
+# **과차단**이 실제로 발생한다 — `TagQueryOverApproximationTest`
+# (tests/contract/test_default_policy_matrix.py) 가 이 현재 행위를
+# 숨기지 않고 그대로 고정(pin)한다.
+#
+# 이 사이클에서 인자 기반 정밀 구분(`-l`/`-d` 를 걸러내는 등)을
+# **채택하지 않는다** — 분류기의 고정 철학과 정면 충돌하기 때문이다:
+# 분류기는 플래그 의미를 추측하지 않는다(`git -C <path> commit` 을
+# 대상 저장소 불명확을 이유로 UNKNOWN 으로 넘기는 것과 동일 원리 —
+# command_classifier.py 모듈 docstring "git 전역 옵션" 항목 참조).
+# `command.type` fact 에 `-l`/`-d` 같은 인자 해석을 섞으면 이 분류기
+# 계약(추측 금지, 보수적 UNKNOWN 우선)을 정책 계층에서 몰래 위반하게
+# 된다. 대신 방향은 **의도적으로 보수적**이다 — 과요구(불필요한 리뷰
+# 요구)는 안전 방향 실패이고, 과소요구(진짜 release 를 놓침)가 훨씬
+# 위험한 실패이므로, 애매하면 더 엄격한 쪽으로 넘어가는 것을 현재
+# 기본값으로 받아들인다.
+#
+# **이행 노트 — 이연 추적**: 정밀 release 식별은 전용 release fact
+# resolver(예: `release.detected` — 태그 이름이 semver 패턴과 일치하고
+# `-l`/`-d`/`-n` 류 조회·삭제 플래그가 없는 경우만 true)를 배선하는
+# 후속 작업 소관이다. 그 resolver 가 생기면 이 파일의
+# `when: command.type: git.tag` 를 그 fact 조건으로 교체한다 — 지금은
+# 존재하지 않는 resolver 를 이 policy 세트 작업(scope 밖, capability/
+# engine 배선 코드 편집 금지) 이 임의로 만들지 않는다.
+# 이연 추적: 활성 DoD(2026-08-11 v2-phase4) §범위 외 "[이연 추적]
+# release 정밀 식별" 항목 + Phase 4 종결 기록으로 이월 — "백로그"라는
+# 막연한 표현이 아니라 이 파일이 실제로 참조 가능한 추적 위치다.
+trigger: tool.pre
+when:
+  command.type: git.tag
+require:
+  - tests_passed
+  - code_review
+  - security_review
+failure_mode: closed

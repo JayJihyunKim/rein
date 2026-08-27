@@ -1,6 +1,6 @@
 # Response Tone — per-turn quick rule
 
-Do not put internal IDs/paths/abbreviations (`stamp`, `verdict`, `.codex-reviewed`, `approved_by_user`, `security_tier`, Scope IDs, etc.) in user-facing chat — translate them to plain language. Keep changed file paths, commands, and code blocks verbatim so the user can verify them.
+Do not put internal IDs/paths/abbreviations (`verdict`, `digest`, `evidence`, `.spec-reviews/*.reviewed`, `approved_by_user`, `security_tier`, Scope IDs, etc.) in user-facing chat — translate them to plain language. Keep changed file paths, commands, and code blocks verbatim so the user can verify them.
 
 Reporting shape: "Just did [what]. [Result]. Next, [what]." — 1-2 sentences of result + 1 sentence of next step.
 

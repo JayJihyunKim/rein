@@ -3,15 +3,31 @@
 #
 # X3.B.1 + X3.B.2 — Area B plan-coverage deferral implementation.
 #
+# Phase 7 웨이브 3 ③-c 재배치 (2026-08-23): 구 단일 pre-bash-test-commit-
+# gate.sh 는 삭제됐고 두 신설 훅으로 교대됐다. plan-coverage flush 는 v1
+# 존속 규율 축이라 pre-bash-commit-discipline-gate.sh 가 그대로 계승했다
+# (신 훅 헤더의 "X3.B.2: Area B plan-coverage deferral" 절 참조) — 아래
+# mk_sandbox_commit_gate / run_commit_gate 의 대상 훅명만 교체, flush
+# 단언 로직은 그대로. discipline-gate 는 리뷰 축을 아예 갖지 않는다(리뷰
+# stamp 판정은 sibling pre-bash-commit-review-gate.sh 로 전량 이관).
+#
+# Phase 7 웨이브 3 ③-d (2026-08-24) 재조준: mk_sandbox_commit_gate 가 미리
+# 찍어두던 `.codex-reviewed`/`.security-reviewed` touch 는 위 ③-c 코멘트가
+# 이미 "죽은 코드, 해가 없어 그대로 둠" 으로 확정했다 — 이번 웨이브에서
+# legacy 표식의 write 경로 자체가 코드베이스 전역에서 제거되므로, 남겨둘
+# "해가 없는" 이유도 함께 사라진다. 실제로 제거한다(정당 소멸).
+#
 # Design ref: docs/specs/2026-05-20-area-b-post-edit-deferral.md
 #   - §5.1 (post-edit-plan-coverage.sh 축소): validator 호출 제거, dirty append 만
-#   - §5.2 (pre-bash-test-commit-gate.sh flush): atomic mv → .processing → validator
+#   - §5.2 (pre-bash-commit-discipline-gate.sh flush, 현재는 pre-bash-commit-
+#     discipline-gate.sh 로 이관): atomic mv → .processing → validator
 #   - §7 Scope ID 1 (post-edit-plan-coverage-defers-validator-to-commit-gate...)
 #   - §7 Scope ID 2 (commit-gate-flushes-plan-coverage-dirty-list-and-runs-...)
 #
 # Test categories:
 #   T1~T5: post-edit-plan-coverage.sh dirty append behavior (B.1)
-#   T6~T11: pre-bash-test-commit-gate.sh flush behavior (B.2)
+#   T6~T11: pre-bash-commit-discipline-gate.sh flush behavior (B.2, 구
+#     pre-bash-commit-discipline-gate.sh 에서 이관)
 #
 # Sandbox harness reused from existing tests/hooks/ pattern (manual sandbox,
 # not the lib/test-harness.sh helper — the commit-gate test pattern needs more
@@ -133,9 +149,9 @@ mk_sandbox_commit_gate() {
   mkdir -p "$SANDBOX/trail/incidents"
   mkdir -p "$SANDBOX/docs/plans"
 
-  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/pre-bash-test-commit-gate.sh" "$SANDBOX/.claude/hooks/"
+  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/pre-bash-commit-discipline-gate.sh" "$SANDBOX/.claude/hooks/"
   cp -R "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/." "$SANDBOX/.claude/hooks/lib/"
-  chmod +x "$SANDBOX/.claude/hooks/pre-bash-test-commit-gate.sh"
+  chmod +x "$SANDBOX/.claude/hooks/pre-bash-commit-discipline-gate.sh"
 
   # Stub validator (same as post-edit sandbox).
   cat > "$SANDBOX/scripts/rein-validate-coverage-matrix.py" <<'PY'
@@ -161,17 +177,14 @@ except OSError:
 PY
   chmod +x "$SANDBOX/scripts/rein-validate-coverage-matrix.py"
 
-  # Seed a DoD so the commit gate's review-stamp branch can proceed past the
-  # "no DoD" early-return (we are testing the flush path, not stamps).
+  # Seed a DoD so the commit gate can proceed past the "no DoD" early-return
+  # (we are testing the flush path).
   cat > "$SANDBOX/trail/dod/dod-test.md" <<'EOF'
 # DoD: test
 - placeholder
 EOF
-  # Pre-create the two stamps so the gate doesn't deny on P5/P6 — we are
-  # exercising the new flush logic at the top of the gate, not the existing
-  # stamp checks.
-  : > "$SANDBOX/trail/dod/.codex-reviewed"
-  : > "$SANDBOX/trail/dod/.security-reviewed"
+  # ③-d (2026-08-24): legacy stamp pre-creation removed — discipline-gate
+  # never had a review-stamp branch to begin with (see file header).
 }
 
 rm_sandbox() {
@@ -209,7 +222,7 @@ run_commit_gate() {
   err_file=$(mktemp)
   printf '%s' "$input" \
     | (cd "$SANDBOX" && env -u CLAUDE_PLUGIN_ROOT REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
-        bash .claude/hooks/pre-bash-test-commit-gate.sh) \
+        bash .claude/hooks/pre-bash-commit-discipline-gate.sh) \
     > "$out_file" 2> "$err_file"
   HOOK_EXIT=$?
   HOOK_STDOUT=$(cat "$out_file")
@@ -314,7 +327,7 @@ test_post_edit_deleted_plan_skip() {
 }
 
 # ======================================================================
-# B.2 — pre-bash-test-commit-gate.sh flush behavior
+# B.2 — pre-bash-commit-discipline-gate.sh flush behavior
 # ======================================================================
 
 # T6: .plan-coverage-dirty present with PASS plan → flush runs validator,
@@ -685,6 +698,34 @@ PY
   rm_sandbox
 }
 
+# T19: codex round 1 Medium — DOD_DIR regression lock. Both flush error paths
+# (merge / rename) interpolate the same $DOD_DIR; a prior gap left the variable
+# undefined so the message rendered an empty path. Force the rename branch to
+# fail deterministically (root-agnostic) and assert the real <project>/trail/dod
+# path appears — this pins the DOD_DIR definition against future removal.
+test_flush_rename_failure_names_dod_dir() {
+  start_test "T19: flush rename failure → stderr names <project>/trail/dod (DOD_DIR regression lock)"
+  mk_sandbox_commit_gate
+  mk_pass_plan "$SANDBOX/docs/plans/good.md"
+  echo "$SANDBOX/docs/plans/good.md" > "$SANDBOX/trail/dod/.plan-coverage-dirty"
+  # Rename branch requires [ -f .processing ] to be false, so make .processing a
+  # directory. `mv -f dirty .processing` would then move dirty INTO it as
+  # .processing/.plan-coverage-dirty — so pre-create that exact target as a
+  # non-empty directory, which mv cannot overwrite. Deterministic, no chmod.
+  mkdir -p "$SANDBOX/trail/dod/.plan-coverage-dirty.processing/.plan-coverage-dirty/blocker"
+  run_commit_gate "git commit -m 'feat(x): test'"
+  # Match the flush rename error message SPECIFICALLY (not just the path
+  # anywhere in stderr) so an empty $DOD_DIR renders "checking  is writable"
+  # and fails this assert — that is what pins the definition.
+  local names_dir=no
+  case "$HOOK_STDERR" in
+    *"failed to rename"*"checking $SANDBOX/trail/dod is writable"*) names_dir=yes ;;
+  esac
+  assert_eq "stderr_names_dod_dir" "yes" "$names_dir"
+  end_test
+  rm_sandbox
+}
+
 # ======================================================================
 # Run all tests
 # ======================================================================
@@ -708,6 +749,7 @@ run_all() {
   test_post_edit_lock_held_fail_plan_falls_back_vocal
   test_flush_validator_runtime_error_fail_closed
   test_flush_mixed_runtime_and_fail_runtime_wins
+  test_flush_rename_failure_names_dod_dir
 }
 
 run_all

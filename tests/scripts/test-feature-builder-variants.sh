@@ -10,8 +10,10 @@
 # 본 테스트가 검증하는 것:
 #   (1) 세 에이전트 파일이 모두 존재한다.
 #   (2) 각 파일의 frontmatter `name:` 이 정확한 값을 가진다.
-#   (3) 세 파일 모두 공유 stamp 구조 참조를 포함한다
-#       (.codex-reviewed 와 .security-reviewed 가 각각 언급되어야 한다).
+#   (3) 세 파일 모두 공유 v2 리뷰 증거 발급 참조를 포함한다
+#       (v2 code_review 와 v2 security_review 가 각각 언급되어야 한다 —
+#       Phase 7 웨이브 3 ③-d 로 legacy .codex-reviewed/.security-reviewed
+#       marker 파일명 자체는 더 이상 등장하지 않아야 한다).
 #   (4) routing-procedure.md 에 DoD 키워드 → 변형 에이전트 감지 규칙이
 #       존재한다 (버그/fix 키워드 → feature-builder-fix,
 #                  refactor 키워드 → feature-builder-refactor).
@@ -87,11 +89,15 @@ check_name "$AGENTS_DIR/feature-builder-fix.md"       "feature-builder-fix"
 check_name "$AGENTS_DIR/feature-builder-refactor.md"  "feature-builder-refactor"
 
 # -----------------------------------------------------------------------
-# (3) 세 에이전트 모두 공유 stamp 구조 참조 포함
-#     .codex-reviewed 와 .security-reviewed 가 각각 언급되어야 한다.
+# (3) 세 에이전트 모두 공유 리뷰-기록 구조 참조 포함
+#     Phase 7 웨이브 3 ③-d — legacy stamp(.codex-reviewed/.security-reviewed)
+#     의 write/read 경로가 전부 제거되어 두 marker 파일명 자체는 더 이상
+#     agent 문서에 등장하지 않는다. v2 code_review/security_review 증거
+#     발급 언급으로 재조준한다 (두 축 모두 언급되어야 한다는 원 취지는
+#     동일하게 보존).
 # -----------------------------------------------------------------------
 echo ""
-echo "[3] Shared stamp structure — .codex-reviewed + .security-reviewed in all three agents"
+echo "[3] Shared v2 evidence structure — code_review + security_review evidence in all three agents"
 
 for agent_file in \
   "$AGENTS_DIR/feature-builder.md" \
@@ -99,19 +105,26 @@ for agent_file in \
   "$AGENTS_DIR/feature-builder-refactor.md"
 do
   if [ ! -f "$agent_file" ]; then
-    fail "cannot check stamp — file missing: $agent_file"
+    fail "cannot check v2 evidence reference — file missing: $agent_file"
     continue
   fi
   base="$(basename "$agent_file")"
-  if grep -q "\.codex-reviewed" "$agent_file"; then
-    pass "$base: contains .codex-reviewed reference"
+  if grep -q "v2 code_review" "$agent_file"; then
+    pass "$base: contains v2 code_review evidence reference"
   else
-    fail "$base: MISSING .codex-reviewed reference"
+    fail "$base: MISSING v2 code_review evidence reference"
   fi
-  if grep -q "\.security-reviewed" "$agent_file"; then
-    pass "$base: contains .security-reviewed reference"
+  if grep -q "v2 security_review" "$agent_file"; then
+    pass "$base: contains v2 security_review evidence reference"
   else
-    fail "$base: MISSING .security-reviewed reference"
+    fail "$base: MISSING v2 security_review evidence reference"
+  fi
+  # 존속 예외 검증: legacy marker 파일명은 이제 등장하면 안 된다
+  # (write/read 경로 전면 제거 — 재도입 회귀 감지).
+  if grep -q "\.codex-reviewed\|\.security-reviewed" "$agent_file"; then
+    fail "$base: still references removed legacy marker (.codex-reviewed/.security-reviewed)"
+  else
+    pass "$base: no leftover legacy marker reference"
   fi
 done
 

@@ -459,8 +459,9 @@ e2e_teardown
 echo "-- RB21: 리뷰 도중 카운터 디렉토리가 링크로 바뀌면 통과 정리가 거부한다 (코드 리뷰 2026-08-05 R2)"
 # clear 재검사 경로의 실행 오라클: 판정 초입 검사는 정상 디렉토리를 보고
 # 통과시키고, fake codex 가 verdict 방출 직전(= 래퍼의 통과 정리 이전)에
-# 디렉토리를 외부 링크로 바꾼다. code-review 모드라 통과 표식 생성 직전
-# 경로가 실제로 실행된다 — exit 7 + 외부 보존 + 표식 미생성이어야 한다.
+# 디렉토리를 외부 링크로 바꾼다. code-review 모드라 v2 발급(write_code_
+# review_stamp) 직전 경로가 실제로 실행된다 — exit 7 + 외부 보존 + v2
+# 발급 미시도여야 한다.
 e2e_setup
 cat > "$SANDBOX/trail/dod/dod-2026-08-05-rb21.md" <<'DOD'
 # DoD: RB21 clear 재검사
@@ -482,8 +483,20 @@ if [ -f "$CAPTURE" ]; then echo "  ok: RB21 codex 실행에 도달함 (초입 �
 else fail "RB21 codex 미실행 — clear 경로가 아니라 초입에서 걸러짐"; fi
 assert_eq "$(ls "$EXTDIR" | wc -l | tr -d ' ')" "1" "RB21 저장소 밖 해시 파일 보존"
 TEST_COUNT=$((TEST_COUNT + 1))
-if [ ! -f "$SANDBOX/trail/dod/.codex-reviewed" ]; then echo "  ok: RB21 통과 표식 미생성 (정리 실패가 표식보다 먼저 중단)"
-else fail "RB21 정리 실패인데 통과 표식이 생성됨"; fi
+# Phase 7 웨이브 3 ③-d: 래퍼는 더 이상 trail/dod/.codex-reviewed legacy
+# stamp 를 쓰지 않는다 — write_code_review_stamp() 는 이름은 유지하되
+# `bin/rein issue-evidence code_review` 발급만 시도한다(3343-3357행:
+# `_round_budget_clear` 가 write_code_review_stamp 호출보다 먼저 실행되고
+# 실패 시 즉시 `exit 7` 하므로, 이 write_code_review_stamp 자체가 호출되지
+# 않는다). 이 스위트는 bin/rein 을 링크하지 않으므로, write_code_review_stamp
+# 가 실제로 호출됐다면 (digest 미캡처) stderr 에 "no review-start subject
+# digest was captured" ERROR 가 반드시 남는다 — 그 부재가 곧 "정리 실패가
+# 발급 시도보다 먼저 중단됐다"는 증거다.
+if ! grep -q "no review-start subject digest was captured" "$SANDBOX/.err.txt" 2>/dev/null; then
+  echo "  ok: RB21 v2 발급 경로 미진입 (정리 실패가 write_code_review_stamp 호출보다 먼저 중단)"
+else
+  fail "RB21 정리 실패인데 v2 발급 경로에 진입함"
+fi
 rm -rf "$EXTDIR"
 e2e_teardown
 
@@ -503,7 +516,7 @@ echo "-- RB22: 통과 정리는 자신이 획득하지 않은 활성 락을 지�
 # R2 High 의 직접 회귀 오라클: 이전 결함 판에서는 clear 가 락 없이 rmdir 을
 # 실행해, 다른 프로세스의 commit 이 쥔(비어 있는) 락 디렉토리를 제거하고
 # 카운터를 지운 뒤 통과 표식까지 작성했다. 수리 후에는 락 대기 초과 →
-# exit 7 + 카운터·기존 락 보존 + 표식 미생성이어야 한다.
+# exit 7 + 카운터·기존 락 보존 + v2 발급 미시도여야 한다.
 e2e_setup
 cat > "$SANDBOX/trail/dod/dod-2026-08-05-rb22.md" <<'DOD'
 # DoD: RB22 clear 락 소유권
@@ -533,8 +546,16 @@ done
 if [ "$LOCK_ALIVE" = "1" ]; then echo "  ok: RB22 자신이 획득하지 않은 락 보존"
 else fail "RB22 남의 활성 락이 제거됨 (R2 High 회귀)"; fi
 TEST_COUNT=$((TEST_COUNT + 1))
-if [ ! -f "$SANDBOX/trail/dod/.codex-reviewed" ]; then echo "  ok: RB22 통과 표식 미생성"
-else fail "RB22 정리 실패인데 통과 표식이 생성됨"; fi
+# Phase 7 웨이브 3 ③-d: RB21 과 동일 원리 — write_code_review_stamp() 는
+# 더 이상 stamp 파일을 쓰지 않는다. `_round_budget_clear` 의 락 미획득
+# 실패가 write_code_review_stamp 호출보다 먼저 exit 7 로 끝나므로, v2
+# 발급 시도 자체가 없어야 한다(bin/rein 미링크 스위트라 호출됐다면 반드시
+# ERROR 로그가 남는다).
+if ! grep -q "no review-start subject digest was captured" "$SANDBOX/.err.txt" 2>/dev/null; then
+  echo "  ok: RB22 v2 발급 경로 미진입 (락 미획득 실패가 write_code_review_stamp 호출보다 먼저 중단)"
+else
+  fail "RB22 정리 실패인데 v2 발급 경로에 진입함"
+fi
 e2e_teardown
 
 echo "-- RB6: 통과로 사이클 종료 시 카운터 제거"

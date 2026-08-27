@@ -1,6 +1,6 @@
 ---
 name: codex-ask
-description: "Codex CLI second opinion 모드. stamp 없음, resume --last 금지, 매번 새 세션으로 독립 관점 확보. brainstorm 반박 / spec sanity / refactor tradeoff 이중 검증에 사용."
+description: "Codex CLI second opinion 모드. 리뷰 증거 미발급, resume --last 금지, 매번 새 세션으로 독립 관점 확보. brainstorm 반박 / spec sanity / refactor tradeoff 이중 검증에 사용."
 ---
 
 # Codex Ask Skill (Mode B)
@@ -16,7 +16,7 @@ Second opinion 전용 — Claude 주 세션의 컨텍스트와 **독립적** 인
 - **refactor tradeoff 이중 검증** — "이 refactor 가 제 3 시각에서 합리적?"
 - Claude 세션 컨텍스트에 오염되지 않은 **독립 관점** 이 필요한 모든 경우
 
-이 스킬은 리뷰 **게이트가 아니다**. 리뷰 게이트 (stamp 생성) 가 필요하면 `/codex-review` 를 사용한다.
+이 스킬은 리뷰 **게이트가 아니다**. 리뷰 게이트 (v2 증거 발급) 가 필요하면 `/codex-review` 를 사용한다.
 
 ---
 
@@ -85,16 +85,15 @@ Hang 감지 시: `lsof -p <pid> -i` 결과가 비어 있거나 (`ps -o %cpu` 가
 
 ---
 
-## 3. Stamp / DoD 자발 생성 금지
+## 3. 리뷰 증거 / DoD 자발 생성 금지
 
 **의도적으로 생성하지 않는다**. Second opinion 은 "관점 제공" 이지 "승인 게이트" 가 아니다.
 
-- `trail/dod/.codex-reviewed` 같은 stamp 파일을 **절대 만들지 않는다**.
-- 다른 어떤 리뷰 marker 도 touch 하지 않는다.
-- `.review-pending` 등 기존 marker 도 건드리지 않는다.
+- `bin/rein issue-evidence code_review ...` 를 **절대 호출하지 않는다** (v2 code_review 증거를 발급하지 않는다).
+- 다른 어떤 리뷰 marker 도 touch 하지 않는다 (legacy marker 는 Phase 7 웨이브 3 ③-d 로 이미 제거되어 대상 자체가 없다 — `.spec-reviews/*` 등 존속하는 marker 도 건드리지 않는다).
 - `trail/dod/dod-*.md` 같은 **DoD 파일도 자발적으로 생성하지 않는다**. DoD 는 주 세션의 작업 기준 문서이며, second opinion 세션이 자동으로 만들면 주 세션 라우팅/승인 흐름을 건너뛰게 된다.
 
-리뷰 게이트가 필요한 경우 (테스트/커밋 통과가 목적) 는 반드시 `/codex-review` (Mode A) 를 사용한다. 실수로 `/codex-ask` 결과로 stamp 를 생성하면 리뷰 없이 테스트/커밋이 통과되어 `pre-bash-test-commit-gate.sh` 의 게이트가 무력화된다. DoD 를 자발 생성하면 `pre-edit-dod-gate.sh` 가 요구하는 주 세션 routing 단계가 생략된 채 편집 권한이 생기는 우회 경로가 된다.
+리뷰 게이트가 필요한 경우 (테스트/커밋 통과가 목적) 는 반드시 `/codex-review` (Mode A) 를 사용한다. 실수로 `/codex-ask` 결과로 v2 code_review 증거를 발급하면 리뷰 없이 커밋이 통과되어 `pre-bash-commit-review-gate.sh`(구 `pre-bash-test-commit-gate.sh` 후속, ③-c 삭제 완료) 의 게이트가 무력화된다. DoD 를 자발 생성하면 `pre-edit-discipline-gate.sh`(구 `pre-edit-dod-gate.sh` 후속, ③-b 삭제 완료) 가 요구하는 주 세션 routing 단계가 생략된 채 편집 권한이 생기는 우회 경로가 된다.
 
 ---
 
@@ -111,12 +110,12 @@ Hang 감지 시: `lsof -p <pid> -i` 결과가 비어 있거나 (`ps -o %cpu` 가
 | 항목          | Mode A (`/codex-review`)     | Mode B (`/codex-ask`)   |
 | ------------- | ---------------------------- | ----------------------- |
 | 용도          | 리뷰 게이트                  | Second opinion          |
-| Stamp 생성    | **필수** (`.codex-reviewed`) | **절대 금지**           |
+| 리뷰 결과 기록 | 검토 대상이 있으면 **필수** (v2 code_review 증거 발급) | **절대 금지**           |
 | Resume --last | 같은 사이클 내 허용          | **금지** — 매번 새 세션 |
 | Sandbox       | 상황별 (기본 read-only)      | 항상 `read-only`        |
 | **Fallback**  | codex 실행 **실패** 시에만 Sonnet/code-reviewer/human fallback 허용 | **same-session Claude fallback 금지**. 독립 reviewer 부재 시 degraded / no-second-opinion 으로 명시 |
 
-Fallback 정책 비대칭 이유는 `.claude/skills/codex-review/SKILL.md` §1 Mode 대비 절 참조. 요지: Mode A 는 stamp 생성 자체가 게이트 통과 조건이므로 차순위 reviewer 허용, Mode B 는 "독립 관점" 이 본질이므로 same-session Claude 대체 불가.
+Fallback 정책 비대칭 이유는 `.claude/skills/codex-review/SKILL.md` §1 Mode 대비 절 참조. 요지: Mode A 는 검토 대상이 있는 변경이면 v2 증거 발급 자체가 게이트 통과 조건이므로 차순위 reviewer 허용, Mode B 는 "독립 관점" 이 본질이므로 same-session Claude 대체 불가.
 
 ---
 
@@ -142,7 +141,7 @@ Fallback 정책 비대칭 이유는 `.claude/skills/codex-review/SKILL.md` §1 M
 
 ### 5.4 사용처가 아닌 경우
 
-- **리뷰 게이트 통과가 필요** → `/codex-review` (stamp 생성 필수 경로)
+- **리뷰 게이트 통과가 필요** → `/codex-review` (v2 증거 발급 필수 경로)
 - **이전 `/codex-ask` 답변에 이어서 물어보고 싶음** → 이어서 resume 하지 말고, 새 `/codex-ask` 에 이전 답변 요약을 prompt 에 포함
 - **구현 편집이 필요** → `/codex-ask` 아님. workspace-write 가 필요한 작업은 별도 경로
 
@@ -153,8 +152,8 @@ Fallback 정책 비대칭 이유는 `.claude/skills/codex-review/SKILL.md` §1 M
 - `codex exec` 가 non-zero exit → 사용자에게 보고 후 재시도 여부 질의. **폴백 없음** — Second opinion 은 리뷰 게이트가 아니므로 실패해도 작업 차단이 발생하지 않는다.
 - **모델 거부 감지 (fail-soft)**: codex 출력에 `is not supported` / `invalid_request_error` / `model_not_found` 가 보이면 모델명이 변경된 것이다(codex upstream rename). `${CLAUDE_PLUGIN_ROOT:-plugins/rein-core}/config/codex-models.sh` 에서 **사용한 tier 의 변수**(`ANALYSIS_FAST_MODEL` / `ANALYSIS_DEFAULT_MODEL` / `ANALYSIS_DEEP_MODEL` 중 해당하는 것)를 최신 모델명으로 갱신하도록 사용자에게 안내하고 재시도한다. (second opinion 은 게이트가 아니므로 작업 차단은 없다.)
   - **Same-session Claude fallback 금지**: codex 가 실패했을 때 "그럼 Claude 가 직접 second opinion 을 내겠다" 는 경로는 **본질 위반**. Mode B 의 가치는 주 세션과 독립된 외부 관점이며, same-session Claude 는 정의상 독립 reviewer 가 아니다.
-  - **차순위 옵션**: (a) 시간을 두고 Mode B 재시도 (b) 호출자가 결과 없이 작업을 계속하되 "second opinion 부재" 사실을 의식적으로 인지 (c) 사용자에게 직접 검토 요청. (a)/(b)/(c) 어느 쪽도 stamp 나 marker 를 만들지 않는다.
-  - Mode A (`/codex-review`) 와의 비대칭: Mode A 는 stamp 생성 자체가 게이트 통과 조건이라 codex 실패 시 Sonnet/code-reviewer/human fallback 으로 stamp 를 만들 수 있다. Mode B 는 stamp 가 아예 없으므로 fallback 의 동기 자체가 다르다.
+  - **차순위 옵션**: (a) 시간을 두고 Mode B 재시도 (b) 호출자가 결과 없이 작업을 계속하되 "second opinion 부재" 사실을 의식적으로 인지 (c) 사용자에게 직접 검토 요청. (a)/(b)/(c) 어느 쪽도 v2 증거나 marker 를 만들지 않는다.
+  - Mode A (`/codex-review`) 와의 비대칭: Mode A 는 검토 대상이 있는 변경이면 v2 증거 발급 자체가 게이트 통과 조건이라 codex 실패 시 Sonnet/code-reviewer/human fallback 으로 그 증거를 발급할 수 있다. Mode B 는 증거 발급 경로가 아예 없으므로 fallback 의 동기 자체가 다르다.
 - 고위험 플래그는 기본적으로 사용하지 않는다. `/codex-ask` 는 `--sandbox read-only` 고정이므로 `--sandbox danger-full-access` / `--full-auto` 의 위험 조합이 발생하지 않는다.
 - 출력에 경고나 부분 결과가 포함되면 요약 후 `AskUserQuestion` 으로 다음 질의 방향 확인.
 - **Hang 증상 탐지** (§2 실행 모드 절 참고):
@@ -178,4 +177,4 @@ Mode B 의 결과를 사용자에게 보고할 때 다음 짧은 형식을 **먼
 **codex 실행 실패 (No fallback)**:
 > codex 가 떠지지 않아 second opinion 을 받지 못했어요. Mode B 는 fallback 없습니다 — 시간을 두고 재시도하거나 사용자가 직접 검토하세요.
 
-이 짧은 안내 후에 기존 codex 본문을 그대로 emit 한다. **stamp 생성 금지** — Mode B 는 §3 에 따라 어떤 review marker 도 만들지 않는다.
+이 짧은 안내 후에 기존 codex 본문을 그대로 emit 한다. **v2 증거 발급 금지** — Mode B 는 §3 에 따라 어떤 review marker 도 만들지 않는다.

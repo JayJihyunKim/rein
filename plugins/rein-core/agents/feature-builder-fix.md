@@ -75,9 +75,9 @@ rein 게이트(`exit 2`)에 막히면 **환경을 조작해 통과시키지 않�
 [ ] 재현 테스트 작성 완료 (수정 전 실패 → 수정 후 pass 확인)
 [ ] Root cause 명시 (DoD 또는 inbox 에 한 줄)
 [ ] 회귀 방지 테스트 추가됨
-[ ] codex 리뷰 실행 완료 (.codex-reviewed stamp 존재)
+[ ] codex 리뷰 실행 완료 (PASS 시 v2 code_review 증거 발급됨)
 [ ] 리뷰 후 추가 수정 시 재리뷰 완료
-[ ] 보안 리뷰 실행 완료 (.security-reviewed stamp 존재, security_tier:light 면 면제)
+[ ] 보안 리뷰 실행 완료 (PASS 시 v2 security_review 증거 발급됨, security_tier:light 면 면제)
 [ ] 기존 테스트 100% 통과
 [ ] lint/format 통과
 [ ] Self-review 완료
@@ -86,7 +86,7 @@ rein 게이트(`exit 2`)에 막히면 **환경을 조작해 통과시키지 않�
 
 ## 사용자 보고 방식
 
-사용자에게 답변하는 채팅 본문에는 내부 식별자 (`.codex-reviewed`, `.security-reviewed`, `stamp`, `verdict`) 를 노출하지 않는다. 버그 수정은 재현 테스트 흐름을 사용자에게 평문으로 설명한다.
+사용자에게 답변하는 채팅 본문에는 내부 식별자 (`verdict`, `digest`, `evidence`, Scope ID) 를 노출하지 않는다. 버그 수정은 재현 테스트 흐름을 사용자에게 평문으로 설명한다.
 
 - **재현 테스트 작성 후**:
   > "버그를 재현하는 실패 테스트를 먼저 작성했습니다. 이제 원인을 추적해서 수정하겠습니다."

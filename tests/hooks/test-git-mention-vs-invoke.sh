@@ -10,17 +10,58 @@
 #   - 리터럴 절대경로 cd 가 저장소 밖이면 커밋 게이트 면제, 변수/불명 cd 는 차단 유지
 #   - 서브셸 닫힘(`)`) 이후는 면제 해제 (실제 저장소 커밋 FN 금지)
 #
-# 행위 기반: 실제 pre-bash-test-commit-gate.sh 실행 + 종료코드/JSON deny 단언.
-# 차단 = exit 2 + stderr 또는 exit 0 + JSON deny (게이트의 2-tier 프로토콜).
+# Phase 7 웨이브 3 ③-c 갱신 (커밋 게이트 교대, 2026-08-23): 구동 대상이
+# `pre-bash-test-commit-gate.sh`(삭제됨)에서 `pre-bash-commit-discipline-
+# gate.sh`(신설)로 바뀌었다. 이 파일이 검증하는 것(GMF-1 canonical commit
+# 인식 + GMF-2 merge/rebase/am 면제 + GSD-3 cd/heredoc/subshell 판별)은
+# `lib/git-subcommand-model.sh` 의 command-form 분류 로직이며, 이 로직은
+# sibling `pre-bash-commit-review-gate.sh` 안에도 **바이트 동일하게
+# 재구현**되어 있다(두 훅 모두 자신의 `GIT_COMMIT_GATED`/exemption 을
+# 독립적으로 재계산한다 — 프로세스 간 상태 공유가 불가하므로, ③-b 의
+# 순차 디스패처 선례와 같은 이유로 각자 소유한다). 이 스위트는 discipline-
+# gate 하나에서 그 분류 로직 전체를 결정론적으로(v2/rein 패키지 의존
+# 없이) 고정한다 — review-gate 쪽의 동일 로직에 대한 좁은 회귀 subset(GMF-1
+# 2케이스 + GMF-2 1케이스 + GSD-3 1케이스)은 tests/hooks/test-pre-bash-
+# commit-review-gate.sh 의 "8/9. GMF-1/GSD-3" 절이 별도로 고정한다 — 두
+# 훅 다 커버되므로 이 파일을 review-gate 로 옮기거나 분할할 필요는 없다.
+#
+# "genuinely gated vs exempted" 증명 기법 (구 버전은 DoD+무표식 상태로
+# 커밋 게이트에 진입시켜 P5 CODEX_STAMP_MISSING 을 관측했다 — 그 축은
+# 이제 review-gate 로 이관되어 discipline-gate 에는 없다): 매 테스트가
+# 존재하지 않는 plan 경로를 가리키는 `.coverage-mismatch` 마커를 미리
+# 심어 둔다(`_seed_gated_marker`, tests/hooks/test-pre-bash-commit-
+# discipline-gate.sh 와 동일 기법). 커밋이 실제로 GIT_COMMIT_GATED=true
+# 로 판정되면 이 마커가 [I3](target unidentifiable, 경로가 존재하지
+# 않아 재검증 불가)로 반드시 exit 2 를 낸다. 면제/미감지 경로는 이
+# 마커를 건드리지 않고 조용히 통과한다 — v2/rein 패키지 의존이 전혀
+# 없어 완전히 결정론적이다.
+#
+# 행위 기반: 실제 pre-bash-commit-discipline-gate.sh 실행 + 종료코드/
+# JSON deny 단언. 차단 = exit 2(I3 fail-closed) — 이 스위트가 쓰는
+# 마커 기법은 항상 exit 2 로만 귀결된다(JSON deny 형태의 P2 는 마커에
+# 식별 가능한 target 이 있을 때만 나오는데, 이 스위트는 의도적으로
+# "식별 불가"(경로 부재)를 고정값으로 쓴다 — 존재 여부만 보면 되지
+# 어떤 형태의 차단인지는 이 스위트의 관심사가 아니므로 exit 2 하나로
+# 충분하다).
 
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/test-harness.sh"
 
-HOOK="pre-bash-test-commit-gate.sh"
+HOOK="pre-bash-commit-discipline-gate.sh"
 
-# 스탬프를 심지 않은 상태에서 커밋으로 판정되면 반드시 차단된다 — 차단 형태는
-# exit 2(stderr) 또는 exit 0 + JSON deny 둘 다 인정.
+# _seed_gated_marker — a `.coverage-mismatch` pointing at a plan path that
+# does not exist. See tests/hooks/test-pre-bash-commit-discipline-gate.sh
+# header for the full mechanism (revalidate_coverage_marker() skips a
+# missing-path entry, validated_count stays 0, rc=2 → [I3] exit 2).
+_seed_gated_marker() {
+  mkdir -p "$SANDBOX/trail/dod"
+  printf '%s\n' "$SANDBOX/docs/plans/nonexistent-plan.md" > "$SANDBOX/trail/dod/.coverage-mismatch"
+}
+
+# 차단 형태는 이 스위트에서 항상 exit 2 (I3) 하나뿐이다 — 그래도 과거
+# 파일과의 연속성을 위해 이름은 유지하고, JSON deny 형태도 관대하게
+# 인정한다(어떤 형태든 "게이트 본문에 도달했다"는 사실만 확인).
 assert_blocked() {
   local msg="$1"
   if [ "$HOOK_EXIT" = "2" ]; then return 0; fi
@@ -53,7 +94,7 @@ _run_cmd() {
 # M1: heredoc 본문에 기록될 뿐인 git commit 텍스트는 커밋이 아니다.
 #     Pre-fix: 줄머리 `git commit` 이 행 앵커에 걸려 차단. Post-fix: 통과.
 test_heredoc_body_git_commit_is_mention() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'cat > /tmp/repro.sh <<'\''EOF'\''
 cd "$SB"
 git init -q
@@ -66,7 +107,7 @@ bash /tmp/repro.sh'
 # M1b: 여는 줄은 유지 — heredoc 을 쓰는 진짜 커밋(-F <(...) 아님, 메시지
 #      heredoc)은 여전히 커밋으로 판정된다. 소거가 실행 절을 지우지 않는다.
 test_real_commit_with_heredoc_message_still_gated() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'git commit -m "$(cat <<'\''EOF'\''
 feat(x): message body
 EOF
@@ -77,7 +118,7 @@ EOF
 # M2: 미종결 heredoc 은 fail-closed — 본문 소거를 포기하고 기존 판정 유지
 #     (본문 줄의 git commit 이 여전히 잡혀 차단 방향).
 test_unterminated_heredoc_fails_closed() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'cat > /tmp/x.sh <<EOF
 git commit -m "text"'
   assert_blocked "unterminated heredoc must fail closed (no body elision)"
@@ -85,29 +126,29 @@ git commit -m "text"'
 
 # M3: 리터럴 절대경로 cd 가 저장소 밖 → 커밋 게이트 면제 (샌드박스 커밋).
 test_literal_outside_cd_commit_exempt() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'cd /tmp/rein-sandbox-x && git init -q && git commit -m "x"'
   assert_allowed "a commit under a literal cd outside the repo must be exempt"
-  assert_stderr_contains "outside this repository" "exemption should be announced via NOTICE"
+  assert_stderr_contains "sandbox commit"
 }
 
 # M3b: 인용된 리터럴 경로도 면제.
 test_quoted_literal_outside_cd_commit_exempt() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'cd "/tmp/rein-sandbox-y" && git commit -m "y"'
   assert_allowed "a quoted literal outside cd must also be exempt"
 }
 
 # M4: 변수 cd 는 면제 불가 — 기존대로 차단 (사용자 확정: 확실할 때만 면제).
 test_variable_cd_commit_still_gated() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'cd "$SB" && git commit -m "z"'
   assert_blocked "a commit after a variable cd must stay gated (target unknown)"
 }
 
 # M4b: 저장소 안으로의 리터럴 cd 는 면제 불가.
 test_literal_inside_cd_commit_still_gated() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd "cd $SANDBOX && git commit -m \"w\""
   assert_blocked "a commit after a literal cd INTO the repo must stay gated"
 }
@@ -115,7 +156,7 @@ test_literal_inside_cd_commit_still_gated() {
 # M5: 서브셸 닫힘 이후의 커밋은 면제 해제 — `(cd /tmp/x; ...); git commit` 의
 #     뒤쪽 커밋은 실제로 저장소에서 실행된다 (FN 금지).
 test_commit_after_subshell_close_still_gated() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd '(cd /tmp/rein-sandbox-z && git init -q); git commit -m "real"'
   assert_blocked "a commit after a closed subshell must stay gated"
 }
@@ -123,7 +164,7 @@ test_commit_after_subshell_close_still_gated() {
 # M5b (R1 High 반영 — 좁힘): 서브셸 형태는 면제하지 않는다. 괄호가 있으면
 #     절 구조 증명이 복잡해지므로 면제 형태에서 제외 (보수 방향 — 게이트 유지).
 test_commit_inside_subshell_not_exempt() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd '(cd /tmp/rein-sandbox-w && git init -q && git commit -m "in-sandbox")'
   assert_blocked "subshell form is outside the narrow exemption shape (conservative)"
 }
@@ -131,21 +172,21 @@ test_commit_inside_subshell_not_exempt() {
 # M8 (R1 High 재현): cd 성공에 종속되지 않는 구분자는 면제 불가 — `;` 는 cd
 #     실패에도 뒤 절이 저장소에서 실행된다.
 test_semicolon_cd_commit_still_gated() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'cd /missing; git commit -m "x"'
   assert_blocked "cd /missing; git commit must stay gated (commit not conditioned on cd)"
 }
 
 # M8b (R1 High 재현): `||` 는 cd 실패 경로에서 커밋이 저장소에서 실행된다.
 test_or_cd_commit_still_gated() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'cd /missing || git commit -m "x"'
   assert_blocked "cd || git commit must stay gated (commit runs on cd FAILURE)"
 }
 
 # M8c (R1 High 재현): 단독 `&` 백그라운드는 cd 와 절연된다.
 test_background_amp_cd_commit_still_gated() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'cd /tmp/rein-sandbox-a & git commit -m "x"'
   assert_blocked "cd & git commit must stay gated (background decouples cd)"
 }
@@ -153,7 +194,7 @@ test_background_amp_cd_commit_still_gated() {
 # M8d (R1 High 재현): 인용 속 구분자가 절 경계를 위조하는 조합 — `$`/`;` 금지로
 #     면제 형태에서 제외된다.
 test_quoted_separator_cd_commit_still_gated() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'printf "%s" "x; cd /tmp/rein-sandbox-b; x" && git commit -m "y"'
   assert_blocked "quoted separators must not fabricate an exempting cd clause"
 }
@@ -161,7 +202,7 @@ test_quoted_separator_cd_commit_still_gated() {
 # M8e (R1 High 재현): `cd /tmp && git -C <이 저장소> commit` 은 명시적으로 현재
 #     저장소를 커밋한다 — -C/--git-dir/--work-tree/GIT_DIR 토큰은 면제 불가.
 test_dash_c_redirect_still_gated() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd "cd /tmp/rein-sandbox-c && git -C $SANDBOX commit -m \"x\""
   assert_blocked "git -C back into the repo must stay gated despite outside cd"
 }
@@ -169,7 +210,7 @@ test_dash_c_redirect_still_gated() {
 # M9 (R1 High 재현 — 소거기 FN): 인용 문자열 속의 <<WORD 는 heredoc 이 아니다.
 #     이걸 heredoc 으로 오인하면 뒤따르는 **실제 커밋**이 본문으로 소거된다.
 test_quoted_fake_heredoc_does_not_hide_commit() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'printf "%s\n" '\''<<EOF'\''
 git commit -m "fix: real"
 EOF
@@ -180,7 +221,7 @@ EOF
 # M10: 한 줄 다중 heredoc (`cat <<A <<B`) — 두 본문이 순서대로 소거되고
 #      (본문 속 git commit 텍스트 비발동), 여는 줄의 실행 절은 유지된다.
 test_multiple_heredocs_one_line() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'cat <<A <<B
 git commit -m "textA"
 A
@@ -191,14 +232,14 @@ B'
 
 # M6: 맨 커밋(cd 없음)은 종전과 동일하게 차단 — 핵심 무회귀.
 test_bare_commit_still_gated() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'git commit -m "feat(x): plain"'
   assert_blocked "a bare git commit without stamps must stay gated (core no-regression)"
 }
 
 # M7: 샌드박스 커밋은 커밋 메시지 포맷 게이트도 건너뛴다 (rein 포맷 비강제).
 test_sandbox_commit_message_format_not_enforced() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'cd /tmp/rein-sandbox-m && git commit -m "no conventional format here"'
   assert_allowed "sandbox commit must not be subject to the commit-message format gate"
 }
@@ -206,7 +247,7 @@ test_sandbox_commit_message_format_not_enforced() {
 # M12 (R2 High 재현): 저장소를 가리키는 symlink 별칭으로의 cd 는 면제 불가 —
 #      텍스트로는 밖이지만 물리적으로는 이 저장소다.
 test_symlink_alias_of_repo_still_gated() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   local alias_link="/tmp/rein-alias-$$"
   ln -s "$SANDBOX" "$alias_link"
   _run_cmd "cd $alias_link && git commit -m \"x\""
@@ -217,7 +258,7 @@ test_symlink_alias_of_repo_still_gated() {
 # M13 (R2 High 재현): 산술 문맥의 `<<` 는 비트 시프트 — heredoc 오인으로
 #      뒤따르는 실제 커밋이 소거되면 안 된다.
 test_arith_shift_does_not_hide_commit() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd '(( x << EOF ))
 git commit -m "fix: real"
 EOF
@@ -229,7 +270,7 @@ EOF
 #      문자열 속 <<WORD 가 진짜 표식으로 오인돼 실제 커밋이 소거된다 — 인용
 #      종결부호 소비를 검증.
 test_quoted_heredoc_then_fake_opener_does_not_hide_commit() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'cat <<'\''EOF'\''
 mention: git commit -m "text"
 EOF
@@ -240,7 +281,7 @@ git commit -m "fix: real2"'
 
 # M15 (R2 지적 반영): 후속 절의 pushd/popd/builtin cd 도 디렉토리 이동 — 면제 불가.
 test_pushd_after_outside_cd_still_gated() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   _run_cmd 'cd /tmp/rein-sandbox-p && pushd /tmp/rein-elsewhere && git commit -m "x"'
   assert_blocked "a pushd after the exempting cd must void the exemption"
 }
@@ -248,7 +289,7 @@ test_pushd_after_outside_cd_still_gated() {
 # M16 (보안 리뷰 2026-08-05 Medium 재현): 이 저장소의 **연결형 워크트리**로의
 #      cd 커밋은 면제 불가 — 경로는 밖이지만 커밋은 이 저장소 브랜치에 실린다.
 test_linked_worktree_commit_still_gated() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   ( cd "$SANDBOX" && git init -q && git config user.email t@e.com \
     && git config user.name t && git add -A >/dev/null 2>&1 \
     && git commit -qm base >/dev/null 2>&1 )
@@ -267,7 +308,7 @@ test_linked_worktree_commit_still_gated() {
 # M16b (대조): 독립 저장소(자체 .git 디렉토리)는 여전히 면제 — 워크트리 판별이
 #       진짜 샌드박스를 오차단하지 않는다.
 test_independent_repo_still_exempt() {
-  seed_dod "dod-2026-08-05-gsd3.md"
+  _seed_gated_marker
   local ext="/tmp/rein-extrepo-$$"
   mkdir -p "$ext"
   ( cd "$ext" && git init -q )
@@ -278,7 +319,8 @@ test_independent_repo_still_exempt() {
 
 # M11: 매처 쌍둥이 동등성 — 모델 lib 의 git_clause_invokes(classifier/dispatcher
 #      경로)와 인프라 lib 의 command_invokes(게이트 경로)가 같은 배터리에서
-#      같은 판정을 내린다 (소거 헬퍼 공유 검증).
+#      같은 판정을 내린다 (소거 헬퍼 공유 검증). 훅을 전혀 실행하지 않는다 —
+#      HOOK 은 sandbox_setup 이 lib/ 를 복사하도록 트리거하는 용도로만 쓰인다.
 test_twin_matcher_equivalence() {
   local libdir="$SANDBOX/.claude/hooks/lib"
   local out

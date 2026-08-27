@@ -1,57 +1,111 @@
 #!/bin/bash
 # tests/hooks/test-security-tier-gate.sh
 #
-# RT-1 (docs/specs/2026-05-19-cc-feature-adoption.md §RT-1):
-# Verify that the `security_tier` field in the DoD `## 라우팅 추천` YAML
-# controls whether the .security-reviewed stamp is required for `git commit`.
+# RT-1 (docs/specs/2026-05-19-cc-feature-adoption.md §RT-1) — 원래 이
+# 스위트는 DoD `## 라우팅 추천` 의 `security_tier`/`approved_by_user`
+# 필드가 `.security-reviewed` 표식 요구를 좌우하는지(light+approved →
+# 요구 skip) 15케이스로 검증했다.
 #
-# Gate behavior (fail-closed):
-#   security_tier: light  + approved_by_user: true  → P6 stamp SKIPPED
-#   security_tier: light  + approved_by_user: false → P6 stamp REQUIRED
-#   security_tier: standard (any approved_by_user)  → P6 stamp REQUIRED
-#   security_tier: deep                             → P6 stamp REQUIRED
-#   security_tier field absent                      → P6 stamp REQUIRED (backward-compat)
-#   security_tier: garbage/malformed value          → P6 stamp REQUIRED (fail-closed)
+# ============================================================
+# Phase 7 웨이브 3 ③-c 갱신 (커밋 게이트 교대, 2026-08-23) — RT-1 명시
+# 폐기
+# ============================================================
 #
-# P5 (.codex-reviewed) is ALWAYS required regardless of security_tier.
+# 구동 대상이 `pre-bash-test-commit-gate.sh`(삭제됨)에서
+# `pre-bash-commit-review-gate.sh`(신설)로 바뀌었을 뿐 아니라, 이
+# 스위트가 검증하던 **메커니즘 자체가 폐기됐다**. 근거:
 #
-# B1 (v1.3.4): the light-tier skip honours ONLY Tier 1 (explicit .active-dod
-# marker — blocking authority). A Tier 2 mtime-latest fallback (no marker) is
-# advisory authority and must NOT skip the security stamp — see case (l).
+#   - RT-1 경량 등급 면제는 선행 결정 3(2026-08-19, spec §3.6 "경량
+#     등급 면제(RT-1)의 이관" 절)으로 **명시 폐기**됐다 — "이관 후 RT-1
+#     fact 가 판정을 실제로 바꾸는 입력 클래스가 존재하는지 구현
+#     단계에서 열거하고 — 없으면 fact 신설 대신 명시 폐기로 처리한다"는
+#     조건에 따라, 6클래스(이 파일의 구 케이스 a~f 가 바로 그 6클래스)
+#     전수 열거 결과 판정을 바꾸는 입력이 0건이었다.
+#   - 신설 `pre-bash-commit-review-gate.sh` 도, 그 훅이 소비하는
+#     `lib/security-review-gate.sh` 도 DoD 의 `security_tier`/
+#     `approved_by_user` 필드를 **어디에서도 읽지 않는다**(grep 으로
+#     확인 가능 — 두 파일 어디에도 `security_tier` 문자열이 없다).
 #
-# Block-point reference (pre-bash-test-commit-gate.sh):
-#   [P5]  codex review stamp missing   — never skipped
-#   [P6]  security review stamp missing — skipped only for light+approved
+# 그래서 이 스위트는 "면제 성립 케이스가 신 훅에서 통과하는가"를
+# 재작성하는 대신, **그 반대를 고정**한다 — 구 스위트의 6개 tier 클래스
+# (light+approved / standard / light+not-approved / absent / garbage /
+# deep) 전부가, 이제는 서로 구별되지 않고 **동일하게** 판정됨을 실제
+# `pre-bash-commit-review-gate.sh` 관통으로 증명한다(죽은 입력 클래스
+# 라는 선행 결정 3 의 주장 자체를 이 스위트가 실측 재현·고정한다). 대비
+# 케이스로, 신선한 legacy 표식이 있으면 tier 값과 무관하게 동일하게
+# 통과함도 고정한다 — "면제가 없어졌다"는 "더 엄격해졌다"는 뜻이지
+# "표식이 필요 없다"는 뜻이 아니었다는 것과 구별하기 위함이다.
+#
+# 대체 근거(코드 리뷰/보안 축의 "판정 입력 정밀화" 자체는 이 파일이
+# 검증하지 않는다 — 그건 v2 자신의 계약이며 아래 v2 pytest 스위트가
+# 이미 관통 검증한다):
+#   plugins/rein-core/tests/unit/test_security_digest_scope.py
+#     DigestScopeProfileLoaderTest — profile 선언 로드(strict/sensitive)
+#   plugins/rein-core/tests/migration/test_authority_dual_read.py
+#     LegacySecurityReviewMarkerTest — subject-empty/unresolved 시
+#     legacy 표식이 실제로 판정을 낸다는 것의 단위 계약
+#
+# 절대 source 하지 않는다 — 항상 실제 훅 프로세스를 실행한다.
 
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=./lib/test-harness.sh
 source "$SCRIPT_DIR/lib/test-harness.sh"
 
-HOOK="pre-bash-test-commit-gate.sh"
+HOOK="pre-bash-commit-review-gate.sh"
+COMMIT_CMD='git commit -m "feat: thing"'
 
-assert_json_deny() {
-  local reason_code="$1"
-  local msg="$2"
-  assert_exit 0 "$msg: JSON deny path exits 0"
-  local decision
-  decision=$(printf '%s' "$HOOK_STDOUT" | python3 -c '
-import json,sys
-data=json.load(sys.stdin)
-print(data["hookSpecificOutput"]["permissionDecision"])
-' 2>/dev/null)
-  [ "$decision" = "deny" ] \
-    || fail "$msg: permissionDecision not \"deny\" (got: '$decision', stdout: $HOOK_STDOUT)"
-  local pdr
-  pdr=$(printf '%s' "$HOOK_STDOUT" | python3 -c '
-import json,sys
-data=json.load(sys.stdin)
-print(data["hookSpecificOutput"]["permissionDecisionReason"])
-' 2>/dev/null)
-  case "$pdr" in
-    *"$reason_code"*) ;;
-    *) fail "$msg: reason_code '$reason_code' not found in permissionDecisionReason: '$pdr'" ;;
-  esac
+# ------------------------------------------------------------
+# 헬퍼 (tests/hooks/test-pre-bash-commit-review-gate.sh 와 동일 기법의
+# 파일-로컬 사본).
+# ------------------------------------------------------------
+
+_event_payload() {
+  python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+command, cwd = sys.argv[1], sys.argv[2]
+print(json.dumps({
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": {"command": command},
+    "cwd": cwd,
+}))
+PY
+}
+
+_link_rein_package() {
+  mkdir -p "$SANDBOX/.claude"
+  ln -sfn "$REAL_PROJECT_DIR/plugins/rein-core/rein" "$SANDBOX/.claude/rein"
+}
+_link_rein_bin() {
+  mkdir -p "$SANDBOX/.claude/bin"
+  ln -sfn "$REAL_PROJECT_DIR/plugins/rein-core/bin/rein" "$SANDBOX/.claude/bin/rein"
+}
+_link_security_axis_policy() {
+  mkdir -p "$SANDBOX/.rein/policy"
+  rm -rf "$SANDBOX/.rein/policy/security-axis"
+  cp -R "$REAL_PROJECT_DIR/tests/fixtures/policy/security-axis" "$SANDBOX/.rein/policy/security-axis"
+}
+_write_authority_switched_both() {
+  mkdir -p "$SANDBOX/.rein/policy"
+  printf 'switched:\n  - code_review\n  - security_review\n' > "$SANDBOX/.rein/policy/authority.yaml"
+}
+
+_hook_stdout_permission_decision() {
+  printf '%s' "$HOOK_STDOUT" | python3 -c '
+import json
+import sys
+
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print("")
+else:
+    hso = data.get("hookSpecificOutput")
+    print(hso.get("permissionDecision", "") if isinstance(hso, dict) else "")
+' 2>/dev/null
 }
 
 assert_pass() {
@@ -59,15 +113,54 @@ assert_pass() {
   [ -z "$HOOK_STDOUT" ] || fail "$1: expected no JSON deny, got stdout: $HOOK_STDOUT"
 }
 
-# Build a DoD content string with the routing YAML populated.
-# Args: $1=security_tier value (or "absent" to omit the field),
-#       $2=approved_by_user value (true|false)
-#
-# NOTE: ## 범위 연결 is included so select_active_dod can resolve this DoD
-# as a Tier 2 candidate (most-recent DoD with ## 범위 연결). Without it
-# select_active_dod returns Tier 0 → fail-closed regardless of security_tier.
-# Real DoDs always carry ## 범위 연결 (required by pre-edit-dod-gate).
-_dod_content_with_routing() {
+assert_denied() {
+  local msg="$1"
+  local decision
+  decision=$(_hook_stdout_permission_decision)
+  [ "$decision" = "deny" ] || fail "$msg: expected a deny, got exit=$HOOK_EXIT permissionDecision='$decision' stdout=$HOOK_STDOUT"
+}
+
+# Phase 7 웨이브 3 ③-d (2026-08-24): _write_code_stamp/_write_security_
+# stamp(legacy marker 작성)는 제거됐다 — evaluator.py 의 legacy dual-read
+# 대체 계층이 완전히 삭제되어 그 표식들은 더 이상 어떤 판정에도 관여하지
+# 않는다. 6개 "여전히 차단" 클래스는 이미 (code/security 어느 쪽이든)
+# evidence 가 없으므로 이 헬퍼 제거만으로 그대로 유효하다 — 유일하게
+# ALLOW 를 요구하는 test_light_approved_label_with_valid_v2_evidence_
+# still_passes_like_any_tier 만 실제 v2 증거 발급으로 재조준한다(아래
+# _gitignore_rein_runtime/_issue_v2_evidence 헬퍼 참조).
+_gitignore_rein_runtime() {
+  cat >> "$SANDBOX/.gitignore" <<'EOF'
+/.rein/state/
+/.rein/logs/
+EOF
+}
+_issue_v2_evidence() {
+  local capability="$1" policy_dir="${2:-}"
+  local digest
+  if [ -n "$policy_dir" ]; then
+    digest=$(REIN_PROJECT_ROOT="$SANDBOX" REIN_POLICY_DIR="$policy_dir" \
+      "$SANDBOX/.claude/bin/rein" issue-evidence "$capability" --print-digest 2>/dev/null)
+  else
+    digest=$(REIN_PROJECT_ROOT="$SANDBOX" \
+      "$SANDBOX/.claude/bin/rein" issue-evidence "$capability" --print-digest 2>/dev/null)
+  fi
+  if [ -z "$digest" ]; then
+    echo "_issue_v2_evidence: empty digest for $capability" >&2
+    return 1
+  fi
+  if [ -n "$policy_dir" ]; then
+    REIN_PROJECT_ROOT="$SANDBOX" REIN_POLICY_DIR="$policy_dir" \
+      "$SANDBOX/.claude/bin/rein" issue-evidence "$capability" --verdict PASS --reviewed-digest "$digest" >/dev/null 2>&1
+  else
+    REIN_PROJECT_ROOT="$SANDBOX" \
+      "$SANDBOX/.claude/bin/rein" issue-evidence "$capability" --verdict PASS --reviewed-digest "$digest" >/dev/null 2>&1
+  fi
+}
+
+# _dod_content_with_tier — 구 스위트의 동명 헬퍼와 동일한 YAML 모양
+# (`## 라우팅 추천` 절 + `## 범위 연결`, select_active_dod 가 Tier 1
+# 로 해석하도록).
+_dod_content_with_tier() {
   local tier_val="$1"
   local approved="$2"
   if [ "$tier_val" = "absent" ]; then
@@ -110,407 +203,148 @@ DOD
   fi
 }
 
-# Seed a DoD with given routing YAML, plus the codex stamp.
-# The security stamp is intentionally NOT created — each test
-# then asserts whether it is required (deny P6) or skipped (pass).
+# _seed_real_repo_with_nonallowlisted_change — 실제 git repo + baseline +
+# strict digest scope 에서도 허용목록 밖(문서/trail/버전-only 아님)인
+# staged 변경. security_review 의 subject 가 확실히 non-empty 가 되도록
+# 한다 — subject-empty 라면 legacy dual-read 로 새고, 이 스위트가
+# 증명하려는 "tier 값 자체는 이제 무의미하다"는 논지가 subject-empty
+# 라는 다른 변수와 섞인다.
+_seed_real_repo_with_nonallowlisted_change() {
+  git -C "$SANDBOX" init -q
+  git -C "$SANDBOX" config user.email "t@example.com"
+  git -C "$SANDBOX" config user.name "t"
+  git -C "$SANDBOX" config commit.gpgsign false
+  printf 'print("baseline")\n' > "$SANDBOX/src_module.py"
+  git -C "$SANDBOX" add src_module.py
+  git -C "$SANDBOX" commit -q -m "chore: baseline"
+  printf 'print("changed logic")\n' >> "$SANDBOX/src_module.py"
+  git -C "$SANDBOX" add src_module.py
+}
+
+# _seed_fixture TIER APPROVED — 구 스위트의 동명 헬퍼와 동일한 의도:
+# 주어진 tier 값의 DoD + Tier1 .active-dod 마커 + 신선한 code 표식(PASS)
+# + security 표식은 없음. 신 훅은 이 tier 값을 전혀 읽지 않으므로 6개
+# 클래스 전부가 동일하게 판정돼야 한다.
 _seed_fixture() {
   local tier_val="$1"
   local approved="$2"
   local content
-  content="$(_dod_content_with_routing "$tier_val" "$approved")"
-  seed_dod "dod-2026-05-19-security-tier-test.md" "$content"
-  # B1 (v1.3.4): write the explicit .active-dod marker so select_active_dod
-  # resolves this DoD as Tier 1 (blocking authority). The security-stamp skip
-  # honours ONLY Tier 1; the marker-less Tier 2 path is covered separately by
-  # test_l_tier2_light_still_requires_security_stamp. A real approved DoD
-  # always carries this marker (auto-written by post-edit-dod-routing-check).
-  printf 'path=trail/dod/dod-2026-05-19-security-tier-test.md\n' \
+  content="$(_dod_content_with_tier "$tier_val" "$approved")"
+  seed_dod "dod-2026-08-23-security-tier-test.md" "$content"
+  printf 'path=trail/dod/dod-2026-08-23-security-tier-test.md\n' \
     > "$SANDBOX/trail/dod/.active-dod"
-  # Codex stamp always present — we're only testing security tier behavior.
-  # M3 (spec 2026-06-16): an empty `touch` code stamp is now fail-closed, so we
-  # write a content-rich PASS stamp; the gate then reaches the P6/M2 security
-  # logic under test rather than blocking at the code-stamp dual-read.
-  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
-reviewed_at: 2026-06-16T01:00:00Z
-reviewer: codex
-diff_base: N/A
-verdict: PASS
-cycle: 2026-05-19-security-tier-test
-scope: wrapper-generated
-STAMP
-  # Deliberately NO .security-reviewed
+  # 의도적으로 evidence 를 아무 축에도 발급하지 않는다(6클래스 전부
+  # "여전히 차단"이 기대값이므로 legacy stamp 제거만으로 그대로 유효).
 }
 
-COMMIT_INPUT='{"tool_input":{"command":"git commit -m \"feat: thing\""},"tool_result":{}}'
+# _run_tier_class_expect_block TIER APPROVED LABEL — 6클래스 공통 로직.
+_run_tier_class_expect_block() {
+  local tier_val="$1" approved="$2" label="$3"
+  _seed_real_repo_with_nonallowlisted_change
+  _link_rein_package
+  _link_rein_bin
+  _link_security_axis_policy
+  _write_authority_switched_both
+  _seed_fixture "$tier_val" "$approved"
+  local payload
+  payload=$(_event_payload "$COMMIT_CMD" "$SANDBOX")
+  run_hook "$HOOK" "$payload"
+  assert_denied "$label: security_tier no longer read at all — must block exactly like any other DoD without a security stamp"
+}
 
 # ============================================================
-# Case (a): security_tier: light + approved_by_user: true
-#   → git commit passes WITHOUT .security-reviewed stamp.
-#   → .codex-reviewed is still required (present in this fixture).
+# 6클래스 전수 — 전부 동일하게 BLOCK (선행 결정 3 의 "판정 변경 입력
+# 0건" 주장을 실측으로 고정)
 # ============================================================
-test_a_light_approved_passes_without_security_stamp() {
+
+test_class_light_approved_no_longer_exempts() {
+  _run_tier_class_expect_block "light" "true" "(class: light+approved)"
+}
+test_class_standard_still_blocks() {
+  _run_tier_class_expect_block "standard" "true" "(class: standard)"
+}
+test_class_light_not_approved_still_blocks() {
+  _run_tier_class_expect_block "light" "false" "(class: light+not-approved)"
+}
+test_class_absent_field_still_blocks() {
+  _run_tier_class_expect_block "absent" "true" "(class: security_tier field absent)"
+}
+test_class_garbage_value_still_blocks() {
+  _run_tier_class_expect_block "INVALID_GARBAGE_VALUE_123" "true" "(class: garbage/malformed value)"
+}
+test_class_deep_still_blocks() {
+  _run_tier_class_expect_block "deep" "true" "(class: deep)"
+}
+
+# ============================================================
+# 대비 케이스 — tier 무관, 실제 v2 증거가 있으면 통과(엄격해진 것이지
+# "기록 자체가 불필요"가 된 것은 아님을 구별).
+#
+# Phase 7 웨이브 3 ③-d 재조준: legacy stamp 는 더 이상 판정에 관여하지
+# 않으므로 ALLOW 는 실제 v2 증거 발급으로만 만들 수 있다. 발급 호출
+# 자체도 (fake evidence 발급 시 부산물로) untracked 파일을 만들 수 있어
+# _gitignore_rein_runtime 이 필요하고, .claude/.rein/policy 같은 test-infra
+# 를 baseline 커밋에 포함시켜야 code_review/security_review digest 가
+# src_module.py 변경 하나만을 정확히 가리킨다 — 그래서 여기서는 공용
+# _seed_real_repo_with_nonallowlisted_change 대신 직접 순서를 제어한다:
+# 변경을 stage 했다가 잠시 unstage 하고 infra 를 baseline 커밋한 뒤 다시
+# stage 한다.
+test_light_approved_label_with_valid_v2_evidence_still_passes_like_any_tier() {
+  _seed_real_repo_with_nonallowlisted_change
+  _link_rein_package
+  _link_rein_bin
+  _link_security_axis_policy
+  _write_authority_switched_both
+  # 굳이 "light+approved" 라벨을 쓴다 — 구 스위트에서 면제를 성립시키던
+  # 바로 그 값이, 이제는 v2 증거 유무 앞에서 다른 어떤 tier 값과도
+  # 구별되지 않는다는 것을 보이기 위함.
   _seed_fixture "light" "true"
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_pass "RT-1(a) security_tier:light + approved:true → commit should pass without security stamp"
+  _gitignore_rein_runtime
+  # src_module.py 의 staged 변경(검증 대상)은 baseline 커밋에서 제외한다
+  # — 먼저 unstage 한 뒤 그 파일만 빼고 나머지(test-infra)를 stage+commit,
+  # 그 다음 다시 stage 한다. `git checkout --`(destructive) 는 쓰지
+  # 않는다 — pre-bash-safety-guard 의 DESTRUCTIVE_GIT_CONFIRM 대상이라
+  # 사람 확인 없이는 이 스위트 자체가 막힌다.
+  ( cd "$SANDBOX" \
+    && git reset HEAD -- src_module.py >/dev/null \
+    && git add -A -- ':!src_module.py' \
+    && git commit -q -m "test-infra baseline" \
+    && git add src_module.py )
+  _issue_v2_evidence "code_review" \
+    || fail "code_review evidence issuance failed"
+  _issue_v2_evidence "security_review" "$SANDBOX/.rein/policy/security-axis" \
+    || fail "security_review evidence issuance failed"
+  local payload
+  payload=$(_event_payload "$COMMIT_CMD" "$SANDBOX")
+  run_hook "$HOOK" "$payload"
+  assert_pass "light+approved label + real v2 evidence (both axes) → passes exactly like standard/deep would (label carries no special weight anymore)"
 }
 
 # ============================================================
-# Case (b): security_tier: standard + approved_by_user: true
-#   → .security-reviewed still required (P6 deny).
+# 정적 확인 — security_tier/approved_by_user 는 신 훅·lib 어디에도 없다.
 # ============================================================
-test_b_standard_still_requires_security_stamp() {
-  _seed_fixture "standard" "true"
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_json_deny "SECURITY_STAMP_MISSING" \
-    "RT-1(b) security_tier:standard → P6 security stamp should still be required"
+
+test_static_security_tier_field_not_referenced_anywhere() {
+  local hits
+  hits=$(grep -rn "security_tier" \
+    "$REAL_PROJECT_DIR/plugins/rein-core/hooks/pre-bash-commit-review-gate.sh" \
+    "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/security-review-gate.sh" \
+    "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/code-review-gate.sh" \
+    2>/dev/null || true)
+  [ -z "$hits" ] || fail "security_tier must not be referenced anywhere in the new review-gate hook or its axis libs (RT-1 dead field): $hits"
 }
 
-# ============================================================
-# Case (c): security_tier: light + approved_by_user: false
-#   → fail-closed: .security-reviewed still required (P6 deny).
-# ============================================================
-test_c_light_not_approved_still_requires_security_stamp() {
-  _seed_fixture "light" "false"
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_json_deny "SECURITY_STAMP_MISSING" \
-    "RT-1(c) security_tier:light but approved:false → fail-closed, P6 still required"
-}
+# =================================================================
+# RUN ALL TESTS
+# =================================================================
 
-# ============================================================
-# Case (d): security_tier field absent
-#   → backward-compat: .security-reviewed still required (P6 deny).
-# ============================================================
-test_d_no_security_tier_field_requires_security_stamp() {
-  _seed_fixture "absent" "true"
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_json_deny "SECURITY_STAMP_MISSING" \
-    "RT-1(d) no security_tier field → backward-compat, P6 still required"
-}
+run_test test_class_light_approved_no_longer_exempts "$HOOK"
+run_test test_class_standard_still_blocks "$HOOK"
+run_test test_class_light_not_approved_still_blocks "$HOOK"
+run_test test_class_absent_field_still_blocks "$HOOK"
+run_test test_class_garbage_value_still_blocks "$HOOK"
+run_test test_class_deep_still_blocks "$HOOK"
+run_test test_light_approved_label_with_valid_v2_evidence_still_passes_like_any_tier "$HOOK"
+run_test test_static_security_tier_field_not_referenced_anywhere "$HOOK"
 
-# ============================================================
-# Case (e): security_tier: <garbage value>
-#   → fail-closed: .security-reviewed still required (P6 deny).
-# ============================================================
-test_e_garbage_security_tier_fails_closed() {
-  _seed_fixture "INVALID_GARBAGE_VALUE_123" "true"
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_json_deny "SECURITY_STAMP_MISSING" \
-    "RT-1(e) malformed/garbage security_tier → fail-closed, P6 still required"
-}
-
-# ============================================================
-# Case (f): security_tier: deep + approved_by_user: true
-#   → .security-reviewed still required (P6 deny).
-# ============================================================
-test_f_deep_still_requires_security_stamp() {
-  _seed_fixture "deep" "true"
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_json_deny "SECURITY_STAMP_MISSING" \
-    "RT-1(f) security_tier:deep → P6 security stamp should still be required"
-}
-
-# ============================================================
-# Case (g): security_tier: light + approved_by_user: true + BOTH stamps present
-#   → should also pass (light+approved is a relaxation, not a break when stamp exists).
-# ============================================================
-test_g_light_approved_with_security_stamp_also_passes() {
-  _seed_fixture "light" "true"
-  touch "$SANDBOX/trail/dod/.security-reviewed"
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_pass "RT-1(g) light+approved with security stamp present → commit should pass"
-}
-
-# ============================================================
-# Case (h): security_tier: light + approved_by_user: true — P5 (.codex-reviewed)
-#   is STILL required even when security stamp is skipped.
-# ============================================================
-test_h_light_approved_still_requires_codex_stamp() {
-  local content
-  content="$(_dod_content_with_routing "light" "true")"
-  seed_dod "dod-2026-05-19-security-tier-test.md" "$content"
-  # Intentionally NO .codex-reviewed and NO .security-reviewed
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_json_deny "CODEX_STAMP_MISSING" \
-    "RT-1(h) light+approved but no codex stamp → P5 still required (codex stamp is never skipped)"
-}
-
-# ============================================================
-# Case (i): no DoD files at all (DoD_EXISTS=false)
-#   → gate skips all stamp checks, commit passes.
-# ============================================================
-test_i_no_dod_skips_all_stamp_checks() {
-  # No seed_dod call — trail/dod/ is empty.
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  # Commit msg format is valid, stamps not checked → should pass
-  assert_pass "RT-1(i) no DoD present → stamp checks skipped, commit passes"
-}
-
-# ============================================================
-# Case (j): STALE-DOD BYPASS REGRESSION (codex Finding 2 / RT-1 fail-open)
-#
-# Setup: TWO DoDs —
-#   dod-2026-05-19-aa-standard.md  → security_tier: standard
-#     (has ## 범위 연결, so it qualifies as Tier 1 target)
-#   dod-2026-05-19-zz-light.md     → security_tier: light + approved_by_user: true
-#     (alphabetically LATER — the buggy glob loop "last-match-wins" selected this)
-#
-# A trail/dod/.active-dod marker points at the STANDARD DoD (Tier 1).
-#
-# With .codex-reviewed present and .security-reviewed absent:
-#   Expected (post-fix): hook resolves the STANDARD DoD via select_active_dod
-#                        → BLOCKED with SECURITY_STAMP_MISSING.
-#   Pre-fix (buggy): glob loop last-match picks zz-light → BYPASS (fail-open).
-# ============================================================
-test_j_stale_dod_bypass_regression() {
-  # DoD 1: standard — the authoritative active one, pointed at by .active-dod.
-  # Must carry ## 범위 연결 so select_active_dod Tier 1 resolves it.
-  local std_content
-  std_content=$(cat <<'DOD'
-# DoD standard (active)
-
-## 라우팅 추천
-
-agent: rein:feature-builder
-skills:
-  - rein:codex-review
-mcps: []
-security_tier: standard
-rationale:
-  - test fixture — stale-dod bypass regression
-approved_by_user: true
-
-## 범위 연결
-plan ref: docs/plans/regression-test.md
-covers: [regression-test-id]
-DOD
-  )
-  seed_dod "dod-2026-05-19-aa-standard.md" "$std_content"
-
-  # DoD 2: light+approved, alphabetically LATER (zz > aa).
-  # The old glob loop would pick this one as "last match" and skip P6.
-  local light_content
-  light_content=$(cat <<'DOD'
-# DoD light (stale, alphabetically later)
-
-## 라우팅 추천
-
-agent: rein:feature-builder
-skills:
-  - rein:codex-review
-mcps: []
-security_tier: light
-rationale:
-  - test fixture — stale-dod bypass regression
-approved_by_user: true
-DOD
-  )
-  seed_dod "dod-2026-05-19-zz-light.md" "$light_content"
-
-  # .active-dod marker → Tier 1: points at the STANDARD DoD.
-  printf 'path=trail/dod/dod-2026-05-19-aa-standard.md\n' \
-    > "$SANDBOX/trail/dod/.active-dod"
-
-  # .codex-reviewed present (content-rich PASS) — P5/M3 satisfied so the gate
-  # reaches P6 (M3 now fail-closes an empty `touch` stamp).
-  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
-reviewed_at: 2026-06-16T01:00:00Z
-reviewer: codex
-diff_base: N/A
-verdict: PASS
-cycle: regression-test
-scope: wrapper-generated
-STAMP
-  # NO .security-reviewed — P6 must block.
-
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_json_deny "SECURITY_STAMP_MISSING" \
-    "RT-1(j) stale-dod bypass: active=standard, stale-later=light → P6 must BLOCK (not bypass via glob)"
-}
-
-# ============================================================
-# Case (k): SECTION-SCOPE REGRESSION (codex R2 HIGH / RT-1 fail-open)
-#
-# security_tier / approved_by_user must be read ONLY from the
-# `## 라우팅 추천` section. A DoD with `security_tier: light` +
-# `approved_by_user: true` placed OUTSIDE that section (here: as plain
-# lines before it) must NOT grant the skip — the routing section itself
-# declares `security_tier: standard`.
-#
-#   Expected (post-fix): awk scopes extraction to `## 라우팅 추천`
-#                        → standard → BLOCKED with SECURITY_STAMP_MISSING.
-#   Pre-fix (buggy): global `grep -m1` picks the first out-of-section
-#                    `security_tier: light` → BYPASS (fail-open).
-# ============================================================
-test_k_out_of_section_tier_does_not_count() {
-  local content
-  content=$(cat <<'DOD'
-# DoD section-scope regression
-
-이 줄들은 ## 라우팅 추천 섹션 밖이다 — 게이트가 무시해야 한다:
-security_tier: light
-approved_by_user: true
-
-## 라우팅 추천
-
-agent: rein:feature-builder
-skills:
-  - rein:codex-review
-mcps: []
-security_tier: standard
-rationale:
-  - test fixture — section-scope regression
-approved_by_user: true
-
-## 범위 연결
-plan ref: docs/plans/section-scope-test.md
-covers: [section-scope-id]
-DOD
-  )
-  seed_dod "dod-2026-05-19-section-scope-test.md" "$content"
-  printf 'path=trail/dod/dod-2026-05-19-section-scope-test.md\n' \
-    > "$SANDBOX/trail/dod/.active-dod"
-  # Content-rich PASS code stamp so the gate reaches P6 (M3 fail-closes empty).
-  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
-reviewed_at: 2026-06-16T01:00:00Z
-reviewer: codex
-diff_base: N/A
-verdict: PASS
-cycle: section-scope-test
-scope: wrapper-generated
-STAMP
-  # NO .security-reviewed — routing section is standard → P6 must block.
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_json_deny "SECURITY_STAMP_MISSING" \
-    "RT-1(k) out-of-section security_tier:light must NOT count — routing section is standard → P6 must BLOCK"
-}
-
-# ============================================================
-# Case (l): B1 REGRESSION (v1.3.4) — Tier 2 (no .active-dod marker)
-#   light+approved must STILL require the security stamp.
-#
-# A single light+approved DoD with ## 범위 연결 but NO .active-dod marker
-# resolves via select_active_dod Tier 2 (advisory mtime-latest fallback).
-# Tier 2 is non-blocking authority and must NOT authorise skipping the
-# security stamp (codex B1 finding).
-#
-#   Expected (post-B1): Tier 2 → fail-closed → DENY SECURITY_STAMP_MISSING.
-#   Pre-B1 (buggy): Tier 2 accepted → P6 skipped → PASS (fail-open).
-# ============================================================
-test_l_tier2_light_still_requires_security_stamp() {
-  local content
-  content="$(_dod_content_with_routing "light" "true")"
-  seed_dod "dod-2026-05-19-tier2-light-test.md" "$content"
-  # Content-rich PASS code stamp so the gate reaches the P6/M2 logic (M3 now
-  # fail-closes an empty `touch` stamp).
-  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
-reviewed_at: 2026-06-16T01:00:00Z
-reviewer: codex
-diff_base: N/A
-verdict: PASS
-cycle: 2026-05-19-tier2-light-test
-scope: wrapper-generated
-STAMP
-  # Deliberately NO .active-dod marker → Tier 2 resolution.
-  # Deliberately NO .security-reviewed.
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_json_deny "SECURITY_STAMP_MISSING" \
-    "B1(l) Tier 2 (no marker) light+approved → P6 must still BLOCK (Tier 2 is advisory, not blocking authority)"
-}
-
-# ============================================================
-# Case (m): M2 INTERACTION (docs/specs/2026-06-16-review-stamp-freshness.md §4.4)
-#   light-tier + approved + security stamp ABSENT → M2 freshness/verdict compare
-#   is SKIPPED entirely (the exemption means "no security stamp is normal").
-#   This already passes via case (a), but (m) asserts it with a content-rich
-#   PASS code stamp present (so the only thing that could fire is M2) — proving
-#   M2 does not run when the exemption holds.
-# ============================================================
-test_m_light_approved_skips_m2_compare() {
-  _seed_fixture "light" "true"
-  # Code stamp content-rich + fresh + PASS. If M2 ran with the security stamp
-  # absent it would have nothing to compare → must SKIP, not fail-closed.
-  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
-reviewed_at: 2026-06-16T01:00:00Z
-reviewer: codex
-diff_base: N/A
-verdict: PASS
-cycle: 2026-05-19-security-tier-test
-scope: wrapper-generated
-STAMP
-  # Deliberately NO .security-reviewed.
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_pass "RT-1(m) light+approved + no security stamp → M2 compare skipped, commit passes"
-}
-
-# ============================================================
-# Case (n): M2 INTERACTION — light-tier + approved + a STALE security stamp
-#   (security reviewed OLDER than code reviewed_at). The exemption must STILL
-#   pass: when light+approved holds, M2 freshness compare is not applied even
-#   if a (stale) security stamp happens to exist.
-# ============================================================
-test_n_light_approved_stale_security_stamp_still_passes() {
-  _seed_fixture "light" "true"
-  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
-reviewed_at: 2026-06-16T05:00:00Z
-reviewer: codex
-diff_base: N/A
-verdict: PASS
-cycle: 2026-05-19-security-tier-test
-scope: wrapper-generated
-STAMP
-  # Security stamp present but STALE (older) + different cycle — would fail M2.
-  cat > "$SANDBOX/trail/dod/.security-reviewed" <<'STAMP'
-reviewer=security-reviewer
-reviewed=2026-06-16T01:00:00Z
-security_level=standard
-cycle=some-other-cycle
-verdict=PASS
-mechanism=llm-security-review
-STAMP
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_pass "RT-1(n) light+approved + stale security stamp → exemption skips M2, commit passes"
-}
-
-# ============================================================
-# Case (o): M2 INTERACTION — standard-tier + security stamp ABSENT → the
-#   existing P6 SECURITY_STAMP_MISSING block is preserved (M2 only changes the
-#   stamp-PRESENT path; the absent path stays the legacy P6 deny). This overlaps
-#   case (b) but pins the exact reason code under the M2 design.
-# ============================================================
-test_o_standard_absent_security_stamp_still_p6_block() {
-  _seed_fixture "standard" "true"
-  # Content-rich PASS code stamp; security stamp ABSENT.
-  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
-reviewed_at: 2026-06-16T01:00:00Z
-reviewer: codex
-diff_base: N/A
-verdict: PASS
-cycle: 2026-05-19-security-tier-test
-scope: wrapper-generated
-STAMP
-  run_hook "$HOOK" "$COMMIT_INPUT"
-  assert_json_deny "SECURITY_STAMP_MISSING" \
-    "RT-1(o) standard-tier + security stamp absent → P6 SECURITY_STAMP_MISSING preserved"
-}
-
-main() {
-  run_test test_a_light_approved_passes_without_security_stamp     "$HOOK"
-  run_test test_b_standard_still_requires_security_stamp           "$HOOK"
-  run_test test_c_light_not_approved_still_requires_security_stamp "$HOOK"
-  run_test test_d_no_security_tier_field_requires_security_stamp   "$HOOK"
-  run_test test_e_garbage_security_tier_fails_closed               "$HOOK"
-  run_test test_f_deep_still_requires_security_stamp               "$HOOK"
-  run_test test_g_light_approved_with_security_stamp_also_passes   "$HOOK"
-  run_test test_h_light_approved_still_requires_codex_stamp        "$HOOK"
-  run_test test_i_no_dod_skips_all_stamp_checks                    "$HOOK"
-  run_test test_j_stale_dod_bypass_regression                      "$HOOK"
-  run_test test_k_out_of_section_tier_does_not_count               "$HOOK"
-  run_test test_l_tier2_light_still_requires_security_stamp        "$HOOK"
-  # M2 interaction (docs/specs/2026-06-16-review-stamp-freshness.md §4.4)
-  run_test test_m_light_approved_skips_m2_compare                  "$HOOK"
-  run_test test_n_light_approved_stale_security_stamp_still_passes "$HOOK"
-  run_test test_o_standard_absent_security_stamp_still_p6_block    "$HOOK"
-  summary
-}
-
-main
+summary

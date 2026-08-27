@@ -1,8 +1,10 @@
 #!/bin/bash
 # Hook: PostToolUse(Write|Edit|MultiEdit)
 # plan 파일 편집 시 dirty path 를 trail/dod/.plan-coverage-dirty 에 append.
-# 실제 validator 실행은 pre-bash-test-commit-gate.sh 의 flush 가 commit/test
-# 시점에 수행 (Area B X3.B.1, design ref:
+# 실제 validator 실행은 pre-bash-commit-discipline-gate.sh(Phase 7 웨이브 3
+# ③-c 신설 — 구 pre-bash-test-commit-gate.sh, ③-c 삭제 완료, 의
+# flush_plan_coverage_dirty() 후속)의 flush 가 commit/test 시점에 수행
+# (Area B X3.B.1, design ref:
 # docs/specs/2026-05-20-area-b-post-edit-deferral.md §5.1 + §7 Scope ID 1).
 #
 # Edit-time cost = path 분류 + append 1줄. validator subprocess 호출 0.

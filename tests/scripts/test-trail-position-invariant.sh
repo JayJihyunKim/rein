@@ -81,12 +81,21 @@ ok "B: resolver rejects 'trail' as a state name (rc=$B_RC)"
 
 # ---------------------------------------------------------------------------
 # C: hooks reference trail/ at repo root only — sample literal forms used
-#    in pre-edit-dod-gate.sh + select-active-dod.sh stay relative.
+#    in pre-edit-discipline-gate.sh / pre-edit-task-gate.sh + select-active-
+#    dod.sh stay relative.
+#
+# pre-edit-dod-gate.sh was retired (Phase 7 웨이브 3 ③-b, edit-gate rotation,
+# 2026-08-21) and replaced by pre-edit-discipline-gate.sh (governance/
+# incident-review/spec-review/routing — most of the old trail/ touch sites)
+# + pre-edit-task-gate.sh (active-task axis — also touches trail/incidents/
+# blocks.jsonl via its own log_block()). Both sample here.
 # ---------------------------------------------------------------------------
 sample_files=(
-  "$PROJECT_DIR/plugins/rein-core/hooks/pre-edit-dod-gate.sh"
+  "$PROJECT_DIR/plugins/rein-core/hooks/pre-edit-discipline-gate.sh"
+  "$PROJECT_DIR/plugins/rein-core/hooks/pre-edit-task-gate.sh"
   "$PROJECT_DIR/plugins/rein-core/hooks/lib/select-active-dod.sh"
-  "$PROJECT_DIR/.claude/hooks/pre-edit-dod-gate.sh"
+  "$PROJECT_DIR/.claude/hooks/pre-edit-discipline-gate.sh"
+  "$PROJECT_DIR/.claude/hooks/pre-edit-task-gate.sh"
   "$PROJECT_DIR/.claude/hooks/lib/select-active-dod.sh"
 )
 for f in "${sample_files[@]}"; do

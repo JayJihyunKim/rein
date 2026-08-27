@@ -10,7 +10,7 @@
 #
 # Scope 매핑:
 #   (a) SKILL.md 존재 + frontmatter name:/description:
-#   (b) 선택 흐름 필수 요소 (내장 2종 + 커스텀 경로 + 끄기 + AskUserQuestion + persona.yaml)
+#   (b) 선택 흐름 필수 요소 (내장 3종 + 커스텀 경로 + 끄기 + AskUserQuestion + persona.yaml)
 #   (c) 생성 흐름 7문항 키워드 + 표현 수위 3단계 라벨
 #   (d) lint 참조 + 통과 시에만 저장 + CLAUDE_PLUGIN_ROOT 경로 해석
 #   (e) 내장 충돌 사전 고지
@@ -66,6 +66,7 @@ assert_grep '^description:[[:space:]]*[^[:space:]]' "a3: frontmatter description
 echo "== (b) 선택 흐름 필수 요소 =="
 assert_grep_fixed 'boss-ace' "b1: 내장 boss-ace"
 assert_grep_fixed 'jennie' "b2: 내장 jennie"
+assert_grep_fixed 'choi-haengbae' "b3: 내장 choi-haengbae"
 assert_grep_fixed '.rein/policy/persona' "b3: 커스텀 프리셋 경로"
 assert_grep_fixed '끄기' "b4: 끄기(중립) 옵션"
 assert_grep_fixed 'AskUserQuestion' "b5: AskUserQuestion 사용"

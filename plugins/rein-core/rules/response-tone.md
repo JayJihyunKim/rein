@@ -4,7 +4,7 @@
 
 사용자에게 보이는 모든 답변에 다음 4 항목을 적용한다.
 
-1. **내부 식별자 사용 금지** — `stamp`, `verdict`, `handoff`, `.codex-reviewed`, `.security-reviewed`, `.review-pending`, `approved_by_user`, `security_tier`, 파일 경로 해시, Scope ID (G3, SR-1 등), PLN-1·AG-2 같은 단축 코드를 채팅 본문에 노출하지 않는다. 아래 `## 번역 테이블` 로 평문화한다. 변경한 파일 경로·명령어·코드 블록은 사용자가 검증·복사할 수 있어야 하므로 원형 보존.
+1. **내부 식별자 사용 금지** — `verdict`, `handoff`, `digest`, `evidence`, `.spec-reviews/*.reviewed`, `.review-rounds`, `approved_by_user`, `security_tier`, 파일 경로 해시, Scope ID (G3, SR-1 등), PLN-1·AG-2 같은 단축 코드를 채팅 본문에 노출하지 않는다. 아래 `## 번역 테이블` 로 평문화한다. 변경한 파일 경로·명령어·코드 블록은 사용자가 검증·복사할 수 있어야 하므로 원형 보존.
 2. **보고 문장 구조** — 완료·진행 보고는 "방금 한 것 → 결과 → 다음 단계" 흐름. 결과 1-2문장 + 다음 단계 1문장이 기본 길이.
 3. **질문 형식** — 사용자 확인을 받을 때 내부 식별자 (`approved_by_user`, `security_tier` 등) 를 질문 본문에 넣지 않는다. "이 조합으로 진행할까요?" / "보안 검토를 간소화할까요?" 같이 평문.
 4. **trail 파일 인용** — `MEMORY.md` / `trail/index.md` / `trail/inbox/` / `trail/dod/` 본문을 그대로 붙여넣지 않는다 — 평문 재진술.
@@ -15,10 +15,10 @@
 
 | 내부 표현 | 사용자 언어 |
 |---|---|
-| stamp 생성됨 | 검토 완료 표시를 남겼습니다 |
-| codex-reviewed stamp | 코드 리뷰 완료 표시 |
-| security-reviewed stamp | 보안 검토 완료 표시 |
-| review-pending stamp | 검토 대기 표시 |
+| v2 증거 발급됨 | 검토 완료 표시를 남겼습니다 |
+| code_review v2 증거 | 코드 리뷰 완료 표시 |
+| security_review v2 증거 | 보안 검토 완료 표시 |
+| 발급 미시도 / 발급 대기 | 검토 대기 표시 |
 | PASS / NEEDS-FIX / REJECT | 통과 / 수정 필요 / 반려 |
 | handoff to subagent | 다음 단계로 넘어가겠습니다 |
 | DoD 작성 | 작업 기준서를 작성합니다 |
@@ -26,8 +26,8 @@
 | trail/inbox/ | 작업 완료 기록 |
 | approved_by_user: true | 사용자 승인 완료 |
 | security_tier: light / standard / deep | 보안 검토 강도: 가벼움 / 표준 / 깊음 |
-| pre-edit-dod-gate / pre-bash-test-commit-gate | 편집 차단 / 커밋 차단 |
-| .pending → .reviewed | 검토 대기 → 검토 완료 |
+| pre-edit-discipline-gate / pre-bash-commit-review-gate | 편집 차단 / 커밋 차단 |
+| .spec-reviews/*.pending → *.reviewed | 검토 대기 → 검토 완료 |
 
 ## 보고 문장 구조
 
@@ -48,7 +48,7 @@
 - 금지: "라우팅 추천에서 approved_by_user 를 true 로 설정할까요?"
 - 권장: "이 조합으로 진행할까요?"
 
-- 금지: "security_tier 를 light 로 내리고 .security-reviewed stamp 면제할까요?"
+- 금지: "security_tier 를 light 로 내리고 security_review v2 증거 발급을 면제할까요?"
 - 권장: "보안 검토를 간소화할까요? (auth/crypto 변경 없는 경우만)"
 
 ## trail 파일 인용
@@ -71,7 +71,7 @@
 
 - **적용 대상**: 사용자에게 보이는 텍스트 (chat 본문).
 - **적용 제외**: tool call payload, hook envelope, DoD/inbox/index 같은 trail 파일의 본문 (운영 기록이라 원형 보존).
-- **원형 보존**: 변경한 파일 경로·명령어·코드 블록·외부 식별자 (라이브러리 이름, 깃 commit hash 등) 는 사용자가 검증·복사할 수 있어야 하므로 그대로 둔다. **marker file 경로 자체** (`trail/dod/.codex-reviewed`, `.review-pending`, `.security-reviewed`) 도 hook 가 작동에 필요한 식별자라 본문에서 보존하되, 의미는 평문으로 병기한다 (예: "코드 리뷰 완료 표시 파일 (`trail/dod/.codex-reviewed`)" 형태).
+- **원형 보존**: 변경한 파일 경로·명령어·코드 블록·외부 식별자 (라이브러리 이름, 깃 commit hash 등) 는 사용자가 검증·복사할 수 있어야 하므로 그대로 둔다. **marker file 경로 자체** (존속하는 `trail/dod/.spec-reviews/*.reviewed`, `trail/dod/.review-rounds/*`, `trail/dod/.incident-review-pending` 등 — legacy `.codex-reviewed`/`.review-pending`/`.security-reviewed` 3종은 Phase 7 웨이브 3 ③-d 로 제거됨) 도 hook 가 작동에 필요한 식별자라 본문에서 보존하되, 의미는 평문으로 병기한다 (예: "설계 검토 완료 표시 파일 (`trail/dod/.spec-reviews/<hash>.reviewed`)" 형태).
 - **답변 길이**: 결과 1-2문장 + 다음 단계 1문장이 기본. 헤더·표는 정보 밀도가 정말 필요할 때만.
 
 ## Output Language

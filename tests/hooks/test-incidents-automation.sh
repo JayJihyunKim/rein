@@ -329,7 +329,13 @@ test_session_start_removes_when_zero() {
 }
 
 # ---------------------------------------------------------------------------
-# pre-edit-dod-gate incident gate
+# pre-edit-discipline-gate incident gate
+#
+# Phase 7 웨이브 3 ③-b (편집 게이트 교대): incident-review 축은
+# pre-edit-dod-gate.sh (삭제됨) 에서 pre-edit-discipline-gate.sh 로 이관됐다.
+# 이 축은 활성작업(active-task) 판정과 무관 — incident-review-gate 는 dod-found
+# 보다도 앞서 실행되어 활성 DoD 존재 여부와 관계없이 판정하므로, 기계적으로
+# 훅 이름만 교체한다.
 # ---------------------------------------------------------------------------
 
 setup_gate_in_sandbox() {
@@ -355,7 +361,7 @@ run_gate() {
   tmp_stdout=$(mktemp)
   tmp_stderr=$(mktemp)
   printf '%s' "$json_input" | REIN_PROJECT_DIR_OVERRIDE="$SANDBOX" \
-    bash "$SANDBOX/.claude/hooks/pre-edit-dod-gate.sh" \
+    bash "$SANDBOX/.claude/hooks/pre-edit-discipline-gate.sh" \
     > "$tmp_stdout" 2> "$tmp_stderr"
   HOOK_EXIT=$?
   HOOK_STDOUT=$(cat "$tmp_stdout")
@@ -631,11 +637,11 @@ main() {
 
   # Gate tests
   run_test test_gate_blocks_when_pending \
-    "pre-edit-dod-gate.sh" "rein-aggregate-incidents.py"
+    "pre-edit-discipline-gate.sh" "rein-aggregate-incidents.py"
   run_test test_gate_self_heal_when_zero \
-    "pre-edit-dod-gate.sh" "rein-aggregate-incidents.py"
+    "pre-edit-discipline-gate.sh" "rein-aggregate-incidents.py"
   run_test test_gate_bypass_consumes \
-    "pre-edit-dod-gate.sh" "rein-aggregate-incidents.py"
+    "pre-edit-discipline-gate.sh" "rein-aggregate-incidents.py"
 
   # Watermark
   run_test test_watermark_prevents_double_processing "rein-aggregate-incidents.py"

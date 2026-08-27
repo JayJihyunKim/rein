@@ -1,7 +1,19 @@
 #!/bin/bash
 # tests/hooks/test-commit-msg.sh
 #
-# Regression tests for pre-bash-test-commit-gate.sh commit message format validation.
+# Regression tests for pre-bash-commit-discipline-gate.sh commit message
+# format validation.
+#
+# Phase 7 웨이브 3 ③-c 재배치 (2026-08-23): 구 단일 pre-bash-test-commit-
+# gate.sh 는 삭제됐고 두 신설 훅(pre-bash-commit-discipline-gate.sh +
+# pre-bash-commit-review-gate.sh)으로 교대됐다. 커밋 메시지 포맷 검증
+# ([P7]/[I4]/[I5])은 v1 존속 규율 축이라 discipline-gate 가 계승했다 —
+# 이 파일의 대상 훅만 바뀌고 단언 로직은 그대로다 (샌드박스 복사 목록은
+# test-harness.sh 의 sandbox_setup 이 lib/ 전체를 이미 복사하므로 별도
+# 조정 불필요 — discipline-gate 의 실제 소싱 목록: portable/python-runner/
+# project-dir/select-active-dod(soft)/plugin-script-path(soft)/
+# bash-guard-infra/git-subcommand-model/shadow-capture(soft)/
+# extract-commit-msg.py, 전부 그 전체 복사 범위 안).
 #
 # Background: v0.4.1 hotfix surfaced three bugs in the prior sed/grep-based
 # extractor:
@@ -11,9 +23,9 @@
 #      bypassed validation because sed is line-oriented.
 #   3) Conventional commits scope notation `fix(auth): foo` was rejected.
 #
-# This suite drives pre-bash-test-commit-gate.sh with crafted JSON payloads and
-# verifies the expected allow/block outcome and the extracted message
-# (indirectly via the block message content).
+# This suite drives pre-bash-commit-discipline-gate.sh with crafted JSON
+# payloads and verifies the expected allow/block outcome and the extracted
+# message (indirectly via the block message content).
 #
 # Wave 2 Phase 2 note: P7 (commit message format violation) was converted
 # from exit 2 + stderr to exit 0 + JSON deny (reason_code COMMIT_MSG_FORMAT).
@@ -24,7 +36,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/test-harness.sh"
 
-HOOK=pre-bash-test-commit-gate.sh
+HOOK=pre-bash-commit-discipline-gate.sh
 
 # Build a command string containing the literal `git commit` at runtime,
 # so that THIS test script source does not accidentally trigger outer hooks

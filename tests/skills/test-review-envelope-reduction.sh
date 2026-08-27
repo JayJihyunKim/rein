@@ -143,7 +143,16 @@ assert_file_grep "Test Alignment" "$CAPTURE" "ER4 테스트 정합 지시문 존
 assert_file_grep "Claim Audit" "$CAPTURE" "ER4 주장 검증 지시문 존재"
 e2e_teardown
 
-echo "-- ER5: FINAL_VERDICT tail-match + PASS 도장 + verdict exit 계약 불변 (C3)"
+echo "-- ER5: FINAL_VERDICT tail-match + v2 발급 경로 + verdict exit 계약 불변 (C3)"
+# Phase 7 웨이브 3 ③-d 재조준: 래퍼는 더 이상 trail/dod/.codex-reviewed
+# legacy stamp 를 쓰지 않는다 — PASS 시 v2 code_review 증거 발급이 유일한
+# 기록 경로다(write_code_review_stamp() 는 이름은 유지하되 파일을 쓰지
+# 않는다). 이 스위트는 bin/rein 을 sandbox 에 링크하지 않으므로(FINAL_
+# VERDICT tail-match parser 가 검증 대상이지 v2 발급 자체가 아니다) 발급은
+# 항상 "캡처된 digest 없음" 경로로 빠진다 — non-fatal(return 0)이며 stderr
+# 에 ERROR 로그만 남긴다. PASS 회차는 이 stderr ERROR 로 "v2 발급 경로에
+# 실제로 진입했다"를 규명하고, NEEDS-FIX 회차는 write_code_review_stamp()
+# 자체가 호출되지 않으므로 이 ERROR 가 없어야 한다.
 e2e_setup
 # 본문 앞쪽 인용 FINAL_VERDICT 는 결론이 아니다 — 마지막 줄 tail-match 가 이긴다.
 FAKE_CODEX_VERDICT='분석 본문. 인용 예시: FINAL_VERDICT: REJECT (예시일 뿐)
@@ -151,15 +160,20 @@ FAKE_CODEX_VERDICT='분석 본문. 인용 예시: FINAL_VERDICT: REJECT (예시�
 FINAL_VERDICT: PASS' run_wrapper "code review please"
 assert_eq "$RC" "0" "ER5 tail FINAL_VERDICT: PASS → exit 0"
 TEST_COUNT=$((TEST_COUNT + 1))
-if [ -f "$SANDBOX/trail/dod/.codex-reviewed" ]; then echo "  ok: ER5 PASS → 도장 생성"
-else fail "ER5 PASS 인데 .codex-reviewed 미생성"; fi
-rm -f "$SANDBOX/trail/dod/.codex-reviewed"
+if grep -q "no review-start subject digest was captured" "$SANDBOX/.err.txt"; then
+  echo "  ok: ER5 PASS → v2 발급 경로 진입(bin/rein 미링크로 캡처없음 ERROR, non-fatal)"
+else
+  fail "ER5 PASS 인데 v2 발급 경로 미진입 (stderr: $(cat "$SANDBOX/.err.txt" 2>/dev/null))"
+fi
 FAKE_CODEX_VERDICT='본문.
 FINAL_VERDICT: NEEDS-FIX' run_wrapper "code review please"
 assert_eq "$RC" "1" "ER5 FINAL_VERDICT: NEEDS-FIX → exit 1"
 TEST_COUNT=$((TEST_COUNT + 1))
-if [ ! -f "$SANDBOX/trail/dod/.codex-reviewed" ]; then echo "  ok: ER5 NEEDS-FIX → 도장 미생성"
-else fail "ER5 NEEDS-FIX 인데 도장 생성됨"; fi
+if ! grep -q "no review-start subject digest was captured" "$SANDBOX/.err.txt"; then
+  echo "  ok: ER5 NEEDS-FIX → v2 발급 경로 미진입 (write_code_review_stamp 미호출)"
+else
+  fail "ER5 NEEDS-FIX 인데 v2 발급 경로에 진입함"
+fi
 FAKE_CODEX_VERDICT='본문.
 FINAL_VERDICT: REJECT' run_wrapper "code review please"
 assert_eq "$RC" "2" "ER5 FINAL_VERDICT: REJECT → exit 2"

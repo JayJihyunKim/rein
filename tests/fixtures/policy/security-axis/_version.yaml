@@ -1,0 +1,55 @@
+# .rein/policy/security-axis/_version.yaml — Task 6.1 security_review 축
+# 전환용 축 전용 정책 세트의 버전 메타데이터 (kernel/policy.py
+# VERSION_FIELDS/VERSION_FILENAME 예약 파일 — commit-security.yaml 과
+# 다른 폐쇄 스키마를 쓴다).
+#
+# 왜 이 디렉토리가 따로 있는가 (code_review 축과의 차이): code_review
+# 축 위임(hooks/lib/code-review-gate.sh)은 REIN_POLICY_DIR 을 전혀
+# 주입하지 않는다 — bin/rein hook 이 REIN_POLICY_DIR 미설정 시 번들
+# 기본 정책(plugins/rein-core/policies/default/)으로 자립하고, 그
+# 번들 세트가 이미 commit tier 에 code_review 를 요구하기 때문이다
+# (policies/default/commit.yaml). 그런데 번들 기본 커밋 정책은
+# security_review 를 요구하지 않는다 — 그래서 security_review 축을
+# 그대로 위임하면 v2 가 "요구 없음"으로 판정해 조용히 통과해버린다
+# (2026-08-18 조사 D6). 그렇다고 REIN_POLICY_DIR 을 번들 기본 세트
+# 자체로 바꿔치기할 수도 없다 — 그러면 코드 축 위임(REIN_POLICY_DIR
+# 미주입 → 번들 기본 자립)까지 이 프로세스 트리 안에서 같은 세트를
+# 보게 되어 축 분리가 깨진다는 뜻은 아니지만, 위임 호출 자체가 서로
+# 다른 서브프로세스이므로 그 문제는 없다 — 대신 진짜 이유는: 이
+# override 를 `.rein/policy/authority.yaml` 처럼 프로젝트 override
+# 파일 하나로 표현하려 해도, 정책 로더(kernel/policy.py
+# load_policies(dir))는 지정 디렉토리 최상위의 *.yaml 전부를 4필드
+# policy 스키마로 강제 파싱한다 — `.rein/policy/` 최상위에는 이미
+# hooks.yaml/persona.yaml/rules.yaml/authority.yaml 등 전혀 다른
+# 스키마의 파일들이 있어 그 디렉토리를 통째로 REIN_POLICY_DIR 로
+# 지정할 수 없다(즉시 "unsupported policy field" 로 깨진다). 로더는
+# 하위 디렉토리를 재귀 스캔하지 않으므로(자동 스킵), `.rein/policy/`
+# 아래 새 하위 폴더 하나(security-axis/)를 만들어 그 폴더만
+# REIN_POLICY_DIR 로 가리키면 다른 v1 설정 파일과 물리적으로
+# 격리된다 — policies/default/commit.yaml 이 policies/ 최상위의
+# tags.yaml(다른 스키마)과 충돌을 피하려고 default/ 하위 디렉토리로
+# 분리한 것과 정확히 같은 회피 기법이다.
+#
+# 이 디렉토리에는 이 파일과 commit-security.yaml 두 개만 둔다 —
+# 번들 기본 세트(policies/default/)를 복제하지 않는다(드리프트 원천
+# 차단). security_review 축만 이 폴더를 쓰고, code_review 축 위임은
+# 여전히 REIN_POLICY_DIR 미주입(번들 기본) 그대로다.
+#
+# v1 대응 지점: 이 정책 세트가 표현하는 요구는 v1
+# hooks/pre-bash-test-commit-gate.sh 의 [P6]/M2(커밋 시점 보안 리뷰
+# 표식 요구) **단 하나**의 미러다 — v1 이 push/release tier 에서
+# security_review 를 요구하는 지점은 없으므로 이 세트도 commit
+# 트리거 하나만 선언한다.
+#
+# Phase 7(v1 게이트 완전 제거, hooks.json 이 bin/rein hook 을 직접
+# 등록)에 도달하면 이 디렉토리 자체가 불필요해진다 — 그 시점에는
+# 번들 기본 세트(policies/default/)가 유일한 정책 SSOT 가 되어야
+# 하므로, 번들 세트에 security_review 요구가 정식으로 반영된 뒤 이
+# 디렉토리를 제거한다.
+#
+# digest_scope: strict — spec §3.6 "digest scope 프로필" 절 (2026-08-19).
+# 이 저장소는 staged 전체(검토 면제 허용목록 제외)를 subject digest 로
+# 삼아 "모든 실질 변경 커밋 검토" 를 유지한다 (사용자 프로젝트 기본값
+# `sensitive` 와 이원화).
+version: 1
+digest_scope: strict

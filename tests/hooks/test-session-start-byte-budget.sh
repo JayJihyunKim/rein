@@ -75,7 +75,7 @@ fi
 # Neutral default emits NOTHING with no persona.yaml (0B would be vacuous), so
 # measure with explicit enabled:true fixtures for BOTH builtin presets. Require
 # >= 1B so a silently-empty envelope can't fake a pass.
-for preset in boss-ace jennie; do
+for preset in boss-ace jennie choi-haengbae; do
   P_DIR="$(mktemp -d)"
   mkdir -p "$P_DIR/.rein/policy"
   printf 'enabled: true\npreset: %s\n' "$preset" > "$P_DIR/.rein/policy/persona.yaml"
@@ -91,7 +91,7 @@ done
 # ---- (b2) persona source-file size contracts ---------------------------------
 # The BUDGET_PERSONA arithmetic above only holds if the source files respect
 # their own caps: _invariant.md <= 1,000 CHARS (UTF-8 decoded) and the largest
-# builtin preset jennie.md <= 1,536 BYTES.
+# builtin presets (jennie.md, choi-haengbae.md) <= 1,536 BYTES each.
 INVARIANT_MD="$PLUGIN_ROOT/rules/persona/_invariant.md"
 JENNIE_MD="$PLUGIN_ROOT/rules/persona/jennie.md"
 if [ -f "$INVARIANT_MD" ]; then
@@ -113,6 +113,17 @@ if [ -f "$JENNIE_MD" ]; then
   fi
 else
   fail "(b2) jennie.md missing at $JENNIE_MD (builtin preset not shipped)"
+fi
+CHOI_MD="$PLUGIN_ROOT/rules/persona/choi-haengbae.md"
+if [ -f "$CHOI_MD" ]; then
+  CHOI_BYTES="$(wc -c < "$CHOI_MD" | tr -d ' ')"
+  if [ "$CHOI_BYTES" -le 1536 ]; then
+    ok "(b2) choi-haengbae.md ${CHOI_BYTES}B <= 1536B"
+  else
+    fail "(b2) choi-haengbae.md ${CHOI_BYTES}B exceeds 1536B"
+  fi
+else
+  fail "(b2) choi-haengbae.md missing at $CHOI_MD (builtin preset not shipped)"
 fi
 
 # ---- (c) bootstrap + load-trail raw stdout <= BUDGET_PLAIN ------------------

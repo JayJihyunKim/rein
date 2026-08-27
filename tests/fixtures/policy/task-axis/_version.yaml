@@ -1,0 +1,42 @@
+# .rein/policy/task-axis/_version.yaml — Task 6.1 active_task 축 전환용
+# 축 전용 정책 세트의 버전 메타데이터 (kernel/policy.py
+# VERSION_FIELDS/VERSION_FILENAME 예약 파일 — edit-task.yaml/
+# write-task.yaml/multiedit-task.yaml 3개 정책 파일과 다른 폐쇄 스키마를
+# 쓴다).
+#
+# 왜 이 디렉토리가 따로 있는가 (security-axis 와 같은 이유, 다른 트리거):
+# 번들 기본 정책(plugins/rein-core/policies/default/)은 commit/push/
+# release 3개 tier 만 선언하고 tool.pre(Edit/Write/MultiEdit) 트리거에는
+# 아무 정책도 없다 — active_task 를 그대로 위임하면 v2 가 "요구 없음"
+# 으로 판정해 조용히 통과한다(security_review 축이 2026-08-18 조사 D6
+# 에서 겪은 것과 동일한 함정의 tool.pre 판). 그래서 이 축의 위임
+# (hooks/lib/active-task-gate.sh 의 rein_active_task_delegate())은
+# REIN_POLICY_DIR 을 이 폴더로 명시 주입한다. `.rein/policy/` 최상위에
+# 이미 hooks.yaml/persona.yaml/rules.yaml/authority.yaml 등 다른
+# 스키마의 파일이 있어 그 디렉토리를 통째로 REIN_POLICY_DIR 로 쓸 수
+# 없다는 이유도 security-axis/_version.yaml 과 동일하다(로더가 하위
+# 디렉토리를 재귀 스캔하지 않으므로 새 하위 폴더 하나로 물리적 격리).
+#
+# 왜 3개 정책 파일인가 (security-axis 와의 차이): security_review 축은
+# 단일 트리거(git.commit)라 파일 1개로 충분했다. active_task 축은
+# Edit/Write/MultiEdit 세 tool 이벤트 전부를 요구해야 하는데(v1
+# pre-edit-dod-gate.sh 의 PreToolUse matcher `Edit|Write|MultiEdit` 와
+# 동일 범위), kernel D3 YAML subset 의 `when:` 절은 단일 값 등호 비교만
+# 지원하고 OR 조건을 표현할 방법이 없다(policies/default/push.yaml +
+# push-testing.yaml 이 "같은 trigger 에 여러 policy 의 require 를
+# evaluator 가 합집합으로 누적" 하는 것과 같은 기법을 여기서도 쓴다 —
+# 단, 여기서는 require 목록이 아니라 when.tool 값 자체를 3파일로
+# 나눈다). 각 파일은 `when: tool: <ToolName>` 하나만 다르고 나머지
+# (trigger/require/failure_mode)는 동일하다.
+#
+# v1 대응 지점: 이 정책 세트가 표현하는 요구는 v1
+# hooks/pre-edit-dod-gate.sh 의 L330-339(활성 작업 스캔) + L369-397
+# (없으면 차단, 있으면 통과) — 편집 이벤트에서 활성 작업을 요구하는
+# 지점의 미러다.
+#
+# Phase 7(v1 게이트 완전 제거, hooks.json 이 bin/rein hook 을 직접
+# 등록)에 도달하면 이 디렉토리 자체가 불필요해진다 — 그 시점에는 번들
+# 기본 세트(policies/default/)가 유일한 정책 SSOT 가 되어야 하므로,
+# 번들 세트에 active_task 요구가 정식으로 반영된 뒤 이 디렉토리를
+# 제거한다.
+version: 1

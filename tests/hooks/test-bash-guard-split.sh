@@ -13,6 +13,25 @@
 #   - Each test runs inside `run_test` → sandbox_setup → sandbox_teardown.
 #   - Stamp + DoD + inbox are seeded to isolate the marker gate as the sole
 #     failure cause (other gates must pass).
+#
+# Phase 7 웨이브 3 ③-c 재배치 (2026-08-23): 구 단일 pre-bash-test-commit-
+# gate.sh 는 삭제됐고 두 신설 훅으로 교대됐다 — pre-bash-commit-discipline-
+# gate.sh(coverage matrix [P2]/[I3] + 커밋 메시지 포맷 [P7]/[I4]/[I5], v1
+# 존속 규율)와 pre-bash-commit-review-gate.sh(code_review/security_review
+# 두 축의 v2 위임, 리뷰 stamp 판정 [P3]~[P6] 전량 이관). 이 파일의 대상이
+# discipline 축인 케이스(Suite 2 BLOCK_MARKERS 6종 + Suite 4 P7 + Suite 5
+# P2)는 대상 훅명만 pre-bash-commit-discipline-gate.sh 로 교체하고 단언
+# 로직은 그대로 남겼다.
+#
+# 리뷰 stamp 축 케이스(구 Suite 5 의 P3~P6: review-pending/codex-stamp/
+# security-stamp 판정)와 구 Suite 8(GUARD-1 test-execution 예외 — pytest/
+# bash tests 가 review-stamp 부재로 차단되지 않아야 한다는 계약, 그 판정
+# 자체가 리뷰 축 소유)는 v1 폴백이 사라진 pre-bash-commit-review-gate.sh
+# 로 판정 권한이 전량 이관됐으므로 이 파일에서 제거했다 — 이관처는 T2
+# 워커의 신설 test-pre-bash-commit-review-gate.sh (또는 v2 pytest, 축별
+# 위임 판정 로직을 직접 검증) 다. 이관 전수 목록과 각 사유는 이 사이클의
+# 부모 보고서 disposition 표를 참조(코드 주석으로 개별 함수를 남기지
+# 않고, 이 헤더 + 부모 보고서가 이관 근거의 SSOT).
 
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -100,27 +119,15 @@ _seed_review_stamps() {
      "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
   seed_dod "dod-2026-04-21-marker-test.md"
   seed_inbox "2026-04-21-marker-test.md"
-  # M2/M3 (docs/specs/2026-06-16-review-stamp-freshness.md): an empty `touch`
-  # stamp is now fail-closed (code stamp needs a PASS verdict + parseable time;
-  # security stamp must be fresher + same cycle + PASS). Write content-rich
-  # stamps with a shared cycle so the gate reaches whichever downstream check a
-  # test perturbs, instead of blocking at the code-stamp dual-read.
-  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
-reviewed_at: 2026-06-16T01:00:00Z
-reviewer: codex
-diff_base: N/A
-verdict: PASS
-cycle: marker-test
-scope: wrapper-generated
-STAMP
-  cat > "$SANDBOX/trail/dod/.security-reviewed" <<'STAMP'
-reviewer=security-reviewer
-reviewed=2026-06-16T02:00:00Z
-security_level=standard
-cycle=marker-test
-verdict=PASS
-mechanism=llm-security-review
-STAMP
+  # Phase 7 웨이브 3 ③-d (2026-08-24) 재조준: 이 helper 는 이 파일의 헤더가
+  # 설명하듯 pre-bash-commit-discipline-gate.sh 만 구동한다 — 그 훅은
+  # code_review/security_review 축을 전혀 참조하지 않는다(coverage-matrix
+  # + 커밋 메시지 포맷만 담당, 리뷰 축은 별도 훅 pre-bash-commit-review-
+  # gate.sh 소관, `grep -n codex-reviewed plugins/rein-core/hooks/pre-
+  # bash-commit-discipline-gate.sh` 로 실측 확인). 함수명은 (호출부
+  # 다수라) 유지하되 legacy stamp heredoc 작성은 제거한다 — 이 훅에겐
+  # 애초부터 무의미한 fixture 였고, 그 write 경로 자체도 코드베이스
+  # 전역에서 이제 존재하지 않는다(정당 소멸).
 }
 
 # Scenario 1: only .coverage-mismatch exists (empty) → exit 2.
@@ -130,7 +137,7 @@ test_block_markers_coverage_mismatch_blocks_commit() {
   touch "$SANDBOX/trail/dod/.coverage-mismatch"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   assert_exit 2 "plan coverage marker should block commit"
   assert_stderr_contains ".coverage-mismatch"
 }
@@ -142,7 +149,7 @@ test_block_markers_dod_coverage_mismatch_blocks_commit() {
   touch "$SANDBOX/trail/dod/.dod-coverage-mismatch"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   assert_exit 2 "DoD coverage marker should block commit"
   assert_stderr_contains ".dod-coverage-mismatch"
 }
@@ -155,7 +162,7 @@ test_block_markers_both_markers_block_commit() {
   touch "$SANDBOX/trail/dod/.dod-coverage-mismatch"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   assert_exit 2 "both markers should block commit"
   # Iteration order is fixed: .coverage-mismatch first, so its message wins.
   assert_stderr_contains ".coverage-mismatch"
@@ -167,7 +174,7 @@ test_block_markers_neither_marker_passes() {
   # Explicitly no markers.
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   # stderr must not contain the coverage-matrix block message.
   echo "$HOOK_STDERR" | grep -qF "coverage matrix 검증 실패" \
     && fail "coverage gate fired without any marker present"
@@ -182,7 +189,7 @@ test_block_markers_advisory_does_not_block() {
   touch "$SANDBOX/trail/dod/.dod-coverage-advisory"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   # Advisory marker must never be in BLOCK_MARKERS.
   echo "$HOOK_STDERR" | grep -qF ".dod-coverage-advisory" \
     && fail ".dod-coverage-advisory should be non-blocking, but guard cited it"
@@ -196,7 +203,7 @@ test_block_markers_dod_marker_blocks_pytest() {
   touch "$SANDBOX/trail/dod/.dod-coverage-mismatch"
 
   local input='{"tool_input":{"command":"pytest tests/"},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   assert_exit 2 "DoD coverage marker should block pytest"
   assert_stderr_contains ".dod-coverage-mismatch"
 }
@@ -294,7 +301,7 @@ test_json_deny_p7_commit_msg_format() {
   _seed_review_stamps
   # Bad commit message: missing conventional commits type
   local input='{"tool_input":{"command":"git commit -m \"bad message without type\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   assert_json_deny "COMMIT_MSG_FORMAT" "P7 bad commit msg should emit JSON deny"
 }
 
@@ -313,23 +320,17 @@ test_json_deny_p11_destructive_git() {
 }
 
 # ============================================================
-# Suite 5: JSON deny regression — P2, P3, P4, P5, P6 (Task 2.5)
+# Suite 5: JSON deny regression — P2 (Task 2.5)
+# ③-c 재배치: 구 P3~P6 (review-pending/codex-stamp/security-stamp 판정) 은
+# 이 파일에서 제거됐다 — 위 마커 주석 + 파일 헤더 참조.
 # ============================================================
 #
 # OQ4 corrected classification:
 #   P2 — rc=1 (validator FAIL, identifiable target) → JSON deny COVERAGE_MISMATCH
-#   P3 — .review-pending present + no .codex-reviewed → JSON deny REVIEW_PENDING_NO_STAMP
-#   P4 — .review-pending newer than .codex-reviewed → JSON deny CODE_EDITED_AFTER_REVIEW
-#   P5 — DoD present + no .review-pending + no .codex-reviewed → JSON deny CODEX_STAMP_MISSING
-#   P6 — DoD present + .codex-reviewed + no .security-reviewed → JSON deny SECURITY_STAMP_MISSING
 #
 # P2 fixture: drop a stub validator at SANDBOX/scripts/ (resolve_helper_script
 # priority 2: PROJECT_DIR/scripts/). Non-empty .coverage-mismatch with a
 # failing target triggers revalidate_coverage_marker rc=1 → [P2] JSON deny.
-#
-# P3-P6 fixture: DoD seed + .review-pending seed (P3/P4) or stamps absent (P5/P6).
-# Input: `git commit -m "feat: test"` — passes through P1/P2 gates to reach
-# check_review_stamp() which houses P3-P6.
 
 # Shared fixture: put a stub validator in the sandbox that fails for any target
 # not containing literal "VALIDATOR_PASS".
@@ -365,108 +366,23 @@ test_json_deny_p2_coverage_mismatch_failing_target() {
   # Seed the marker with the failing plan path.
   printf '%s\n' "$SANDBOX/docs/plans/failing-plan.md" \
     > "$SANDBOX/trail/dod/.coverage-mismatch"
-  # Also seed stamps/dod/inbox so the only blocking gate is the coverage marker.
-  # Content-rich stamps (spec 2026-06-16): an empty `touch` stamp now fail-closes
-  # at the M2/M3 review-stamp check — but coverage runs first, so content-rich
-  # stamps keep the coverage marker the sole blocker regardless of check order.
+  # Also seed dod/inbox so the only blocking gate is the coverage marker.
+  # ③-d (2026-08-24): legacy review-stamp seeding removed — this test drives
+  # pre-bash-commit-discipline-gate.sh only, which never reads those markers
+  # (§ _seed_review_stamps() above has the same fact + verification command).
   seed_dod "dod-2026-04-21-p2-test.md"
   seed_inbox "2026-04-21-p2-test.md"
-  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
-reviewed_at: 2026-06-16T01:00:00Z
-reviewer: codex
-diff_base: N/A
-verdict: PASS
-cycle: p2-test
-scope: wrapper-generated
-STAMP
-  cat > "$SANDBOX/trail/dod/.security-reviewed" <<'STAMP'
-reviewer=security-reviewer
-reviewed=2026-06-16T02:00:00Z
-security_level=standard
-cycle=p2-test
-verdict=PASS
-mechanism=llm-security-review
-STAMP
 
   local input='{"tool_input":{"command":"git commit -m \"feat: p2-test\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   assert_json_deny "COVERAGE_MISMATCH" \
     "P2: non-empty .coverage-mismatch with failing target should emit JSON deny"
 }
 
-# Suite 5 Scenario 5.2: P3 — .review-pending + no .codex-reviewed → JSON deny
-# [P3] HIGH-2: deny_emit inside check_review_stamp() calls exit, not return.
-test_json_deny_p3_review_pending_no_stamp() {
-  _seed_review_stamps
-  # Remove .codex-reviewed so P3 fires (.review-pending present → no stamp).
-  rm -f "$SANDBOX/trail/dod/.codex-reviewed"
-  touch "$SANDBOX/trail/dod/.review-pending"
-
-  local input='{"tool_input":{"command":"git commit -m \"feat: p3-test\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
-  assert_json_deny "REVIEW_PENDING_NO_STAMP" \
-    "P3: .review-pending present but no .codex-reviewed should emit JSON deny"
-}
-
-# Suite 5 Scenario 5.3: P4 — .review-pending newer than .codex-reviewed → JSON deny
-# [P4] HIGH-2: deny_emit inside check_review_stamp() calls exit, not return.
-test_json_deny_p4_code_edited_after_review() {
-  _seed_review_stamps
-  # Make .codex-reviewed older than .review-pending so the staleness check fires.
-  touch -t 202601010000 "$SANDBOX/trail/dod/.codex-reviewed"
-  sleep 1
-  touch "$SANDBOX/trail/dod/.review-pending"
-
-  local input='{"tool_input":{"command":"git commit -m \"feat: p4-test\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
-  assert_json_deny "CODE_EDITED_AFTER_REVIEW" \
-    "P4: .review-pending newer than .codex-reviewed should emit JSON deny"
-}
-
-# Suite 5 Scenario 5.4: P5 — DoD exists + no .review-pending + no .codex-reviewed
-# → JSON deny CODEX_STAMP_MISSING.
-# [P5] HIGH-2: deny_emit inside check_review_stamp() calls exit, not return.
-test_json_deny_p5_codex_stamp_missing() {
-  # Seed DoD + inbox but no stamps.
-  mkdir -p "$SANDBOX/.claude/hooks/lib"
-  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/extract-commit-msg.py" \
-     "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
-  seed_dod "dod-2026-04-21-p5-test.md"
-  seed_inbox "2026-04-21-p5-test.md"
-  # Explicitly no .codex-reviewed, no .review-pending, no .security-reviewed.
-
-  local input='{"tool_input":{"command":"git commit -m \"feat: p5-test\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
-  assert_json_deny "CODEX_STAMP_MISSING" \
-    "P5: DoD exists but no .codex-reviewed should emit JSON deny"
-}
-
-# Suite 5 Scenario 5.5: P6 — DoD exists + .codex-reviewed + no .security-reviewed
-# → JSON deny SECURITY_STAMP_MISSING.
-# [P6] HIGH-2: deny_emit inside check_review_stamp() calls exit, not return.
-test_json_deny_p6_security_stamp_missing() {
-  mkdir -p "$SANDBOX/.claude/hooks/lib"
-  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/extract-commit-msg.py" \
-     "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
-  seed_dod "dod-2026-04-21-p6-test.md"
-  seed_inbox "2026-04-21-p6-test.md"
-  # Content-rich PASS code stamp (spec 2026-06-16) so the gate reaches P6 instead
-  # of fail-closing at the M3 code-stamp dual-read on an empty `touch` stamp.
-  cat > "$SANDBOX/trail/dod/.codex-reviewed" <<'STAMP'
-reviewed_at: 2026-06-16T01:00:00Z
-reviewer: codex
-diff_base: N/A
-verdict: PASS
-cycle: p6-test
-scope: wrapper-generated
-STAMP
-  # Explicitly no .security-reviewed.
-
-  local input='{"tool_input":{"command":"git commit -m \"feat: p6-test\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
-  assert_json_deny "SECURITY_STAMP_MISSING" \
-    "P6: .codex-reviewed present but no .security-reviewed should emit JSON deny"
-}
+# Suite 5 Scenario 5.2~5.5 (P3~P6: review-pending/codex-stamp/security-stamp
+# 판정) — Phase 7 웨이브 3 ③-c 재배치로 이 파일에서 제거됐다. 이관처는
+# T2 워커의 신설 test-pre-bash-commit-review-gate.sh (또는 v2 pytest) —
+# 상세는 파일 헤더 + 부모 보고서 disposition 표 참조.
 
 # ============================================================
 # Suite 6: P9, P10 direct JSON deny + emitter-unavailable fail-closed
@@ -642,94 +558,39 @@ print(data["hookSpecificOutput"]["permissionDecisionReason"])
 
 # ============================================================
 # Suite 8: GUARD-1 (2026-05-19) — test-execution gate re-scoping.
+# ③-c 재배치로 이 파일에서 제거됐다 — GUARD-1 의 "test-execution 은
+# review-stamp 게이트 비대상" 계약은 [P5]/[P6](CODEX_STAMP_MISSING /
+# SECURITY_STAMP_MISSING) 판정 자체를 소유한 pre-bash-commit-review-
+# gate.sh 로 판정 권한이 전량 이관됐다 — discipline-gate.sh 는 그 두
+# reason_code 를 애초에 낼 수 없어(코드 자체에 없음) 여기 남겨두면
+# 공허하게 항상 통과하는 진단력 없는 회귀 테스트가 된다. 이관처는 T2
+# 워커의 신설 test-pre-bash-commit-review-gate.sh (또는 v2 pytest) —
+# 상세는 파일 헤더 + 부모 보고서 disposition 표 참조.
 # ============================================================
-#
-# The review-stamp gate that blocked *test execution* (pytest etc.) when no
-# .codex-reviewed stamp existed made the TDD red-green loop structurally
-# impossible — you cannot run a failing reproduction test before the code is
-# even written/reviewed. The gate target is *commit / completion*, not test
-# runs. GUARD-1 removes the test-execution stamp gate and keeps the commit
-# gate. coverage-matrix marker gating of pytest is a SEPARATE discipline and
-# is unchanged (see Suite 2 Scenario 6).
-#
-# Contract after GUARD-1:
-#   - DoD present + no stamps + pytest  → NOT blocked (gate removed).
-#   - DoD present + no stamps + git commit → still blocked (commit gate kept).
-
-# Seed a DoD only (no stamps), plus the commit-msg helper so the git-commit
-# path reaches check_review_stamp rather than failing on a missing helper.
-_seed_dod_only_no_stamps() {
-  mkdir -p "$SANDBOX/.claude/hooks/lib"
-  cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/extract-commit-msg.py" \
-     "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
-  seed_dod "dod-2026-05-19-guard1-test.md"
-  seed_inbox "2026-05-19-guard1-test.md"
-  # Explicitly NO .codex-reviewed / .security-reviewed.
-}
-
-# Scenario 8.1: pytest with DoD present + no review stamps → NOT blocked.
-test_guard1_pytest_not_blocked_without_stamps() {
-  _seed_dod_only_no_stamps
-
-  local input='{"tool_input":{"command":"pytest tests/"},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
-  assert_exit 0 "pytest must not be blocked by a missing review stamp (GUARD-1)"
-  # No JSON deny on stdout either — the test-execution stamp gate is gone.
-  echo "$HOOK_STDOUT" | grep -qF "CODEX_STAMP_MISSING" \
-    && fail "pytest emitted CODEX_STAMP_MISSING deny — test-execution gate not removed"
-  echo "$HOOK_STDOUT" | grep -qF "SECURITY_STAMP_MISSING" \
-    && fail "pytest emitted SECURITY_STAMP_MISSING deny — test-execution gate not removed"
-  return 0
-}
-
-# Scenario 8.2: bash tests/ runner with DoD + no stamps → NOT blocked.
-test_guard1_bash_tests_not_blocked_without_stamps() {
-  _seed_dod_only_no_stamps
-
-  local input='{"tool_input":{"command":"bash tests/hooks/test-foo.sh"},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
-  assert_exit 0 "bash tests/ must not be blocked by a missing review stamp (GUARD-1)"
-  echo "$HOOK_STDOUT" | grep -qF "CODEX_STAMP_MISSING" \
-    && fail "bash tests/ emitted CODEX_STAMP_MISSING deny — test-execution gate not removed"
-  return 0
-}
-
-# Scenario 8.3: git commit with DoD + no stamps → STILL blocked (commit gate kept).
-test_guard1_git_commit_still_blocked_without_stamps() {
-  _seed_dod_only_no_stamps
-
-  local input='{"tool_input":{"command":"git commit -m \"feat: guard1-test\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
-  assert_json_deny "CODEX_STAMP_MISSING" \
-    "git commit must still be blocked when no codex review stamp exists (commit gate kept)"
-}
 
 main() {
   # Suite 1
   run_test test_pre_bash_guard_windows_stub_blocks       pre-bash-safety-guard.sh
   run_test test_pre_bash_guard_posix_resolver_unchanged  pre-bash-safety-guard.sh
   # Suite 2 — BLOCK_MARKERS (Plan A Phase 5)
-  run_test test_block_markers_coverage_mismatch_blocks_commit      pre-bash-test-commit-gate.sh
-  run_test test_block_markers_dod_coverage_mismatch_blocks_commit  pre-bash-test-commit-gate.sh
-  run_test test_block_markers_both_markers_block_commit            pre-bash-test-commit-gate.sh
-  run_test test_block_markers_neither_marker_passes                pre-bash-test-commit-gate.sh
-  run_test test_block_markers_advisory_does_not_block              pre-bash-test-commit-gate.sh
-  run_test test_block_markers_dod_marker_blocks_pytest             pre-bash-test-commit-gate.sh
+  run_test test_block_markers_coverage_mismatch_blocks_commit      pre-bash-commit-discipline-gate.sh
+  run_test test_block_markers_dod_coverage_mismatch_blocks_commit  pre-bash-commit-discipline-gate.sh
+  run_test test_block_markers_both_markers_block_commit            pre-bash-commit-discipline-gate.sh
+  run_test test_block_markers_neither_marker_passes                pre-bash-commit-discipline-gate.sh
+  run_test test_block_markers_advisory_does_not_block              pre-bash-commit-discipline-gate.sh
+  run_test test_block_markers_dod_marker_blocks_pytest             pre-bash-commit-discipline-gate.sh
   # Suite 3 — Pipe-bash block (A + B fix)
   run_test test_pipe_bash_blocks_with_redirect_hint                              pre-bash-safety-guard.sh
   run_test test_pipe_bash_pattern_false_positive_in_grep_alternation_passes      pre-bash-safety-guard.sh
   run_test test_bash_with_file_redirect_passes                                   pre-bash-safety-guard.sh
   # Suite 4 — JSON deny: P1, P7, P8, P11 representative (Task 2.2)
   run_test test_json_deny_p1_pipe_bash          pre-bash-safety-guard.sh
-  run_test test_json_deny_p7_commit_msg_format  pre-bash-test-commit-gate.sh
+  run_test test_json_deny_p7_commit_msg_format  pre-bash-commit-discipline-gate.sh
   run_test test_json_deny_p8_env_read           pre-bash-safety-guard.sh
   run_test test_json_deny_p11_destructive_git   pre-bash-safety-guard.sh
-  # Suite 5 — JSON deny regression: P2, P3, P4, P5, P6 (Task 2.5)
-  run_test test_json_deny_p2_coverage_mismatch_failing_target  pre-bash-test-commit-gate.sh
-  run_test test_json_deny_p3_review_pending_no_stamp           pre-bash-test-commit-gate.sh
-  run_test test_json_deny_p4_code_edited_after_review          pre-bash-test-commit-gate.sh
-  run_test test_json_deny_p5_codex_stamp_missing               pre-bash-test-commit-gate.sh
-  run_test test_json_deny_p6_security_stamp_missing            pre-bash-test-commit-gate.sh
+  # Suite 5 — JSON deny regression: P2 (Task 2.5). 구 P3~P6 은 ③-c 재배치로
+  # 제거됨 — 파일 헤더 + 부모 보고서 disposition 표 참조.
+  run_test test_json_deny_p2_coverage_mismatch_failing_target  pre-bash-commit-discipline-gate.sh
   # Suite 6 — P9, P10 direct JSON deny + emitter-unavailable fail-closed (Fix 1 regression)
   run_test test_json_deny_p9_env_stage_blocked                             pre-bash-safety-guard.sh
   run_test test_json_deny_p10_env_commit_am_blocked                        pre-bash-safety-guard.sh
@@ -737,10 +598,8 @@ main() {
   run_test test_emitter_unavailable_fake_deny_emit_on_path_fails_closed    pre-bash-safety-guard.sh
   # Suite 7 — Task 3.1 tone assertions (S7)
   run_test test_json_deny_tone_p8_natural_sentence                          pre-bash-safety-guard.sh
-  # Suite 8 — GUARD-1: test-execution gate re-scoping (2026-05-19)
-  run_test test_guard1_pytest_not_blocked_without_stamps                    pre-bash-test-commit-gate.sh
-  run_test test_guard1_bash_tests_not_blocked_without_stamps                pre-bash-test-commit-gate.sh
-  run_test test_guard1_git_commit_still_blocked_without_stamps              pre-bash-test-commit-gate.sh
+  # Suite 8 — GUARD-1 (2026-05-19) 은 ③-c 재배치로 제거됨 — 파일 헤더 +
+  # 부모 보고서 disposition 표 참조.
   summary
 }
 

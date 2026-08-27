@@ -142,6 +142,17 @@ rm -rf "$S"
 # Pre-fix: wrapper used stale stamp.diff_base → false freshness HIGH
 # Post-fix: wrapper detects stale ISO, falls back to HEAD~1
 # ============================================================
+# Phase 7 웨이브 3 ③-d (2026-08-24) 재조준: 원래 이 시나리오는 "stale
+# stamp 는 무시되고 fresh 판정만 채택된다"는 self-healing 을 고정했다.
+# ③-d 로 `_resolve_diff_base()` 의 legacy stamp 읽기 경로 자체가 완전히
+# 제거되면서 — stale/fresh 구분 없이 **어떤 stamp 내용이든 무조건 무시**
+# 하고 HEAD~1 을 채택한다(무조건 채택이 곧 "무조건 self-heal"). 원
+# 시나리오가 검증하려던 "5번 재현 패턴(stale stamp 채택) 재발 방지"는
+# 이제 더 강한 형태로 구조적으로 보장된다 — stamp 판정부 자체가 없으니
+# 애초에 채택할 수가 없다. 이 정확한 계약(어떤 stamp 내용이든, 조작된
+# 값이든 완전히 무시)은 tests/skills/test-codex-review-stale-stamp.sh 가
+# Test A~D 로 전담 고정한다(대체) — 여기서는 통합 시나리오 순서(Tier
+# 선택 → self-heal → 세션 정리) 안에서 회귀가 없는지만 얇게 재확인한다.
 echo "### Scenario 2: stale_stamp_after_new_commit_self_heals_to_head_tilde_1"
 S=$(_mksandbox)
 git -C "$S" commit --allow-empty -q -m "first commit (review base)"
@@ -149,7 +160,8 @@ git -C "$S" commit --allow-empty -q -m "second commit (after PASS)"
 HEAD_TILDE_1=$(git -C "$S" rev-parse HEAD~1)
 STALE_BASE="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-# Stamp from past PASS — stored diff_base no longer valid for current HEAD.
+# Legacy marker from a past PASS — retained only to prove it is now fully
+# inert (never read at all, not merely "detected as stale").
 cat > "$S/trail/dod/.codex-reviewed" <<EOF
 reviewed_at: 2020-01-01T00:00:00Z
 reviewer: codex
@@ -160,12 +172,13 @@ scope: old
 active_dod: trail/dod/dod-old.md
 EOF
 
-# Wrapper computes DIFF_BASE — Phase 2 self-healing should pick HEAD~1, not stale.
+# Wrapper computes DIFF_BASE — unconditionally HEAD~1 post-③-d, regardless
+# of any legacy marker content.
 result=$(_get_diff_base "$S")
 if [ "$result" = "$HEAD_TILDE_1" ]; then
-  _pass "Phase 2 self-heal: stale stamp detected, fell back to HEAD~1"
+  _pass "legacy marker fully ignored, DIFF_BASE unconditionally HEAD~1 (post-③-d)"
 elif [ "$result" = "$STALE_BASE" ]; then
-  _fail "5번 재현 패턴 재발 — wrapper used stale stamp.diff_base"
+  _fail "5번 재현 패턴 재발 — wrapper used the legacy marker's diff_base (must never happen post-③-d)"
 else
   _fail "unexpected diff_base: $result (expected HEAD~1=$HEAD_TILDE_1)"
 fi

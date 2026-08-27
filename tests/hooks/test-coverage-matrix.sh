@@ -1,6 +1,11 @@
 #!/bin/bash
 # tests/hooks/test-coverage-matrix.sh
 # Test suite for design→plan coverage matrix validator + hooks.
+#
+# Phase 7 웨이브 3 ③-c 재배치 (2026-08-23): 구 단일 pre-bash-test-commit-
+# gate.sh 는 삭제됐고 두 신설 훅으로 교대됐다. coverage-matrix 게이트
+# ([P2]/[I3])는 v1 존속 규율 축이라 pre-bash-commit-discipline-gate.sh 가
+# 계승했다 — 아래 run_hook/run_test 대상 훅명만 교체, 단언 로직은 그대로.
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/test-harness.sh"
 
@@ -328,42 +333,41 @@ test_hook_does_not_clear_marker_on_valid_plan() {
 }
 
 test_test_commit_gate_blocks_commit_on_marker() {
-  # 리뷰 stamp + DoD + inbox 까지 전부 생성해 coverage gate 가 **유일한 실패 원인**이 되도록 격리.
-  # pre-bash-test-commit-gate 는 commit-msg helper 를 호출하므로 lib 파일도 복사한다.
+  # DoD + inbox 까지 전부 생성해 coverage gate 가 **유일한 실패 원인**이 되도록 격리.
+  # pre-bash-commit-discipline-gate 는 commit-msg helper 를 호출하므로 lib 파일도 복사한다.
   # Wave 3: coverage gate now uses JSON deny (exit 0, stdout JSON) when the
   # validator can revalidate the plan (rc=1 path), or falls back to exit 2 +
   # [rein] stderr when the marker target is unidentifiable (rc=2/infra path).
   # A touch-only marker is empty → rc=2 path → exit 2 + [rein] stderr.
   # Both paths block the command; test asserts exit non-zero and coverage text present.
+  # ③-d (2026-08-24): legacy review-stamp seeding removed — this hook never
+  # reads them (verified: `grep -n codex-reviewed
+  # plugins/rein-core/hooks/pre-bash-commit-discipline-gate.sh` → no hits).
   mkdir -p "$SANDBOX/.claude/hooks/lib"
   cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/extract-commit-msg.py" \
      "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
   seed_dod "dod-2026-04-19-stamp-test.md"
   seed_inbox "2026-04-19-stamp-test.md"
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
-  touch "$SANDBOX/trail/dod/.security-reviewed"
   touch "$SANDBOX/trail/dod/.coverage-mismatch"
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   # Empty marker → rc=2 path [I3]: exactly exit 2 + [rein] on stderr.
   assert_exit 2 "test-commit gate should exit 2 (I3 infra path) for empty coverage-mismatch marker"
   assert_stderr_contains "[rein]" "I3 infra block must emit [rein] prefix on stderr"
 }
 
 test_test_commit_gate_allows_commit_without_marker() {
-  # Negative control — 마커가 없으면 coverage gate 가 통과해야 한다 (review stamp gate 는 별개).
+  # Negative control — 마커가 없으면 coverage gate 가 통과해야 한다.
   mkdir -p "$SANDBOX/.claude/hooks/lib"
   cp "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/extract-commit-msg.py" \
      "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
   seed_dod "dod-2026-04-19-stamp-test.md"
   seed_inbox "2026-04-19-stamp-test.md"
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
-  touch "$SANDBOX/trail/dod/.security-reviewed"
   # NO .coverage-mismatch
 
   local input='{"tool_input":{"command":"git commit -m \"feat: test\""},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   # stderr 에 coverage 문구가 **없어야** 한다 (다른 gate 에서 exit 돼도 coverage 는 무관)
   echo "$HOOK_STDERR" | grep -qF "coverage matrix 검증 실패" \
     && fail "coverage gate should not fire without marker" || true
@@ -499,12 +503,10 @@ test_test_commit_gate_blocks_pytest_on_marker() {
      "$SANDBOX/.claude/hooks/lib/extract-commit-msg.py"
   seed_dod "dod-2026-04-19-stamp-test.md"
   seed_inbox "2026-04-19-stamp-test.md"
-  touch "$SANDBOX/trail/dod/.codex-reviewed"
-  touch "$SANDBOX/trail/dod/.security-reviewed"
   touch "$SANDBOX/trail/dod/.coverage-mismatch"
 
   local input='{"tool_input":{"command":"pytest tests/unit/"},"tool_result":{}}'
-  run_hook "pre-bash-test-commit-gate.sh" "$input"
+  run_hook "pre-bash-commit-discipline-gate.sh" "$input"
   # Empty marker → rc=2 path [I3]: exactly exit 2 + [rein] on stderr.
   assert_exit 2 "test-commit gate should exit 2 (I3 infra path) for empty coverage-mismatch marker"
   assert_stderr_contains "[rein]" "I3 infra block must emit [rein] prefix on stderr"
@@ -528,14 +530,14 @@ run_test test_hook_appends_dirty_on_invalid_plan_no_validator_call \
 run_test test_hook_does_not_clear_marker_on_valid_plan \
   post-edit-plan-coverage.sh rein-validate-coverage-matrix.py
 run_test test_test_commit_gate_blocks_commit_on_marker \
-  pre-bash-test-commit-gate.sh
+  pre-bash-commit-discipline-gate.sh
 run_test test_test_commit_gate_allows_commit_without_marker \
-  pre-bash-test-commit-gate.sh
+  pre-bash-commit-discipline-gate.sh
 run_test test_hook_appends_multiple_distinct_plans \
   post-edit-plan-coverage.sh rein-validate-coverage-matrix.py
 run_test test_hook_does_not_mutate_existing_marker \
   post-edit-plan-coverage.sh rein-validate-coverage-matrix.py
 run_test test_test_commit_gate_blocks_pytest_on_marker \
-  pre-bash-test-commit-gate.sh
+  pre-bash-commit-discipline-gate.sh
 
 summary

@@ -2,12 +2,12 @@
 
 ## 행동 강령
 
-subagent-driven-development 시 stamp 수동 touch 로 review gate 우회 금지. Task 별 Implementer → Spec Reviewer → Code+Security Reviewer 분리. 통합 리뷰 1회 push 전 필수. spec/plan markdown 도 author/reviewer 권한 분리 — codex 가 spec 을 직접 수정 금지. findings 수신 후 Claude (author) 가 보완 + 재리뷰 사이클. per-spec stamp 는 PASS 직후에만 rein-mark-spec-reviewed.sh 로 생성.
+subagent-driven-development 시 리뷰 v2 증거를 실제 리뷰 없이 발급해 review gate 우회 금지. Task 별 Implementer → Spec Reviewer → Code+Security Reviewer 분리. 통합 리뷰 1회 push 전 필수. spec/plan markdown 도 author/reviewer 권한 분리 — codex 가 spec 을 직접 수정 금지. findings 수신 후 Claude (author) 가 보완 + 재리뷰 사이클. per-spec stamp 는 PASS 직후에만 rein-mark-spec-reviewed.sh 로 생성.
 
 ## 핵심 원칙
 
-subagent-driven-development 실행 시 **stamp 수동 touch 로 리뷰 gate 를 우회하면 안 된다**.
-review stamp (`.codex-reviewed`, `.security-reviewed`) 는 **실제 리뷰를 거친 후에만** 생성한다.
+subagent-driven-development 실행 시 **리뷰 없이 v2 증거를 발급해 리뷰 gate 를 우회하면 안 된다**.
+code_review/security_review v2 증거는 **실제 리뷰를 거친 후에만** 발급한다 (legacy stamp `.codex-reviewed`/`.security-reviewed` 는 Phase 7 웨이브 3 ③-d 로 write 경로 자체가 제거됨).
 
 ## Task 별 필수 단계
 
@@ -15,9 +15,9 @@ review stamp (`.codex-reviewed`, `.security-reviewed`) 는 **실제 리뷰를 �
 
 1. **Implementer** — 코딩 + 테스트 + self-review + commit
 2. **Spec Reviewer** (subagent) — plan 준수 확인. 미준수 시 implementer 재디스패치
-3. **Code Quality + Security Reviewer** (subagent) — 코드 품질 + 보안 검토. 승인 후 stamp 생성
+3. **Code Quality + Security Reviewer** (subagent) — 코드 품질 + 보안 검토. 승인(PASS) 후 v2 증거 발급
 
-stamp 는 3단계를 모두 통과한 뒤에만 touch 한다. Implementer 가 자기 commit 전에 stamp 를 먼저 찍는 것은 금지.
+v2 증거는 3단계를 모두 통과한 뒤에만 발급한다. Implementer 가 자기 commit 전에 증거를 먼저 발급하는 것은 금지.
 
 ## Spec/Plan 리뷰 권한 분리
 

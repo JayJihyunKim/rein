@@ -1,26 +1,47 @@
 #!/bin/bash
 # tests/hooks/test-teach-forward-gates.sh
 #
-# ONBOARD-1 Phase 2 regressions — teach-forward block messages for the three
-# core gates in pre-edit-dod-gate.sh.
+# ONBOARD-1 Phase 2 regressions — teach-forward block messages for the core
+# gates that used to live together in pre-edit-dod-gate.sh.
+#
+# Phase 7 웨이브 3 ③-b (편집 게이트 교대, 2026-08-21): pre-edit-dod-gate.sh 는
+# 삭제되고 pre-edit-discipline-gate.sh + pre-edit-task-gate.sh 로 교대된다.
 #
 # Covers Scope IDs:
 #   SCOPE-TEST-GATE-NEXTSTEP — DoD-absent / routing-approval / unreviewed-spec
 #     block messages each contain numbered next steps (≤2) + exit 2 preserved.
 #   SCOPE-TEST-HINT — routing-approval message contains the approval-line format
 #     hint AND the hint's "recognized / not recognized" claims agree with the
-#     shared regex (pre-edit-dod-gate.sh:752) applied directly.
+#     shared regex (now pre-edit-discipline-gate.sh) applied directly.
 #
-# Strategy: the shared sandbox harness triggers each gate in isolation by
-# shaping the trail/dod + .spec-reviews state, then asserts stderr + exit 2.
+# Scenario B (routing-approval) and C (unreviewed-spec) exercise
+# routing-gate/spec-review-gate — both explicitly discipline-gate's axes per
+# the rotation contract, unaffected by the active-task retirement. They keep
+# their original teach-forward assertions verbatim, just retargeted.
+#
+# Scenario A (DoD-absent) is different in kind: its "no active task record"
+# teach-forward message was owned by the OLD v1 active-task fallback
+# judgment (hooks/lib/active-task-gate.sh's final `else` branch), which is
+# retired wholesale by the rotation — task-gate's contract has NO v1 fallback
+# ("구 v1 폴백 판정 소멸"); its blocking paths are exclusively (i) a v2 DENY
+# relay (a generic evaluator reason, no numbered next-steps — see
+# tests/hooks/test-active-task-authority-switch.sh's assert_v1_relayed_v2_deny
+# for why that reason text can never carry this teach-forward UX) or (ii) a
+# fail-closed exit 2 when delegation/switch-check itself cannot run. This
+# default sandbox links no rein package/bin, so it lands in (ii) — but the
+# specific "no active task record" / "trail/dod/dod-" / numbered-steps wording
+# is NOT reproduced by that fail-closed path (it is new code, not a
+# preserved copy of the old message). We keep the scenario as a
+# characterization of the fail-closed *direction* (still exit 2, still
+# assistant-toned) without asserting the retired message's exact shape.
 
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=./lib/test-harness.sh
 source "$SCRIPT_DIR/lib/test-harness.sh"
 
-# Shared approval-line regex — copied verbatim from pre-edit-dod-gate.sh:752
-# (and post-edit-dod-routing-check.sh:85). The hint's pass/fail claims must
+# Shared approval-line regex — copied verbatim from pre-edit-discipline-gate.sh
+# (and post-edit-dod-routing-check.sh). The hint's pass/fail claims must
 # agree with THIS regex.
 APPROVAL_RE='^[[:space:]]*approved_by_user:[[:space:]]*true([[:space:]]*#.*)?[[:space:]]*$'
 
@@ -41,20 +62,26 @@ _assert_two_numbered_steps() {
   fi
 }
 
-# ---- Scenario A: DoD-absent gate teach-forward (line ~893)
-test_dod_absent_teach_forward() {
-  # No DoD files, no spec-reviews, no incidents → DoD-absent block.
+# ---- Scenario A: task-gate fail-closed path (formerly "DoD-absent" v1
+# teach-forward). See file header for why the message assertions are
+# relaxed to exit-code + assistant-tone rather than the retired exact text.
+test_task_gate_no_active_task_axis_fails_closed_in_default_sandbox() {
+  # No DoD files, no rein package/bin linked → the axis's switch-check
+  # cannot even run → fail-closed (exit 2), not a v1-style teach-forward
+  # block. (This is new case (a)/(switch-state-read-failure) territory —
+  # see tests/hooks/test-pre-edit-task-gate.sh and
+  # tests/hooks/test-active-task-authority-switch.sh scenario (f) for the
+  # dedicated coverage of that exact path.)
   touch "$SANDBOX/scripts/foo.sh"
 
-  run_hook "pre-edit-dod-gate.sh" "$(_make_input scripts/foo.sh)"
+  run_hook "pre-edit-task-gate.sh" "$(_make_input scripts/foo.sh)"
 
-  assert_exit 2 "DoD-absent → block (exit 2 preserved)"
-  assert_stderr_contains "no active task record"
-  assert_stderr_contains "trail/dod/dod-"
-  _assert_two_numbered_steps "DoD-absent"
+  assert_exit 2 "no active-task axis available in a default sandbox → fail-closed (exit 2 preserved)"
+  [ -n "$HOOK_STDERR" ] || fail "task-gate fail-closed path must still say something on stderr"
+  echo "$HOOK_STDERR" | grep -qF "[rein]" || fail "task-gate fail-closed stderr missing '[rein]' prefix"
 }
 
-# ---- Scenario B: routing-approval gate teach-forward + format hint (line ~766)
+# ---- Scenario B: routing-approval gate teach-forward + format hint
 test_routing_approval_teach_forward_and_hint() {
   # An active DoD (new format, no inbox match) with a '## 라우팅 추천' section
   # but NO approval line → routing-approval block.
@@ -69,7 +96,7 @@ approved_by_user: false
 EOF
   touch "$SANDBOX/scripts/foo.sh"
 
-  run_hook "pre-edit-dod-gate.sh" "$(_make_input scripts/foo.sh)"
+  run_hook "pre-edit-discipline-gate.sh" "$(_make_input scripts/foo.sh)"
 
   assert_exit 2 "routing-approval → block (exit 2 preserved)"
   assert_stderr_contains "without user approval"
@@ -101,7 +128,7 @@ EOF
   done
 }
 
-# ---- Scenario C: unreviewed-spec gate teach-forward (line ~665)
+# ---- Scenario C: unreviewed-spec gate teach-forward
 test_unreviewed_spec_teach_forward() {
   # A .spec-reviews/<hash>.pending pointing at an existing spec, with no
   # matching .reviewed → unreviewed-spec block.
@@ -122,7 +149,7 @@ EOF
   # Edit a NON-test source file so the tests/ TDD exemption does not apply.
   touch "$SANDBOX/scripts/foo.sh"
 
-  run_hook "pre-edit-dod-gate.sh" "$(_make_input scripts/foo.sh)"
+  run_hook "pre-edit-discipline-gate.sh" "$(_make_input scripts/foo.sh)"
 
   assert_exit 2 "unreviewed-spec → block (exit 2 preserved)"
   assert_stderr_contains "has not been reviewed yet"
@@ -131,9 +158,9 @@ EOF
 }
 
 main() {
-  run_test test_dod_absent_teach_forward                   pre-edit-dod-gate.sh
-  run_test test_routing_approval_teach_forward_and_hint    pre-edit-dod-gate.sh
-  run_test test_unreviewed_spec_teach_forward              pre-edit-dod-gate.sh
+  run_test test_task_gate_no_active_task_axis_fails_closed_in_default_sandbox pre-edit-task-gate.sh
+  run_test test_routing_approval_teach_forward_and_hint    pre-edit-discipline-gate.sh
+  run_test test_unreviewed_spec_teach_forward              pre-edit-discipline-gate.sh
   summary
 }
 
