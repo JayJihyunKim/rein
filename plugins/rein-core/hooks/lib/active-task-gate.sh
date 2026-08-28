@@ -81,9 +81,13 @@
 # v2 silently judge "no requirement" and ALLOW every edit (same failure
 # shape security_review's D6 investigation found, just for a different
 # trigger shape). So this axis's delegate also injects REIN_POLICY_DIR,
-# pointing at `.rein/policy/task-axis/` (see that folder's `_version.yaml`
-# header for the full "why a new folder, why THREE policy files"
-# reasoning — the OR-less `when:` clause forces one file per tool name).
+# pointing at the task-axis policy folder — resolved in two tiers: the
+# project override `<project>/.rein/policy/task-axis/` first, else the
+# distribution-shipped default `<plugin-root>/policies/task-axis/` (see
+# rein_active_task_delegate()'s "정책 위치 2단 해소" section for why the
+# bundled fallback exists, and that folder's `_version.yaml` header for
+# the full "why a new folder, why THREE policy files" reasoning — the
+# OR-less `when:` clause forces one file per tool name).
 #
 # --- Phase 7 웨이브 3 ③-c (커밋 게이트 교대) 갱신 ---
 #
@@ -235,9 +239,10 @@ PY
 REIN_ATG_DELEGATE_TIMEOUT_S=30
 
 # _rein_atg_policy_file_for_tool TOOL_NAME
-#   Maps a tool name to its axis-only policy filename (see
-#   .rein/policy/task-axis/_version.yaml for why three separate files —
-#   the D3 `when:` clause has no OR). Prints the filename on a match, or
+#   Maps a tool name to its axis-only policy filename (the same filename is
+#   looked up in whichever tier resolves — project override or bundled
+#   default; see that folder's `_version.yaml` for why three separate
+#   files — the D3 `when:` clause has no OR). Prints the filename on a match, or
 #   nothing (rc 1) for any other tool name — the hook's own PreToolUse
 #   matcher is Edit|Write|MultiEdit, so a non-match here can only happen
 #   in a malformed/synthetic event, and the caller must treat that as
@@ -268,8 +273,36 @@ _rein_atg_policy_file_for_tool() {
 #   없으면(예: edit-task.yaml 삭제) 매칭되는 policy 가 0개가 되어
 #   "policy 0개 = 평가 기본 ALLOW" 에 걸려 이 축의 요구 전체가 로그도
 #   에러도 없이 사라진다. 그래서 위임을 시도하기 전에 이 도구용 정책
-#   파일 하나만 직접 확인한다 — 없으면 위임 자체를 건너뛰고 result 를
-#   FAIL 초기값 그대로 둔다.
+#   파일 하나가 실재하는지 직접 확인한다 — 없으면 위임 자체를 건너뛰고
+#   result 를 FAIL 초기값 그대로 둔다.
+#
+#   --- 정책 위치 2단 해소 (프로젝트 오버라이드 → 배포 번들 폴백,
+#   2026-08-28 hotfix — docs/reports/[issues]_2026-08-28.md) ---
+#
+#   위 존재 확인의 대상 디렉토리를 두 곳에서 순서대로 찾는다:
+#     ① `$PROJECT_DIR/.rein/policy/task-axis/`  — 프로젝트 오버라이드
+#     ② `$_REIN_ATG_PKG_PARENT/policies/task-axis/` — 배포 번들 기본
+#        (플러그인에 동봉되는 SSOT, policies/task-axis/_version.yaml 참조)
+#   ①에 이 도구용 파일이 있으면 그 폴더를, 없고 ②에 있으면 ②를
+#   REIN_POLICY_DIR 로 주입한다. 둘 다 없을 때만 위임을 건너뛰고 FAIL
+#   (fail-closed)로 둔다.
+#
+#   왜 ② 폴백이 필수인가: active_task 축은 배포 기본값(rein/engine/
+#   authority.py DEFAULT_SWITCHED_CAPABILITIES)으로 v2 전환돼 있는데,
+#   이 축이 요구하는 tool.pre 정책은 policies/default/ 에 없어 오직 이
+#   축 전용 폴더에서만 온다. ①만 보던 이전 구현은 그 폴더를 dogfood
+#   저장소의 프로젝트 오버라이드로만 갖고 있었고 배포본엔 동봉하지
+#   않아서, v2 로 업데이트한 실사용자 프로젝트(① 부재)는 위임이 매번
+#   FAIL → 모든 편집이 복구 불가로 하드 차단됐다(실측 리포트 동일).
+#   ②를 폴백으로 두면 오버라이드 없는 프로젝트도 배포 번들 정책으로
+#   정상 위임(활성 작업 없으면 정상 DENY, 있으면 ALLOW)한다.
+#
+#   위변조 가드는 오히려 강화된다: 위 "policy 0개 = 침묵 ALLOW" 함정을
+#   막는 파일 존재 확인은 유지되고, 사용자가 ① 오버라이드 파일을 지워
+#   축을 조용히 끄려 해도 ②가 이어받아 축이 계속 발동한다. FAIL 은
+#   이제 ①②가 **모두** 없는 손상 상태(플러그인 파손 →
+#   `claude plugin update rein` 로 재설치)에서만 도달한다. 정상 opt-out
+#   은 여전히 authority.yaml/hooks.yaml 경로로만 한다(이 파일 판정 밖).
 #
 #   결과를 두 전역에 담아 반환한다(다른 두 축과 동일 이유 — 함수
 #   반환값 하나로는 DENY 의 JSON 본문까지 실어 나를 수 없다):
@@ -321,9 +354,17 @@ rein_active_task_delegate() {
   local _atg_policy_file_name
   _atg_policy_file_name=$(_rein_atg_policy_file_for_tool "${TOOL_NAME:-}") || return 0
 
-  local _atg_policy_dir="$PROJECT_DIR/.rein/policy/task-axis"
-  local _atg_policy_file="$_atg_policy_dir/$_atg_policy_file_name"
-  [ -f "$_atg_policy_file" ] || return 0
+  # 정책 위치 2단 해소 — 프로젝트 오버라이드 우선, 없으면 배포 번들 폴백
+  # (위 함수 docstring "정책 위치 2단 해소" 절 참조). 둘 다 이 도구용
+  # 파일이 없을 때만 위임을 건너뛰고 FAIL(fail-closed)로 둔다.
+  local _atg_policy_dir=""
+  if [ -f "$PROJECT_DIR/.rein/policy/task-axis/$_atg_policy_file_name" ]; then
+    _atg_policy_dir="$PROJECT_DIR/.rein/policy/task-axis"
+  elif [ -f "$_REIN_ATG_PKG_PARENT/policies/task-axis/$_atg_policy_file_name" ]; then
+    _atg_policy_dir="$_REIN_ATG_PKG_PARENT/policies/task-axis"
+  else
+    return 0
+  fi
 
   # REIN_PROJECT_ROOT + REIN_POLICY_DIR 를 명시 주입한다 — 다른 두 축과
   # 동일 이유(v1 이 이미 확정한 PROJECT_DIR 을 그대로 넘겨 v1/v2 가 같은

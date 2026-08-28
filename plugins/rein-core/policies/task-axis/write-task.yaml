@@ -1,0 +1,10 @@
+# plugins/rein-core/policies/task-axis/write-task.yaml — active_task 축 전용
+# 배포 번들 정책, Write 도구 이벤트. edit-task.yaml 과 완전히 동일한
+# 스키마 — `when.tool` 값 하나만 다르다(OR 미지원이라 도구별 파일 분리,
+# `_version.yaml` 헤더 참조).
+trigger: tool.pre
+when:
+  tool: Write
+require:
+  - active_task
+failure_mode: closed

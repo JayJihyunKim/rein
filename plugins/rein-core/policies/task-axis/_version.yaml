@@ -1,0 +1,32 @@
+# plugins/rein-core/policies/task-axis/_version.yaml — active_task 축 전용
+# 정책 세트의 버전 메타데이터 (kernel/policy.py VERSION_FIELDS/
+# VERSION_FILENAME 예약 파일 — edit-task.yaml/write-task.yaml/
+# multiedit-task.yaml 3개 정책 파일과 다른 폐쇄 스키마를 쓴다).
+#
+# 이것은 **배포 번들(distribution)에 동봉되는 기본 세트**다. active_task
+# 축은 배포 기본값(rein/engine/authority.py DEFAULT_SWITCHED_CAPABILITIES)
+# 으로 v2 전환돼 있어, 오버라이드 없는 사용자 프로젝트에서도 위임
+# (hooks/lib/active-task-gate.sh 의 rein_active_task_delegate())이 이
+# 폴더를 REIN_POLICY_DIR 로 해소한다. 프로젝트가 자기 규율을 조정하려면
+# `<project>/.rein/policy/task-axis/` 에 같은 이름의 파일을 두면 그쪽이
+# 우선한다(오버라이드). 둘 다 없으면 위임은 fail-closed 로 귀결된다
+# (위변조·손상 방어 — 그 함수의 정책 해소 주석 참조).
+#
+# 왜 이 디렉토리가 policies/default/ 와 따로인가 (security-axis 와 같은
+# 이유, 다른 트리거): policies/default/ 는 commit/push/release 3개 tier 만
+# 선언하고 tool.pre(Edit/Write/MultiEdit) 트리거에는 아무 정책도 없다 —
+# active_task 를 그 세트로 그대로 위임하면 v2 가 "요구 없음"으로 판정해
+# 조용히 통과한다(security_review 축이 2026-08-18 조사 D6 에서 겪은 것과
+# 동일한 함정의 tool.pre 판). 그래서 이 축의 위임은 REIN_POLICY_DIR 을 이
+# 폴더로 명시 주입해 tool.pre 요구만 격리 평가한다.
+#
+# 왜 3개 정책 파일인가: active_task 축은 Edit/Write/MultiEdit 세 tool
+# 이벤트 전부를 요구해야 하는데, kernel D3 YAML subset 의 `when:` 절은
+# 단일 값 등호 비교만 지원하고 OR 를 표현할 방법이 없다. 각 파일은
+# `when: tool: <ToolName>` 하나만 다르고 나머지(trigger/require/
+# failure_mode)는 동일하다.
+#
+# 종국 형태(후속): policies/default/ 로 tool.pre 요구를 정식 통합하고 이
+# 격리 폴더 + REIN_POLICY_DIR 주입 구조를 걷어내는 것이 이관의 마지막
+# 단계다 — 그 통합은 별도 결정 사안이며, 이 파일은 그 전까지 배포 SSOT 다.
+version: 1

@@ -1,0 +1,14 @@
+# plugins/rein-core/policies/task-axis/edit-task.yaml — active_task 축 전용
+# 배포 번들 정책, Edit 도구 이벤트. `_version.yaml` 헤더에 이 폴더와
+# 3파일 분할이 왜 필요한지, 그리고 이것이 배포 번들 기본(오버라이드 없는
+# 프로젝트의 위임 해소 대상)임이 전부 적혀 있다. 요지만 반복: policies/
+# default/ 는 tool.pre 트리거에 아무 policy 도 없어 active_task 를 요구하지
+# 않으므로, 이 축을 위임하려면 REIN_POLICY_DIR 로 별도 주입되는 이 정책이
+# 필요하다. `when:` 절이 OR 를 지원하지 않아 Edit/Write/MultiEdit 각각
+# 파일 1개씩.
+trigger: tool.pre
+when:
+  tool: Edit
+require:
+  - active_task
+failure_mode: closed

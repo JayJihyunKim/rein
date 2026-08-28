@@ -288,9 +288,9 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v1.6.6** (2026-08-07) — blocked commands are no longer written verbatim to the git-tracked incident log: the tracked record keeps only the command verb and a content hash, while a masked copy (env-var tokens, Authorization headers, URL credentials) goes to a local untracked log. Test-harness events are tagged and excluded from repeat-violation warnings and incident promotion. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v2.0.1** (2026-08-28) — hotfix for v2.0.0: updating to v2.0.0 could block every file edit because the active-task gate's policy shipped without the plugin. The policy is now bundled and falls back to a deployed default when a project has none, so edits are allowed with an active task and otherwise get a recoverable prompt instead of a hard block. ([CHANGELOG](CHANGELOG.md))
 
-Previous: **v1.6.4** (2026-07-27) — the persona picker offers **Create new** directly, switching a persona takes effect immediately in the running session, you can pick or write the greeting yourself, and code review (`/codex-review`) no longer mis-cancels itself while the reviewer is running your tests. ([CHANGELOG](CHANGELOG.md))
+Previous: **v2.0.0** (2026-08-27) — review, security, and active-task pass evidence is now bound to the reviewed change content and drawn from a trust store instead of a self-declared marker file, so forging a marker or swapping the content after review no longer passes the commit gate. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

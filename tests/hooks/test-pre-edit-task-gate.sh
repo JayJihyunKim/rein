@@ -61,6 +61,19 @@ _link_task_axis_policy() {
   rm -rf "$SANDBOX/.rein/policy/task-axis"
   cp -R "$REAL_PROJECT_DIR/tests/fixtures/policy/task-axis" "$SANDBOX/.rein/policy/task-axis"
 }
+# _link_bundled_task_axis_policy — places the axis policy at the *bundled*
+# location a real plugin install ships it to (plugin-root/policies/task-axis),
+# NOT at the per-project override (.rein/policy/task-axis). In this sandbox the
+# hook runs from $SANDBOX/.claude/hooks, so its plugin root is $SANDBOX/.claude
+# (rein_active_task_delegate()'s _REIN_ATG_PKG_PARENT). This exercises the
+# distribution-shipped fallback that a project with NO override must rely on —
+# the exact configuration a v2-updated user project has (bug reproduced:
+# docs/reports/[issues]_2026-08-28.md).
+_link_bundled_task_axis_policy() {
+  mkdir -p "$SANDBOX/.claude/policies"
+  rm -rf "$SANDBOX/.claude/policies/task-axis"
+  cp -R "$REAL_PROJECT_DIR/tests/fixtures/policy/task-axis" "$SANDBOX/.claude/policies/task-axis"
+}
 _write_authority_switched_on() {
   mkdir -p "$SANDBOX/.rein/policy"
   printf 'switched:\n  - active_task\n' > "$SANDBOX/.rein/policy/authority.yaml"
@@ -78,6 +91,20 @@ _setup_switched_no_active_task() {
   _link_rein_package
   _link_rein_bin
   _link_task_axis_policy
+  _write_authority_switched_on
+}
+
+# _setup_switched_bundled_only — real engine, switched on, task-axis policy
+# present ONLY at the bundled (distribution) location, NO per-project override,
+# NO DoD seeded. This is precisely the shape of a project that updated to v2
+# without ever having a .rein/policy/task-axis/ override. An Edit to an
+# IS_SOURCE=true path must still reach real v2 delegation and get a genuine
+# DENY ("no active task") — proving the delegate falls back to the shipped
+# policy instead of collapsing to a fail-closed FAIL (the reported bug).
+_setup_switched_bundled_only() {
+  _link_rein_package
+  _link_rein_bin
+  _link_bundled_task_axis_policy
   _write_authority_switched_on
 }
 
@@ -506,6 +533,44 @@ test_dual_axis_independent_logging_two_distinct_reasons() {
     || fail "dual-axis 차단은 정확히 서로 다른 사유 2건을 남겨야 함(단일화/dedup 이 조용히 도입되면 이 값이 1로 줄어든다) — got: $reason_count"
 }
 
+# ============================================================
+# 배포 번들 폴백 (2026-08-28 hotfix — docs/reports/[issues]_2026-08-28.md):
+# active_task 축은 배포 기본으로 v2 전환돼 있지만, 위임이 요구하는 도구별
+# 정책은 예전엔 프로젝트 오버라이드(.rein/policy/task-axis)에서만 찾았다.
+# 그 오버라이드는 dogfood 저장소에만 있고 배포본엔 동봉되지 않아, v2 로
+# 업데이트한 실사용자 프로젝트는 위임이 매번 FAIL → fail-closed 로 전체
+# 편집이 복구 불가 차단됐다. 수리: 위임이 프로젝트 오버라이드 → 배포 번들
+# (plugin-root/policies/task-axis) 순으로 정책 위치를 해소한다. 이 스위트는
+# 오버라이드 없이 번들 정책만 있는 프로젝트에서 위임이 정상 DENY 에
+# 도달하는지(= fail-closed FAIL 이 아닌지)를 실 엔진으로 관측한다.
+# ============================================================
+
+# red(수정 전엔 exit 2 FAIL)→green: 오버라이드 없음 + 번들 정책만 →
+# source 편집이 실제 v2 위임 DENY 에 도달.
+test_bundled_policy_fallback_reaches_v2_deny() {
+  _mk_src_file "src/api.ts"
+  _setup_switched_bundled_only
+
+  run_hook "$HOOK" "$(_make_input src/api.ts)"
+
+  assert_reaches_v2_deny "src/api.ts (오버라이드 없음, 번들 정책 폴백 → v2 위임 도달, fail-closed FAIL 아님)"
+}
+
+# 위변조 가드 보존: 프로젝트/번들 양쪽 모두 정책이 없으면 여전히
+# fail-closed exit 2 (엔진·정책이 진짜로 없는 손상 상태만 FAIL).
+test_no_policy_anywhere_still_fails_closed() {
+  _mk_src_file "src/api.ts"
+  _link_rein_package
+  _link_rein_bin
+  _write_authority_switched_on
+  # 프로젝트 오버라이드도, 번들 정책도 깔지 않는다.
+
+  run_hook "$HOOK" "$(_make_input src/api.ts)"
+
+  assert_exit 2 "정책이 프로젝트·번들 어디에도 없으면 fail-closed(위변조 가드 보존)"
+  assert_stderr_contains "task-axis"
+}
+
 main() {
   # GMF-3: 소스 판정 경계가 위임 시도 여부를 가른다
   run_test test_gmf3_red_root_internal_go_reaches_v2_deny "$HOOK"
@@ -533,6 +598,9 @@ main() {
   run_test test_json_parse_failure_fails_closed "$HOOK"
   # 로그 계약: 축별 독립 감사 (dedup 하지 않음) 회귀 방지
   run_test test_dual_axis_independent_logging_two_distinct_reasons "$HOOK" pre-edit-discipline-gate.sh
+  # 배포 번들 폴백 (2026-08-28 hotfix): 오버라이드 없는 프로젝트도 위임 도달
+  run_test test_bundled_policy_fallback_reaches_v2_deny "$HOOK"
+  run_test test_no_policy_anywhere_still_fails_closed "$HOOK"
   summary
 }
 

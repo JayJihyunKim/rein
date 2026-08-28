@@ -338,7 +338,7 @@ if rein_active_task_authority_switched; then
       # rein_check_active_task() 는 이 경우 v1 자신의 DOD_FOUND 판정으로
       # 흘려보냈다 — 이 훅은 그 폴백을 갖지 않는다. 판단 불능은 거부
       # 방향이다(design doc §3.4) — fail-closed.
-      echo "[rein] The active-task axis could not be evaluated (v2 delegation failed, timed out, or returned an unparseable response) after authority for this axis was confirmed switched to v2. This edit is blocked until the underlying failure is fixed — there is no v1 fallback judgment for this axis anymore. Check the v2 engine installation (bin/rein) and .rein/policy/task-axis/ policy files." >&2
+      echo "[rein] The active-task axis could not be evaluated (v2 delegation failed, timed out, or returned an unparseable response) after authority for this axis was confirmed switched to v2. This edit is blocked until the underlying failure is fixed — there is no v1 fallback judgment for this axis anymore. The task-axis policy ships with the plugin; if it is missing your install is damaged — reinstall the plugin with 'claude plugin update rein' to restore it, then check the v2 engine (bin/rein). (Do not hand-craft policy files to bypass this.)" >&2
       log_block "활성 작업 위임 실패 (v2, fail-closed)" "$FILE_PATH"
       exit 2
       ;;
