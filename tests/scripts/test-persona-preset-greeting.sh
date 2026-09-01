@@ -41,7 +41,7 @@ CHOI="$PRESET_DIR/choi-haengbae.md"
 # code drives the bash-level ok/fail. Korean length + exact LF fence + L4
 # forbidden-pattern scanning all live in Python for byte/codepoint accuracy.
 check_preset() {
-  python3 - "$1" "$2" <<'PYEOF'
+  python3 - "$1" "$2" "$3" <<'PYEOF'
 import re
 import sys
 
@@ -114,19 +114,58 @@ for rx in FORBIDDEN_REGEXES:
     if rx.search(greeting):
         die("greeting matches discipline-erosion pattern /%s/: %r" % (rx.pattern, greeting))
 
-print("%s: greeting=%r (len=%d) OK" % (label, greeting, len(greeting)))
+# (e) display_name 필수 + one-line scalar (block 은 이미 줄 단위 리스트라 값이
+#     여러 줄에 걸칠 수 없음 — 파서 계약상 one-line 이 구조적으로 보장됨).
+display_lines = [ln for ln in block if ln.startswith("display_name:")]
+if not display_lines:
+    die("frontmatter block has no `display_name:` field")
+display_name = display_lines[0][len("display_name:"):].strip()
+if not display_name:
+    die("`display_name:` value is empty")
+
+# (f) L4 forbidden pattern scan on display_name (mirrors greeting's own scan).
+for lit in FORBIDDEN_LITERALS:
+    if lit in display_name:
+        die("display_name contains forbidden internal path/identifier %r: %r" % (lit, display_name))
+for rx in FORBIDDEN_REGEXES:
+    if rx.search(display_name):
+        die("display_name matches discipline-erosion pattern /%s/: %r" % (rx.pattern, display_name))
+
+# (g) display_name_en — expect_alias 인자("yes"/"no")로 존재/부재를 강제.
+#     Python 실행 라인이 세 번째 인자를 항상 넘기므로(위 invocation 수정) 기본값 없이
+#     필수로 읽는다 — 누락 시 IndexError 로 즉시 실패(fail-closed, silent "no" 강등 방지).
+expect_alias = sys.argv[3]
+alias_lines = [ln for ln in block if ln.startswith("display_name_en:")]
+if expect_alias == "yes" and not alias_lines:
+    die("frontmatter block has no `display_name_en:` field (expected for this preset)")
+if expect_alias == "no" and alias_lines:
+    die("frontmatter block has `display_name_en:` but this preset must omit it")
+
+alias_val = alias_lines[0][len("display_name_en:"):].strip() if alias_lines else None
+print(
+    "%s: greeting=%r display_name=%r display_name_en=%r (len=%d) OK"
+    % (label, greeting, display_name, alias_val, len(greeting))
+)
 PYEOF
 }
 
-for spec in "boss-ace:$BOSS" "jennie:$JENNIE" "choi-haengbae:$CHOI"; do
+LOOP_FAIL=""
+for spec in "boss-ace:$BOSS:yes" "jennie:$JENNIE:yes" "choi-haengbae:$CHOI:no"; do
   label="${spec%%:*}"
-  file="${spec#*:}"
-  if OUT="$(check_preset "$label" "$file")"; then
+  rest="${spec#*:}"
+  file="${rest%%:*}"
+  expect_alias="${rest#*:}"
+  if OUT="$(check_preset "$label" "$file" "$expect_alias")"; then
     ok "$OUT"
   else
-    fail "$OUT"
+    # 즉시 exit 하지 않고 실패를 누적한다 — 3개 프리셋을 모두 관찰해야 웨이브
+    # allowlist 가 jennie·choi-haengbae 상태를 각각 검증할 수 있다 (즉시 fail 은
+    # 첫 실패에서 종료해 뒤 프리셋을 가림).
+    echo "FAIL: $OUT" >&2
+    LOOP_FAIL="${LOOP_FAIL} ${label}"
   fi
 done
+[ -z "$LOOP_FAIL" ] || fail "preset frontmatter/display_name checks failed for:${LOOP_FAIL}"
 
 echo ""
 echo "test-persona-preset-greeting: OK ($PASS asserts passed)"

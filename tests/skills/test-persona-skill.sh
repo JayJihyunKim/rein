@@ -148,28 +148,96 @@ assert_grep_fixed '로더는 정본만 반환' "g7h: 로더 정본만 반환 절
 assert_grep_fixed '장황한 여러 문장 나열·이모지 스팸을 금지' "g7i: 장황 나열·이모지 스팸 금지 (허용 반전 차단)"
 assert_grep_fixed '<전환 확인 1줄>' "g7j: 전환 확인 정확히 1줄 (최소 1줄 회귀 차단)"
 
-echo "== (h) 선택창 '새로 만들기' 입구 + 선택지 상한 초과 처리 (dod-2026-07-27) =="
+echo "== (h) 최상위 3개 고정 메뉴 + flat 목록 + 페이지네이션 (dod-2026-08-28) =="
 
-# (h1) 새로 만들기 / 끄기는 실존 프리셋 수와 무관한 고정 옵션
-assert_grep_fixed '항상 포함하는 고정 옵션 2개' "h1a: 고정 옵션 2개(새로 만들기·끄기) 명시"
-assert_grep '새로 만들기[^[:cntrl:]]*생성 흐름' "h1b: '새로 만들기' 가 생성 흐름 입구"
+SEL_BLOCK="$(awk '/^## 선택 흐름/{f=1; next} /^## /{f=0} f' "$SKILL_MD")"
 
-# (h2) AskUserQuestion 선택지 상한 + 초과 시 2단 제시 + 갈래 내 이어보기
-assert_grep_fixed '선택지 상한 4개' "h2a: 선택지 상한 4개 명시"
-assert_grep_fixed '2단 제시' "h2b: 상한 초과 시 2단 제시"
-assert_grep_fixed '갈래 선택' "h2c: 1단 = 갈래 선택"
-assert_grep_fixed '다음 목록 보기' "h2d: 갈래 내 4개 초과 시 이어보기"
+# Block-scoped assertion helpers (Medium-1 hardening — round 2): operate on
+# $SEL_BLOCK (the '## 선택 흐름' section body) rather than the whole file, so a
+# phrase's presence/ABSENCE is verified precisely within the mutated section.
+assert_block_grep_fixed() {
+  TEST_COUNT=$((TEST_COUNT + 1))
+  if printf '%s' "$SEL_BLOCK" | grep -qF -- "$1"; then echo "  ok: $2"
+  else fail "$2 (literal not found in 선택 흐름 block: $1)"; fi
+}
+assert_block_grep_absent() {
+  TEST_COUNT=$((TEST_COUNT + 1))
+  if printf '%s' "$SEL_BLOCK" | grep -qE -- "$1"; then fail "$2 (unexpected pattern found in 선택 흐름 block: $1)"
+  else echo "  ok: $2"; fi
+}
 
-# (h3) 도달 가능성 불변식 — 상한 때문에 실존 후보가 조용히 누락되면 안 됨 (negative 계약)
-assert_grep_fixed '도달 가능성 불변식' "h3a: 도달 가능성 불변식 항목 존재"
-assert_grep_fixed '조용히 빠지는 프리셋이 있어서는 안 된다' "h3b: 후보 누락 금지 문장 보존"
+# (h1) 최상위 정확히 3개 고정: 페르소나 목록 / 내 페르소나 만들기 / 페르소나 끄기
+assert_grep_fixed '최상위 3개 고정 메뉴' "h1a: 최상위 3개 고정 메뉴 명시"
+assert_grep_fixed '페르소나 목록' "h1b: 최상위 옵션 — 페르소나 목록"
+assert_grep_fixed '내 페르소나 만들기' "h1c: 최상위 옵션 — 내 페르소나 만들기 (신규 라벨)"
+assert_grep_fixed '페르소나 끄기' "h1d: 최상위 옵션 — 페르소나 끄기 (신규 라벨)"
+assert_grep_absent '갈래 선택' "h1e: 갈래 선택 폐지 (negative)"
+assert_grep_absent '고정 옵션 2개' "h1f: 옛 '고정 옵션 2개' 문구 부재 (negative)"
+assert_grep_absent '2단 제시' "h1g: 옛 '2단 제시' 문구 부재 (negative)"
+assert_grep_absent '새로 만들기' "h1h: 옛 라벨 '새로 만들기' 독립 부재 (negative)"
+assert_grep_absent '끄기\(중립\)' "h1i: 옛 라벨 '끄기(중립)' 부재 (negative)"
 
-# (h4) 인계 시 상태 미변경 — persona.yaml 미기록 + 전환 인사말 미수행
-assert_grep '새로 만들기 선택 시[^[:cntrl:]]*쓰지 않고' "h4a: 새로 만들기 선택 시 persona.yaml 미기록"
-assert_grep_fixed '새로 만들기로 인계된 경우 이 단계를 수행하지 않는다' "h4b: 인계 시 인사말 단계 미수행"
+# (h2) flat 목록 — frontmatter read + tier 구분 없음 + 등록순 명시 리스트
+assert_grep_fixed 'tier 구분 없이' "h2a: 내장·커스텀 tier 구분 없는 flat 목록"
+assert_grep_fixed 'frontmatter 에서 직접 read' "h2b: 표시 이름·요약 frontmatter read"
+assert_grep_fixed 'boss-ace → jennie → choi-haengbae' "h2c: 등록순 명시 리스트 (set 이터레이션 미의존)"
+assert_grep_fixed '하드코딩하지 않는다' "h2d: 내장 이름·요약 하드코딩 금지 (negative 취지)"
 
-# (h5) 적용 질문 '예' 는 기록 + 인사말을 모두 수행 (인사말이 영구히 누락되지 않음)
-assert_grep '선택 흐름 [0-9]단계\(인사말 prepend \+ 결과 보고\)를 동일하게 수행' "h5a: 적용 '예' 시 기록 + 인사말 수행"
+# (h3) 활성 표식
+assert_grep_fixed '· 지금 켜짐' "h3a: 활성 프리셋 표식 '· 지금 켜짐'"
+assert_grep_fixed 'resolved 이름' "h3b: 활성 판정은 로더 --persona resolved 이름과 대조"
+
+# (h4) 페이지네이션 단일 임계 규칙 + 필러 폐지
+assert_grep_fixed '다음 목록 보기' "h4a: 잔여 5개 이상 시 이어보기"
+assert_grep_absent '뒤로 가기' "h4b: 옛 '뒤로 가기' 필러 부재 (negative, 파일 전체)"
+assert_grep_fixed '선택지 상한 4개' "h4c: 선택지 상한 4개 명시 (불변 보존)"
+assert_grep_fixed '잔여 항목이 4개 이하' "h4d: 단일 임계 규칙 — 잔여 4개 이하 전부 표시"
+
+# (h5) 도달 가능성 불변식 (불변 보존)
+assert_grep_fixed '도달 가능성 불변식' "h5a: 도달 가능성 불변식 항목 존재"
+assert_grep_fixed '조용히 빠지는 프리셋이 있어서는 안 된다' "h5b: 후보 누락 금지 문장 보존"
+
+# (h6) 전역 label dedup
+assert_grep_fixed '인덱스 suffix' "h6a: dedup 인덱스 suffix 규칙 명시"
+assert_grep_fixed '이름 없는 페르소나' "h6b: fallback label '이름 없는 페르소나'"
+
+# (h7) '내 페르소나 만들기'/'페르소나 끄기' 인계 시 상태 미변경 (라벨 갱신)
+assert_grep '내 페르소나 만들기 선택 시[^[:cntrl:]]*쓰지 않고' "h7a: '내 페르소나 만들기' 선택 시 persona.yaml 미기록 (신규 라벨)"
+assert_grep_fixed '내 페르소나 만들기로 인계된 경우 이 단계를 수행하지 않는다' "h7b: 인계 시 인사말 단계 미수행 (신규 라벨)"
+
+# (h8) 정적 계약 강화 — 선택 흐름 블록 범위 검증 (Medium-1, round 2)
+# (h8a) '페르소나 목록' 후보 구성 프로즈에 내장 이름·요약 하드코딩 부재 (negative).
+#   frontmatter read 계약(각 프리셋 .md 에서 display_name·summary 를 읽음)이므로 목록
+#   프로즈가 slug 옆에 이름·요약을 직접 나열하면 안 된다. 전역 SEL_BLOCK 은 4단계의
+#   의도된 `display_name: 마르코` 예시를 포함하므로 canonical 이름을 전역 금지할 수 없다 —
+#   검사 범위를 '페르소나 목록 선택 시' 2단계(3단계 '기록' 직전까지)로 한정한 LIST_BLOCK 을
+#   SEL_BLOCK 에서 다시 추출해, 그 범위에서만 이름·요약 하드코딩 부재를 확인한다.
+LIST_BLOCK="$(printf '%s\n' "$SEL_BLOCK" | awk '/페르소나 목록. 선택 시/{f=1} /^[[:space:]]*3\. \*\*기록/{f=0} f')"
+# fail-closed: 앵커가 어긋나 LIST_BLOCK 이 비면 아래 부재 검사 6건이 공집합에서 전부
+# 통과(오탐 GREEN)하므로, 부재 검사 이전에 추출 성공을 확정한다 — 시작 앵커가 정확히
+# 1회 매칭되고 LIST_BLOCK 이 비어있지 않아야 한다.
+list_start_hits="$(printf '%s\n' "$SEL_BLOCK" | grep -cE '페르소나 목록. 선택 시')"
+[ "$list_start_hits" = "1" ] || fail "h8a0a: LIST_BLOCK 시작 앵커가 정확히 1회가 아님 (실제 $list_start_hits) — 범위 추출 실패, 하드코딩 검사 무효"
+[ -n "$LIST_BLOCK" ] || fail "h8a0b: LIST_BLOCK 이 비어 있음 — 앵커 매칭 실패로 이름·요약 부재 검사가 무효"
+ok() { echo "  ok: $1"; }
+list_absent() { TEST_COUNT=$((TEST_COUNT + 1)); case "$LIST_BLOCK" in *"$1"*) fail "$2" ;; *) ok "$2" ;; esac }
+list_absent '마르코' "h8a1: 목록 프로즈에 boss-ace 이름(마르코) 하드코딩 부재"
+list_absent '제니'   "h8a2: 목록 프로즈에 jennie 이름(제니) 하드코딩 부재"
+list_absent '최행배' "h8a3: 목록 프로즈에 choi-haengbae 이름(최행배) 하드코딩 부재"
+list_absent '말투만 캐릭터, 판단은 냉정' "h8a4: boss-ace 요약 하드코딩 부재"
+list_absent '애교 섞인 밝은 톤' "h8a5: jennie 요약 하드코딩 부재"
+list_absent '부산 사투리 승부사' "h8a6: choi-haengbae 요약 하드코딩 부재"
+# (h8b) 페이지네이션 "잔여…1개" 분기 문구 부재 (negative, block-scoped)
+assert_block_grep_absent '잔여.*1개' "h8b: 잔여 정확히 1개 분기 문구 부재"
+# (h8c) 전역 label dedup 계약 4요소 — 각각 개별 확인 (block-scoped)
+assert_block_grep_fixed '페이지네이션 이전' "h8c1: dedup 시점 — 페이지네이션 이전"
+assert_block_grep_fixed '모든 프리셋의 최종 label' "h8c2: dedup 범위 — 전역(모든 프리셋의 최종 label)"
+assert_block_grep_fixed '(2)' "h8c3: dedup suffix 예시 (2)"
+assert_block_grep_fixed '페이지 구성과 무관' "h8c4: dedup 안정성 — 페이지 구성과 무관"
+# (h8d) 활성 표식은 한 항목에만 (block-scoped)
+assert_block_grep_fixed '한 항목에만' "h8d: 활성 표식이 한 항목에만 붙음"
+# (h8e) 목록 label 은 canonical-only — 영문 alias 미노출 (block-scoped)
+assert_block_grep_fixed 'slug·영문 alias 미노출' "h8e: 목록 label 은 canonical-only (영문 alias 미노출)"
 
 echo "== (i) 전환 즉시 본문 반영 + 인사말 후보 선택 (dod-2026-07-27) =="
 
@@ -193,6 +261,16 @@ assert_grep_fixed '본문을 읽었다고 해서 인사말을 본문에서 만�
 assert_grep_fixed '후보 2~3개를 제시해 사용자가 고르거나 직접 작성' "i6a: 인사말 후보 제시 + 직접 작성"
 assert_grep_fixed '직접 쓸게요' "i6b: '직접 쓸게요' 경로 존재"
 assert_grep_fixed '초안 확인 단계의 일부이지 질문 세트의 일부가 아니다' "i6c: 확인 단계 소속 — 질문 세트 아님"
+
+echo "== (n) 선택 흐름 4단계 — display_name frontmatter 병행 read (dod-2026-08-28) =="
+assert_grep_fixed '함께 읽어 이름을 확정한다' "n1a: 4단계가 display_name frontmatter 도 함께 읽어 이름 확정"
+assert_grep_fixed 'boss-ace 는 본문에 캐릭터 고유명사가 없으므로' "n1b: boss-ace 사례로 frontmatter 단일 출처 필요성 명시"
+
+echo "== (m) 생성 흐름 — display_name 자동 제안 (dod-2026-08-28) =="
+assert_grep 'display_name:[^[:cntrl:]]*자동|자동[^[:cntrl:]]*display_name' "m1a: display_name 자동 작성 언급"
+assert_grep_fixed 'Q1 의 파일명 slug 를 그대로 복사하지 않는다' "m1b: Q1 slug 복사 금지 명시"
+assert_grep_fixed '본문 제목도 slug 대신' "m1c: 커스텀 본문 제목 slug 미사용"
+assert_grep_fixed '# Persona: {display_name}' "m1d: 초안 본문 제목 템플릿 — display_name 사용"
 
 echo "== (j) 로더 호출 경로 해석 규약 (dod-2026-07-27) =="
 
@@ -235,8 +313,6 @@ assert_grep_fixed '내장 프리셋인데 재시도에도 비면 그것은 "인�
 assert_grep_fixed '즉석 생성 금지' "k3c: 내장 경로 즉석 생성 금지"
 
 # (k4) 갈래 내 항목 1개일 때 선택지 최소 2개 충족
-assert_grep_fixed '선택지는 최소 2개' "k4a: 선택지 최소 2개 제약 명시"
-assert_grep_fixed '뒤로 가기' "k4b: 단일 항목 갈래의 2번째 선택지"
 
 echo ""
 echo "persona-skill: $((TEST_COUNT - FAIL_COUNT))/$TEST_COUNT passed, $FAIL_COUNT failed"

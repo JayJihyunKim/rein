@@ -177,6 +177,29 @@ u2028 = chr(0x2028)  # LINE SEPARATOR — ASCII-only source, no literal char / e
         + "---" + u2028 + "# Persona: my-persona" + u2028
     ).encode("utf-8")
 )
+
+(root / "display-name-l4.md").write_text(
+    "---\n"
+    "summary: 이름 필드 L4 테스트\n"
+    "display_name: trail/ 침투 이름\n"
+    "---\n"
+    "# Persona: my-persona\n"
+    "- 담백하게 말한다.\n",
+    encoding="utf-8",
+)
+(root / "display-name-ok.md").write_text(
+    "---\n"
+    "summary: 이름 필드 정상 테스트\n"
+    "display_name: 노바\n"
+    "---\n"
+    "# Persona: my-persona\n"
+    "- 담백하게 말한다.\n",
+    encoding="utf-8",
+)
+head = "---\nsummary: size boundary fixture\ndisplay_name: 노바\n---\n"
+over_budget = head + "a" * (4001 - len(head))
+assert len(over_budget) == 4001
+(root / "display-name-size-4001.md").write_text(over_budget, encoding="utf-8")
 PYEOF
 
 # -----------------------------------------------------------------------------
@@ -367,6 +390,39 @@ for fx in fence-padded fence-crlf fence-barecr fence-u2028; do
   out_has_any "fence" "울타리" || fail "(12) $fx: fence violation token missing: $LINT_OUT"
   ok "(12) rejects non-exact leading fence: $fx"
 done
+
+# -----------------------------------------------------------------------------
+# (13) display_name field rides the existing L4 scan — internal path mention.
+# -----------------------------------------------------------------------------
+run_lint "my-persona" "$TMP_ROOT/display-name-l4.md"
+[ "$LINT_RC" = "1" ] || fail "(13) display_name L4: expected exit 1, got $LINT_RC ($LINT_OUT)"
+out_has "L4" || fail "(13) display_name L4: 'L4' not in output: $LINT_OUT"
+out_has "trail/" || fail "(13) display_name L4: matched 'trail/' line not echoed: $LINT_OUT"
+ok "(13) display_name field hitting an internal path is caught by L4"
+
+# -----------------------------------------------------------------------------
+# (14) display_name present + clean -> PASS (no dedicated required rule).
+# -----------------------------------------------------------------------------
+run_lint "my-persona" "$TMP_ROOT/display-name-ok.md"
+[ "$LINT_RC" = "0" ] || fail "(14) display_name ok: expected exit 0, got $LINT_RC ($LINT_OUT)"
+out_has "PASS" || fail "(14) display_name ok: 'PASS' not in output: $LINT_OUT"
+ok "(14) valid display_name field passes"
+
+# -----------------------------------------------------------------------------
+# (15) display_name bytes count toward the existing L3 total-size cap.
+# -----------------------------------------------------------------------------
+run_lint "my-persona" "$TMP_ROOT/display-name-size-4001.md"
+[ "$LINT_RC" = "1" ] || fail "(15) display_name size: expected exit 1, got $LINT_RC ($LINT_OUT)"
+out_has "L3" || fail "(15) display_name size: 'L3' not in output: $LINT_OUT"
+ok "(15) display_name field counted toward L3 total-size cap"
+
+# -----------------------------------------------------------------------------
+# (16) no display_name, only summary -> PASS (L5 stays summary-only, not extended).
+# -----------------------------------------------------------------------------
+run_lint "my-persona" "$TMP_ROOT/valid.md"
+[ "$LINT_RC" = "0" ] || fail "(16) no display_name: expected exit 0, got $LINT_RC ($LINT_OUT)"
+out_has "PASS" || fail "(16) no display_name: 'PASS' not in output: $LINT_OUT"
+ok "(16) missing display_name still passes (L5 not extended)"
 
 echo ""
 echo "test-persona-lint: OK ($PASS asserts passed)"

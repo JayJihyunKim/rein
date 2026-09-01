@@ -553,6 +553,40 @@ def _read_frontmatter_greeting(path) -> str | None:
     return None  # never closed — no valid frontmatter
 
 
+def _read_frontmatter_display(path) -> tuple[str | None, str | None]:
+    """Return (display_name, display_name_en) from a leading closed `---`
+    frontmatter block in ONE read + ONE scan — get_turn_brief() is a hot
+    path (every turn), so this deliberately returns two fields per call
+    instead of following the summary/greeting per-field-function
+    convention. Closure mandatory (same fail-open contract as its
+    siblings); unclosed/absent -> (None, None).
+    """
+    if not path:
+        return (None, None)
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except Exception:
+        return (None, None)
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return (None, None)
+    display_name = None
+    display_name_en = None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return (display_name, display_name_en)  # closed
+        if display_name is None:
+            m = re.match(r"^display_name:\s*(.+)$", line)
+            if m:
+                display_name = m.group(1).strip()
+                continue
+        if display_name_en is None:
+            m = re.match(r"^display_name_en:\s*(.+)$", line)
+            if m:
+                display_name_en = m.group(1).strip()
+    return (None, None)  # never closed
+
+
 def _read_text_or_empty(path: Path) -> str:
     """Read a file's text, returning '' on any error (fail-open)."""
     try:
@@ -603,12 +637,19 @@ def get_turn_brief() -> str:
             # Task 3.1: the nudge text is preset-agnostic; append ONE line
             # naming the ACTIVE preset (resolved via the single trusted
             # interpretation point) plus its frontmatter summary when present.
-            name, source_path = resolve_persona_source(preset_raw)
+            _name, source_path = resolve_persona_source(preset_raw)
             summary = _read_frontmatter_summary(source_path)
-            if summary:
-                active_line = f"활성 프리셋: {name} — {summary}"
+            display_name, display_name_en = _read_frontmatter_display(source_path)
+            if display_name:
+                label = display_name
+                if display_name_en:
+                    label = f"{label} ({display_name_en})"
             else:
-                active_line = f"활성 프리셋: {name}"
+                label = "이름 없는 페르소나"
+            if summary:
+                active_line = f"활성 프리셋: {label} — {summary}"
+            else:
+                active_line = f"활성 프리셋: {label}"
             parts.append(persona.rstrip("\n") + "\n" + active_line)
 
     body = "\n\n---\n\n".join(parts)

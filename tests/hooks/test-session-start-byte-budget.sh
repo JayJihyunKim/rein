@@ -91,7 +91,12 @@ done
 # ---- (b2) persona source-file size contracts ---------------------------------
 # The BUDGET_PERSONA arithmetic above only holds if the source files respect
 # their own caps: _invariant.md <= 1,000 CHARS (UTF-8 decoded) and the largest
-# builtin presets (jennie.md, choi-haengbae.md) <= 1,536 BYTES each.
+# builtin presets (jennie.md, choi-haengbae.md) <= 1,600 BYTES each.
+# (2026-08-28: 1,536 -> 1,600 — builtin 프리셋에 display_name/display_name_en
+#  frontmatter 필드를 도입한 만큼 개별 파일 상한을 상향. 프리셋 SessionStart 주입
+#  실측 최대 2,131B 로 BUDGET_PERSONA 6,000B 대비 여유가 커, 이 상향은 예산 산술을
+#  깨지 않는다. 캐릭터 서술을 압축해 상한에 우겨넣는 대신 상한을 새 필드 크기만큼
+#  넓혀 프리셋 톤을 보존한다.)
 INVARIANT_MD="$PLUGIN_ROOT/rules/persona/_invariant.md"
 JENNIE_MD="$PLUGIN_ROOT/rules/persona/jennie.md"
 if [ -f "$INVARIANT_MD" ]; then
@@ -106,10 +111,10 @@ else
 fi
 if [ -f "$JENNIE_MD" ]; then
   JENNIE_BYTES="$(wc -c < "$JENNIE_MD" | tr -d ' ')"
-  if [ "$JENNIE_BYTES" -le 1536 ]; then
-    ok "(b2) jennie.md ${JENNIE_BYTES}B <= 1536B"
+  if [ "$JENNIE_BYTES" -le 1600 ]; then
+    ok "(b2) jennie.md ${JENNIE_BYTES}B <= 1600B"
   else
-    fail "(b2) jennie.md ${JENNIE_BYTES}B exceeds 1536B"
+    fail "(b2) jennie.md ${JENNIE_BYTES}B exceeds 1600B"
   fi
 else
   fail "(b2) jennie.md missing at $JENNIE_MD (builtin preset not shipped)"
@@ -117,10 +122,10 @@ fi
 CHOI_MD="$PLUGIN_ROOT/rules/persona/choi-haengbae.md"
 if [ -f "$CHOI_MD" ]; then
   CHOI_BYTES="$(wc -c < "$CHOI_MD" | tr -d ' ')"
-  if [ "$CHOI_BYTES" -le 1536 ]; then
-    ok "(b2) choi-haengbae.md ${CHOI_BYTES}B <= 1536B"
+  if [ "$CHOI_BYTES" -le 1600 ]; then
+    ok "(b2) choi-haengbae.md ${CHOI_BYTES}B <= 1600B"
   else
-    fail "(b2) choi-haengbae.md ${CHOI_BYTES}B exceeds 1536B"
+    fail "(b2) choi-haengbae.md ${CHOI_BYTES}B exceeds 1600B"
   fi
 else
   fail "(b2) choi-haengbae.md missing at $CHOI_MD (builtin preset not shipped)"

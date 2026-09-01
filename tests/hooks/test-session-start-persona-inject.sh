@@ -68,7 +68,7 @@ HOOKS_JSON="$PLUGIN_ROOT/hooks/hooks.json"
 
 # Fingerprints — literal substrings so a body rewrite that drops them fails
 # loudly (and is fixed deliberately).
-PERSONA_FINGERPRINT="# Persona: boss-ace"       # plugin boss-ace.md heading
+PERSONA_FINGERPRINT="# Persona: 마르코"       # plugin boss-ace.md heading
 INVARIANT_FINGERPRINT="Persona 공통 불변층"       # _invariant.md heading phrase
 MIA_FINGERPRINT="# Persona: mia"                # custom mia.md body heading
 CUSTOM_BOSS_MARKER="커스텀 그림자 본문 boss-ace"  # shadow custom body marker
@@ -170,6 +170,10 @@ else
   case "$A_CTX" in
     *"$PERSONA_FINGERPRINT"*) ok "(a1) boss-ace body present" ;;
     *) fail "(a1) boss-ace body absent when enabled:true preset:boss-ace" ;;
+  esac
+  case "$A_CTX" in
+    *"boss-ace"*) fail "(a1b) raw slug 'boss-ace' leaked into injected body" ;;
+    *) ok "(a1b) raw slug 'boss-ace' absent from injected body" ;;
   esac
   INV_COUNT="$(printf '%s' "$A_CTX" | count_substr "$INVARIANT_FINGERPRINT")"
   if [ "$INV_COUNT" = "1" ]; then
@@ -494,6 +498,38 @@ check_fence_variant "i-padded"  "fpad"    "padded"
 check_fence_variant "i-crlf"    "fcrlf"   "crlf"
 check_fence_variant "i-barecr"  "fbarecr" "barecr"
 check_fence_variant "i-u2028"   "fu2028"  "u2028"
+
+# -----------------------------------------------------------------------------
+# (j) 내장 3종 각각 — 본문 제목이 display_name 이고 raw slug 가 부재함 (§2.7).
+# -----------------------------------------------------------------------------
+check_builtin_display_title() {
+  local slug="$1" display="$2"
+  local dir="$TMP_ROOT/J_$slug"
+  mkdir -p "$dir/.rein/policy"
+  cat >"$dir/.rein/policy/persona.yaml" <<YAML
+enabled: true
+preset: $slug
+YAML
+  local out="$dir/stdout" err="$dir/stderr"
+  local rc; rc="$(run_hook "$dir" "$out" "$err")"
+  if [ "$rc" != "0" ]; then
+    cat "$err" >&2
+    fail "(j-$slug) hook rc=$rc, expected 0"
+    return
+  fi
+  local ctx; ctx="$(extract_ctx "$out")"
+  case "$ctx" in
+    *"# Persona: $display"*) ok "(j-$slug) title uses display_name '$display'" ;;
+    *) fail "(j-$slug) title does not carry display_name '$display'" ;;
+  esac
+  case "$ctx" in
+    *"$slug"*) fail "(j-$slug) raw slug '$slug' leaked into injected body" ;;
+    *) ok "(j-$slug) raw slug '$slug' absent from injected body" ;;
+  esac
+}
+check_builtin_display_title "boss-ace" "마르코"
+check_builtin_display_title "jennie" "제니"
+check_builtin_display_title "choi-haengbae" "최행배"
 
 echo "test-session-start-persona-inject: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -288,9 +288,9 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v2.0.1** (2026-08-28) — hotfix for v2.0.0: updating to v2.0.0 could block every file edit because the active-task gate's policy shipped without the plugin. The policy is now bundled and falls back to a deployed default when a project has none, so edits are allowed with an active task and otherwise get a recoverable prompt instead of a hard block. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v2.0.2** (2026-09-01) — the "pick a persona" flow is simplified to three fixed top-level choices (persona list / create your own / turn off), and built-in personas now go by their human display names (마르코 / 제니 / 최행배) instead of an internal file slug across chat, the picker, and session context — presets that carry an English notation (Marco Santoro, Jennie) use it in English conversations. ([CHANGELOG](CHANGELOG.md))
 
-Previous: **v2.0.0** (2026-08-27) — review, security, and active-task pass evidence is now bound to the reviewed change content and drawn from a trust store instead of a self-declared marker file, so forging a marker or swapping the content after review no longer passes the commit gate. ([CHANGELOG](CHANGELOG.md))
+Previous: **v2.0.1** (2026-08-28) — hotfix for v2.0.0: updating to v2.0.0 could block every file edit because the active-task gate's policy shipped without the plugin. The policy is now bundled and falls back to a deployed default when a project has none, so edits are allowed with an active task and otherwise get a recoverable prompt instead of a hard block. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 
