@@ -68,43 +68,95 @@ fi
 source "$HELPER"
 
 # ---------------------------------------------------------------------------
-# BG-B: degraded pass-through + bootstrap allow-list
+# 5-g: single confirmed path (bootstrap_check-resolved) + shared quoting
 # ---------------------------------------------------------------------------
-# Two escape hatches inserted before the bootstrap_check invocation so that
-# Claude Code remains usable (a) when the SessionStart hook opted into
-# degraded mode (git missing / non-git / user opt-out / bootstrap refused),
-# and (b) when the user is *running the bootstrap command itself*. Without
-# (b) a fresh-install user would deadlock: the gate blocks every Bash call
-# including the very command that would resolve the missing bootstrap.
-
-# (a) Degraded mode pass-through.
-# project-dir.sh resolves the user's project root (git root from cwd in
-# plugin mode). Sourced from the same plugin tree as this gate. If the
-# helper is missing (install regression), fall through to PWD — degraded
-# marker is keyed on the project dir, so a wrong dir simply means no
-# bypass, which is the safer side.
+# Escape hatches inserted before the RC dispatch so that Claude Code remains
+# usable (a) when the SessionStart hook opted into degraded mode (git
+# missing / non-git / user opt-out / bootstrap refused), and (b) when the
+# user is *running the bootstrap command itself*. Without (b) a fresh-install
+# user would deadlock: the gate blocks every Bash call including the very
+# command that would resolve the missing bootstrap.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "$SCRIPT_DIR/lib/project-dir.sh" ]; then
-  # shellcheck source=./lib/project-dir.sh
-  . "$SCRIPT_DIR/lib/project-dir.sh"
-  PROJECT_DIR="$(resolve_project_dir "$SCRIPT_DIR")"
-else
-  PROJECT_DIR="${PWD:-.}"
+
+# Read stdin ONCE — resolution needs it (envelope.cwd hint) and so does the
+# tool_input.command extraction below; both read the SAME INPUT.
+INPUT=$(cat)
+
+# ---- Step 1: resolve the confirmed project_dir, no temp files -------------
+# _bc_resolve_project_dir (sourced from bootstrap-check.sh above) does ONLY
+# the resolution step — no trail/marker probe — so the degraded-marker check
+# below can key off the confirmed path WITHOUT running bootstrap_check's
+# fuller predicate (and its guidance side effects) first. Piped through a
+# plain pipeline — no mktemp anywhere in this gate, so a broken TMPDIR
+# cannot make this step fail open.
+#
+# Output shape is "<source><TAB><resolved_real>" — source is a fixed enum
+# that never contains a tab, so splitting on the FIRST tab and taking the
+# remainder as the path is safe even when resolved_real itself contains a
+# literal tab byte (a legal directory-name character).
+#
+# Sentinel capture (`; printf x` inside the SAME command substitution,
+# stripped with `${RESOLUTION%x}`): a plain `$(...)` strips ALL trailing
+# newlines, which would truncate resolved_real when its own last byte is a
+# literal LF (also a legal directory-name character) — the resolution would
+# then fail its directory-existence check and this gate would fail OPEN
+# (RESOLVED empty → silent exit 0) instead of blocking. Exit code is not
+# needed here (the emptiness check below is the only consumer), so the
+# simple sentinel form suffices — no if/else needed.
+RESOLUTION=$(printf '%s' "$INPUT" | _bc_resolve_project_dir 2>/dev/null; printf x)
+RESOLUTION="${RESOLUTION%x}"
+RESOLVED="${RESOLUTION#*$'\t'}"
+
+# Resolution failure (stdin/git/PWD all failed, or the resolved path does
+# not exist) is best-effort pass-through — same contract as bootstrap_check
+# itself returning 11 for this category.
+if [ -z "$RESOLVED" ]; then
+  exit 0
 fi
+
+# ---- Step 2: degraded mode pass-through, keyed on the CONFIRMED path ------
+# This runs BEFORE bootstrap_check (step 3) so a degraded session never
+# triggers bootstrap_check's guidance side effects (the once-per-session
+# "shown" flag write) on a call whose own guidance is about to be discarded
+# anyway — the marker check alone decides the pass-through here.
 if [ -f "$SCRIPT_DIR/lib/degraded-check.sh" ]; then
   # shellcheck source=./lib/degraded-check.sh
   . "$SCRIPT_DIR/lib/degraded-check.sh"
-  rein_is_degraded "$PROJECT_DIR" && exit 0
+  rein_is_degraded "$RESOLVED" && exit 0
+fi
+
+# ---- Step 3: bootstrap_check via override (no stdin re-read needed) -------
+# Sentinel idiom (`; printf x` inside the SAME command substitution that
+# captures stdout): plain `$(cmd)` strips trailing newlines, which would
+# lose the guidance's final LF. bootstrap_check's own stderr diagnostic
+# (one line, "caller's log" per its own header) is discarded on THIS call —
+# this gate re-emits the guidance body itself (via GUIDANCE) only on the
+# actual block path below, so an allow-listed command stays silent on
+# stderr even though bootstrap_check had to run to confirm bootstrap state.
+GUIDANCE=$(
+  if bootstrap_check "$RESOLVED" 2>/dev/null; then
+    printf x
+  else
+    rc=$?
+    printf x
+    exit "$rc"
+  fi
+)
+RC=$?
+GUIDANCE="${GUIDANCE%x}"
+
+# Bootstrap complete — silent pass before any further spawn (the allow-list
+# below only matters when the gate would otherwise block).
+if [ "$RC" = "0" ]; then
+  exit 0
 fi
 
 # (b) Bootstrap command allow-list.
-# Consume stdin once (`bootstrap_check` re-reads it internally via
-# _bc_read_stdin_cwd), then feed it back via printf below. Extract
-# tool_input.command best-effort: missing python3 / parse failure → empty
-# COMMAND → no allow-list match → fall through to bootstrap_check, which
-# does its own python3-resilient handling. Using python-runner.sh keeps
-# the runner discovery consistent with the policy Bash guards.
-INPUT=$(cat)
+# Extract tool_input.command best-effort: missing python3 / parse failure →
+# empty COMMAND → no allow-list match → fall through to the RC dispatch
+# below, which does its own python3-resilient handling. Using
+# python-runner.sh keeps the runner discovery consistent with the policy
+# Bash guards.
 COMMAND=""
 if [ -f "$SCRIPT_DIR/lib/python-runner.sh" ]; then
   # shellcheck source=./lib/python-runner.sh
@@ -113,6 +165,43 @@ if [ -f "$SCRIPT_DIR/lib/python-runner.sh" ]; then
     COMMAND=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" \
       "$SCRIPT_DIR/lib/extract-hook-json.py" \
       --field tool_input.command --default '' 2>/dev/null || true)
+  fi
+fi
+
+# (b-1) Exact-match allow-list keyed on the CONFIRMED path. Built with the
+# shared quoting helper hooks/lib/shell-quote.sh so a path requiring
+# escaping (space, single quote, semicolon, `$(...)`, backtick — anything
+# the regex allow-list below cannot parse) still matches the EXACT command
+# bootstrap_check / git-required-guidance.sh themselves would have rendered
+# for this path. When shell-quote.sh is missing, fall back to `printf %q`
+# directly (same fallback bootstrap-check.sh and git-required-guidance.sh
+# use) rather than skipping this route — a %q-rendered recovery command must
+# still be recognizable, since the regex allow-list below cannot parse %q's
+# backslash escaping. Comparison trims only leading/trailing whitespace off
+# COMMAND — nothing else is normalized. Known limit: a --project-dir value
+# containing a single quote renders via `%q`, which only this exact-match
+# route (never the regex below) can allow.
+if [ -n "$RESOLVED" ] && [ -n "$COMMAND" ]; then
+  QUOTE_LIB="$SCRIPT_DIR/lib/shell-quote.sh"
+  if [ -f "$QUOTE_LIB" ] && ! command -v rein_shell_quote >/dev/null 2>&1; then
+    # shellcheck source=./lib/shell-quote.sh
+    . "$QUOTE_LIB"
+  fi
+  BOOTSTRAP_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/rein-bootstrap-project.py"
+  if command -v rein_shell_quote >/dev/null 2>&1; then
+    SCRIPT_Q="$(rein_shell_quote "$BOOTSTRAP_SCRIPT")"
+    DIR_Q="$(rein_shell_quote "$RESOLVED")"
+  else
+    printf -v SCRIPT_Q '%q' "$BOOTSTRAP_SCRIPT"
+    printf -v DIR_Q '%q' "$RESOLVED"
+  fi
+  EXPECT_BASE="python3 ${SCRIPT_Q} --project-dir ${DIR_Q}"
+  EXPECT_ALLOW="${EXPECT_BASE} --allow-non-git"
+  TRIMMED_COMMAND="$COMMAND"
+  TRIMMED_COMMAND="${TRIMMED_COMMAND#"${TRIMMED_COMMAND%%[![:space:]]*}"}"
+  TRIMMED_COMMAND="${TRIMMED_COMMAND%"${TRIMMED_COMMAND##*[![:space:]]}"}"
+  if [ "$TRIMMED_COMMAND" = "$EXPECT_BASE" ] || [ "$TRIMMED_COMMAND" = "$EXPECT_ALLOW" ]; then
+    exit 0
   fi
 fi
 
@@ -160,45 +249,35 @@ fi
 #   --project-dir               the required flag (no intervening tokens)
 #   [[:space:]=]+               separator before the value (space or `=`)
 #   ( "…" | '…' | … )           dir value — dquoted / squoted / unquoted
+#   ([[:space:]]+--allow-non-git)?   optional,
+#                                    EXACT trailing token — rein-bootstrap-
+#                                    project.py's own suggested recovery
+#                                    command for a fresh non-git folder ends
+#                                    with `--allow-non-git` (see
+#                                    scripts/rein-bootstrap-project.py). The
+#                                    group requires whitespace before the
+#                                    literal token and the end-anchor right
+#                                    after it, so any OTHER trailing token or
+#                                    shell metacharacter after
+#                                    `--allow-non-git` still fails the match.
 #   [[:space:]]*$               trailing whitespace then END — nothing appended
-if [[ "$COMMAND" =~ ^[[:space:]]*python3?[[:space:]]+(\"[^\"\$\`\\]*rein-bootstrap-project\.py\"|\'[^\']*rein-bootstrap-project\.py\'|[^[:space:]\"\'\;\$\`\&\|<>(){}\\]*rein-bootstrap-project\.py)[[:space:]]+--project-dir[[:space:]=]+(\"[^\"\$\`\\]+\"|\'[^\']+\'|[^[:space:]\"\'\;\$\`\&\|<>(){}\\]+)[[:space:]]*$ ]]; then
+#
+# Shape vs path contract (L1): this regex is SHAPE-based only — it accepts
+# any `python3? <script ending in rein-bootstrap-project.py> --project-dir
+# <value>` command whose script/dir tokens are individually regex-legal, not
+# just ones naming the CONFIRMED path (RESOLVED). Keying a match to RESOLVED
+# is exclusively the exact-match allow-list above (b-1); a `--project-dir`
+# value this regex accepts for some OTHER existing directory still passes
+# here even though it differs from RESOLVED.
+if [[ "$COMMAND" =~ ^[[:space:]]*python3?[[:space:]]+(\"[^\"\$\`\\]*rein-bootstrap-project\.py\"|\'[^\']*rein-bootstrap-project\.py\'|[^[:space:]\"\'\;\$\`\&\|<>(){}\\]*rein-bootstrap-project\.py)[[:space:]]+--project-dir[[:space:]=]+(\"[^\"\$\`\\]+\"|\'[^\']+\'|[^[:space:]\"\'\;\$\`\&\|<>(){}\\]+)([[:space:]]+--allow-non-git)?[[:space:]]*$ ]]; then
   exit 0
 fi
 
 # ---------------------------------------------------------------------------
-# Invoke helper, preserving stdout (including trailing newline)
+# (c)/(d) RC dispatch — RC/GUIDANCE/RESOLVED came from the single
+# bootstrap_check call above (Step 3); RC=0 already exited earlier so only
+# RC=10 (block) and everything else (pass-through) remain here.
 # ---------------------------------------------------------------------------
-# Trailing-newline preservation idiom: command substitution `$(...)` strips
-# trailing newlines. Append a sentinel byte ("x") inside the subshell, then
-# strip it after capture — that preserves the helper's exact stdout including
-# the final LF of the bilingual guidance.
-#
-# We must also capture the helper's exit code. Naively wrapping the capture
-# in `if GUIDANCE=$(...); then ... fi` followed by `RC=$?` does NOT work:
-# bash resets `$?` to 0 after an `if/fi` block when the condition fails and
-# no `else` branch runs. Instead, we capture the rc directly with `||` so
-# `$?` is preserved through the assignment.
-#
-# BG-B: feed the captured INPUT back into bootstrap_check's stdin so its
-# internal _bc_read_stdin_cwd sees the same envelope.cwd it would have read
-# directly, preserving stdin.cwd-based monorepo resolution.
-GUIDANCE=$(
-  if printf '%s' "$INPUT" | bootstrap_check; then
-    printf x
-  else
-    rc=$?
-    printf x
-    exit "$rc"
-  fi
-) || RC=$?
-RC="${RC:-0}"
-GUIDANCE="${GUIDANCE%x}"
-
-if [ "$RC" = "0" ]; then
-  # Helper exit 0 — trail/ exists, silent pass.
-  exit 0
-fi
-
 if [ "$RC" = "10" ]; then
   # trail/ missing, project_dir safe → block + surface guidance.
   printf '%s' "$GUIDANCE" >&2

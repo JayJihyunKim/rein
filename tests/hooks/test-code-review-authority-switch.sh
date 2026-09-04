@@ -250,6 +250,24 @@ _link_security_axis_policy() {
   cp -R "$REAL_PROJECT_DIR/tests/fixtures/policy/security-axis" "$SANDBOX/.rein/policy/security-axis"
 }
 
+# _link_bundled_security_axis_policy — places the axis policy at the
+# *bundled* location a real plugin install ships it to (plugin-root/
+# policies/security-axis), NOT at the per-project override (.rein/policy/
+# security-axis). The commit gate's security-axis pre-check now
+# resolves project override → bundled default before the switched-check
+# ever runs — "policy folder absent = declared opt-out regardless of
+# switched state" is no longer the contract, so scenarios in THIS file that
+# only mean to isolate the code_review axis (and deliberately leave
+# security_review NOT_SWITCHED or off) must still provide a resolvable
+# security-axis policy somewhere, or the pre-check treats the sandbox as a
+# damaged install and fails closed for a reason unrelated to what the
+# scenario is actually testing.
+_link_bundled_security_axis_policy() {
+  mkdir -p "$SANDBOX/.claude/policies"
+  rm -rf "$SANDBOX/.claude/policies/security-axis"
+  cp -R "$REAL_PROJECT_DIR/tests/fixtures/policy/security-axis" "$SANDBOX/.claude/policies/security-axis"
+}
+
 # Phase 7 웨이브 3 ③-d (2026-08-24): _write_code_stamp/_write_security_
 # stamp(legacy marker 작성)는 제거됐다 — evaluator.py 의 legacy dual-read
 # 대체 계층이 완전히 삭제되어 그 표식들은 더 이상 어떤 판정에도 관여하지
@@ -433,6 +451,7 @@ test_a_switch_on_valid_v2_evidence_allows() {
   _seed_real_repo
   _link_rein_package
   _link_rein_bin
+  _link_bundled_security_axis_policy
   _write_authority_switched_on
   seed_dod "dod-2026-08-18-crg-switch.md"
   _gitignore_rein_runtime
@@ -487,6 +506,7 @@ test_b_switch_on_no_v2_evidence_blocks() {
 test_c_switch_off_axis_skipped_passes() {
   seed_dod "dod-2026-08-18-crg-switch.md"
   _link_rein_package
+  _link_bundled_security_axis_policy
   _write_authority_switched_off
 
   local payload
@@ -494,7 +514,8 @@ test_c_switch_off_axis_skipped_passes() {
   run_hook "$HOOK" "$payload"
 
   # ③-c: NOT_SWITCHED 는 이제 문서화된 opt-out — v1 폴백 판정이 없으므로
-  # 이 축은 조용히 통과한다(security axis 도 폴더 부재로 skip).
+  # 이 축은 조용히 통과한다(security axis 도 NOT_SWITCHED 라 위임까지
+  # 가지 않는다 — 정책 사전 점검만 통과하면 된다, 위 헬퍼 참조).
   assert_v1_silent "(c) code_review NOT_SWITCHED → axis skip, overall pass (no v1 fallback judgment)"
   if _v2_state_db_exists; then
     fail "(c) v2 state db should NOT exist — delegation must never be attempted when the switch is off"
@@ -608,6 +629,7 @@ test_f_no_active_dod_allows_via_genuine_delegation() {
   # 정반대 — 구는 의도적으로 아무것도 준비하지 않았다).
   _link_rein_package
   _link_rein_bin
+  _link_bundled_security_axis_policy
   _write_authority_switched_on
   local payload
   payload=$(_event_payload "$COMMIT_CMD" "$SANDBOX")

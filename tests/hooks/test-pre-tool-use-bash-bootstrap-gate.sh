@@ -452,9 +452,9 @@ fixture_m() {
 }
 
 # ---------------------------------------------------------------------------
-# Fixture N — anchored allow-list rejects substring bypass (LOW-1)
+# Fixture N — anchored allow-list rejects substring bypass
 # ---------------------------------------------------------------------------
-# Security review (v1.3.0 LOW-1): the original allow-list pattern
+# The original allow-list pattern
 # `*rein-bootstrap-project.py*--project-dir*` matched the substring anywhere
 # in the command. A payload that smuggles the bootstrap signature into a
 # trailing comment must NOT be allowed — when the shell parses the command,
@@ -517,9 +517,8 @@ fixture_o() {
 # bootstrap-check.sh emits the script path and --project-dir value both
 # double-quoted. macOS / user repos legitimately have spaces in their path
 # (e.g. "/Users/jo/My Project"). The anchored allow-list must still allow
-# the quoted form — the Round 2 codex review caught a regression where the
-# anchored regex forbade whitespace even inside quotes, which would re-deadlock
-# fresh installs on space-containing paths.
+# the quoted form — an anchored regex that forbids whitespace even inside
+# quotes would re-deadlock fresh installs on space-containing paths.
 fixture_p() {
   local dir
   dir="$(mktemp -d "$SCRATCH_ROOT/P-XXXXXX")"
@@ -604,6 +603,640 @@ fixture_s() {
 }
 
 # ---------------------------------------------------------------------------
+# Fixture T — the `--allow-non-git` recovery command rein-bootstrap-project.py
+# itself suggests for a fresh non-git folder must be allowed through (exit
+# 0) — without this the gate blocked (rc 2) the very command it told the
+# user to run, and no degraded marker exists yet at this point (the marker
+# is a SessionStart artifact; this is the very first Bash call in a
+# brand-new non-git folder).
+# ---------------------------------------------------------------------------
+fixture_t() {
+  local dir
+  dir="$(mktemp -d "$SCRATCH_ROOT/T-XXXXXX")"
+  local payload='{"tool_input":{"command":"python3 /p/rein-bootstrap-project.py --project-dir \"/x\" --allow-non-git"}}'
+  local out err rc errfile
+  errfile="$SCRATCH_ROOT/T-err"
+  out=$( (cd "$dir" && printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile" )
+  rc=$?
+  err=$(cat "$errfile")
+  if [ "$rc" -ne 0 ]; then
+    record_fail "T: expected exit 0 (--allow-non-git recovery command allowed), got $rc (stderr: $err)"
+    return
+  fi
+  if [ -n "$out" ]; then
+    record_fail "T: expected empty stdout, got: $out"
+    return
+  fi
+  record_pass "T (--allow-non-git trailing flag → exit 0)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture U — `--allow-non-git` PLUS a trailing shell metacharacter → still
+# blocked. The optional group requires the end-anchor immediately after the
+# literal token; anything appended (even just whitespace-separated shell)
+# must still fail the match.
+# ---------------------------------------------------------------------------
+fixture_u() {
+  local dir
+  dir="$(mktemp -d "$SCRATCH_ROOT/U-XXXXXX")"
+  local payload='{"tool_input":{"command":"python3 /p/rein-bootstrap-project.py --project-dir \"/x\" --allow-non-git && rm -rf /"}}'
+  local out err rc errfile
+  errfile="$SCRATCH_ROOT/U-err"
+  out=$( (cd "$dir" && printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile" )
+  rc=$?
+  err=$(cat "$errfile")
+  if [ "$rc" -ne 2 ]; then
+    record_fail "U: expected exit 2 (--allow-non-git plus trailing shell), got $rc (stderr: $err)"
+    return
+  fi
+  record_pass "U (--allow-non-git plus trailing && rm -rf / → exit 2)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture V — `--allow-non-git` plus another PLAIN trailing token (no shell
+# metacharacter at all) → still blocked. Confirms the group is an exact,
+# whole-token match, not a prefix match on `--allow-non-git`.
+# ---------------------------------------------------------------------------
+fixture_v() {
+  local dir
+  dir="$(mktemp -d "$SCRATCH_ROOT/V-XXXXXX")"
+  local payload='{"tool_input":{"command":"python3 /p/rein-bootstrap-project.py --project-dir \"/x\" --allow-non-git extra"}}'
+  local out err rc errfile
+  errfile="$SCRATCH_ROOT/V-err"
+  out=$( (cd "$dir" && printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile" )
+  rc=$?
+  err=$(cat "$errfile")
+  if [ "$rc" -ne 2 ]; then
+    record_fail "V: expected exit 2 (--allow-non-git plus a plain trailing token), got $rc (stderr: $err)"
+    return
+  fi
+  record_pass "V (--allow-non-git plus a plain trailing token → exit 2)"
+}
+
+# ===========================================================================
+# 5-g fixtures — recovery command / gate parity (git-required-onboarding DoD)
+# ===========================================================================
+# The guidance lib renders every project_dir through the shared quoting
+# helper (hooks/lib/shell-quote.sh): single-quoted unless the path itself
+# contains a literal single quote, in which case `printf %q`. These fixtures
+# round-trip the ACTUAL rendered command through the gate to prove the exact
+# command the assistant is told to run is never itself blocked.
+
+# Extract the runnable "python3 <script> --project-dir <dir>[...]" command
+# from a rein_git_required_guidance rendering — mirrors the extraction
+# test-git-required-guidance.sh's fixture H uses.
+extract_guidance_command() {
+  local guidance="$1"
+  local line
+  line="$(printf '%s\n' "$guidance" | grep -F '(2) python3')"
+  local cmd="${line#*(2) }"
+  cmd="${cmd% — then*}"
+  printf '%s' "$cmd"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture W — rendered guidance command for a fresh non-git dir whose name
+# contains a space (no degraded marker present yet) → exit 0.
+# ---------------------------------------------------------------------------
+fixture_w() {
+  local dir d d_real
+  dir="$(mktemp -d "$SCRATCH_ROOT/W-XXXXXX")"
+  d="$dir/space dir"
+  mkdir -p "$d"
+  d_real="$(cd "$d" && pwd -P)"
+  local guidance cmd
+  guidance="$(
+    # shellcheck disable=SC1090
+    source "$PLUGIN_ROOT/hooks/lib/git-required-guidance.sh"
+    rein_git_required_guidance non-git-dir "$d_real" "$PLUGIN_ROOT/scripts/rein-bootstrap-project.py"
+  )"
+  cmd="$(extract_guidance_command "$guidance")"
+  local payload
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]},"cwd":sys.argv[2]}))' "$cmd" "$d_real")"
+  local out err rc errfile
+  errfile="$SCRATCH_ROOT/W-err"
+  out=$( (cd "$dir" && printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile" )
+  rc=$?
+  err=$(cat "$errfile")
+  if [ "$rc" -ne 0 ]; then
+    record_fail "W: expected exit 0 (rendered guidance command for space-dir), got $rc (stderr: $err; cmd: $cmd)"
+    return
+  fi
+  record_pass "W (rendered guidance command, space-dir → exit 0)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture X — same as W with the `--allow-non-git` recovery flag appended
+# → exit 0.
+# ---------------------------------------------------------------------------
+fixture_x() {
+  local dir d d_real
+  dir="$(mktemp -d "$SCRATCH_ROOT/X-XXXXXX")"
+  d="$dir/space dir"
+  mkdir -p "$d"
+  d_real="$(cd "$d" && pwd -P)"
+  local guidance cmd
+  guidance="$(
+    # shellcheck disable=SC1090
+    source "$PLUGIN_ROOT/hooks/lib/git-required-guidance.sh"
+    rein_git_required_guidance non-git-dir "$d_real" "$PLUGIN_ROOT/scripts/rein-bootstrap-project.py"
+  )"
+  cmd="$(extract_guidance_command "$guidance") --allow-non-git"
+  local payload
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]},"cwd":sys.argv[2]}))' "$cmd" "$d_real")"
+  local out err rc errfile
+  errfile="$SCRATCH_ROOT/X-err"
+  out=$( (cd "$dir" && printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile" )
+  rc=$?
+  err=$(cat "$errfile")
+  if [ "$rc" -ne 0 ]; then
+    record_fail "X: expected exit 0 (space-dir + --allow-non-git), got $rc (stderr: $err; cmd: $cmd)"
+    return
+  fi
+  record_pass "X (rendered guidance command + --allow-non-git, space-dir → exit 0)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture Y — same rendered command with a trailing `&& echo pwned` appended
+# → exit 2 (tampering is still rejected).
+# ---------------------------------------------------------------------------
+fixture_y() {
+  local dir d d_real
+  dir="$(mktemp -d "$SCRATCH_ROOT/Y-XXXXXX")"
+  d="$dir/space dir"
+  mkdir -p "$d"
+  d_real="$(cd "$d" && pwd -P)"
+  local guidance cmd
+  guidance="$(
+    # shellcheck disable=SC1090
+    source "$PLUGIN_ROOT/hooks/lib/git-required-guidance.sh"
+    rein_git_required_guidance non-git-dir "$d_real" "$PLUGIN_ROOT/scripts/rein-bootstrap-project.py"
+  )"
+  cmd="$(extract_guidance_command "$guidance") && echo pwned"
+  local payload
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]},"cwd":sys.argv[2]}))' "$cmd" "$d_real")"
+  local out err rc errfile
+  errfile="$SCRATCH_ROOT/Y-err"
+  out=$( (cd "$dir" && printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile" )
+  rc=$?
+  err=$(cat "$errfile")
+  if [ "$rc" -ne 2 ]; then
+    record_fail "Y: expected exit 2 (rendered command + && echo pwned), got $rc (stderr: $err; cmd: $cmd)"
+    return
+  fi
+  record_pass "Y (rendered guidance command + && echo pwned → exit 2)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture Z — same rendered command with an extra plain trailing token
+# → exit 2.
+# ---------------------------------------------------------------------------
+fixture_z() {
+  local dir d d_real
+  dir="$(mktemp -d "$SCRATCH_ROOT/Z-XXXXXX")"
+  d="$dir/space dir"
+  mkdir -p "$d"
+  d_real="$(cd "$d" && pwd -P)"
+  local guidance cmd
+  guidance="$(
+    # shellcheck disable=SC1090
+    source "$PLUGIN_ROOT/hooks/lib/git-required-guidance.sh"
+    rein_git_required_guidance non-git-dir "$d_real" "$PLUGIN_ROOT/scripts/rein-bootstrap-project.py"
+  )"
+  cmd="$(extract_guidance_command "$guidance") extra-token"
+  local payload
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]},"cwd":sys.argv[2]}))' "$cmd" "$d_real")"
+  local out err rc errfile
+  errfile="$SCRATCH_ROOT/Z-err"
+  out=$( (cd "$dir" && printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile" )
+  rc=$?
+  err=$(cat "$errfile")
+  if [ "$rc" -ne 2 ]; then
+    record_fail "Z: expected exit 2 (rendered command + extra token), got $rc (stderr: $err; cmd: $cmd)"
+    return
+  fi
+  record_pass "Z (rendered guidance command + extra trailing token → exit 2)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture AA — a dir whose name contains a literal single quote → exit 0 via
+# the exact-match allow-list (the regex cannot parse the %q fallback form).
+# ---------------------------------------------------------------------------
+fixture_aa() {
+  local dir d d_real
+  dir="$(mktemp -d "$SCRATCH_ROOT/AA-XXXXXX")"
+  d="$dir/it's a dir"
+  mkdir -p "$d"
+  d_real="$(cd "$d" && pwd -P)"
+  local guidance cmd
+  guidance="$(
+    # shellcheck disable=SC1090
+    source "$PLUGIN_ROOT/hooks/lib/git-required-guidance.sh"
+    rein_git_required_guidance non-git-dir "$d_real" "$PLUGIN_ROOT/scripts/rein-bootstrap-project.py"
+  )"
+  cmd="$(extract_guidance_command "$guidance")"
+  local payload
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]},"cwd":sys.argv[2]}))' "$cmd" "$d_real")"
+  local out err rc errfile
+  errfile="$SCRATCH_ROOT/AA-err"
+  out=$( (cd "$dir" && printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile" )
+  rc=$?
+  err=$(cat "$errfile")
+  if [ "$rc" -ne 0 ]; then
+    record_fail "AA: expected exit 0 (apostrophe dir via exact match), got $rc (stderr: $err; cmd: $cmd)"
+    return
+  fi
+  record_pass "AA (apostrophe-dir rendered command → exit 0 via exact match)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture AB — mixed degraded case: the degraded marker lives under the
+# envelope-resolved cwd B, while $PWD is a DIFFERENT dir with no marker at
+# all. The gate must key its degraded pass-through on the CONFIRMED
+# (bootstrap_check-resolved) path, not on a $PWD-based resolution → exit 0
+# regardless of the (destructive-looking) command.
+# ---------------------------------------------------------------------------
+fixture_ab() {
+  local pwd_dir envelope_dir
+  pwd_dir="$(mktemp -d "$SCRATCH_ROOT/AB-pwd-XXXXXX")"
+  envelope_dir="$(mktemp -d "$SCRATCH_ROOT/AB-envelope-XXXXXX")"
+  mkdir -p "$envelope_dir/.claude/cache"
+  printf 'non-git-dir\n' > "$envelope_dir/.claude/cache/.rein-session-degraded"
+  local payload='{"tool_input":{"command":"rm -rf /tmp/foo"},"cwd":"'"$envelope_dir"'"}'
+  local out err rc errfile
+  errfile="$SCRATCH_ROOT/AB-err"
+  out=$( (cd "$pwd_dir" && printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile" )
+  rc=$?
+  err=$(cat "$errfile")
+  if [ "$rc" -ne 0 ]; then
+    record_fail "AB: expected exit 0 (degraded marker under envelope cwd, \$PWD differs), got $rc (stderr: $err)"
+    return
+  fi
+  record_pass "AB (degraded marker keyed on confirmed/envelope path, not \$PWD → exit 0)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture AC — the rendered command's --project-dir value names a DIFFERENT
+# dir than the confirmed (envelope-resolved) path, and contains an
+# apostrophe (so the regex route cannot allow it either) → exit 2. Proves
+# the exact-match allow-list is keyed on the CONFIRMED path, not on
+# whatever the command text itself claims.
+# ---------------------------------------------------------------------------
+fixture_ac() {
+  local dir da db da_real db_real
+  dir="$(mktemp -d "$SCRATCH_ROOT/AC-XXXXXX")"
+  da="$dir/it's dir a"
+  db="$dir/dir-b"
+  mkdir -p "$da" "$db"
+  da_real="$(cd "$da" && pwd -P)"
+  db_real="$(cd "$db" && pwd -P)"
+  local guidance cmd
+  guidance="$(
+    # shellcheck disable=SC1090
+    source "$PLUGIN_ROOT/hooks/lib/git-required-guidance.sh"
+    rein_git_required_guidance non-git-dir "$da_real" "$PLUGIN_ROOT/scripts/rein-bootstrap-project.py"
+  )"
+  cmd="$(extract_guidance_command "$guidance")"
+  # Envelope cwd = db (a DIFFERENT dir than the one the command names).
+  local payload
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]},"cwd":sys.argv[2]}))' "$cmd" "$db_real")"
+  local out err rc errfile
+  errfile="$SCRATCH_ROOT/AC-err"
+  out=$( (cd "$dir" && printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile" )
+  rc=$?
+  err=$(cat "$errfile")
+  if [ "$rc" -ne 2 ]; then
+    record_fail "AC: expected exit 2 (command names a different dir than confirmed path), got $rc (stderr: $err; cmd: $cmd)"
+    return
+  fi
+  record_pass "AC (command targets a dir != confirmed path → exit 2, exact match keyed on confirmed path)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture AD — TMPDIR names a nonexistent directory. The gate must fail
+# CLOSED (still block an ordinary command on an un-bootstrapped dir), not
+# open — this gate has no mktemp / TMPDIR dependency anywhere in its path.
+# ---------------------------------------------------------------------------
+fixture_ad() {
+  local dir
+  dir="$(mktemp -d "$SCRATCH_ROOT/AD-XXXXXX")"
+  local payload='{"tool_input":{"command":"ls trail/"}}'
+  local out err rc errfile
+  errfile="$SCRATCH_ROOT/AD-err"
+  out=$( (cd "$dir" && printf '%s' "$payload" | TMPDIR=/nonexistent/dir CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile" )
+  rc=$?
+  err=$(cat "$errfile")
+  if [ "$rc" -ne 2 ]; then
+    record_fail "AD: expected exit 2 (broken TMPDIR must not open the gate), got $rc (stderr: $err)"
+    return
+  fi
+  if ! printf '%s' "$err" | grep -q "rein-bootstrap-project.py"; then
+    record_fail "AD: stderr missing bootstrap guidance (got: $err)"
+    return
+  fi
+  record_pass "AD (TMPDIR=/nonexistent/dir → gate still fails closed, exit 2)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture AE — degraded marker present, no "shown" guidance flag yet.
+# The gate must pass through (exit 0) WITHOUT ever calling bootstrap_check —
+# so the once-per-session "shown" flag (written only as a side effect of
+# bootstrap_check's degraded-reason override) must stay absent afterward.
+# ---------------------------------------------------------------------------
+fixture_ae() {
+  local dir
+  dir="$(mktemp -d "$SCRATCH_ROOT/AE-XXXXXX")"
+  mkdir -p "$dir/.claude/cache"
+  printf 'non-git-dir\n' > "$dir/.claude/cache/.rein-session-degraded"
+  if ls "$dir"/.claude/cache/.rein-git-guidance-shown.session-* >/dev/null 2>&1; then
+    record_fail "AE: setup error — shown flag already present before the gate ran"
+    return
+  fi
+  local payload='{"tool_input":{"command":"rm -rf /tmp/foo"}}'
+  local out err rc errfile
+  errfile="$SCRATCH_ROOT/AE-err"
+  out=$( (cd "$dir" && printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile" )
+  rc=$?
+  err=$(cat "$errfile")
+  if [ "$rc" -ne 0 ]; then
+    record_fail "AE: expected exit 0 (degraded pass-through before bootstrap_check runs), got $rc (stderr: $err)"
+    return
+  fi
+  if ls "$dir"/.claude/cache/.rein-git-guidance-shown.session-* >/dev/null 2>&1; then
+    record_fail "AE: gate must not write the 'shown' guidance flag on the degraded pass-through path"
+    return
+  fi
+  record_pass "AE (degraded marker + no shown flag → exit 0, gate never mutates the shown flag)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture AF — hooks/lib/shell-quote.sh is missing from the plugin root.
+# bootstrap-check.sh's own guidance still renders (falling back to
+# `printf %q`), so the gate's exact-match allow-list must also fall back to
+# `printf %q` instead of skipping the route entirely — otherwise the exact
+# %q-rendered recovery command the guidance just printed is rejected by the
+# regex allow-list too (the regex cannot parse %q's backslash escaping).
+# Uses a throwaway plugin root (hooks/, scripts/, .claude-plugin/ only) with
+# shell-quote.sh deleted, so the REAL plugin root's shell-quote.sh is never
+# touched.
+# ---------------------------------------------------------------------------
+fixture_af() {
+  local fake_root
+  fake_root="$(mktemp -d "$SCRATCH_ROOT/AF-plugin-XXXXXX")"
+  mkdir -p "$fake_root/hooks" "$fake_root/scripts" "$fake_root/.claude-plugin"
+  cp -R "$PLUGIN_ROOT/hooks/." "$fake_root/hooks/"
+  cp -R "$PLUGIN_ROOT/scripts/." "$fake_root/scripts/"
+  cp -R "$PLUGIN_ROOT/.claude-plugin/." "$fake_root/.claude-plugin/"
+  rm -f "$fake_root/hooks/lib/shell-quote.sh"
+  if [ -f "$fake_root/hooks/lib/shell-quote.sh" ]; then
+    record_fail "AF: setup error — shell-quote.sh still present in fake root"
+    return
+  fi
+
+  local dir d d_real
+  dir="$(mktemp -d "$SCRATCH_ROOT/AF-XXXXXX")"
+  d="$dir/space dir"
+  mkdir -p "$d"
+  d_real="$(cd "$d" && pwd -P)"
+
+  # Render the fresh-template guidance directly from the FAKE root's
+  # bootstrap-check.sh (no gate involved yet) so the extracted command is
+  # exactly what that root's own %q fallback produces.
+  local out_render errfile_render rc_render
+  errfile_render="$SCRATCH_ROOT/AF-render-err"
+  out_render=$(cd "$d" && CLAUDE_PLUGIN_ROOT="$fake_root" bash "$fake_root/hooks/lib/bootstrap-check.sh" "$d_real" 2>"$errfile_render")
+  rc_render=$?
+  if [ "$rc_render" -ne 10 ]; then
+    record_fail "AF: setup error — fake-root bootstrap-check.sh did not return 10 (got $rc_render; stderr: $(cat "$errfile_render"))"
+    return
+  fi
+  local cmd
+  cmd="$(printf '%s\n' "$out_render" | grep -E '^Run: ' | head -n1)"
+  cmd="${cmd#Run: }"
+  if [ -z "$cmd" ]; then
+    record_fail "AF: setup error — could not extract 'Run:' line from fake-root guidance (got: $out_render)"
+    return
+  fi
+  case "$cmd" in
+    *'\ '*) : ;;  # backslash-escaped space — the %q fallback rendering
+    *)
+      record_fail "AF: setup error — expected a %q (backslash-escaped) rendering, got: $cmd"
+      return
+      ;;
+  esac
+
+  local payload
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]},"cwd":sys.argv[2]}))' "$cmd" "$d_real")"
+  local out err rc errfile
+  errfile="$SCRATCH_ROOT/AF-err"
+  out=$( (cd "$dir" && printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="$fake_root" bash "$fake_root/hooks/pre-tool-use-bash-bootstrap-gate.sh") 2>"$errfile" )
+  rc=$?
+  err=$(cat "$errfile")
+  if [ "$rc" -ne 0 ]; then
+    record_fail "AF: expected exit 0 (%q fallback via exact-match with shell-quote.sh missing), got $rc (stderr: $err; cmd: $cmd)"
+    return
+  fi
+  record_pass "AF (shell-quote.sh missing → %q-rendered command still passes via exact-match fallback)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture AG — fresh/partial template round trip (REAL plugin root): a dir
+# with a space in its name, no degraded marker, an ordinary command → exit 2
+# with bootstrap-check.sh's own generic "Run:" guidance on stderr. Extract
+# that line's runnable command and feed it back as tool_input.command →
+# exit 0 (the generic template's rendering round-trips through the gate,
+# same as the git-required-guidance template already covered by W-Z).
+# ---------------------------------------------------------------------------
+fixture_ag() {
+  local dir d d_real
+  dir="$(mktemp -d "$SCRATCH_ROOT/AG-XXXXXX")"
+  d="$dir/space dir"
+  mkdir -p "$d"
+  d_real="$(cd "$d" && pwd -P)"
+  local payload1
+  payload1="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":"ls trail/"},"cwd":sys.argv[1]}))' "$d_real")"
+  local out1 err1 rc1 errfile1
+  errfile1="$SCRATCH_ROOT/AG-err1"
+  out1=$( (cd "$dir" && printf '%s' "$payload1" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile1" )
+  rc1=$?
+  err1=$(cat "$errfile1")
+  if [ "$rc1" -ne 2 ]; then
+    record_fail "AG: setup error — expected exit 2 on the first (blocking) call, got $rc1 (stderr: $err1)"
+    return
+  fi
+  local cmd
+  cmd="$(printf '%s\n' "$err1" | grep -E '^Run: ' | head -n1)"
+  cmd="${cmd#Run: }"
+  if [ -z "$cmd" ]; then
+    record_fail "AG: setup error — could not extract 'Run:' line (got: $err1)"
+    return
+  fi
+  local payload2
+  payload2="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]},"cwd":sys.argv[2]}))' "$cmd" "$d_real")"
+  local out2 err2 rc2 errfile2
+  errfile2="$SCRATCH_ROOT/AG-err2"
+  out2=$( (cd "$dir" && printf '%s' "$payload2" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile2" )
+  rc2=$?
+  err2=$(cat "$errfile2")
+  if [ "$rc2" -ne 0 ]; then
+    record_fail "AG: expected exit 0 (generic-template rendered command replayed), got $rc2 (stderr: $err2; cmd: $cmd)"
+    return
+  fi
+  record_pass "AG (generic fresh-template Run: command round-trips through the gate → exit 0)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture AH — same as AG, but the extracted command is tampered
+# (`&& echo pwned` appended) → exit 2 (tampering is still rejected).
+# ---------------------------------------------------------------------------
+fixture_ah() {
+  local dir d d_real
+  dir="$(mktemp -d "$SCRATCH_ROOT/AH-XXXXXX")"
+  d="$dir/space dir"
+  mkdir -p "$d"
+  d_real="$(cd "$d" && pwd -P)"
+  local payload1
+  payload1="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":"ls trail/"},"cwd":sys.argv[1]}))' "$d_real")"
+  local out1 err1 rc1 errfile1
+  errfile1="$SCRATCH_ROOT/AH-err1"
+  out1=$( (cd "$dir" && printf '%s' "$payload1" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile1" )
+  rc1=$?
+  err1=$(cat "$errfile1")
+  if [ "$rc1" -ne 2 ]; then
+    record_fail "AH: setup error — expected exit 2 on the first (blocking) call, got $rc1 (stderr: $err1)"
+    return
+  fi
+  local cmd
+  cmd="$(printf '%s\n' "$err1" | grep -E '^Run: ' | head -n1)"
+  cmd="${cmd#Run: }"
+  if [ -z "$cmd" ]; then
+    record_fail "AH: setup error — could not extract 'Run:' line (got: $err1)"
+    return
+  fi
+  cmd="$cmd && echo pwned"
+  local payload2
+  payload2="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]},"cwd":sys.argv[2]}))' "$cmd" "$d_real")"
+  local out2 err2 rc2 errfile2
+  errfile2="$SCRATCH_ROOT/AH-err2"
+  out2=$( (cd "$dir" && printf '%s' "$payload2" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile2" )
+  rc2=$?
+  err2=$(cat "$errfile2")
+  if [ "$rc2" -ne 2 ]; then
+    record_fail "AH: expected exit 2 (tampered generic-template command), got $rc2 (stderr: $err2; cmd: $cmd)"
+    return
+  fi
+  record_pass "AH (tampered generic-template Run: command + && echo pwned → exit 2)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture AI — un-bootstrapped dir whose name contains a literal tab byte:
+# an ordinary command with envelope cwd = that dir → exit 2 (the resolver
+# must not truncate the path at the tab and silently pass through). The
+# generic template's rendered "Run:" command (naming the FULL tab-containing
+# path) round-trips through the gate → exit 0.
+# ---------------------------------------------------------------------------
+fixture_ai() {
+  local dir d d_real tab
+  tab="$(printf '\t')"
+  dir="$(mktemp -d "$SCRATCH_ROOT/AI-XXXXXX")"
+  d="$dir/tab${tab}dir"
+  mkdir -p "$d"
+  d_real="$(cd "$d" && pwd -P)"
+  local payload1
+  payload1="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":"ls trail/"},"cwd":sys.argv[1]}))' "$d_real")"
+  local out1 err1 rc1 errfile1
+  errfile1="$SCRATCH_ROOT/AI-err1"
+  out1=$( (cd "$dir" && printf '%s' "$payload1" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile1" )
+  rc1=$?
+  err1=$(cat "$errfile1")
+  if [ "$rc1" -ne 2 ]; then
+    record_fail "AI: expected exit 2 (tab-named un-bootstrapped dir, ordinary command), got $rc1 (stderr: $err1)"
+    return
+  fi
+  local cmd
+  cmd="$(printf '%s\n' "$err1" | grep -E '^Run: ' | head -n1)"
+  cmd="${cmd#Run: }"
+  if [ -z "$cmd" ]; then
+    record_fail "AI: setup error — could not extract 'Run:' line (got: $err1)"
+    return
+  fi
+  local payload2
+  payload2="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]},"cwd":sys.argv[2]}))' "$cmd" "$d_real")"
+  local out2 err2 rc2 errfile2
+  errfile2="$SCRATCH_ROOT/AI-err2"
+  out2=$( (cd "$dir" && printf '%s' "$payload2" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile2" )
+  rc2=$?
+  err2=$(cat "$errfile2")
+  if [ "$rc2" -ne 0 ]; then
+    record_fail "AI: expected exit 0 (rendered guidance command for tab-dir replayed), got $rc2 (stderr: $err2; cmd: $cmd)"
+    return
+  fi
+  record_pass "AI (tab-named un-bootstrapped dir → exit 2; rendered guidance command → exit 0)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture AJ — un-bootstrapped dir whose name ENDS in a literal LF byte: an
+# ordinary command with envelope cwd = that dir → exit 2 (the resolver must
+# not truncate the trailing LF and silently pass through). The generic
+# template's rendered "Run:" command is extracted byte-safely (NOT via a
+# single-line grep like fixture AI's tab case — the embedded trailing LF
+# inside the single-quoted --project-dir value would otherwise be mistaken
+# for a line boundary, losing the closing quote) and replayed through the
+# gate → exit 0.
+# ---------------------------------------------------------------------------
+fixture_aj() {
+  local dir dir_real lf d d_real
+  lf=$'\n'
+  dir="$(mktemp -d "$SCRATCH_ROOT/AJ-XXXXXX")"
+  dir_real="$(cd "$dir" && pwd -P)"
+  d="${dir_real}/lfdir-$$${lf}"
+  if ! mkdir -p "$d" 2>/dev/null; then
+    record_fail "AJ: could not create LF-terminated directory fixture"
+    return
+  fi
+  # d is already the physically-resolved path — dir_real has no symlink
+  # components left to resolve, and d is a direct child of it.
+  d_real="$d"
+  local payload1
+  payload1="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":"ls trail/"},"cwd":sys.argv[1]}))' "$d_real")"
+  local out1 rc1 errfile1
+  errfile1="$SCRATCH_ROOT/AJ-err1"
+  out1=$( (cd "$dir" && printf '%s' "$payload1" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile1" )
+  rc1=$?
+  if [ "$rc1" -ne 2 ]; then
+    record_fail "AJ: expected exit 2 (LF-terminated un-bootstrapped dir, ordinary command), got $rc1 (stderr: $(cat "$errfile1"))"
+    return
+  fi
+  # Byte-safe extraction straight off disk — no $(...) round-trip of the raw
+  # guidance text, and no line-based grep, either of which would mishandle
+  # the embedded LF.
+  local cmd
+  cmd="$(python3 -c '
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+marker = "Run: "
+start = text.index(marker) + len(marker)
+end = text.index("\n\n(Claude:", start)
+sys.stdout.write(text[start:end])
+' "$errfile1")"
+  if [ -z "$cmd" ]; then
+    record_fail "AJ: setup error — could not extract 'Run:' command from guidance (stderr: $(cat "$errfile1"))"
+    return
+  fi
+  local payload2
+  payload2="$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]},"cwd":sys.argv[2]}))' "$cmd" "$d_real")"
+  local out2 rc2 errfile2
+  errfile2="$SCRATCH_ROOT/AJ-err2"
+  out2=$( (cd "$dir" && printf '%s' "$payload2" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HOOK") 2>"$errfile2" )
+  rc2=$?
+  if [ "$rc2" -ne 0 ]; then
+    record_fail "AJ: expected exit 0 (rendered guidance command for LF-terminated dir replayed), got $rc2 (stderr: $(cat "$errfile2"); cmd: $cmd)"
+    return
+  fi
+  record_pass "AJ (LF-terminated un-bootstrapped dir → exit 2; rendered guidance command → exit 0)"
+}
+
+# ---------------------------------------------------------------------------
 # Run all fixtures
 # ---------------------------------------------------------------------------
 fixture_a
@@ -625,6 +1258,23 @@ fixture_p
 fixture_q
 fixture_r
 fixture_s
+fixture_t
+fixture_u
+fixture_v
+fixture_w
+fixture_x
+fixture_y
+fixture_z
+fixture_aa
+fixture_ab
+fixture_ac
+fixture_ad
+fixture_ae
+fixture_af
+fixture_ag
+fixture_ah
+fixture_ai
+fixture_aj
 
 echo ""
 echo "=================================================="

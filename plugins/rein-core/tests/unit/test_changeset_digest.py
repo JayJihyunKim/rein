@@ -25,6 +25,7 @@ if _PLUGIN_ROOT not in sys.path:
     sys.path.insert(0, _PLUGIN_ROOT)
 
 from rein.kernel.changeset import (  # noqa: E402
+    SUBJECT_UNRESOLVED,
     SCOPE_COMMIT,
     SCOPE_STAGED,
     SCOPE_TASK,
@@ -194,7 +195,11 @@ class GitFactsTest(unittest.TestCase):
         )
 
     def _write(self, name, data):
-        with open(os.path.join(self.repo, name), "wb") as handle:
+        full_path = os.path.join(self.repo, name)
+        parent = os.path.dirname(full_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(full_path, "wb") as handle:
             handle.write(data)
 
     def test_worktree_changeset_lists_modified_and_untracked(self):
@@ -256,6 +261,199 @@ class GitFactsTest(unittest.TestCase):
         self.assertNotEqual(
             facts.changeset_digest(worktree, cwd=self.repo), first
         )
+
+    # ---- staged-deletion-of-ignored-path digest suppression (2026-09-04,
+    # rein-state-gitignore-digest DoD, item 3) -----------------------------
+    #
+    # `git rm --cached` stages a deletion (porcelain index column 'D') while
+    # leaving the file on disk. If that path is now ignored, git does NOT
+    # also report it as '??' — so pre-fix, the WORKTREE content reader still
+    # opened and read the on-disk file for that path (it is in
+    # changeset.paths, and read_content had no way to know it was a staged
+    # deletion), meaning every rewrite of that on-disk file (e.g. rein's own
+    # hook-rewritten `.rein/state.json`) changed the digest despite git
+    # itself considering the path DELETED. Post-fix, that path's content
+    # reads as absent (None) instead.
+
+    def _stage_delete_of_committed_file(self, name, initial_content):
+        """Commit `name`, then `git rm --cached` it (file stays on disk)."""
+        self._write(name, initial_content)
+        self._git("add", name)
+        self._git("-c", "commit.gpgsign=false", "commit", "-q", "-m", "add " + name)
+        self._git("rm", "--cached", "-q", name)
+
+    def test_worktree_digest_ignores_staged_deleted_ignored_path_content(self):
+        # (a) path is ALSO gitignored → no '??' re-surfacing → suppressed.
+        self._stage_delete_of_committed_file(
+            ".rein/state.json", b'{"updated_at": 1}\n'
+        )
+        self._write(".gitignore", b"/.rein/state.json\n")
+        changeset = facts.worktree_changeset(cwd=self.repo)
+        self.assertIsNotNone(changeset)
+        self.assertIn(".rein/state.json", changeset.paths)
+        first = facts.changeset_digest(changeset, cwd=self.repo)
+        self.assertIsNotNone(first)
+
+        # Disk content changes repeatedly (as rein's own state-writer hook
+        # would do on every tool call) — the WORKTREE digest must not move.
+        self._write(".rein/state.json", b'{"updated_at": 2}\n')
+        second = facts.changeset_digest(
+            facts.worktree_changeset(cwd=self.repo), cwd=self.repo
+        )
+        self.assertEqual(second, first)
+
+        self._write(".rein/state.json", b'{"updated_at": 3, "more": "x"}\n')
+        third = facts.changeset_digest(
+            facts.worktree_changeset(cwd=self.repo), cwd=self.repo
+        )
+        self.assertEqual(third, first)
+
+    def test_parse_worktree_status_only_plain_index_deletion_is_suppressed(self):
+        out = b"D  gone.txt\0DU ours-deleted.txt\0DD both-deleted.txt\0AD added-then-deleted.txt\0"
+        paths, deleted = facts._parse_worktree_status(out)
+        self.assertEqual(
+            paths,
+            ["gone.txt", "ours-deleted.txt", "both-deleted.txt", "added-then-deleted.txt"],
+        )
+        self.assertEqual(deleted, {"gone.txt"})
+
+    def test_worktree_digest_reads_content_of_unmerged_deleted_by_us_path(self):
+        # DU conflict: deleted on our side, modified on theirs — the file
+        # exists on disk (their version) and its content must still drive
+        # the digest, i.e. it must NOT be treated as a staged deletion.
+        self._git("checkout", "-q", "-b", "side")
+        self._write("tracked.txt", b"theirs\n")
+        self._git("add", "tracked.txt")
+        self._git("-c", "commit.gpgsign=false", "commit", "-q", "-m", "side")
+        self._git("checkout", "-q", "-")
+        self._git("rm", "-q", "tracked.txt")
+        self._git("-c", "commit.gpgsign=false", "commit", "-q", "-m", "delete")
+        merge = subprocess.run(
+            ("git", "merge", "side"),
+            cwd=self.repo,
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertNotEqual(merge.returncode, 0)
+        status = subprocess.run(
+            ("git", "status", "--porcelain"),
+            cwd=self.repo,
+            capture_output=True,
+            check=True,
+            timeout=30,
+        ).stdout
+        self.assertIn(b"DU tracked.txt", status)
+        self.assertNotIn("tracked.txt", facts.worktree_deleted_paths(cwd=self.repo))
+
+        first = facts.changeset_digest(
+            facts.worktree_changeset(cwd=self.repo), cwd=self.repo
+        )
+        self._write("tracked.txt", b"resolved differently\n")
+        second = facts.changeset_digest(
+            facts.worktree_changeset(cwd=self.repo), cwd=self.repo
+        )
+        self.assertIsNotNone(first)
+        self.assertNotEqual(second, first)
+
+    def test_worktree_digest_is_absent_when_suppression_status_query_fails(self):
+        # The changeset resolves (first `git status` succeeds) but the
+        # suppression query (second `git status`) fails — the digest must be
+        # absent (None), never computed with an empty suppression set.
+        self._stage_delete_of_committed_file(
+            ".rein/state.json", b'{"updated_at": 1}\n'
+        )
+        self._write(".gitignore", b"/.rein/state.json\n")
+        changeset = facts.worktree_changeset(cwd=self.repo)
+        self.assertIsNotNone(changeset)
+
+        real_run_git = facts._run_git
+        calls = {"status": 0}
+
+        def flaky_run_git(args, cwd=None):
+            if args and args[0] == "status":
+                calls["status"] += 1
+                if calls["status"] >= 1:
+                    return None
+            return real_run_git(args, cwd=cwd)
+
+        facts._run_git = flaky_run_git
+        try:
+            self.assertIsNone(facts.worktree_deleted_paths(cwd=self.repo))
+            self.assertIsNone(facts.changeset_digest(changeset, cwd=self.repo))
+            self.assertEqual(
+                facts.review_digest(changeset, cwd=self.repo),
+                SUBJECT_UNRESOLVED,
+            )
+        finally:
+            facts._run_git = real_run_git
+        # one failing suppression query per call above (direct, via
+        # changeset_digest, via review_digest) — nothing else re-ran status
+        self.assertEqual(calls["status"], 3)
+
+    def test_worktree_digest_reflects_content_when_deleted_path_is_readded_untracked(
+        self,
+    ):
+        # (b) path is NOT ignored → git reports it as BOTH 'D ' (staged
+        # deletion) and '??' (re-surfaced untracked) for the SAME path — the
+        # '??' record means content is authoritative again, so suppression
+        # must NOT apply and the digest must still react to content changes.
+        self._stage_delete_of_committed_file(
+            ".rein/state.json", b'{"updated_at": 1}\n'
+        )
+        changeset = facts.worktree_changeset(cwd=self.repo)
+        self.assertIn(".rein/state.json", changeset.paths)
+        first = facts.changeset_digest(changeset, cwd=self.repo)
+        self.assertIsNotNone(first)
+
+        self._write(".rein/state.json", b'{"updated_at": 2}\n')
+        second = facts.changeset_digest(
+            facts.worktree_changeset(cwd=self.repo), cwd=self.repo
+        )
+        self.assertNotEqual(second, first)
+
+    def test_worktree_digest_still_reacts_to_ordinary_tracked_file_changes(
+        self,
+    ):
+        # (c) regression guard — the suppression must be scoped to the
+        # deleted-and-ignored path only; an ordinary modified tracked file
+        # elsewhere in the SAME changeset still changes the digest.
+        self._stage_delete_of_committed_file(
+            ".rein/state.json", b'{"updated_at": 1}\n'
+        )
+        self._write(".gitignore", b"/.rein/state.json\n")
+        first = facts.changeset_digest(
+            facts.worktree_changeset(cwd=self.repo), cwd=self.repo
+        )
+        self._write("tracked.txt", b"changed-alongside-suppressed-delete\n")
+        second = facts.changeset_digest(
+            facts.worktree_changeset(cwd=self.repo), cwd=self.repo
+        )
+        self.assertNotEqual(second, first)
+
+    def test_review_digest_suppresses_staged_deleted_ignored_content_but_keeps_subject_path(
+        self,
+    ):
+        # code_review's subject (review_digest/review_subject_paths, the
+        # functions `bin/rein issue-evidence code_review --print-subject`
+        # calls) must show the SAME behavior: the deleted path stays in the
+        # authenticated subject path list (nothing is silently dropped from
+        # what the reviewer is told was reviewed), but its content stops
+        # moving the digest.
+        self._stage_delete_of_committed_file(
+            ".rein/state.json", b'{"updated_at": 1}\n'
+        )
+        self._write(".gitignore", b"/.rein/state.json\n")
+        changeset = facts.worktree_changeset(cwd=self.repo)
+        subject_paths = facts.review_subject_paths(changeset)
+        self.assertIn(".rein/state.json", subject_paths)
+        first = facts.review_digest(changeset, cwd=self.repo)
+
+        self._write(".rein/state.json", b'{"updated_at": 2}\n')
+        changeset2 = facts.worktree_changeset(cwd=self.repo)
+        subject_paths2 = facts.review_subject_paths(changeset2)
+        self.assertEqual(subject_paths2, subject_paths)
+        second = facts.review_digest(changeset2, cwd=self.repo)
+        self.assertEqual(second, first)
 
     def test_clean_tree_yields_empty_changesets(self):
         self.assertEqual(facts.worktree_changeset(cwd=self.repo).paths, ())

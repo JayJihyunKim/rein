@@ -43,7 +43,8 @@ make_sandbox() {
   local sb
   sb=$(mktemp -d "/tmp/perf1-test-XXXXXX")
   mkdir -p "$sb/trail/incidents"
-  # .rein/project.json makes bootstrap-check happy (not needed for script but good practice)
+  # .rein/project.json is REQUIRED: the aggregate script treats its absence
+  # (or a non-regular-file at that path) as un-bootstrapped and writes nothing.
   mkdir -p "$sb/.rein"
   printf '{"mode":"plugin","scope":"project","version":"1.0.0"}\n' > "$sb/.rein/project.json"
   echo "$sb"
@@ -303,6 +304,104 @@ test_legacy_example_redaction_and_test_exclusion() {
   end
 }
 
+# ============================================================
+# Un-bootstrapped guard: neither set-session-end nor plain aggregate may
+# create trail/ for a project that was never bootstrapped (no
+# .rein/project.json). Reproduces the stop-hook residue bug where a
+# never-bootstrapped project ends up with a stray trail/incidents/ that
+# flips bootstrap-check.sh's tri-marker predicate to PARTIAL.
+# ============================================================
+make_unbootstrapped_sandbox() {
+  # Deliberately bare: no .rein/, no trail/ — nothing exists yet.
+  mktemp -d "/tmp/perf1-nobootstrap-XXXXXX"
+}
+
+test_set_session_end_noop_when_unbootstrapped() {
+  begin "T10: set-session-end on an un-bootstrapped dir creates no trail/"
+  local sb
+  sb=$(make_unbootstrapped_sandbox)
+
+  python3 "$AGGREGATE" --project-dir "$sb" set-session-end true >/dev/null 2>&1
+  local rc=$?
+  [ "$rc" -eq 0 ] || fail "expected rc 0, got $rc"
+  [ ! -e "$sb/trail" ] || fail "trail/ should not be created for an un-bootstrapped project"
+
+  rm -rf "$sb"
+  end
+}
+
+# Seeds a stray blocks.jsonl (the one input that makes aggregate() want to
+# write) into an un-bootstrapped sandbox, so that the bootstrap guard — and
+# nothing else — is what keeps the run side-effect free.
+seed_stray_blocks_jsonl() {
+  local sb="$1"
+  mkdir -p "$sb/trail/incidents"
+  printf '{"ts": "2026-01-01T00:00:00", "hook": "pre-edit-dod-gate", "reason": "stray", "target": "x.py", "source": "live"}\n' > "$sb/trail/incidents/blocks.jsonl"
+  cp "$sb/trail/incidents/blocks.jsonl" "$sb/.blocks.before"
+}
+assert_aggregate_wrote_nothing() {
+  local sb="$1"
+  cmp -s "$sb/trail/incidents/blocks.jsonl" "$sb/.blocks.before" || fail "blocks.jsonl must be left untouched"
+  for f in .aggregate.lock .last-processed-line .last-aggregate-state.json; do
+    [ ! -e "$sb/trail/incidents/$f" ] || fail "$f must not be created for an un-bootstrapped project"
+  done
+  local stray
+  stray=$(find "$sb/trail/incidents" -name 'auto-*.md' 2>/dev/null | head -1)
+  [ -z "$stray" ] || fail "auto-*.md incident must not be created for an un-bootstrapped project: $stray"
+}
+
+test_aggregate_noop_when_unbootstrapped() {
+  begin "T11: plain aggregate on an un-bootstrapped dir with a stray blocks.jsonl writes nothing"
+  local sb
+  sb=$(make_unbootstrapped_sandbox)
+  seed_stray_blocks_jsonl "$sb"
+
+  python3 "$AGGREGATE" --project-dir "$sb" >/dev/null 2>&1
+  local rc=$?
+  [ "$rc" -eq 0 ] || fail "expected rc 0, got $rc"
+  assert_aggregate_wrote_nothing "$sb"
+
+  rm -rf "$sb"
+  end
+}
+
+# ============================================================
+# A directory at .rein/project.json is not a valid marker (only a regular
+# file is). Every other reader of this marker (the hooks' `[ -f ... ]`
+# checks, bootstrap-check.sh's tri-marker predicate) treats a directory the
+# same as absent, so _project_bootstrapped() must too.
+# ============================================================
+test_set_session_end_noop_when_marker_is_a_directory() {
+  begin "T12: set-session-end treats a .rein/project.json DIRECTORY as un-bootstrapped"
+  local sb
+  sb=$(make_unbootstrapped_sandbox)
+  mkdir -p "$sb/.rein/project.json"
+
+  python3 "$AGGREGATE" --project-dir "$sb" set-session-end true >/dev/null 2>&1
+  local rc=$?
+  [ "$rc" -eq 0 ] || fail "expected rc 0, got $rc"
+  [ ! -e "$sb/trail" ] || fail "trail/ should not be created when .rein/project.json is a directory"
+
+  rm -rf "$sb"
+  end
+}
+
+test_aggregate_noop_when_marker_is_a_directory() {
+  begin "T13: plain aggregate treats a .rein/project.json DIRECTORY as un-bootstrapped (stray blocks.jsonl present)"
+  local sb
+  sb=$(make_unbootstrapped_sandbox)
+  mkdir -p "$sb/.rein/project.json"
+  seed_stray_blocks_jsonl "$sb"
+
+  python3 "$AGGREGATE" --project-dir "$sb" >/dev/null 2>&1
+  local rc=$?
+  [ "$rc" -eq 0 ] || fail "expected rc 0, got $rc"
+  assert_aggregate_wrote_nothing "$sb"
+
+  rm -rf "$sb"
+  end
+}
+
 # Run all tests
 test_output_json_is_valid_json
 test_pending_count_accurate
@@ -313,6 +412,10 @@ test_backward_set_session_end_subcommand
 test_backward_plain_aggregate
 test_session_end_set_value_in_json
 test_legacy_example_redaction_and_test_exclusion
+test_set_session_end_noop_when_unbootstrapped
+test_aggregate_noop_when_unbootstrapped
+test_set_session_end_noop_when_marker_is_a_directory
+test_aggregate_noop_when_marker_is_a_directory
 
 echo ""
 echo "================================"

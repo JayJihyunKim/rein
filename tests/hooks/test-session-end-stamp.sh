@@ -15,6 +15,17 @@ source "$SCRIPT_DIR/lib/test-harness.sh"
 REAL_PROJECT_DIR="${REAL_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 AGG_PY="$REAL_PROJECT_DIR/scripts/rein-aggregate-incidents.py"
 
+# set_session_end()/aggregate() now require .rein/project.json (the
+# un-bootstrapped-residue guard) before touching trail/incidents/ at all.
+# These low-level CLI unit tests exercise JSON I/O robustness independent of
+# bootstrap status, so they seed the marker directly rather than depending on
+# copy_hooks_into_sandbox (which is for the Stop-hook trap tests below).
+_seed_bootstrap_marker() {
+  mkdir -p "$SANDBOX/.rein"
+  printf '%s' '{"mode":"plugin","scope":"project","version":"1.3.3"}' \
+    > "$SANDBOX/.rein/project.json"
+}
+
 # Helper: read snapshot.session_end as literal string ("true"/"false"/"missing")
 read_snapshot_session_end() {
   local snap="$1"
@@ -57,12 +68,14 @@ copy_hooks_into_sandbox() {
 # ---------------------------------------------------------------------------
 
 test_set_session_end_true_creates_snapshot_when_absent() {
+  _seed_bootstrap_marker
   python3 "$AGG_PY" --project-dir "$SANDBOX" set-session-end true
   local snap="$SANDBOX/trail/incidents/.last-aggregate-state.json"
   assert_eq "true" "$(read_snapshot_session_end "$snap")" "snapshot session_end=true"
 }
 
 test_set_session_end_false_overwrites_existing_true() {
+  _seed_bootstrap_marker
   python3 "$AGG_PY" --project-dir "$SANDBOX" set-session-end true >/dev/null
   python3 "$AGG_PY" --project-dir "$SANDBOX" set-session-end false
   local snap="$SANDBOX/trail/incidents/.last-aggregate-state.json"
@@ -70,6 +83,7 @@ test_set_session_end_false_overwrites_existing_true() {
 }
 
 test_set_session_end_preserves_other_fields() {
+  _seed_bootstrap_marker
   mkdir -p "$SANDBOX/trail/incidents"
   cat > "$SANDBOX/trail/incidents/.last-aggregate-state.json" <<SNAP
 {"watermark":42,"pending_hashes":["abc123"],"timestamp":"2026-04-29T00:00:00","session_end":false}
@@ -86,6 +100,7 @@ SNAP
 }
 
 test_set_session_end_warns_on_corrupt_snapshot() {
+  _seed_bootstrap_marker
   mkdir -p "$SANDBOX/trail/incidents"
   echo "{not valid json" > "$SANDBOX/trail/incidents/.last-aggregate-state.json"
   local stderr
@@ -108,6 +123,7 @@ test_set_session_end_invalid_value_rejected() {
 # ---------------------------------------------------------------------------
 
 test_aggregate_preserves_existing_session_end_true() {
+  _seed_bootstrap_marker
   mkdir -p "$SANDBOX/trail/incidents"
   # 먼저 session_end=true 로 만들기
   python3 "$AGG_PY" --project-dir "$SANDBOX" set-session-end true >/dev/null
@@ -120,6 +136,7 @@ test_aggregate_preserves_existing_session_end_true() {
 }
 
 test_aggregate_warns_and_defaults_false_on_non_dict_snapshot() {
+  _seed_bootstrap_marker
   mkdir -p "$SANDBOX/trail/incidents"
   # JSON-valid but non-dict (list) — must not crash, must warn
   echo "[]" > "$SANDBOX/trail/incidents/.last-aggregate-state.json"
@@ -135,6 +152,7 @@ test_aggregate_warns_and_defaults_false_on_non_dict_snapshot() {
 }
 
 test_aggregate_warns_and_defaults_false_on_undecodable_bytes_snapshot() {
+  _seed_bootstrap_marker
   mkdir -p "$SANDBOX/trail/incidents"
   # binary 바이트 (UTF-8 디코드 불가) — UnicodeDecodeError 가 except 에 잡혀야 함
   printf '\xff\xfe\x00\x00' > "$SANDBOX/trail/incidents/.last-aggregate-state.json"
@@ -150,6 +168,7 @@ test_aggregate_warns_and_defaults_false_on_undecodable_bytes_snapshot() {
 }
 
 test_set_session_end_warns_on_undecodable_bytes_snapshot() {
+  _seed_bootstrap_marker
   mkdir -p "$SANDBOX/trail/incidents"
   printf '\xff\xfe\x00\x00' > "$SANDBOX/trail/incidents/.last-aggregate-state.json"
   local stderr
@@ -162,6 +181,7 @@ test_set_session_end_warns_on_undecodable_bytes_snapshot() {
 }
 
 test_aggregate_warns_and_defaults_false_on_corrupt_json_snapshot() {
+  _seed_bootstrap_marker
   mkdir -p "$SANDBOX/trail/incidents"
   echo "{not valid json" > "$SANDBOX/trail/incidents/.last-aggregate-state.json"
   echo '{"ts":"2026-04-29T00:00:00","hook":"pre-bash-safety-guard","reason":"r","target":"t"}' \
@@ -176,6 +196,7 @@ test_aggregate_warns_and_defaults_false_on_corrupt_json_snapshot() {
 }
 
 test_aggregate_session_end_defaults_false_when_no_prior_snapshot() {
+  _seed_bootstrap_marker
   mkdir -p "$SANDBOX/trail/incidents"
   echo '{"ts":"2026-04-29T00:00:00","hook":"pre-bash-safety-guard","reason":"r","target":"t"}' \
     > "$SANDBOX/trail/incidents/blocks.jsonl"

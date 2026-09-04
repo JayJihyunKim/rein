@@ -464,8 +464,11 @@ def _git_changeset_facts(project_root):
     검토 면제 허용목록(문서/trail, 버전-only 특례 미적용)을 제외한
     집합의 digest 다. 계산은 `rein.platform.git.facts.review_digest()`
     에 이미 계산된 `changeset`(WORKTREE)을 그대로 넘겨 위임한다 —
-    `git status` 를 다시 실행하지 않는다(이 함수 자신의 "단일 pass"
-    계약, 위 docstring "review_digest" 항목). WORKTREE changeset 자체가
+    변경 경로 집합을 다시 수집하지 않는다(이 함수 자신의 "단일 pass"
+    계약, 위 docstring "review_digest" 항목). 단 WORKTREE digest 계산은
+    스테이징된 삭제 경로의 억제 집합을 위해 `git status` 를 1회 더
+    실행한다(`facts.worktree_deleted_paths`, 2026-09-04) — 경로 집합의
+    출처는 여전히 이 함수가 넘긴 changeset 하나다. WORKTREE changeset 자체가
     해석 불가면 `SUBJECT_UNRESOLVED`, 그 밖의 닫힌 값 2상태·실제
     digest 문자열은 `rein.platform.git.facts.review_digest()` docstring
     참조.

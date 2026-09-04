@@ -9,11 +9,14 @@ TOTAL_FAIL=0
 
 for test_file in \
   "$SCRIPT_DIR/test-bootstrap-check-helper.sh" \
+  "$SCRIPT_DIR/test-git-required-guidance.sh" \
+  "$SCRIPT_DIR/test-no-special-builtin-redirect.sh" \
   "$SCRIPT_DIR/test-pre-edit-trail-bootstrap-gate.sh" \
   "$SCRIPT_DIR/test-pre-tool-use-bash-bootstrap-gate.sh" \
   "$SCRIPT_DIR/test-bootstrap-gate-hooks-json-order.sh" \
   "$SCRIPT_DIR/test-user-prompt-submit-bootstrap-advisory.sh" \
   "$SCRIPT_DIR/test-session-start-bootstrap-helper-refactor.sh" \
+  "$SCRIPT_DIR/test-session-start-bootstrap.sh" \
   "$SCRIPT_DIR/test-bootstrap-trigger-parity.sh" \
   "$SCRIPT_DIR/test-dod-rotation.sh" \
   "$SCRIPT_DIR/test-sandbox-teardown-retry.sh" \
@@ -43,6 +46,7 @@ for test_file in \
   "$SCRIPT_DIR/test-pre-bash-commit-review-gate.sh" \
   "$SCRIPT_DIR/test-code-review-authority-switch.sh" \
   "$SCRIPT_DIR/test-security-review-authority-switch.sh" \
+  "$SCRIPT_DIR/test-security-axis-policy-resolve.sh" \
   "$SCRIPT_DIR/test-active-task-authority-switch.sh" \
   "$SCRIPT_DIR/test-security-tier-gate.sh" \
   "$SCRIPT_DIR/test-python-runner.sh" \

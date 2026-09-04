@@ -150,6 +150,22 @@ _link_security_axis_policy() {
   cp -R "$REAL_PROJECT_DIR/tests/fixtures/policy/security-axis" "$SANDBOX/.rein/policy/security-axis"
 }
 
+# _link_bundled_security_axis_policy — places the axis policy at the
+# *bundled* location a real plugin install ships it to (plugin-root/
+# policies/security-axis), NOT at the per-project override (.rein/policy/
+# security-axis). Same self-location math as _link_rein_package/_link_rein_
+# bin above: this hook's plugin root inside the sandbox is $SANDBOX/.claude.
+# "policy folder absent = declared opt-out regardless of switched state" is
+# no longer the contract; the pre-check now resolves project override →
+# bundled default before the switched-check ever runs, so a scenario that
+# wants "a genuine, undamaged install with no project override" (as opposed
+# to "install itself is damaged") must link this.
+_link_bundled_security_axis_policy() {
+  mkdir -p "$SANDBOX/.claude/policies"
+  rm -rf "$SANDBOX/.claude/policies/security-axis"
+  cp -R "$REAL_PROJECT_DIR/tests/fixtures/policy/security-axis" "$SANDBOX/.claude/policies/security-axis"
+}
+
 # _write_broken_security_axis_policy
 #   시나리오 (i) — 축 전용 정책 폴더의 commit-security.yaml 에 폐쇄
 #   스키마 밖 필드(bogus_field)를 주입한다. 2026-08-18 실측(scratchpad):
@@ -515,6 +531,12 @@ test_e_switch_off_axis_skipped_passes() {
   seed_dod "dod-2026-08-18-srg-switch.md"
   # no security stamp
   _link_rein_package
+  # 정책 위치 사전 점검(project override → 배포 번들)은 전환 여부와
+  # 무관하게 먼저 실행되므로, 번들을 심어 둔다 — 그렇지 않으면 이
+  # sandbox 는 "정책이 어디에도 없는 손상된 install" 로 보여 이 테스트가
+  # 확인하려는 NOT_SWITCHED 분기가 아니라 엉뚱한 사유(damaged-install)로
+  # 차단된다.
+  _link_bundled_security_axis_policy
   _write_authority_switched_off
 
   local payload
@@ -645,16 +667,20 @@ test_g_cross_axis_isolation_docs_only_no_security_stamp() {
 
 # ③-c 방향 전환 (파일 헤더 참조) — 이 훅에는 DOD_EXISTS 선행조건이 없다.
 # code_review 는 이제 task.exists 조건화로 v2 정책 자체가 미매칭돼
-# ALLOW(genuine 위임) 하고, security_review 는 axis 폴더를 의도적으로
-# 안 심어(commit-security.yaml 자체가 없음) 구조적으로 skip 시킨다 —
-# 두 축의 skip 사유가 서로 다르다는 것 자체가 이 재설계의 핵심이다(구
-# 시나리오는 "위임 인프라 자체가 전혀 안 쓰인다"였지만, 신 훅에서는
-# code_review 축만큼은 실제로 쓰인다).
+# ALLOW(genuine 위임) 한다. security_review 도(security-axis bundling
+# hotfix 이후) 동형이다 — 배포 번들 정책이 실재하고 위임도 실제로
+# 일어나지만, 그 정책도 code_review 의 번들 기본 정책과 마찬가지로
+# task.exists 조건을 갖고 있어(활성 작업이 없으면 정직하게 발급할 리뷰
+# 증거 자체가 없다) 미매칭돼 ALLOW 로 귀결된다 — "정책이 아예 없어서
+# 축이 사라짐" 이 아니라 "정책은 있지만 조건부로 미요구" 다. 두 축
+# 모두 실제로 위임되지만(state db 존재) 어느 쪽도 이 이벤트에 요구를
+# 발동하지 않는다는 것이 이 시나리오의 핵심이다.
 test_h_no_active_dod_allows_code_review_delegates_security_skips() {
   _link_rein_package
   _link_rein_bin
-  # .rein/policy/security-axis/ 를 의도적으로 링크하지 않는다 — 그 축은
-  # 폴더 부재로 switched 여부와 무관하게 구조적으로 skip.
+  # project override 는 만들지 않고 배포 번들만 심는다 — 오버라이드
+  # 없는 프로젝트의 실제 형태(security-axis bundling hotfix 재현).
+  _link_bundled_security_axis_policy
   _write_authority_switched_both
 
   local payload

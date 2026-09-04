@@ -15,6 +15,13 @@ PY="$REAL_PROJECT_DIR/scripts/rein-aggregate-incidents.py"
 # Helper: run aggregate script against sandbox
 # ---------------------------------------------------------------------------
 run_aggregate() {
+  # aggregate() now requires .rein/project.json (the un-bootstrapped-residue
+  # guard) before it will touch trail/incidents/ at all. This suite tests
+  # aggregation logic itself, independent of bootstrap status, so seed the
+  # marker once here rather than in every test function.
+  mkdir -p "$SANDBOX/.rein"
+  [ -f "$SANDBOX/.rein/project.json" ] || printf '%s' '{"mode":"plugin","scope":"project","version":"1.3.3"}' \
+    > "$SANDBOX/.rein/project.json"
   python3 "$PY" --project-dir "$SANDBOX" 2>&1
 }
 

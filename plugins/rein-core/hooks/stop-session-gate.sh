@@ -39,14 +39,35 @@ if ! . "$SCRIPT_DIR/lib/plugin-script-path.sh" 2>/dev/null; then
 fi
 AGGREGATE_PY=$(resolve_helper_script rein-aggregate-incidents.py 2>/dev/null || true)
 
-# session_end "퇴근 도장" — 어떤 exit 경로로 끝나든 trap EXIT 으로 marking.
-# 이 redefinition 으로 session_end=true 의 의미가 "Stop hook 이 어떤 경로로든
-# 실행은 됨" 이 된다. false 로 남는 것은 진짜 hook 미호출 (Ctrl+C / 터미널
-# 닫기 / Claude Code crash / SIGKILL) 만. SIGKILL 은 잡히지 않는데, 그 경우는
-# 진짜 abnormal 이라 false 로 남는 게 의도. 모든 쓰기는 aggregate 의
-# `set-session-end` subcommand 를 통해 flock 안에서 직렬화된다 (multi-writer
-# race 회피).
+# session_end "퇴근 도장" — trap EXIT 으로 marking, 등록은 여기서 바로 한다
+# (거의 모든 exit 경로를 잡아야 하므로 — REIN_BYPASS_STOP_GATE 탈출구가 이
+# 등록 지점보다 아래에서 가장 먼저 exit 하기 때문에, 등록을 뒤로 미루면 그
+# 경로가 stamp 를 놓친다). 대신 stamp 여부의 판단은 이 함수 본문이 EXIT 시점
+# (스크립트의 어느 줄에서 exit 했든) 에 PROJECT_DIR 의 실제 상태를 직접 검사해
+# 내린다 — "어느 텍스트 줄을 지났는가" 가 아니라 "지금 이 프로젝트가 bootstrap
+# 완료 상태인가" 로 판정하므로 조기 종료 지점의 순서와 무관하게 항상 정확하다.
+# stamp 되는 경우: 프로젝트가 bootstrap 완료 상태로 끝난 모든 세션 — degraded
+# 상태, SRC_EDIT_MARKER 부재(소스 편집 없는 docs-only 세션), REIN_BYPASS_STOP_GATE
+# 탈출구를 전부 포함해 정상 종료로 친다. degraded 여부는 stamp 판정에 영향을
+# 주지 않는다 — 다음 SessionStart 의 비정상 종료 감지(session-start-load-trail.sh)
+# 는 이 프로젝트가 bootstrap 되었다는 사실만으로 "훅이 실행됨" 을 판단하며,
+# degraded 로 incident gate 를 건너뛴 것과 SIGKILL 로 죽은 것은 서로 다른
+# 신호이기 때문이다(전자는 오탐 방지 대상, 후자는 진짜 이상 종료). stamp 안
+# 되는 경우: (1) bootstrap 미완료 상태 (아직 trail/incidents/ 를 소유할 자격이
+# 없다) 와 (2) 진짜 hook 미호출 (Ctrl+C / 터미널 닫기 / Claude Code crash /
+# SIGKILL) 뿐이다. SIGKILL 은 잡히지 않는데, 그 경우는 진짜 abnormal 이라
+# false 로 남는 게 의도. 모든 쓰기는 aggregate 의 `set-session-end` subcommand
+# 를 통해 flock 안에서 직렬화된다 (multi-writer race 회피).
 _stamp_session_end_true() {
+  # bootstrap 미완료면 stamp 하지 않는다 — 아직 trail/incidents/ 를 소유할
+  # 자격이 없는 프로젝트에 잔여물을 남기지 않기 위함. aggregate 스크립트
+  # 쪽에도 동일한 가드가 있어 이중 방어지만, 여기서 걸러두면 python3 기동
+  # 자체를 아낀다. degraded 여부는 여기서 검사하지 않는다 — degraded 는
+  # incident gate 만 건너뛰는 상태이고, "hook 이 정상 종료됐다" 는 사실 자체는
+  # bootstrap 여부와만 관련 있다.
+  if [ ! -f "$PROJECT_DIR/.rein/project.json" ] || [ ! -d "$PROJECT_DIR/trail" ]; then
+    return 0
+  fi
   if command -v python3 >/dev/null 2>&1 && [ -n "$AGGREGATE_PY" ]; then
     python3 "$AGGREGATE_PY" \
       --project-dir "$PROJECT_DIR" set-session-end true >/dev/null 2>&1 || true
@@ -77,7 +98,7 @@ incident_advisory_check() {
     return 0
   fi
   summary_json=$(python3 "$AGGREGATE_PY" \
-    advisory-summary --since-line "$since_line" 2>/dev/null || echo "[]")
+    --project-dir "$PROJECT_DIR" advisory-summary --since-line "$since_line" 2>/dev/null || echo "[]")
 
   if [ -z "$summary_json" ] || [ "$summary_json" = "[]" ]; then
     return 0
@@ -121,12 +142,19 @@ PY
 if [ "${REIN_BYPASS_STOP_GATE:-0}" = "1" ]; then
   echo "WARNING: REIN_BYPASS_STOP_GATE=1 — stop gate bypassed." >&2
   echo "  이 탈출구는 1회성 비상용입니다. 다음 세션에서 trail/inbox/${TODAY}-*.md 에 작업 기록을 보충하세요." >&2
-  # Audit trail: bypass 사용 이력을 blocks.log 에 기록해 repo-audit 등에서
-  # 추후 탐지 가능하도록 한다. 실패해도 조용히 통과 (exit 0 유지).
-  BLOCKS_LOG="$PROJECT_DIR/trail/incidents/blocks.log"
-  mkdir -p "$(dirname "$BLOCKS_LOG")" 2>/dev/null || true
-  echo "$(date -u +%Y-%m-%dT%H:%M:%S)|stop-session-gate|BYPASS_ENV|REIN_BYPASS_STOP_GATE=1" \
-    >> "$BLOCKS_LOG" 2>/dev/null || true
+  # Audit trail: bypass 사용 이력을 기록해 repo-audit 등에서 추후 탐지 가능
+  # 하도록 한다. 단, 미초기화 프로젝트에서는 trail/ 를 만들 자격이 없으므로
+  # blocks.log 파일을 절대 생성하지 않는다 — 대신 같은 감사 줄을 stderr 로만
+  # 낸다 (다음 프롬프트의 bootstrap tri-marker 판정이 이 부산물로 PARTIAL
+  # 오진하는 것을 막기 위함). 실패해도 조용히 통과 (exit 0 유지).
+  _BYPASS_AUDIT_LINE="$(date -u +%Y-%m-%dT%H:%M:%S)|stop-session-gate|BYPASS_ENV|REIN_BYPASS_STOP_GATE=1"
+  if [ -f "$PROJECT_DIR/.rein/project.json" ] && [ -d "$PROJECT_DIR/trail" ]; then
+    BLOCKS_LOG="$PROJECT_DIR/trail/incidents/blocks.log"
+    mkdir -p "$(dirname "$BLOCKS_LOG")" 2>/dev/null || true
+    printf '%s\n' "$_BYPASS_AUDIT_LINE" >> "$BLOCKS_LOG" 2>/dev/null || true
+  else
+    echo "$_BYPASS_AUDIT_LINE" >&2
+  fi
   exit 0
 fi
 
@@ -176,8 +204,10 @@ fi
 
 # ---- BG-D: degraded mode escape (BG-J helper) ----
 # SessionStart 가 degraded 로 끝났으면 incident gate 도 skip.
-# rein_is_degraded 는 .claude/cache/.rein-degraded marker (또는 BG-J 가 정한 위치)
-# 를 검사. helper 가 없으면 silent fail — stamp 부재 시 정상 경로로 통과.
+# rein_is_degraded 는 .claude/cache/.rein-session-degraded marker 를 검사.
+# helper 가 없으면 silent fail — stamp 부재 시 정상 경로로 통과.
+# (degraded 는 stamp 판정에 영향을 주지 않는다 — _stamp_session_end_true 는
+# bootstrap 완료 여부만 본다. 이 exit 은 오직 incident gate 를 건너뛴다.)
 # shellcheck source=./lib/degraded-check.sh
 if [ -f "${CLAUDE_PLUGIN_ROOT:-$SCRIPT_DIR/..}/hooks/lib/degraded-check.sh" ]; then
   . "${CLAUDE_PLUGIN_ROOT:-$SCRIPT_DIR/..}/hooks/lib/degraded-check.sh"

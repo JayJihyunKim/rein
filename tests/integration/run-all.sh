@@ -12,7 +12,8 @@ TOTAL_FAIL=0
 for test_file in \
   "$SCRIPT_DIR/test-governance-e2e.sh" \
   "$SCRIPT_DIR/test-fresh-design-spec-review-no-fallback.sh" \
-  "$SCRIPT_DIR/test-slash-command-namespace.sh"
+  "$SCRIPT_DIR/test-slash-command-namespace.sh" \
+  "$SCRIPT_DIR/test-git-required-onboarding-e2e.sh"
 do
   echo ""
   echo "######## $(basename "$test_file") ########"

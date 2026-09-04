@@ -143,7 +143,7 @@ Claude Code 는 에이전트에게 도구를 줍니다. Rein 은 팀에게 통�
 
 설치 후, 에이전트가 처음으로 소스 편집 (Edit / Write / MultiEdit) 또는 Bash 명령을 시도하면 Rein 의 bootstrap gate 가 `trail/` 부재를 감지해 **해당 동작을 차단**하고 한 줄짜리 `python3 …/rein-bootstrap-project.py` 명령을 표시합니다. 그 명령을 실행하면 `trail/` 과 `.rein/` 이 생성되며 이후 편집은 정상적으로 통과합니다. `/reload-plugins` 이후에도 동일한 흐름이 적용됩니다 — 새 세션 시작과 같은 경로로 수렴합니다.
 
-non-git 프로젝트도 지원됩니다 — `git init` 은 **불필요**합니다. `git_root` 가 없으면 bootstrap 이 프로젝트 디렉토리 자체를 root 로 사용합니다.
+git 저장소가 **필요**합니다 — rein 의 리뷰·커밋 게이트는 git 상태에 묶여 있어, git 저장소가 아니면 편집 게이트만 동작합니다. 아직 git 저장소가 아니면 에이전트가 먼저 물어본 뒤 `git init` 을 실행하고, 거부하면 직접 실행하기 전까지 그 폴더에서 rein 이 꺼진 채로 남습니다. non-git 폴더는 bootstrap 명령에 `--allow-non-git` 을 붙이면 여전히 선택적으로 사용할 수 있습니다 (편집 게이트만 동작하는 동일한 제약).
 
 gate 를 끄려면 `.rein/policy/hooks.yaml` 에 `bootstrap-gate: false` 를 추가하세요. 자세한 옵션은 troubleshooting docs 에 있습니다.
 
@@ -229,7 +229,7 @@ Windows 사용자는 **WSL2 (Ubuntu)** 를 권장합니다. 설치 방법과 Git
 
 Rein 은 더 이상 세션 시작 시 자동으로 bootstrap 을 묻지 않습니다. bootstrap 명령은 `trail/` 이 없는 디렉토리에서 에이전트가 **첫 소스 편집** (Edit / Write / MultiEdit) 또는 **첫 Bash 명령** 을 시도하는 시점에만 노출됩니다. 에이전트에게 어떤 편집이든 시켜 보세요 — gate 가 한 줄짜리 `python3 …/rein-bootstrap-project.py` 명령을 출력합니다. 한 번 실행하면 이후 편집은 정상 통과합니다.
 
-`/reload-plugins` 이후에도 동일하게 동작합니다 — 별도의 "첫 세션" 경로가 없습니다. non-git 프로젝트도 지원하므로 `git init` 은 **불필요**합니다.
+`/reload-plugins` 이후에도 동일하게 동작합니다 — 별도의 "첫 세션" 경로가 없습니다. git 저장소가 **필요**하며, 에이전트가 먼저 물어본 뒤 `git init` 을 실행합니다. `--allow-non-git` 은 non-git 폴더를 위한 명시적 opt-in 으로 남아 있습니다 (편집 게이트만 동작).
 
 gate 자체를 끄려면 `.rein/policy/hooks.yaml` 에 `bootstrap-gate: false` 를 추가하세요. 개별 hook 키 (`pre-edit-trail-bootstrap-gate`, `pre-tool-use-bash-bootstrap-gate`) 도 동일한 방식으로 토글할 수 있습니다.
 
@@ -288,9 +288,9 @@ PR 전에 [`AGENTS.md`](AGENTS.md) 에서 프레임워크 구조와 기여 규�
 
 ## 릴리즈 히스토리
 
-최신 릴리즈: **v2.0.2** (2026-09-01) — "페르소나 골라줘" 선택창이 세 개의 고정 메뉴(페르소나 목록 / 내 페르소나 만들기 / 페르소나 끄기)로 단순해지고, 내장 페르소나가 대화·선택 목록·세션 안내에서 내부 파일 이름(영어 slug) 대신 표시 이름(마르코 / 제니 / 최행배)으로 불립니다. ([CHANGELOG](CHANGELOG.md))
+최신 릴리즈: **v2.0.3** (2026-09-04) — 사용자 대면 결함 수정 4건: 프로젝트에 별도 설정이 없을 때 보안 검토 게이트가 조용히 사라지던 문제 해소(정책 동봉), git 저장소가 아닌 폴더의 온보딩 안내 통일(rein 은 git 저장소가 필요 — 에이전트가 먼저 물어보고 `git init`, `--allow-non-git` 은 명시적 opt-in, 초기화 후 같은 세션에서 감시 시작), rein 런타임 상태 파일을 `.gitignore` 에 등록해 리뷰 지문이 흔들리지 않음(이미 `.rein/state.json` 을 추적 중인 저장소는 `git rm --cached .rein/state.json` 한 번 필요, CHANGELOG 참조), 초기화하지 않은 프로젝트에서 세션을 끝내도 `trail/` 잔여물을 남기지 않아 다음 세션이 "절반만 초기화된 상태"로 오진하지 않음. ([CHANGELOG](CHANGELOG.md))
 
-이전: **v2.0.1** (2026-08-28) — v2.0.0 hotfix: v2.0.0 으로 업데이트하면 편집 게이트가 참조하는 정책이 플러그인에 함께 담기지 않아 모든 파일 편집이 막힐 수 있었습니다. 이제 정책이 동봉되고 프로젝트에 설정이 없으면 배포 기본값으로 동작해, 활성 작업이 있으면 편집이 허용되고 없으면 복구 가능한 안내로 돌아갑니다(복구 불가 차단 제거). ([CHANGELOG](CHANGELOG.md))
+이전: **v2.0.2** (2026-09-01) — "페르소나 골라줘" 선택창이 세 개의 고정 메뉴(페르소나 목록 / 내 페르소나 만들기 / 페르소나 끄기)로 단순해지고, 내장 페르소나가 대화·선택 목록·세션 안내에서 내부 파일 이름(영어 slug) 대신 표시 이름(마르코 / 제니 / 최행배)으로 불립니다. ([CHANGELOG](CHANGELOG.md))
 
 이전 dev cycle 히스토리 (v0.x) 는 [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md) 참조.
 

@@ -378,3 +378,12 @@
 {"ts": "2026-08-24T06:10:39", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "rm #827d494ac1c7", "source": "live"}
 {"ts": "2026-08-25T06:01:22", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "cd #44f2c90b0b03", "source": "live"}
 {"ts": "2026-08-27T01:25:17", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "cd #86aa4d5d817e", "source": "live"}
+{"ts": "2026-09-01T01:51:01", "hook": "pre-bash-commit-review-gate", "reason": "코드 리뷰 위임 차단 (v2)", "target": "git commit #5962ba95801e", "source": "live"}
+{"ts": "2026-09-01T02:03:40", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "git restore #1033782e1847", "source": "live"}
+{"ts": "2026-09-01T02:06:19", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "git restore #1033782e1847", "source": "live"}
+{"ts": "2026-09-01T02:06:47", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "git restore #ff434b4c7131", "source": "live"}
+{"ts": "2026-09-04T04:21:15", "hook": "pre-bash-safety-guard", "reason": ".env Bash 읽기 시도", "target": "cd #2becbeb544c8", "source": "live"}
+{"ts": "2026-09-04T05:18:21", "hook": "pre-edit-coverage-gate", "reason": "dod covers mismatch (tier 1)", "target": "trail/dod/dod-2026-09-04-rein-state-gitignore-digest.md", "source": "live"}
+{"ts": "2026-09-04T07:32:21", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "import #dc0c573e6f18", "source": "live"}
+{"ts": "2026-09-04T07:32:37", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "git checkout #c5f3890e1642", "source": "live"}
+{"ts": "2026-09-04T12:44:50", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "$TITLE #b51d26ec5b4f", "source": "live"}

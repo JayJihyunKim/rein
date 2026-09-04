@@ -703,6 +703,105 @@ class DigestScopeGitExecutionFailureVsNonGitTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# 6a-2. policy_dir 자체가 존재하지 않는 경우 — git 조회 실패와 별개 상태.
+# `subprocess.run(cwd=<존재하지 않는 경로>)` 는 git 이 실행되기도 전에
+# `FileNotFoundError`(OSError)를 던진다 — git 은 호출된 적이 없으므로 그
+# 부재를 `_GIT_QUERY_ERROR`(git 조회 실패) 로 흡수하면 문구가 엉뚱하게
+# git 을 지목한다. 부재(ENOENT)만 이 상태로 분류하고, 경로가 일반 파일인
+# 경우 등 다른 OSError 는 여전히 판정 실패(fail-closed) 로 흐른다.
+
+
+class PolicyDirDoesNotExistTest(unittest.TestCase):
+    """policy_dir 부재는 git 조회 실패와 구분된 fail-closed 사유를 내야
+    한다 — 문구가 "git query failed"/"unable to confirm" 을 언급하지
+    않고, git 이 호출되지 않았다는 것과 그 경로를 명시해야 한다."""
+
+    def _nonexistent_policy_dir(self, base_dir):
+        # base_dir 자체는 존재하지만(TemporaryDirectory), 그 하위의
+        # "policy" 는 한 번도 만들어지지 않는다 — 진짜 부재.
+        return os.path.join(base_dir, "policy")
+
+    def test_dangling_symlink_is_reported_as_unresolvable_not_missing(self):
+        # 링크 자체는 존재하지만(lexists) 대상이 없다 — "존재하지 않음" 이
+        # 아니라 "경로 해소 불가(매달린 링크)" 로 안내해야 사용자가 링크를
+        # 고치지, 없는 폴더를 새로 만들려 하지 않는다. fail-closed 유지.
+        with tempfile.TemporaryDirectory() as base_dir:
+            link_path = os.path.join(base_dir, "policy")
+            os.symlink(os.path.join(base_dir, "gone"), link_path)
+            with self.assertRaises(facts.PolicyVersionGitStateError) as ctx:
+                facts.resolve_policy_version_digest_scope(link_path)
+            message = str(ctx.exception)
+            self.assertIn("dangling symbolic link", message)
+            self.assertNotIn("does not exist", message)
+            self.assertIn("git was not invoked", message)
+
+    def test_regular_file_path_is_not_reported_as_missing(self):
+        # 경로가 존재하지만 디렉터리가 아니다 — "존재하지 않음" 이 아니라
+        # 판정 실패(fail-closed) 로 흘러야 한다. 부재 문구를 내면 사용자가
+        # 엉뚱하게 "폴더를 만들라" 는 안내를 받는다.
+        with tempfile.TemporaryDirectory() as base_dir:
+            policy_file = os.path.join(base_dir, "policy")
+            with open(policy_file, "w") as handle:
+                handle.write("not a directory\n")
+            with self.assertRaises(facts.PolicyVersionGitStateError) as ctx:
+                facts.resolve_policy_version_digest_scope(policy_file)
+            message = str(ctx.exception)
+            self.assertNotIn("does not exist", message)
+            self.assertIn("unable to confirm", message)
+
+    def test_digest_scope_reports_missing_dir_without_mentioning_git_query(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as base_dir:
+            policy_dir = self._nonexistent_policy_dir(base_dir)
+            self.assertFalse(os.path.isdir(policy_dir))
+            with self.assertRaises(
+                facts.PolicyVersionGitStateError
+            ) as ctx:
+                facts.resolve_policy_version_digest_scope(policy_dir)
+            message = str(ctx.exception)
+            self.assertIn(policy_dir, message)
+            self.assertNotIn("git query failed", message)
+            self.assertNotIn("unable to confirm", message)
+
+    def test_absent_worktree_reports_missing_dir_without_mentioning_git_query(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as base_dir:
+            policy_dir = self._nonexistent_policy_dir(base_dir)
+            self.assertFalse(os.path.isdir(policy_dir))
+            with self.assertRaises(
+                facts.PolicyVersionGitStateError
+            ) as ctx:
+                facts.resolve_policy_version_for_absent_worktree(policy_dir)
+            message = str(ctx.exception)
+            self.assertIn(policy_dir, message)
+            self.assertNotIn("git query failed", message)
+            self.assertNotIn("unable to confirm", message)
+
+    def test_message_does_not_blame_git_and_names_the_directory(self):
+        with tempfile.TemporaryDirectory() as base_dir:
+            policy_dir = self._nonexistent_policy_dir(base_dir)
+            with self.assertRaises(
+                facts.PolicyVersionGitStateError
+            ) as ctx:
+                facts.resolve_policy_version_digest_scope(policy_dir)
+            message = str(ctx.exception)
+            self.assertIn(
+                "does not exist",
+                message,
+                msg="문구가 '디렉터리가 존재하지 않는다'는 실제 원인을 "
+                "명시해야 한다",
+            )
+            self.assertIn(
+                "git was not invoked",
+                message,
+                msg="git 이 호출된 적조차 없다는 것을 명시해 git 을 "
+                "디버깅하도록 오도하지 않는다",
+            )
+
+
+# ---------------------------------------------------------------------------
 # 6b. malformed 교차 계약 m1~m3 (+ s1 clean+malformed 무복구 경계 사례).
 
 

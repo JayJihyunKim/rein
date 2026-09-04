@@ -166,6 +166,22 @@ sandbox_init() {
   printf 'switched: none\n' \
     > "$SANDBOX/.rein/policy/authority.yaml"
 
+  # security-axis bundled default: pre-bash-commit-review-gate.sh's
+  # security-axis pre-check now resolves project override → bundled
+  # default (hooks/lib/security-axis-policy-resolve.sh) BEFORE the
+  # switched-check above ever runs — even though this suite opts
+  # security_review out via `switched: none`, an unresolvable policy
+  # location there is treated as a damaged install, not an opt-out, and
+  # would fail closed for a reason unrelated to whatever axis a given
+  # scenario actually means to exercise. Link the real bundled policy at
+  # this hook's sandbox plugin root ($SANDBOX/.claude/policies/security-
+  # axis) so the pre-check resolves cleanly and NOT_SWITCHED (set above)
+  # remains the only thing keeping this axis silent, exactly as the
+  # opt-out above intends.
+  mkdir -p "$SANDBOX/.claude/policies"
+  ln -sfn "$REAL_PROJECT_DIR/plugins/rein-core/policies/security-axis" \
+    "$SANDBOX/.claude/policies/security-axis"
+
   # Scripts
   cp "$REAL_PROJECT_DIR/scripts/rein-validate-coverage-matrix.py" \
      "$SANDBOX/scripts/rein-validate-coverage-matrix.py"

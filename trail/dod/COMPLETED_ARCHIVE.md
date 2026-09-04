@@ -5722,3 +5722,241 @@ Phase 2 종료 시점 잔존 1번. 반입 검증의 사적 경로 규칙(설계�
 
 approved_by_user: true
 
+---
+## dod-2026-08-27-v2-release.md (mtime: 2026-09-01, archived: 2026-09-02)
+# DoD — v2 governance 배포 (1.6.6 → 2.0.0)
+
+- date: 2026-08-27 착수
+- plan ref: 없음 (메인테이너 릴리스 절차 — 설계 사이클 불요)
+- approved_by_user: true (2026-08-27 "일단 v2 먼저 배포하자" + "진행해")
+
+## 배경
+
+plan 없음 (릴리스 절차). v2 governance(Phase 0~7 웨이브 4) 전량 dev 완료 + 배포 선결 ①(자기무효화 봉합, `95870df`) 해소. 판정 엔진이 통째로 들어오는 **major 배포**. 배포 선결 ②(마켓 이름 격리)는 blocker 아니므로 이 배포에서 제외 — 백로그로 이월(사용자 결정 2026-08-27).
+
+## 범위
+
+1. **버전 bump** 1.6.6 → 2.0.0 — `plugin.json` + `scripts/rein.sh` VERSION 둘 다(parity).
+2. **CHANGELOG** — v2 user-facing 항목(governance 엔진·증거 발급·게이트 재구성 outcome 언어로).
+3. **main 선별 체크아웃** — v2 파일 + 이 세션 커밋을 dev→main 으로 선별(branch-strategy 준수, full merge 금지).
+4. **태그 preflight** — main 트리 전체 테스트 시뮬(로컬 초록 ≠ main 초록 대비).
+5. **publish + mirror** — 마켓플레이스 발행 + public 미러(strip 검증).
+
+> 마켓 이름 격리(A안)는 사용자 결정으로 이 배포에서 제외 — 백로그 이월.
+
+## 검증 기준
+
+- [ ] 버전 2곳 parity (2.0.0)
+- [ ] CHANGELOG user-facing 항목 추가
+- [ ] main tests preflight 초록
+- [ ] publish 성공 + mirror public clean (trail/.rein/AGENTS.md strip 검증)
+- [ ] tag `v2.0.0`
+
+## 라우팅 추천
+
+- 메인테이너 릴리스 — CHANGELOG 는 `rein:docs-writer`, 버전 config 편집은 `rein:codex-review` + `rein:security-reviewer`(릴리스 표면 최종 확인).
+
+---
+
+approved_by_user: true
+
+---
+## dod-2026-08-28-v2-0-2-persona-release.md (mtime: 2026-09-01, archived: 2026-09-02)
+---
+approved_by_user: true
+plan ref: 없음 (릴리스 배포 — 설계 사이클 불요, 기능은 dod-2026-08-28-persona-selection-ui.md 에서 완료·리뷰됨)
+---
+
+# DoD: v2.0.2 배포 — 페르소나 선택 UI 개선 + 표시 이름 현지화 사용자 릴리스
+
+이미 dev 에서 완료·리뷰된 페르소나 선택 UI 개선 작업(`dod-2026-08-28-persona-selection-ui.md`,
+spec 5R user-approved + plan 5R PASS + 웨이브별 코드/보안 리뷰 PASS + 전체 테스트 GREEN)을
+사용자에게 배포한다. 버전 2.0.1 → 2.0.2 (patch).
+
+## 범위
+
+- 버전 표면 2곳(`plugins/rein-core/.claude-plugin/plugin.json` + `scripts/rein.sh`)을
+  2.0.1 → 2.0.2 로 승격 (parity).
+- CHANGELOG + README(en/ko)에 v2.0.2 사용자 대면 항목 추가 (최신 릴리스 요약 갱신).
+- 이미 dev 에 있는 페르소나 소스·테스트를 main 에 선별 체크아웃 후 tag v2.0.2 + 공개 미러 + 마켓 발행.
+
+Rule B 예외 명시: 2026-08-28 이미 v2.0.0/v2.0.1 배포. 오늘 세 번째 배포는 사용자 명시 결정
+("지금 2.0.2로 패치올려", 2026-08-28)에 따른 것. hotfix 아님(UX 개선) — 사용자 권한으로
+Rule B advisory 를 우회한 배포임을 정직하게 기록.
+
+포함하지 않음 (의도적 축소):
+- 신규 기능/코드 변경 없음 — 페르소나 기능은 이미 완료·리뷰됨. 본 DoD 는 버전 승격 + 배포만.
+- 설계 문서(`docs/specs`·`docs/plans`)는 main 제외 대상 — 선별 체크아웃 세트에서 제외.
+
+## 변경 파일
+
+- `plugins/rein-core/.claude-plugin/plugin.json` (버전 2.0.1→2.0.2)
+- `scripts/rein.sh` (VERSION 2.0.1→2.0.2)
+- `CHANGELOG.md` (v2.0.2 항목 추가)
+- `README.md` + `README.ko.md` (최신 릴리스 요약 v2.0.1→v2.0.2 로 갱신, v2.0.1 을 이전으로 내림)
+- (main 선별 체크아웃 대상, 운영 기록 4 — branch-strategy trail 포함 규정) `trail/index.md`,
+  `trail/dod/dod-2026-08-28-v2-0-2-persona-release.md` (본 문서),
+  `trail/dod/dod-2026-08-28-persona-selection-ui.md`,
+  `trail/inbox/2026-08-28-persona-display-name-ui.md`
+- (main 선별 체크아웃 대상, dev 기존 커밋) 페르소나 소스 7 + 테스트 6:
+  `plugins/rein-core/rules/persona/{boss-ace,jennie,choi-haengbae}.md`,
+  `plugins/rein-core/rules/short/persona-summary.md`,
+  `plugins/rein-core/scripts/rein-policy-loader.py`, `scripts/rein-policy-loader.py`,
+  `plugins/rein-core/skills/persona/SKILL.md`,
+  `tests/scripts/{test-persona-lint,test-persona-preset-greeting,test-policy-loader-turn-brief}.sh`,
+  `tests/hooks/{test-session-start-persona-inject,test-session-start-byte-budget}.sh`,
+  `tests/skills/test-persona-skill.sh`
+
+## 검증 기준
+
+- [ ] 두 버전 표면이 2.0.2 로 일치 (parity — plugin.json + rein.sh).
+- [ ] 페르소나 테스트 스위트 전량 GREEN (`tests/{scripts,hooks,skills}/run-all.sh` 관련분).
+- [ ] main 트리 preflight 시뮬레이션 통과 (dev-green ≠ main-green 방지 — 태그 직전 main worktree 배터리).
+- [ ] main 선별 체크아웃 후 `git status --short` 에 예상 외 파일 0.
+- [ ] tag v2.0.2 생성 + 공개 미러 strip 검증(`docs/specs`·`docs/plans`·`trail`·`.rein`·`AGENTS.md` 미노출) + 마켓 발행 success.
+
+## 라우팅 추천
+
+approved_by_user: true
+
+- 릴리스 배포 (신규 설계·구현 없음, 버전 bump + 선별 머지). 버전 bump 소스 편집분에
+  `rein:codex-review`(VER-1 게이트) + `rein:security-reviewer`(버전 문자열 변경이라 표면 최소).
+
+---
+## dod-2026-08-28-v2-test-policy-decoupling.md (mtime: 2026-09-01, archived: 2026-09-02)
+# DoD — v2 훅 테스트 dogfood 정책 커플링 해소 (release preflight blocker fix)
+
+- date: 2026-08-28 착수
+- plan ref: 없음 (버그 수정 — 설계 사이클 불요)
+- approved_by_user: true (2026-08-28 "2번: 테스트 커플링 수정" 선택)
+
+## 배경
+
+v2.0.0 배포 preflight(main 트리 테스트 시뮬)에서 훅 테스트 7묶음이 실패. 원인: 이 테스트들이 `$REAL_PROJECT_DIR/.rein/policy/security-axis` · `.rein/policy/task-axis` 를 `cp -R` 로 복사해 v2 위임을 태우는데, `.rein/policy/` 는 dev 는 커밋하지만 branch-strategy 가 main 에서 제외한다. → 깨끗한 main 트리(=publish preflight 의 `tests.yml` workflow_call 실행 환경)에는 소스가 없어 cp 실패 → 테스트 실패 → 발행 차단.
+
+dev CI 는 초록(dev 에 파일 존재). `tests.yml` 은 main push 에선 안 돌지만 `publish-plugin.yml` 이 태그 push 시 `preflight-tests: uses ./.github/workflows/tests.yml` 로 main 트리 테스트를 돌린다 — 여기서 실패.
+
+## 범위
+
+테스트가 저장소의 dogfood 런타임(`.rein/policy/`)에 의존하지 않고, **커밋되어 main 에 실리는 픽스처**로 자립하게 만든다. 축 정책 내용(security-axis: git.commit → security_review 요구 / task-axis: Edit·Write·MultiEdit → active_task 요구)은 dogfood 원본과 동일하게 보존.
+
+1. `tests/fixtures/policy/security-axis/{commit-security.yaml,_version.yaml}` + `tests/fixtures/policy/task-axis/{edit-task,write-task,multiedit-task,_version}.yaml` 커밋 픽스처 신설 (현 `.rein/policy/` 버전과 내용 일치).
+2. 영향 7개 테스트의 provisioning 헬퍼를 `$REAL_PROJECT_DIR/.rein/policy/...` → 픽스처 경로 복사로 전환.
+
+## 변경 파일
+
+- `tests/fixtures/policy/security-axis/commit-security.yaml` (신규)
+- `tests/fixtures/policy/security-axis/_version.yaml` (신규)
+- `tests/fixtures/policy/task-axis/edit-task.yaml` (신규)
+- `tests/fixtures/policy/task-axis/write-task.yaml` (신규)
+- `tests/fixtures/policy/task-axis/multiedit-task.yaml` (신규)
+- `tests/fixtures/policy/task-axis/_version.yaml` (신규)
+- `tests/hooks/test-pre-edit-dispatcher.sh`
+- `tests/hooks/test-pre-edit-task-gate.sh`
+- `tests/hooks/test-security-tier-gate.sh`
+- `tests/hooks/test-active-task-authority-switch.sh`
+- `tests/hooks/test-security-review-authority-switch.sh`
+- `tests/hooks/test-code-review-authority-switch.sh`
+- `tests/hooks/test-pre-bash-commit-review-gate.sh`
+
+## 검증 기준
+
+- [ ] 7개 테스트가 dev 라이브 저장소에서 여전히 초록 (회귀 없음)
+- [ ] 7개 테스트가 `.rein/policy/` 가 없는 깨끗한 트리(main worktree)에서도 초록 (커플링 해소 실증)
+- [ ] 픽스처 정책 내용이 현 dogfood `.rein/policy/` 축 정책과 동일 (드리프트 없음)
+- [ ] 훅 배터리 전체(`tests/hooks/run-all.sh`)가 main 트리에서 초록
+
+## 라우팅 추천
+
+- 버그 수정 — `rein:feature-builder-fix` (reproduction: 깨끗한 트리에서 실패 재현 → 픽스처 자립으로 green). 구현 후 `rein:codex-review` + `rein:security-reviewer`(테스트가 보안 축 위임을 태우므로 보안 표면 확인).
+
+---
+
+approved_by_user: true
+
+---
+## dod-2026-09-02-security-axis-bundled-policy.md (mtime: 2026-09-02, archived: 2026-09-03)
+# DoD — 배포본에 security-axis 축 정책 동봉 + 3곳 2단 해소 + 전환 축 번들 계약 (보안 검토 축 무음 소멸 수리)
+
+- date: 2026-09-02 착수 → 2026-09-02 코드 커밋 완료 (dev `54b1377`, 19파일). 배포는 별도 배포 DoD.
+- plan ref: 없음 (버그 수정 — v2.0.1 task-axis 수리(`dc1b421`)와 동형 패턴 적용, 설계 사이클 불요)
+- 근거 리포트: `docs/reports/[issues]_2026-09-02.md` (사용자 저장소 실측)
+- approved_by_user: true (2026-09-02 "승인, 바로 시작 (권장)" 선택 — doctor 축별 진단 포함 → 같은 날 리뷰 6회차 후 사용자 재결정으로 doctor 제외)
+
+## 배경
+
+`security_review` 축은 배포 기본값으로 v2 전환돼 있으나(`rein/engine/authority.py` `DEFAULT_SWITCHED_CAPABILITIES`), 그 축이 요구하는 커밋 정책(`commit-security.yaml`)이 **이 저장소의 git 추적 override(`.rein/policy/security-axis/`)로만 존재**하고 배포본 `plugins/rein-core/policies/` 에는 없다. 그 결과 오버라이드 없는 모든 사용자 프로젝트에서:
+
+1. 기록 경로(`scripts/rein-mark-security-reviewed.sh:235` → `bin/rein issue-evidence security_review`)는 존재하지 않는 폴더를 git 조회 cwd 로 넘겨 `facts.py:256` 이 OSError 를 "git 조회 실패"로 흡수 → **fail-closed 기록 실패**, 문구는 git 을 지목해 오도.
+2. 커밋 게이트(`hooks/pre-bash-commit-review-gate.sh:305`)는 같은 부재를 "정당한 opt-out"으로 읽어 **위임 없이 exit 0**.
+3. 위임 헬퍼(`hooks/lib/security-review-gate.sh:266`)도 프로젝트 경로 고정.
+
+즉 성실한 쪽만 막히고 건너뛰는 쪽은 통과한다. v2.0.0 이후 사용자 저장소의 보안 검토 기록은 0건. 08-28 task-axis 사고와 **동일 클래스**(배포 기본 전환 축의 정책이 dogfood override 로만 존재)이며, 그때의 교훈("축 기본 켤 때 정책이 배포 경로에 실제 있는지 + override 없는 e2e")이 형제 축에 적용되지 않았다.
+
+## 범위
+
+배포 기본으로 켜진 `security_review` 축이 **오버라이드 없는 프로젝트에서도 정상 위임·기록**되도록 축 정책을 배포본에 동봉하고, 정책 위치를 참조하는 3곳이 **단일 해소 로직**으로 프로젝트 오버라이드 → 배포 번들 순으로 해소하게 한다. "프로젝트 폴더 없음 = 통과" 분기는 제거하고, "프로젝트 폴더는 있는데 파일 없음 = 손상, 차단"은 유지, "번들도 없음 = 설치 손상, 차단 + 재설치 안내"로 통일한다. 축 비활성(opt-out)은 기존 문서화 경로(`.rein/policy/authority.yaml` 로 capability 미전환)만 인정한다.
+
+추가로 이 사고 클래스를 구조적으로 봉합한다: **배포 기본 전환 축 전부**(code_review / security_review / active_task)에 대해 "프로젝트 override 없이 번들만으로 그 축을 요구하는 정책이 해소된다"는 계약 테스트를 둔다. `rein doctor` 축별 진단은 이 사이클에서 제외한다(사용자 결정 2026-09-02: 처음엔 포함했으나 codex 리뷰 6회 중 5회가 doctor 의 계약 정밀도(도구별 해소·훅 토글·환경변수 디렉토리·버전 파일·의미 검사)로 소모돼, 리뷰로 설계하는 대신 별도 사이클에서 spec 부터 작성하기로 재결정). 구현·테스트는 되돌렸고 지적 사항은 작업 기록에 설계 입력으로 남긴다.
+
+번들 정책은 기본 커밋 정책(`policies/default/commit.yaml`)과 동일하게 `task.exists: "true"` 조건을 가진다 — v1 보안 게이트의 활성 작업 선행조건과 같은 의미이며, 무조건 요구로 두면 활성 작업 없는 프로젝트가 기록 스크립트(`--cycle <dod-slug>` 필수)로 풀 수 없는 차단에 갇힌다(수정 전 실측: 활성 작업 없으면 코드 리뷰 요구도 미매칭으로 통과). 번들·테스트 픽스처·이 저장소 오버라이드 3곳을 동일 4필드로 정렬한다.
+
+`facts.py` 의 git 조회 3상태 헬퍼는 **cwd 자체가 없는 경우**를 git 조회 오류와 분리해 "정책 디렉토리가 존재하지 않음: <경로>"로 fail-closed 한다(git 을 지목하지 않음).
+
+포함하지 않음 (의도적 축소):
+- bootstrap 이 프로젝트에 security-axis 폴더를 복사·프로비저닝하는 것 — task-axis 와 동일하게 번들 폴백으로 대체(프로젝트 복제본은 드리프트 원천).
+- `policies/default/` 로의 security_review 요구 통합(종국 형태, 별도 후속).
+- dogfood override `.rein/policy/security-axis/` 제거(유지).
+- 면제 로직(RT-1 light-tier · 보안-surface 면제) 변경 — 위임 앞 셸 판정 그대로.
+- 릴리스 버전/CHANGELOG — 별도 배포 DoD 에서(등급 사용자 결정, 권고 patch).
+- 온보딩 오진(09-01) · 리뷰 자기증폭 봉합 — 다음 사이클.
+
+## 변경 파일
+
+- `plugins/rein-core/policies/security-axis/_version.yaml` (신규 — 번들 정책 버전 메타, 헤더는 번들용 설명)
+- `plugins/rein-core/policies/security-axis/commit-security.yaml` (신규 — dogfood override 와 동일 4필드: `trigger: tool.pre` / `when: command.type: git.commit` / `require: [security_review]` / `failure_mode: closed`)
+- `plugins/rein-core/hooks/lib/security-axis-policy-resolve.sh` (신규 — 의존성 없는 해소 함수 1개: 프로젝트 오버라이드 → 번들, PROJECT / PROJECT_DAMAGED / BUNDLE / NONE)
+- `plugins/rein-core/hooks/lib/security-review-gate.sh` (위 해소 함수 사용 — PROJECT/BUNDLE 만 위임, 나머지는 FAIL 유지)
+- `.rein/policy/security-axis/commit-security.yaml` (이 저장소 오버라이드 — `task.exists` 조건 정렬만)
+- `plugins/rein-core/hooks/pre-bash-commit-review-gate.sh` (`:304-320` 사전 점검을 2단 해소 결과 기반으로 재작성 — 폴더 없음→번들, 프로젝트 손상→exit 2, 번들 부재→exit 2 + 재설치 안내; FAIL 문구도 task-gate 와 같은 "정책은 플러그인에 동봉, 재설치" 형태)
+- `plugins/rein-core/scripts/rein-mark-security-reviewed.sh` (`:235` 고정 경로 → 같은 해소 로직 사용)
+- `plugins/rein-core/rein/platform/git/facts.py` (`:256` 근방 — cwd 부재를 별도 상태/문구로 분리)
+- `plugins/rein-core/tests/contract/test_bundled_switched_axes_policy.py` (신규 — DEFAULT_SWITCHED_CAPABILITIES 전 축 번들 해소 계약; 기존 `test_bundled_task_axis_policy.py` 는 유지)
+- `tests/hooks/test-security-axis-policy-resolve.sh` (신규 — 해소 함수 단위 계약: 번들·없음·오버라이드·파일 없음·매달린 링크·일반 파일·정상 링크·상위 구성요소 손상, `tests/hooks/run-all.sh` 등록)
+- `plugins/rein-core/tests/unit/test_security_digest_scope.py` (facts.py 부재·매달린 링크·일반 파일 구분 테스트)
+- `tests/hooks/test-pre-bash-commit-review-gate.sh` (재현/회귀: 오버라이드 없음+증거 없음 → DENY, 오버라이드 우선, 프로젝트 손상 exit 2, 번들 부재 exit 2)
+- `tests/hooks/test-security-review-authority-switch.sh`, `tests/hooks/test-code-review-authority-switch.sh`, `tests/integration/test-governance-e2e.sh` (기존 스위트가 "폴더 없음 = opt-out" 을 전제로 샌드박스를 꾸미던 부분을 번들 폴백 계약에 맞춰 갱신)
+- `tests/scripts/test-mark-security-reviewed.sh` (오버라이드 없이 subject 출력 rc 0)
+- `tests/fixtures/policy/security-axis/commit-security.yaml` (번들과 동일 내용 유지 — 드리프트 가드 대상에 포함)
+
+## 검증 기준
+
+- [x] (red→green) 오버라이드 없는 프로젝트에서 보안 검토 증거 없이 `git commit` → 수정 전 exit 0(통과), 수정 후 v2 DENY.
+- [x] (red→green) 오버라이드 없는 프로젝트에서 `rein-mark-security-reviewed.sh --print-subject` → 수정 전 rc 1, 수정 후 rc 0 + 비어 있지 않은 subject.
+- [x] e2e(오버라이드 없음): bootstrap → 보안 검토 기록 → `git commit` ALLOW. 증거 원장에 `security_review` 항목 생성.
+- [x] 프로젝트 오버라이드가 있으면 여전히 그쪽이 우선(기존 스위트 전량 초록).
+- [x] 프로젝트 폴더는 있고 `commit-security.yaml` 없음 → 여전히 exit 2. 번들까지 없음(임시 플러그인 트리에서 폴더 제거) → exit 2 + 재설치 안내 문구.
+- [x] 문서-only(light-tier 면제) 커밋은 수정 전후 동일하게 통과 — 면제 회귀 없음.
+- [x] `facts.py`: 존재하지 않는 정책 폴더를 지정하면 오류 문구가 폴더 부재(또는 매달린 링크)를 지목하고, git 조회 실패("git query failed"/"unable to confirm")를 원인으로 지목하지 않으며 git 이 호출되지 않았음을 명시. 기존 3상태(FOUND/ABSENT/ERROR) 테스트 초록.
+- [x] 전환 3축 번들 계약 테스트 초록 — 임의 축 하나의 번들 폴더를 제거하면 그 축에 대해 실패(테스트가 실제로 잡는지 역변이 확인).
+- [x] **override 없는 배포 시뮬레이션**(v2.0.1 교훈): 임시 프로젝트 + `plugins/rein-core` 를 플러그인 루트로, dogfood `.rein/policy/security-axis` 없이 커밋 게이트·기록 2종 실측.
+- [x] 훅 배터리(`tests/hooks/run-all.sh`) + plugin 테스트(unit/contract/cli) 전량 초록. `policies/` 하위 폴더 추가가 로더 격리 계약을 깨지 않음.
+
+## 라우팅 추천
+
+agent: rein:feature-builder-fix
+skills:
+  - rein:codex-review
+  - superpowers:test-driven-development
+mcps: []
+security_tier: standard
+complexity: medium
+model_hint: sonnet
+effort_hint: medium
+rationale:
+  - 버그 수정(배포 결함 — 성실한 쪽만 막히고 건너뛰는 쪽은 통과) → feature-builder-fix, reproduction-first (오버라이드 없는 프로젝트에서 "기록 실패 + 커밋 통과" 재현 테스트 먼저 → 번들+2단 해소로 green)
+  - 워커는 sonnet. 파일이 겹치지 않는 3갈래 병렬: (a) 번들+셸 3곳+훅/스크립트 테스트 / (b) facts.py 부재 구분+단위 테스트 / (c) 전환 3축 계약 테스트 (doctor 축별 진단은 리뷰 6회차 후 사용자 재결정으로 제외·되돌림)
+  - 커밋 게이트 판정 경로·정책 해소 순서 변경이라 standard 등급 — 구현 후 rein:codex-review + rein:security-reviewer 필수 (fail-closed 방향·우회 표면 확인)
+  - 파일 수는 12 안팎이지만 v2.0.1 task-axis 수리(dc1b421)의 기존 패턴 복제라 아키텍처 변경 아님 → medium
+approved_by_user: true
+

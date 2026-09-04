@@ -33,8 +33,8 @@
 # 구성한다. v1 폴백은 이제 이 축에 존재하지 않는다 — 미전환/확인실패/위임
 # FAIL 을 그 훅이 fail-closed 방향으로 직접 판정한다. RT-1 light-tier
 # 면제와 보안-surface 면제가 담당하던 재료(strict digest 범위의
-# subject-empty=충족, scripts/rein.sh·plugin.json 버전-only 특례)는 이제
-# v2 네이티브 판정이 대체한다 — 근거: docs/specs/2026-08-07-rein-v2-
+# subject-empty=충족 등, §3.6 security_review "digest scope 프로필" 절)는
+# 이제 v2 네이티브 판정이 대체한다 — 근거: docs/specs/2026-08-07-rein-v2-
 # governance-orchestration.md §3.6 security_review 절 + DoD 선행 결정 3.
 #
 # 미전환("NOT_SWITCHED")과 확인 자체 실패("ERROR")를 구분하기 위해
@@ -74,13 +74,34 @@
 # would have v2 silently judge "no requirement" and ALLOW every commit,
 # which is the opposite of what this axis is for. So this axis's delegate
 # additionally injects REIN_POLICY_DIR pointing at a small, axis-only policy
-# folder (`.rein/policy/security-axis/` — see that folder's own
-# `_version.yaml` header for the full "why a new folder, why not reuse an
-# existing one" reasoning) that declares exactly one requirement:
-# security_review on git.commit. That folder is scoped to $PROJECT_DIR (the
-# project the hook is running against), NOT this plugin's own package root —
-# same override-lives-with-the-project convention `.rein/policy/
-# authority.yaml` already uses.
+# folder that declares exactly one requirement: security_review on
+# git.commit (conditioned on task.exists, same shape as policies/default/
+# commit.yaml's code_review requirement — see that folder's own
+# commit-security.yaml for the full "why a new folder" + task.exists
+# reasoning).
+#
+# --- Policy location resolution (project override → bundled default) ---
+#
+# That folder is resolved in two tiers by hooks/lib/security-axis-policy-
+# resolve.sh (rein_security_axis_policy_resolve(), sourced below) — the
+# SAME shared resolver used by hooks/pre-bash-commit-review-gate.sh's
+# pre-check and scripts/rein-mark-security-reviewed.sh's evidence issuance,
+# so the three sites can never disagree about which directory backs this
+# axis:
+#   ① `<project>/.rein/policy/security-axis/` — project override, wins
+#      when its commit-security.yaml is present.
+#   ② `<plugin-root>/policies/security-axis/` — the distribution-shipped
+#      default (mirrors hooks/lib/active-task-gate.sh's rein_active_task_
+#      delegate() two-tier resolution for the task-axis policy — same
+#      shape, same rationale: security_review is switched on by deployed
+#      default, so a project that never created the override must still
+#      have a real policy to delegate against).
+# A project folder that exists but is damaged (missing commit-security.yaml)
+# NEVER falls through to ② — see rein_security_axis_policy_resolve()'s own
+# contract for why. This function only proceeds to the delegation call when
+# the resolver reports PROJECT or BUNDLE; PROJECT_DAMAGED and NONE both
+# leave the axis's result at its FAIL default (see rein_security_review_
+# delegate()'s own comment).
 #
 # Usage:
 #   . "$SCRIPT_DIR/lib/security-review-gate.sh"
@@ -115,9 +136,22 @@ __REIN_SECURITY_REVIEW_GATE_LOADED=1
 # 전제하지 않는다):
 #   hooks/lib/security-review-gate.sh → (..) hooks → (..) <plugin root>
 # <plugin root> 아래에 rein/engine/authority.py 가 있으면 그 패키지를
-# 그대로 import 한다.
+# 그대로 import 한다. 같은 <plugin root> 는 이 파일이 아래에서 소싱하는
+# 정책 해소 lib 이 배포 번들 정책(②)을 찾는 기준점이기도 하다
+# (<plugin root>/policies/security-axis/).
 _REIN_SRG_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _REIN_SRG_PKG_PARENT="$(cd "$_REIN_SRG_LIB_DIR/../.." 2>/dev/null && pwd)" || _REIN_SRG_PKG_PARENT=""
+
+# 정책 해소 lib 하드 소싱 (fail-closed) — 이 파일을 소싱하는 훅이 이미
+# hard-sourcing 관례(`if ! . lib/security-review-gate.sh; then exit 2; fi`)
+# 를 따르므로, 여기서 sourcing 자체가 실패하면 `return 1` 로 그 상위
+# 실패를 그대로 전파한다(별도 fallback 함수를 여기서 새로 정의하지
+# 않는다 — 정책 해소가 불가능한 상태에서 이 파일 전체가 조용히 계속
+# 로드되는 것을 막는다).
+# shellcheck source=./security-axis-policy-resolve.sh
+if ! . "$_REIN_SRG_LIB_DIR/security-axis-policy-resolve.sh" 2>/dev/null; then
+  return 1 2>/dev/null || exit 1
+fi
 
 # rein_security_review_authority_switched
 #   v2 authority(rein.engine.authority.is_switched)에 security_review 축이
@@ -204,12 +238,25 @@ REIN_SRG_DELEGATE_TIMEOUT_S=30
 #   hook_event_name/tool_name/cwd 등을 다시 필요로 한다).
 #
 #   code_review 축과의 유일한 차이 — REIN_POLICY_DIR 추가 주입: 이
-#   축은 REIN_PROJECT_ROOT 뿐 아니라 REIN_POLICY_DIR 도
-#   `$PROJECT_DIR/.rein/policy/security-axis` 로 명시 주입한다(이 파일
+#   축은 REIN_PROJECT_ROOT 뿐 아니라 REIN_POLICY_DIR 도 주입한다(이 파일
 #   상단 "왜 이 축은 REIN_POLICY_DIR 을 주입하는가" 절 참조) — 그래야
 #   v2 가 이 커밋 이벤트에서 security_review 를 실제로 요구하는 정책을
 #   본다. code_review 축은 이 주입을 하지 않는다(번들 기본 정책이 이미
 #   code_review 를 요구하므로 불필요).
+#
+#   그 정책 디렉토리는 rein_security_axis_policy_resolve() (위에서 소싱한
+#   hooks/lib/security-axis-policy-resolve.sh) 로 project override → 배포
+#   번들 순서로 해소한다 — 파일 상단 "Policy location resolution" 절 참조.
+#   해소 결과가 PROJECT_DAMAGED 또는 NONE 이면 위임 자체를 시도하지 않고
+#   result 를 FAIL 초기값 그대로 둔다 — 정책 폴더는 있는데 파일만 없는
+#   손상 상태를 "policy 0개 = 평가 기본 ALLOW"(다른 축·다른 트리거를 위해
+#   의도된 설계, kernel/policy.py:150-158 docstring, spec §3.4 — 여기서
+#   건드리면 안 된다)로 새어나가게 두지 않기 위해서다: 정책 파일 하나가
+#   통째로 없으면 매칭되는 policy 가 0개가 되어 이 커밋 이벤트가 `{}` 로
+#   되돌아오고, 호출자는 이를 ALLOW 로 해석해 그대로 통과시킨다 — 위임
+#   분류상으로는 정상 ALLOW 이지만 실제로는 "이 축을 판단할 정책이
+#   아예 없었다"는 뜻이라, 보안 리뷰 요구 전체가 로그도 에러도 없이
+#   사라진다. 그래서 위임을 시도하기 전에 해소 결과 자체를 직접 확인한다.
 #
 #   결과를 두 전역에 담아 반환한다(code_review 축과 동일 이유 — 함수
 #   반환값 하나로는 DENY 의 JSON 본문까지 실어 나를 수 없다):
@@ -225,23 +272,25 @@ REIN_SRG_DELEGATE_TIMEOUT_S=30
 #     FAIL  — 그 밖의 모든 경우를 균일하게 묶는다(엔진 스크립트 부재,
 #       파이썬 인터프리터 실행 실패, timeout(124)/exec 실패 등 0 이
 #       아닌 종료 코드, 빈 출력, JSON 파싱 불가, 위 두 계약 어느 쪽에도
-#       맞지 않는 출력 형태). 호출자(소비 훅 pre-bash-commit-review-
-#       gate.sh)의 유일한 의무는 FAIL 이면 fail-closed 로 직접 차단하는
-#       것 — Phase 7 웨이브 3 ③-c 이후 이 축에는 v1 폴백 판정이 더 이상
-#       존재하지 않는다(이 축이 조용히 사라지는 대신 항상 거부 방향으로
-#       귀결된다).
+#       맞지 않는 출력 형태, 그리고 위에서 설명한 "정책 위치가 PROJECT_
+#       DAMAGED/NONE 으로 해소돼 위임 자체를 시도하지 않음"도 이 FAIL 로
+#       흡수된다). 호출자(소비 훅 pre-bash-commit-review-gate.sh)의
+#       유일한 의무는 FAIL 이면 fail-closed 로 직접 차단하는 것 — Phase 7
+#       웨이브 3 ③-c 이후 이 축에는 v1 폴백 판정이 더 이상 존재하지
+#       않는다(이 축이 조용히 사라지는 대신 항상 거부 방향으로 귀결된다).
 #
-#   NOTE — 정책 폴더 자체가 손상/부재이면 `bin/rein hook` 내부에서
-#   PolicyLoadError 가 발생하고, `rein/cli/__init__.py::_run_hook()` 의
-#   광범위 예외 처리기가 이를 **rc 0 + native BLOCK(DENY 형태) JSON** 으로
-#   변환한다(실측 확인, 2026-08-18) — 즉 "정책 폴더 손상"은 이 함수
-#   관점에서 FAIL 이 아니라 DENY 로 분류된다(엔진 스크립트 자체가
-#   죽거나 응답하지 못하는 경우만 FAIL). 어느 쪽이든 이 축이 조용히
-#   통과되는 경로는 없다 — DENY 로 분류되면 그 JSON 이 그대로 relay
-#   되어 커밋이 차단되고, FAIL 로 분류되면 소비 훅이 fail-closed 로 직접
-#   차단한다. 둘 다 fail-closed 방향이며, 이 함수는 code_review 축과
-#   동일하게 두 갈래를 구분 없이 기계적으로 분류한다(축마다 다른
-#   특별 취급을 추가하지 않는다 — 분류 로직 자체를 단일 소스로 유지).
+#   NOTE — 정책 디렉토리 자체가 로드 시점에 손상되면(예: 파일이 이 함수의
+#   존재 확인과 `bin/rein hook` 실제 호출 사이에 사라지는 TOCTOU) `bin/rein
+#   hook` 내부에서 PolicyLoadError 가 발생하고, `rein/cli/__init__.py::
+#   _run_hook()` 의 광범위 예외 처리기가 이를 **rc 0 + native BLOCK(DENY
+#   형태) JSON** 으로 변환한다(실측 확인) — 즉 그 경우는 이 함수 관점에서
+#   FAIL 이 아니라 DENY 로 분류된다(엔진 스크립트 자체가 죽거나 응답하지
+#   못하는 경우만 FAIL). 어느 쪽이든 이 축이 조용히 통과되는 경로는 없다
+#   — DENY 로 분류되면 그 JSON 이 그대로 relay 되어 커밋이 차단되고, FAIL
+#   로 분류되면 소비 훅이 fail-closed 로 직접 차단한다. 둘 다 fail-closed
+#   방향이며, 이 함수는 code_review 축과 동일하게 두 갈래를 구분 없이
+#   기계적으로 분류한다(축마다 다른 특별 취급을 추가하지 않는다 — 분류
+#   로직 자체를 단일 소스로 유지).
 rein_security_review_delegate() {
   rein_security_review_delegate_result="FAIL"
   rein_security_review_delegate_json=""
@@ -259,39 +308,20 @@ rein_security_review_delegate() {
     return 0
   fi
 
-  # REIN_PROJECT_ROOT + REIN_POLICY_DIR 를 명시 주입한다. REIN_PROJECT_ROOT
-  # 는 code_review 축과 동일 이유(v1 이 이미 확정한 PROJECT_DIR 을 그대로
-  # 넘겨 v1/v2 가 같은 프로젝트 루트를 보장받는다). REIN_POLICY_DIR 은 이
-  # 축 고유(위 함수 docstring 참조) — 축 전용 정책 폴더를 가리킨다.
-  local _srg_policy_dir="$PROJECT_DIR/.rein/policy/security-axis"
-
-  # HOLE FIX (보안 검토, 2026-08-18) — bin/rein hook 을 부르기 전에
-  # commit-security.yaml 자기 자신의 존재를 직접 확인한다. 아래 두
-  # 실패 모드는 겉보기에 비슷하지만 결과가 정반대라 이 검사가 필요하다:
-  #   - 축 폴더 전체가 없으면: kernel/policy.py의 load_policies() 가
-  #     os.listdir() 에서 OSError → PolicyLoadError 로 죽고, bin/rein
-  #     hook 은 이를 캐치해 native BLOCK(DENY) JSON 으로 번역한다
-  #     (시나리오 (i) 와 동일 경로) — fail-closed, 의도대로 차단된다.
-  #   - 폴더는 있는데 commit-security.yaml 만 없으면(비었거나
-  #     _version.yaml 만 남으면): load_policies() 는 예약 파일
-  #     _version.yaml 을 스킵하므로 매칭되는 policy 가 정확히 0개가
-  #     된다 — 엔진의 "policy 0개 = 평가 기본 ALLOW"(다른 축·다른
-  #     트리거를 위해 의도된 설계, kernel/policy.py:150-158 docstring,
-  #     spec §3.4 — 여기서 건드리면 안 된다)에 걸려 이 커밋 이벤트가
-  #     `{}` 로 되돌아온다. 호출자는 이를 ALLOW 로 해석해 그대로
-  #     통과시킨다 — 위임 분류상으로는 정상 ALLOW 이지만 실제로는
-  #     "이 축을 판단할 정책이 아예 없었다"는 뜻이라, 보안 리뷰 요구
-  #     전체가 로그도 에러도 없이 사라진다(2026-08-18 보안 검토,
-  #     샌드박스 재현으로 확정 — 시나리오 (j)가 이 재현을 고정한다).
-  # 그래서 위임을 시도하기 전에 이 정책 파일 하나만 직접 확인한다.
-  # 없으면 위임 자체를 건너뛰고 result 를 FAIL 초기값 그대로 둔다 —
-  # FAIL 은 호출자(소비 훅 pre-bash-commit-review-gate.sh)를 fail-closed
-  # 로 직접 차단시킨다(Phase 7 웨이브 3 ③-c 이후 이 축에는 v1 폴백
-  # 판정이 더 이상 존재하지 않는다 — 이 축이 조용히 사라지는 대신 항상
-  # 거부 방향으로 귀결된다. 엔진 스크립트 손상 시나리오 (f)와 동일한
-  # 낙하 경로).
-  local _srg_policy_file="$_srg_policy_dir/commit-security.yaml"
-  [ -f "$_srg_policy_file" ] || return 0
+  # 정책 위치 해소 — project override 우선, 없으면 배포 번들
+  # (hooks/lib/security-axis-policy-resolve.sh 단일 소스, 이 파일 상단
+  # "Policy location resolution" 절 참조). PROJECT_DAMAGED(폴더는 있는데
+  # commit-security.yaml 이 없음)는 절대 번들로 넘어가지 않는다 — 손상된
+  # 프로젝트 설정을 그럴듯한 배포 기본값으로 가려버리면 사용자가 자신의
+  # 설정이 깨졌다는 사실 자체를 알 길이 없어진다. NONE 과 함께 위임
+  # 자체를 건너뛰고 result 를 FAIL 초기값 그대로 둔다 — 호출자(소비 훅
+  # pre-bash-commit-review-gate.sh)를 fail-closed 로 이끈다.
+  rein_security_axis_policy_resolve "$PROJECT_DIR" "$_REIN_SRG_PKG_PARENT"
+  case "$rein_security_axis_policy_kind" in
+    PROJECT|BUNDLE) ;;
+    *) return 0 ;;
+  esac
+  local _srg_policy_dir="$rein_security_axis_policy_dir"
 
   local _srg_out _srg_rc
   if command -v timeout >/dev/null 2>&1; then

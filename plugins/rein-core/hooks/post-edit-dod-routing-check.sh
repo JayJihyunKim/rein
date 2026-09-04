@@ -36,7 +36,11 @@ if [ "${REIN_HOOK_INPUT_CACHE:-0}" != "1" ]; then
   rc=$?
   if [ "$rc" -ne 0 ]; then
     mkdir -p "$DOD_DIR" 2>/dev/null
-    : > "$DOD_DIR/.routing-missing-unknown-python-runtime" 2>/dev/null
+    # printf, not `:` — a redirection error on a special builtin exits a
+    # POSIX-mode shell (bash 5 + POSIXLY_CORRECT=1) instead of failing the command.
+    # `2>/dev/null` BEFORE the `>`: redirections apply left to right, so a
+    # failing open of the target is reported to the already-silenced stderr.
+    printf '' 2>/dev/null > "$DOD_DIR/.routing-missing-unknown-python-runtime"
     exit 0
   fi
   # resolver 성공 경로에 도달하면 이전 write 시 남긴 python-runtime fallback marker 를 자동 해소.

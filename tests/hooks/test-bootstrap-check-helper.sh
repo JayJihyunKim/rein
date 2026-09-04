@@ -22,6 +22,36 @@
 #   M      — partial CRASH: marker+trail/ no index → exit 10 (PARTIAL guidance)
 #   N      — fresh install (nothing)              → exit 10 (generic guidance)
 #   O      — atomic marker-last write produces exit 0 + no .tmp leftover
+#   P      — _bc_resolve_project_dir: override arg → resolved dir + source=override
+#   Q      — _bc_resolve_project_dir: stdin cwd inside a git repo walks up to
+#            the root → resolved root + source=git-from-stdin
+#   R      — _bc_resolve_project_dir: stdin cwd (non-git) used verbatim →
+#            resolved dir + source=stdin
+#   S      — _bc_resolve_project_dir: nonexistent stdin cwd → 11 + stderr
+#            names the unresolved path; bootstrap_check on the same path
+#            (as override) also returns 11
+#   T      — _bc_resolve_project_dir: stdin cwd whose directory name contains
+#            a literal tab byte resolves to the FULL path (source=stdin) —
+#            the tab does not truncate the emitted path
+#   U      — _bc_resolve_project_dir: stdin cwd whose directory name ENDS in
+#            a literal LF byte resolves to the FULL path with the trailing
+#            LF intact (source=stdin) — a plain `$(...)` capture would strip
+#            it and the resolution would fail (11) instead of succeeding
+#   V      — _bc_resolve_project_dir: a git stub on PATH that prints a path
+#            and exits 1 must not be accepted as the walk-up root — the
+#            resolver falls back to the stdin cwd verbatim (source=stdin),
+#            never the stub's printed output
+#   W      — _bc_resolve_project_dir: COLD PATH (no stdin envelope) — a git
+#            stub on PATH prints a decoy path and exits 1; with no
+#            stdin.cwd, the bare cold `git rev-parse` from $PWD must not
+#            accept the stub's decoy either — falls back to $PWD itself
+#            (source=pwd)
+#   X      — _bc_resolve_project_dir: BASH SUCCESS path (git-from-stdin) —
+#            a subdirectory of a real git repo whose root directory name
+#            ENDS in a literal LF byte is passed as the stdin cwd; the walk-
+#            up resolves and prints the FULL root path with its trailing LF
+#            intact (source=git-from-stdin), exactly one LF (git's own
+#            terminator stripped, the root dirname's own LF kept)
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -654,8 +684,8 @@ fixture_l() {
 # ---------------------------------------------------------------------------
 # Fixture M — partial-bootstrap CRASH SCENARIO: marker + trail/ present but
 # trail/index.md MISSING. This is the exact failure mode the v1.3.0+1 fix
-# targets (codex round 1 missed defect #3): rein-bootstrap-project.py crashed
-# (SIGINT / disk full / kill) AFTER mkdir created trail/ + .rein/ but BEFORE
+# targets: rein-bootstrap-project.py crashed (SIGINT / disk full / kill)
+# AFTER mkdir created trail/ + .rein/ but BEFORE
 # write_text_if_missing wrote trail/index.md. Pre-fix the BG-1 two-marker
 # check (trail dir + marker) reported exit 0 here → FALSE PASS, and downstream
 # session-start-load-trail.sh would crash reading the absent index. Post-fix:
@@ -763,7 +793,11 @@ fixture_o() {
   local dir
   dir="$(mktemp -d "$SCRATCH_ROOT/O-XXXXXX")"
   # Run the real bootstrap. Non-git dir → script uses project_dir in-place.
-  if ! python3 "$boot_py" --project-dir "$dir" >/dev/null 2>"$SCRATCH_ROOT/bc-err-O"; then
+  # git-required-onboarding (2026-09-02): a non-git project_dir is refused by
+  # default now, so this fixture (which only cares about atomic marker-last
+  # write ordering, not the git-required policy) needs --allow-non-git to
+  # reach a real bootstrap run.
+  if ! python3 "$boot_py" --project-dir "$dir" --allow-non-git >/dev/null 2>"$SCRATCH_ROOT/bc-err-O"; then
     record_fail "O: bootstrap run failed (stderr: $(cat "$SCRATCH_ROOT/bc-err-O"))"
     return
   fi
@@ -804,6 +838,406 @@ sys.exit(0 if os.path.getmtime(marker) >= os.path.getmtime(index) else 1)
 }
 
 # ---------------------------------------------------------------------------
+# Fixture P — _bc_resolve_project_dir: override arg wins, prints
+# "override<TAB><resolved_real>".
+# ---------------------------------------------------------------------------
+fixture_p() {
+  local dir dir_real
+  dir="$(mktemp -d "$SCRATCH_ROOT/P-XXXXXX")"
+  dir_real="$(cd "$dir" && pwd -P)"
+  local out rc
+  out=$(env -u CLAUDE_PLUGIN_ROOT bash -c '
+    # shellcheck disable=SC1090
+    source "$1"
+    _bc_resolve_project_dir "$2"
+  ' _bc-test "$HELPER" "$dir")
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    record_fail "P: expected exit 0 (override arg), got $rc"
+    return
+  fi
+  local expect
+  expect="$(printf 'override\t%s' "$dir_real")"
+  if [ "$out" != "$expect" ]; then
+    record_fail "P: expected '$expect', got '$out'"
+    return
+  fi
+  record_pass "P (_bc_resolve_project_dir override arg → resolved dir + source=override)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture Q — _bc_resolve_project_dir: stdin cwd inside a git repo walks up
+# to the root, prints "git-from-stdin<TAB><root>".
+# ---------------------------------------------------------------------------
+fixture_q() {
+  if ! command -v git >/dev/null 2>&1; then
+    record_skip "Q (_bc_resolve_project_dir stdin git walkup) — git not installed"
+    return
+  fi
+  local root root_real
+  root="$(mktemp -d "$SCRATCH_ROOT/Q-root-XXXXXX")"
+  (cd "$root" && git init -q && mkdir -p sub/dir)
+  root_real="$(cd "$root" && pwd -P)"
+  local sub="$root/sub/dir"
+  local out rc
+  out=$(printf '{"cwd":"%s"}' "$sub" | env -u CLAUDE_PLUGIN_ROOT bash -c '
+    # shellcheck disable=SC1090
+    source "$1"
+    _bc_resolve_project_dir
+  ' _bc-test "$HELPER")
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    record_fail "Q: expected exit 0 (stdin cwd git walkup), got $rc"
+    return
+  fi
+  local expect
+  expect="$(printf 'git-from-stdin\t%s' "$root_real")"
+  if [ "$out" != "$expect" ]; then
+    record_fail "Q: expected '$expect', got '$out'"
+    return
+  fi
+  record_pass "Q (_bc_resolve_project_dir stdin cwd inside git repo walks up to root)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture R — _bc_resolve_project_dir: stdin cwd (non-git) used verbatim,
+# prints "stdin<TAB><dir>".
+# ---------------------------------------------------------------------------
+fixture_r() {
+  local dir dir_real
+  dir="$(mktemp -d "$SCRATCH_ROOT/R-XXXXXX")"
+  dir_real="$(cd "$dir" && pwd -P)"
+  local out rc
+  out=$(printf '{"cwd":"%s"}' "$dir" | env -u CLAUDE_PLUGIN_ROOT \
+    GIT_CEILING_DIRECTORIES="$(dirname "$dir")" bash -c '
+    # shellcheck disable=SC1090
+    source "$1"
+    _bc_resolve_project_dir
+  ' _bc-test "$HELPER")
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    record_fail "R: expected exit 0 (stdin cwd non-git verbatim), got $rc"
+    return
+  fi
+  local expect
+  expect="$(printf 'stdin\t%s' "$dir_real")"
+  if [ "$out" != "$expect" ]; then
+    record_fail "R: expected '$expect', got '$out'"
+    return
+  fi
+  record_pass "R (_bc_resolve_project_dir stdin cwd non-git used verbatim)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture S — _bc_resolve_project_dir: nonexistent stdin cwd → exit 11,
+# stdout empty, stderr names the unresolved path. bootstrap_check invoked
+# with that SAME path as override must also return 11 (the pure resolver's
+# failure propagates unchanged through bootstrap_check's own call site).
+# ---------------------------------------------------------------------------
+fixture_s() {
+  local gone gone_real
+  gone="$SCRATCH_ROOT/S-gone-$$"
+  mkdir "$gone"
+  gone_real="$(cd "$gone" && pwd -P)"
+  rmdir "$gone"
+  local out err rc
+  out=$(printf '{"cwd":"%s"}' "$gone_real" | env -u CLAUDE_PLUGIN_ROOT bash -c '
+    # shellcheck disable=SC1090
+    source "$1"
+    _bc_resolve_project_dir
+  ' _bc-test "$HELPER" 2>"$SCRATCH_ROOT/bc-err-S")
+  rc=$?
+  err=$(cat "$SCRATCH_ROOT/bc-err-S")
+  if [ "$rc" -ne 11 ]; then
+    record_fail "S: expected exit 11 (_bc_resolve_project_dir, nonexistent stdin cwd), got $rc (stderr: $err)"
+    return
+  fi
+  if [ -n "$out" ]; then
+    record_fail "S: expected empty stdout on failure, got: $out"
+    return
+  fi
+  if ! printf '%s' "$err" | grep -qF "$gone_real"; then
+    record_fail "S: stderr diagnostic must name the unresolved path (got: $err)"
+    return
+  fi
+  if ! printf '%s' "$err" | grep -q "resolution"; then
+    record_fail "S: stderr missing 'resolution' category keyword (got: $err)"
+    return
+  fi
+  local bc_rc
+  bash "$HELPER" "$gone_real" >/dev/null 2>"$SCRATCH_ROOT/bc-err-S2"
+  bc_rc=$?
+  if [ "$bc_rc" -ne 11 ]; then
+    record_fail "S: bootstrap_check on the same nonexistent path (override) expected exit 11, got $bc_rc"
+    return
+  fi
+  record_pass "S (_bc_resolve_project_dir nonexistent stdin cwd → 11 + path in diagnostic; bootstrap_check also 11)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture T — _bc_resolve_project_dir: stdin cwd whose directory name
+# contains a literal tab byte still resolves to the FULL path (source=stdin)
+# — the emitted "source<TAB>path" shape must not be confused by a tab that
+# is part of the path itself. The envelope is built via json.dumps (a raw
+# tab embedded in a printf-built JSON string is invalid JSON and would be
+# rejected by the parser).
+# ---------------------------------------------------------------------------
+fixture_t() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    record_skip "T (_bc_resolve_project_dir tab-in-path) — python3 not installed"
+    return
+  fi
+  local tab dir dir_real
+  tab="$(printf '\t')"
+  dir="${SCRATCH_ROOT}/T-tab${tab}dir-$$"
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    record_fail "T: could not create tab-named directory fixture"
+    return
+  fi
+  dir_real="$(cd "$dir" && pwd -P)"
+  local envelope out rc
+  envelope="$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1]}))' "$dir")"
+  out=$(printf '%s' "$envelope" | env -u CLAUDE_PLUGIN_ROOT \
+    GIT_CEILING_DIRECTORIES="$(dirname "$dir")" bash -c '
+    # shellcheck disable=SC1090
+    source "$1"
+    _bc_resolve_project_dir
+  ' _bc-test "$HELPER")
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    record_fail "T: expected exit 0 (stdin cwd tab-named dir), got $rc"
+    return
+  fi
+  local source_out path_out
+  source_out="${out%%$'\t'*}"
+  path_out="${out#*$'\t'}"
+  if [ "$source_out" != "stdin" ]; then
+    record_fail "T: expected source=stdin, got source='$source_out' (full: '$out')"
+    return
+  fi
+  if [ "$path_out" != "$dir_real" ]; then
+    record_fail "T: expected full tab-containing path '$dir_real', got '$path_out'"
+    return
+  fi
+  record_pass "T (_bc_resolve_project_dir tab-containing stdin cwd resolves to full path, source=stdin)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture U — _bc_resolve_project_dir: a stdin cwd directory name ENDING in a
+# literal LF byte still resolves to the FULL path with the trailing LF
+# intact (source=stdin). A plain `$(cmd)` capture strips ALL trailing
+# newlines, which would truncate the path at exactly this byte and make the
+# resolved path fail its directory-existence check (returning 11 instead of
+# 0). The directory is built directly under an already-`pwd -P`-resolved
+# parent — never via `$(cd "$d" && pwd -P)` on the LF-suffixed leaf itself,
+# since that capture would suffer the very same bug this fixture exists to
+# catch (the leaf path IS already the physically-resolved path: parent_real
+# has no symlink components left to resolve, and the leaf is a direct child
+# of it). The test's own capture of _bc_resolve_project_dir's output also
+# uses the sentinel idiom for the same reason.
+# ---------------------------------------------------------------------------
+fixture_u() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    record_skip "U (_bc_resolve_project_dir LF-suffixed path) — python3 not installed"
+    return
+  fi
+  local parent parent_real lf dir
+  parent="$(mktemp -d "$SCRATCH_ROOT/U-XXXXXX")"
+  parent_real="$(cd "$parent" && pwd -P)"
+  lf=$'\n'
+  dir="${parent_real}/lfdir-$$${lf}"
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    record_fail "U: could not create LF-suffixed directory fixture"
+    return
+  fi
+  local envelope out rc
+  envelope="$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1]}))' "$dir")"
+  out=$(printf '%s' "$envelope" | env -u CLAUDE_PLUGIN_ROOT \
+    GIT_CEILING_DIRECTORIES="$parent_real" bash -c '
+    # shellcheck disable=SC1090
+    source "$1"
+    _bc_resolve_project_dir
+    rc=$?
+    printf x
+    exit "$rc"
+  ' _bc-test "$HELPER")
+  rc=$?
+  out="${out%x}"
+  if [ "$rc" -ne 0 ]; then
+    record_fail "U: expected exit 0 (stdin cwd LF-suffixed dir), got $rc"
+    return
+  fi
+  local source_out path_out
+  source_out="${out%%$'\t'*}"
+  path_out="${out#*$'\t'}"
+  if [ "$source_out" != "stdin" ]; then
+    record_fail "U: expected source=stdin, got source='$source_out' (full: '$out')"
+    return
+  fi
+  if [ "$path_out" != "$dir" ]; then
+    record_fail "U: expected full LF-suffixed path (trailing LF intact) '$dir', got '$path_out'"
+    return
+  fi
+  record_pass "U (_bc_resolve_project_dir LF-suffixed stdin cwd resolves to full path with trailing LF intact, source=stdin)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture V — _bc_resolve_project_dir: a git stub on PATH that prints a path
+# and exits 1 must not be accepted as a successful walk-up. The resolver
+# must capture the git invocation's own exit status, not just whether
+# something trailed the sentinel byte, and fall back to the stdin cwd
+# verbatim (source=stdin) — never the stub's printed decoy path.
+# ---------------------------------------------------------------------------
+fixture_v() {
+  local stub_dir dir dir_real
+  stub_dir="$(mktemp -d "$SCRATCH_ROOT/V-stub-XXXXXX")"
+  cat > "$stub_dir/git" <<'WRAP'
+#!/usr/bin/env bash
+echo "/nonexistent/decoy-root"
+exit 1
+WRAP
+  chmod +x "$stub_dir/git"
+
+  dir="$(mktemp -d "$SCRATCH_ROOT/V-XXXXXX")"
+  dir_real="$(cd "$dir" && pwd -P)"
+  local out rc
+  out=$(printf '{"cwd":"%s"}' "$dir" | PATH="$stub_dir:$PATH" env -u CLAUDE_PLUGIN_ROOT bash -c '
+    # shellcheck disable=SC1090
+    source "$1"
+    _bc_resolve_project_dir
+  ' _bc-test "$HELPER")
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    record_fail "V: expected exit 0 (failing git stub falls back to stdin cwd), got $rc"
+    return
+  fi
+  local expect
+  expect="$(printf 'stdin\t%s' "$dir_real")"
+  if [ "$out" != "$expect" ]; then
+    record_fail "V: expected '$expect' (fallback to stdin cwd, never the stub's printed decoy path), got '$out'"
+    return
+  fi
+  record_pass "V (_bc_resolve_project_dir: failing git stub that prints a path is not accepted as the walk-up root; falls back to stdin cwd)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture W — _bc_resolve_project_dir: COLD PATH (no stdin envelope at all,
+# `</dev/null`), a git stub on PATH that prints a decoy path and exits 1.
+# Fixture V already covers the stdin-cwd walk-up rejecting this stub; this
+# fixture covers the OTHER branch — with no stdin.cwd, resolution falls to
+# the bare `git rev-parse --show-toplevel` run from $PWD. That call must
+# also fail closed on the stub's non-zero exit (not just "something got
+# printed") and fall back to $PWD itself (source=pwd), never the stub's
+# printed decoy.
+# ---------------------------------------------------------------------------
+fixture_w() {
+  local stub_dir dir dir_real
+  stub_dir="$(mktemp -d "$SCRATCH_ROOT/W-stub-XXXXXX")"
+  cat > "$stub_dir/git" <<'WRAP'
+#!/usr/bin/env bash
+echo "/nonexistent/decoy-root"
+exit 1
+WRAP
+  chmod +x "$stub_dir/git"
+
+  dir="$(mktemp -d "$SCRATCH_ROOT/W-XXXXXX")"
+  dir_real="$(cd "$dir" && pwd -P)"
+  local out rc
+  out=$( (cd "$dir" && PATH="$stub_dir:$PATH" env -u CLAUDE_PLUGIN_ROOT bash -c '
+    # shellcheck disable=SC1090
+    source "$1"
+    _bc_resolve_project_dir
+  ' _bc-test "$HELPER" </dev/null) )
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    record_fail "W: expected exit 0 (cold path, failing git stub falls back to \$PWD), got $rc"
+    return
+  fi
+  local expect
+  expect="$(printf 'pwd\t%s' "$dir_real")"
+  if [ "$out" != "$expect" ]; then
+    record_fail "W: expected '$expect' (cold-path fallback to \$PWD, never the stub's printed decoy path), got '$out'"
+    return
+  fi
+  record_pass "W (_bc_resolve_project_dir: cold path (no stdin) with a failing git stub falls back to \$PWD, source=pwd, decoy not accepted)"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture X — _bc_resolve_project_dir: BASH SUCCESS path (git-from-stdin)
+# walking up to a git root whose directory name ENDS in a literal LF byte.
+# A subdirectory of that repo is passed as the stdin cwd; the
+# `git -C <stdin.cwd> rev-parse --show-toplevel` walk-up succeeds and must
+# print the FULL root path with its trailing LF intact (source=git-from-
+# stdin) — exactly ONE trailing LF (the root dirname's own byte), with
+# git's own line terminator stripped. The expected value is captured via
+# the sentinel idiom (mirrors _bc_realpath's own rationale) so the test's
+# OWN `pwd -P` capture does not itself strip the root's trailing LF before
+# the comparison.
+# ---------------------------------------------------------------------------
+fixture_x() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    record_skip "X (_bc_resolve_project_dir LF-suffixed git root) — python3 not installed"
+    return
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    record_skip "X (_bc_resolve_project_dir LF-suffixed git root) — git not installed"
+    return
+  fi
+  local parent parent_real lf root sub
+  parent="$(mktemp -d "$SCRATCH_ROOT/X-parent-XXXXXX")"
+  parent_real="$(cd "$parent" && pwd -P)"
+  lf=$'\n'
+  root="${parent_real}/lfrepo-$$${lf}"
+  if ! mkdir -p "$root" 2>/dev/null; then
+    record_fail "X: could not create LF-suffixed git root fixture"
+    return
+  fi
+  (cd "$root" && git init -q)
+  sub="$root/sub"
+  mkdir -p "$sub"
+
+  # Sentinel capture: `pwd -P` on the LF-suffixed root emits the path bytes
+  # (which themselves end in LF) followed by pwd's own line terminator —
+  # two consecutive trailing LFs. A plain `$(...)` would strip BOTH. The
+  # sentinel stops that, then exactly one trailing LF (pwd's own) is
+  # stripped back off, leaving the root's own trailing LF intact.
+  local root_real
+  root_real="$(cd "$root" && pwd -P; printf x)"
+  root_real="${root_real%x}"
+  root_real="${root_real%$'\n'}"
+
+  local envelope out rc
+  envelope="$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1]}))' "$sub")"
+  out=$(printf '%s' "$envelope" | env -u CLAUDE_PLUGIN_ROOT \
+    GIT_CEILING_DIRECTORIES="$parent_real" bash -c '
+    # shellcheck disable=SC1090
+    source "$1"
+    _bc_resolve_project_dir
+    rc=$?
+    printf x
+    exit "$rc"
+  ' _bc-test "$HELPER")
+  rc=$?
+  out="${out%x}"
+  if [ "$rc" -ne 0 ]; then
+    record_fail "X: expected exit 0 (LF-suffixed git root walk-up), got $rc"
+    return
+  fi
+  local source_out path_out
+  source_out="${out%%$'\t'*}"
+  path_out="${out#*$'\t'}"
+  if [ "$source_out" != "git-from-stdin" ]; then
+    record_fail "X: expected source=git-from-stdin, got source='$source_out' (full: '$out')"
+    return
+  fi
+  if [ "$path_out" != "$root_real" ]; then
+    record_fail "X: expected full LF-suffixed root path (trailing LF intact, git's own terminator stripped) '$root_real', got '$path_out'"
+    return
+  fi
+  record_pass "X (_bc_resolve_project_dir: git-from-stdin walk-up to an LF-suffixed root resolves to the full path with trailing LF intact)"
+}
+
+# ---------------------------------------------------------------------------
 # Run all fixtures
 # ---------------------------------------------------------------------------
 fixture_a
@@ -827,6 +1261,15 @@ fixture_l
 fixture_m
 fixture_n
 fixture_o
+fixture_p
+fixture_q
+fixture_r
+fixture_s
+fixture_t
+fixture_u
+fixture_v
+fixture_w
+fixture_x
 
 echo
 echo "test-bootstrap-check-helper: pass=$PASS_COUNT fail=$FAIL_COUNT skip=$SKIP_COUNT"

@@ -1441,7 +1441,7 @@ if [ "${BASH_SOURCE[0]:-}" = "$0" ] \
       echo "ERROR: [codex-review] readiness precheck: masked-body spool 할당 실패" >&2
       exit 4
     }
-    : > "$REIN_EV_MASKED_FILE"   # 빈 본문 (라인 0)
+    printf '' > "$REIN_EV_MASKED_FILE"   # 빈 본문 (라인 0). `:` 금지 — 특수 내장명령의 리다이렉트 실패는 POSIX 모드 셸을 종료시킴
   fi
   : "${EVIDENCE_BLOCK_SUMMARY:=}"
   : "${EVIDENCE_BLOCK_COUNT:=0}"

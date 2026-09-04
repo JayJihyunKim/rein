@@ -1,0 +1,18 @@
+# plugins/rein-core/policies/security-axis/commit-security.yaml —
+# security_review 축 전용 정책, 배포 번들 기본값. `_version.yaml` 의 헤더에
+# 이 디렉토리가 왜 별도로 존재하는지 전체 배경이 있다.
+#
+# task.exists 조건화는 policies/default/commit.yaml 의 code_review 요구와
+# 동일한 이유를 그대로 상속한다: v1 의 보안 리뷰 요구에도 활성 작업 존재가
+# 전제였고(DOD_EXISTS precondition), 그 전제가 없으면 이 요구를 무조건
+# 강제할 경우 활성 작업이 없는 프로젝트는 빠져나갈 길 없이 막힌다 —
+# scripts/rein-mark-security-reviewed.sh 의 증거 발급 자체가 `--cycle
+# <dod-slug>` 를 요구하므로, task.exists 가 거짓인 상태에서는 애초에
+# 정직하게 발급할 증거가 없다.
+trigger: tool.pre
+when:
+  command.type: git.commit
+  task.exists: "true"
+require:
+  - security_review
+failure_mode: closed

@@ -78,12 +78,27 @@ fi
 # provided — the script's conservative PROJECT_DIR fallback engages, driven
 # by REIN_PROJECT_DIR_OVERRIDE (same override rein-mark-spec-reviewed.sh's
 # test suite already relies on).
+#
+# <root>/hooks/lib/security-axis-policy-resolve.sh (real copy) +
+# <root>/policies/security-axis/commit-security.yaml (a placeholder, content
+# irrelevant here) ARE provided — the script now hard-requires the resolver
+# lib and resolves a POLICY_DIR before it can proceed to any mode, and every
+# scenario below uses the FAKE bin/rein stub, which ignores REIN_POLICY_DIR's
+# actual content entirely (it never reads the directory) so a placeholder
+# bundled policy is enough to let resolution succeed without affecting any
+# assertion. This fixture represents "no project override, but a genuine,
+# undamaged plugin install" — the resolver falls back to this bundled
+# location because _mk_fixture_project() never creates a project override.
 _mk_fixture_plugin() {
   local root
   root=$(mktemp -d "$BASE_TMP/plugin-XXXXXX")
-  mkdir -p "$root/scripts" "$root/bin"
+  mkdir -p "$root/scripts" "$root/bin" "$root/hooks/lib" "$root/policies/security-axis"
   cp "$MARK_SCRIPT_SRC" "$root/scripts/rein-mark-security-reviewed.sh"
   chmod +x "$root/scripts/rein-mark-security-reviewed.sh"
+  cp "$PROJECT_ROOT/plugins/rein-core/hooks/lib/security-axis-policy-resolve.sh" \
+    "$root/hooks/lib/security-axis-policy-resolve.sh"
+  printf 'trigger: tool.pre\nwhen:\n  command.type: git.commit\nrequire:\n  - security_review\nfailure_mode: closed\n' \
+    > "$root/policies/security-axis/commit-security.yaml"
   cat > "$root/bin/rein" <<'PYEOF'
 #!/usr/bin/env python3
 # Fake bin/rein stub for test-mark-security-reviewed.sh — implements just
@@ -717,6 +732,155 @@ if printf '%s' "$out_xii_lf" | grep -qi "cycle" && printf '%s' "$out_xii_lf" | g
   pass "ERROR message names --cycle and control character as the reason"
 else
   fail "ERROR message names --cycle and control character as the reason" "stderr: $out_xii_lf"
+fi
+
+# ----------------------------------------------------------------------------
+# (xiii) Real bundle-only policy resolution — security-axis bundling
+# (plugins/rein-core/policies/security-axis/, project override at
+# .rein/policy/security-axis/ takes priority when present). Every scenario
+# above drives the FAKE bin/rein stub, which ignores REIN_POLICY_DIR's
+# content entirely — it cannot prove this script resolves the RIGHT
+# directory. These scenarios link the REAL rein package + REAL bin/rein +
+# the REAL bundled security-axis policy, with NO per-project override
+# anywhere, to exercise the resolver end to end against the actual engine.
+# ----------------------------------------------------------------------------
+echo ""
+echo "[xiii] real bundle-only policy resolution (no project override anywhere)"
+
+# _mk_real_fixture_plugin — unlike _mk_fixture_plugin (fake bin/rein stub),
+# this links the genuine rein package, bin/rein, hooks/lib/ (for the shared
+# resolver + project-dir.sh), and the real policies/ tree (bundled
+# security-axis default included) — the shape a real, undamaged plugin
+# install has.
+_mk_real_fixture_plugin() {
+  local root
+  root=$(mktemp -d "$BASE_TMP/realplugin-XXXXXX")
+  mkdir -p "$root/scripts" "$root/bin" "$root/hooks"
+  cp "$MARK_SCRIPT_SRC" "$root/scripts/rein-mark-security-reviewed.sh"
+  chmod +x "$root/scripts/rein-mark-security-reviewed.sh"
+  ln -sfn "$PROJECT_ROOT/plugins/rein-core/rein" "$root/rein"
+  ln -sfn "$PROJECT_ROOT/plugins/rein-core/bin/rein" "$root/bin/rein"
+  ln -sfn "$PROJECT_ROOT/plugins/rein-core/hooks/lib" "$root/hooks/lib"
+  ln -sfn "$PROJECT_ROOT/plugins/rein-core/policies" "$root/policies"
+  echo "$root"
+}
+
+# _mk_real_git_project — a real git repo (issue-evidence's digest
+# computation needs one), no .rein/policy/security-axis override anywhere.
+_mk_real_git_project() {
+  local root
+  root=$(mktemp -d "$BASE_TMP/realproject-XXXXXX")
+  mkdir -p "$root/trail/dod"
+  git -C "$root" init -q
+  git -C "$root" config user.email "t@example.com"
+  git -C "$root" config user.name "t"
+  git -C "$root" config commit.gpgsign false
+  printf '# baseline\n' > "$root/CHANGELOG.md"
+  git -C "$root" add CHANGELOG.md
+  git -C "$root" commit -q -m "chore: baseline"
+  echo "$root"
+}
+
+# (a) red (before the bundled policy existed): no project override anywhere
+# meant POLICY_DIR pointed at a directory that never existed, and bin/rein
+# issue-evidence failed reading it — this script surfaced that as a plain
+# "the digest probe failed" error, not a subject. green: the resolver falls
+# back to the real bundled policy and the real engine computes a genuine
+# subject for a staged sensitive-classified path (.env, the default
+# `sensitive` digest_scope profile's target — the bundled _version.yaml
+# declares no digest_scope override).
+PLUGIN_XIII=$(_mk_real_fixture_plugin)
+PROJECT_XIII=$(_mk_real_git_project)
+printf 'SECRET=shh\n' > "$PROJECT_XIII/.env"
+git -C "$PROJECT_XIII" add .env
+
+out_xiii=$(_run_mark "$PLUGIN_XIII" "$PROJECT_XIII" --print-subject 2>&1)
+rc_xiii=$?
+
+if [ "$rc_xiii" -eq 0 ]; then
+  pass "--print-subject exits 0 against the real bundled policy (no project override anywhere)"
+else
+  fail "--print-subject exits 0 against the real bundled policy (no project override anywhere)" "rc=$rc_xiii output: $out_xiii"
+fi
+
+if printf '%s' "$out_xiii" | grep -q '"subject"' && ! printf '%s' "$out_xiii" | grep -q '"subject": ""'; then
+  pass "--print-subject reports a non-empty subject via the bundled default policy"
+else
+  fail "--print-subject reports a non-empty subject via the bundled default policy" "output: $out_xiii"
+fi
+
+# (b) a damaged project override (folder present, commit-security.yaml
+# missing) must fail closed WITHOUT ever pointing the user at git — the
+# original bug's issuance-side symptom was a git-misleading absorbed-OSError
+# message when the axis folder did not resolve to anything real.
+PLUGIN_XIIIB=$(_mk_real_fixture_plugin)
+PROJECT_XIIIB=$(_mk_real_git_project)
+mkdir -p "$PROJECT_XIIIB/.rein/policy/security-axis"
+printf 'version: 1\n' > "$PROJECT_XIIIB/.rein/policy/security-axis/_version.yaml"
+# commit-security.yaml deliberately absent — damaged override, must not
+# fall through to the bundle.
+
+out_xiiib=$(_run_mark "$PLUGIN_XIIIB" "$PROJECT_XIIIB" --print-subject 2>&1)
+rc_xiiib=$?
+
+if [ "$rc_xiiib" -ne 0 ]; then
+  pass "--print-subject fails closed when the project override folder is damaged"
+else
+  fail "--print-subject fails closed when the project override folder is damaged" "got rc=0, output: $out_xiiib"
+fi
+
+if printf '%s' "$out_xiiib" | grep -qF ".rein/policy/security-axis"; then
+  pass "the damaged-folder error names the actual folder"
+else
+  fail "the damaged-folder error names the actual folder" "output: $out_xiiib"
+fi
+
+# (b-2) the override path exists but is a dangling symlink — not "absent",
+# so it must be treated as damaged and never fall through to the bundle.
+PLUGIN_XIIIC=$(_mk_real_fixture_plugin)
+PROJECT_XIIIC=$(_mk_real_git_project)
+mkdir -p "$PROJECT_XIIIC/.rein/policy"
+ln -s "$PROJECT_XIIIC/.rein/policy/security-axis-gone" "$PROJECT_XIIIC/.rein/policy/security-axis"
+
+out_xiiic=$(_run_mark "$PLUGIN_XIIIC" "$PROJECT_XIIIC" --print-subject 2>&1)
+rc_xiiic=$?
+
+if [ "$rc_xiiic" -ne 0 ]; then
+  pass "--print-subject fails closed when the project override path is a dangling symlink"
+else
+  fail "--print-subject fails closed when the project override path is a dangling symlink" "got rc=0, output: $out_xiiic"
+fi
+
+if printf '%s' "$out_xiiic" | grep -qF "not a directory"; then
+  pass "the dangling-symlink error says the path is not a directory"
+else
+  fail "the dangling-symlink error says the path is not a directory" "output: $out_xiiic"
+fi
+
+# (b-3) the override folder is fine but its parent (.rein/policy) cannot be
+# searched — the child's existence cannot be judged, so this must be treated
+# as damaged (never resolved to the bundle). Skipped as root (permission
+# bits are bypassed there).
+if [ "$(id -u)" != "0" ]; then
+  PLUGIN_XIIID=$(_mk_real_fixture_plugin)
+  PROJECT_XIIID=$(_mk_real_git_project)
+  mkdir -p "$PROJECT_XIIID/.rein/policy/security-axis"
+  cp "$PROJECT_ROOT/tests/fixtures/policy/security-axis/"*.yaml "$PROJECT_XIIID/.rein/policy/security-axis/" 2>/dev/null || true
+  chmod 000 "$PROJECT_XIIID/.rein/policy"
+  out_xiiid=$(_run_mark "$PLUGIN_XIIID" "$PROJECT_XIIID" --print-subject 2>&1)
+  rc_xiiid=$?
+  chmod 755 "$PROJECT_XIIID/.rein/policy"
+  if [ "$rc_xiiid" -ne 0 ]; then
+    pass "--print-subject fails closed when the policy parent folder is unsearchable"
+  else
+    fail "--print-subject fails closed when the policy parent folder is unsearchable" "got rc=0, output: $out_xiiid"
+  fi
+fi
+
+if printf '%s' "$out_xiiib" | grep -qi "git"; then
+  fail "the damaged-folder error must not point the user at git" "output: $out_xiiib"
+else
+  pass "the damaged-folder error does not mention git"
 fi
 
 echo ""

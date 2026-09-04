@@ -130,8 +130,20 @@ fi
 # preserving the one-envelope-per-SessionStart contract). The primer body comes
 # from the shared single definition (rein_primer_body) so it is byte-identical
 # to the user-stdout channel emitted by the bootstrap hook.
+#
+# append ONE bootstrap-status line after the primer
+# body (NOT a marker rename — .rein/.onboarded still only means "primer shown
+# once"; this line separately answers "did bootstrap actually finish").
+# Same tri-marker predicate lib/bootstrap-check.sh uses (trail/ +
+# .rein/project.json + trail/index.md) — recomputed directly here rather
+# than sourcing that helper, since this is a one-line status read, not a
+# safety-checked resolution.
 if [ "$ONBOARD_FIRST_SESSION" = "1" ]; then
-  CONTENT="$(rein_primer_body)"$'\n\n'"$CONTENT"
+  BOOTSTRAP_STATUS_LINE="초기화는 아직이에요 — 위 안내를 따라 주세요."
+  if [ -d "$PROJECT_DIR/trail" ] && [ -f "$PROJECT_DIR/.rein/project.json" ] && [ -f "$PROJECT_DIR/trail/index.md" ]; then
+    BOOTSTRAP_STATUS_LINE="초기화는 이미 끝났어요."
+  fi
+  CONTENT="$(rein_primer_body)"$'\n'"$BOOTSTRAP_STATUS_LINE"$'\n\n'"$CONTENT"
 fi
 
 # JSON-encode CONTENT via python3 (handles all escaping including newlines,

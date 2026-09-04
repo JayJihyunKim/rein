@@ -282,31 +282,60 @@ def _resolve_git_toplevel(cwd):
 
     (2026-08-20 후속 수리로 내부 구현이 공용 3상태 헬퍼
     `_run_git_lifecycle_query()` 위로 옮겨졌다 — 이 함수의 반환 계약
-    (아래 2-tuple)과 호출자 계약은 한 글자도 바뀌지 않았다, 순수 내부
+    (아래 3-tuple 중 앞 두 원소)과 호출자 계약은 바뀌지 않았다, 순수 내부
     리팩터.)
 
-    반환: `(toplevel, confirmed_non_git)` 2-tuple.
+    `cwd` 자체가 존재하지 않는 경우는 세 번째 상태로 분리한다:
+    `subprocess.run(cwd=<존재하지 않는 경로>)` 는 git 프로세스를
+    실행하기도 전에 `FileNotFoundError`(OSError)를 던진다 — git 이
+    실행되어 응답한 게 아니라 실행이 시도조차 되지 않은 것이다. 이
+    구분이 없으면 호출자가 "판정 실패"(아래 항목)로 오분류해 git 조회를
+    지목하는 fail-closed 문구를 내는데, 실제 원인은 그 경로가 없다는
+    것뿐이다 — git 을 지목하면 사용자가 엉뚱한 곳을 디버깅하게 된다.
 
-    - 성공(git 작업 트리 안): `(toplevel_경로_bytes, False)`.
+    반환: `(toplevel, confirmed_non_git, cwd_missing)` 3-tuple.
+
+    - 성공(git 작업 트리 안): `(toplevel_경로_bytes, False, False)`.
     - **확실히 비-git**(git 이 정상적으로 실행되어 스스로 "not a git
       repository" 로 응답 — 전형적으로 exit 128 + 그 문구가 포함된
-      stderr): `(None, True)`. 이 신호만 s5 판정의 근거로 인정한다.
+      stderr): `(None, True, False)`. 이 신호만 s5 판정의 근거로
+      인정한다.
+    - **`cwd` 자체가 존재하지 않음**(`os.stat` 이 ENOENT — git 은 호출되지
+      않았다. 접근 불가·일반 파일 등 다른 OSError 는 이 상태가 아니라 아래
+      판정 실패로 흐른다):
+      `(None, False, True)`. 호출자는 이를 "git 조회 실패"와 별개로
+      취급해, 그 경로가 없다는 것을 명시한 fail-closed 오류를 내야
+      한다 — "git query failed"/"unable to confirm" 류의 문구로
+      뭉뚱그리면 안 된다.
     - **판정 실패**(`OSError`/`subprocess.TimeoutExpired` 로 프로세스
       자체가 실행되지 못했거나, git 이 실행은 됐지만 "not a git
       repository" 가 아닌 다른 사유로 비0 종료 — 예: 손상된 저장소,
-      권한 오류, 그 밖의 예기치 못한 실패): `(None, False)`. 이
+      권한 오류, 그 밖의 예기치 못한 실패): `(None, False, False)`. 이
       조합은 "비-git 이라고 결론 낼 근거가 없다" 는 뜻이다 — 호출자는
       이 조합을 s5 로 흡수하면 안 되고 fail-closed 해야 한다(위 재현
       시나리오의 바로 그 결함).
     """
+    if cwd is not None:
+        try:
+            os.stat(cwd)
+        except FileNotFoundError:
+            # 진짜 부재 또는 매달린(dangling) 심볼릭 링크 — 둘 다 git 을
+            # 실행할 수 없는 "경로 해소 불가" 상태다. 호출자 문구가 둘을
+            # 구분해 안내한다(_policy_dir_missing_error).
+            return None, False, True
+        except OSError:
+            # 경로는 있으나 접근 불가·일반 파일 등 — "존재하지 않음" 이
+            # 아니므로 아래 git 조회로 넘겨 ERROR(판정 실패, fail-closed)
+            # 분기가 처리하게 둔다.
+            pass
     state, stdout = _run_git_lifecycle_query(
         ("rev-parse", "--show-toplevel"), cwd, _ABSENT_MARKERS_TOPLEVEL
     )
     if state == _GIT_QUERY_FOUND:
-        return stdout, False
+        return stdout, False, False
     if state == _GIT_QUERY_ABSENT:
-        return None, True
-    return None, False
+        return None, True, False
+    return None, False, False
 
 
 def _read_bounded(handle, path, max_bytes):
@@ -347,6 +376,52 @@ def _blob_size(spec, cwd):
         return None
 
 
+def _parse_worktree_status(out):
+    """Shared porcelain -z parser — returns ``(paths, deleted_not_readded)``.
+
+    Factored out of ``worktree_changeset()`` so ``worktree_deleted_paths()``
+    (below) parses the exact same record shape rather than duplicating the
+    token-walk logic.
+
+    ``deleted_not_readded`` is the set of paths whose INDEX column (the
+    first of the two status-field characters, ``XY``) is ``D`` — staged for
+    deletion relative to HEAD — and which are NOT ALSO reported as a
+    separate ``??`` record for the same path. A path can appear twice: a
+    tracked file removed via ``git rm --cached`` while the on-disk copy
+    survives is reported as ``D `` alone when that path is now gitignored
+    (no re-surfacing), but as BOTH ``D `` and ``??`` when it is not ignored
+    (git treats the surviving on-disk copy as a new untracked file). Only
+    the first case belongs in this set — the second means the on-disk
+    content is authoritative again.
+    """
+    paths = []
+    deleted = set()
+    untracked = set()
+    tokens = out.split(b"\0")
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        index += 1
+        if len(token) < 4:
+            # 빈 꼬리 토큰 또는 형식 밖 레코드 — 보수적으로 건너뜀
+            continue
+        status_field = token[:2].decode("ascii", "replace")
+        path = os.fsdecode(token[3:])
+        paths.append(path)
+        # Exactly "D " (deleted in the index, worktree unchanged). Unmerged
+        # records that also start with D ("DU"/"DD") are conflicts whose
+        # on-disk content IS authoritative — never suppress them.
+        if status_field == "D ":
+            deleted.add(path)
+        if status_field == "??":
+            untracked.add(path)
+        if any(char in status_field for char in _RENAME_STATUS_CHARS):
+            if index < len(tokens) and tokens[index]:
+                paths.append(os.fsdecode(tokens[index]))
+            index += 1
+    return paths, (deleted - untracked)
+
+
 def worktree_changeset(cwd=None):
     """WORKTREE ChangeSet — HEAD 대비 작업 트리의 변경 경로 전부.
 
@@ -359,22 +434,43 @@ def worktree_changeset(cwd=None):
     )
     if out is None:
         return None
-    paths = []
-    tokens = out.split(b"\0")
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        index += 1
-        if len(token) < 4:
-            # 빈 꼬리 토큰 또는 형식 밖 레코드 — 보수적으로 건너뜀
-            continue
-        status_field = token[:2].decode("ascii", "replace")
-        paths.append(os.fsdecode(token[3:]))
-        if any(char in status_field for char in _RENAME_STATUS_CHARS):
-            if index < len(tokens) and tokens[index]:
-                paths.append(os.fsdecode(tokens[index]))
-            index += 1
+    paths, _deleted_not_readded = _parse_worktree_status(out)
     return ChangeSet(scope=SCOPE_WORKTREE, paths=tuple(paths))
+
+
+def worktree_deleted_paths(cwd=None):
+    """Paths staged for deletion (index column ``D``) that are NOT also
+    re-surfaced as untracked (``??``) in the current worktree status
+    (2026-09-04 review-digest self-invalidation fix).
+
+    Used by ``changeset_digest()``'s WORKTREE branch to suppress reading
+    on-disk content for a path git itself considers deleted — without this,
+    `git rm --cached` on a gitignored path (the file survives on disk, and
+    because it is ignored git does not re-report it as untracked) leaves
+    the WORKTREE content reader still opening that on-disk file, so its
+    every rewrite moves the digest despite the deletion being staged.
+
+    This runs its own single ``git status`` call rather than reusing a
+    caller-supplied ``ChangeSet`` — `review_digest()` / `sensitive_security_
+    digest()` construct a FRESH filtered ``ChangeSet`` (allowlist/tag
+    filtering) before calling `changeset_digest()`, discarding whatever a
+    prior `worktree_changeset()` call parsed. `cwd` is the one input stable
+    across every such call site, so deriving the suppression set here (by
+    `cwd`, on demand) is smaller than threading a deleted-paths parameter
+    through every WORKTREE digest call site and every re-filter step.
+    Returns None when the status query itself fails (non-repo, timeout,
+    execution error) — a missing fact, never an empty set: an empty set
+    would let the digest silently re-hash on-disk content of staged-deleted
+    paths, which is exactly the self-invalidation this suppression exists
+    to stop. `changeset_digest()` propagates None as "digest unresolved".
+    """
+    out = _run_git(
+        ("status", "--porcelain", "-z", "--untracked-files=all"), cwd=cwd
+    )
+    if out is None:
+        return None
+    _paths, deleted_not_readded = _parse_worktree_status(out)
+    return frozenset(deleted_not_readded)
 
 
 def staged_changeset(cwd=None):
@@ -388,7 +484,9 @@ def staged_changeset(cwd=None):
     return ChangeSet(scope=SCOPE_STAGED, paths=paths)
 
 
-def worktree_content_reader(cwd=None, max_bytes=_MAX_CONTENT_BYTES):
+def worktree_content_reader(
+    cwd=None, max_bytes=_MAX_CONTENT_BYTES, suppressed_paths=None
+):
     """WORKTREE 내용 공급자 — 작업 트리 파일을 그대로 읽는다.
 
     kernel `content_digest` 주입 계약: path -> bytes | None. 레포
@@ -399,6 +497,15 @@ def worktree_content_reader(cwd=None, max_bytes=_MAX_CONTENT_BYTES):
     None (모듈 docstring "특수 파일 — 심링크 미경유" 절 참조 — FIFO
     open() 의 무기한 블로킹 DoS 방지). max_bytes 초과 파일은
     ContentSizeExceededError.
+
+    `suppressed_paths` (2026-09-04 review-digest self-invalidation fix) —
+    an optional set of paths (typically `worktree_deleted_paths()`'s
+    result) that read as absent (None) WITHOUT ever stat()-ing or
+    open()-ing the on-disk file, regardless of what is actually sitting
+    there. This is how a staged deletion (`git rm --cached`) of a
+    gitignored path stops its surviving on-disk copy from feeding the
+    digest — see `worktree_deleted_paths()`'s own docstring for why git
+    itself does not already surface this as an absence.
     """
     out = _run_git(("rev-parse", "--show-toplevel"), cwd=cwd)
     if out is None:
@@ -406,8 +513,11 @@ def worktree_content_reader(cwd=None, max_bytes=_MAX_CONTENT_BYTES):
     toplevel = os.fsdecode(out).strip()
     if not toplevel:
         return None
+    suppressed = suppressed_paths if suppressed_paths else frozenset()
 
     def read_content(path):
+        if path in suppressed:
+            return None
         full_path = os.path.join(toplevel, path)
         try:
             st = os.stat(full_path, follow_symlinks=False)
@@ -464,11 +574,31 @@ def changeset_digest(changeset, cwd=None, max_bytes=_MAX_CONTENT_BYTES):
     v2.0 Enforcement Scope 는 WORKTREE/STAGED — 그 밖의 scope 또는
     해석 불가 시 None (fact 부재). max_bytes 초과 내용은
     ContentSizeExceededError 로 전파된다 (부재로 조용히 흡수하지 않음).
+
+    WORKTREE 분기는 `worktree_deleted_paths(cwd)` 로 스테이징된 삭제
+    경로(무시되는 파일이라 '??' 로 재등장하지 않는 것만)를 별도 조회해
+    content reader 에 넘긴다 — 한 번의 추가 `git status` 호출(2026-09-04
+    review-digest 자기무효화 수리). 그 조회가 실패하면(None) digest 도
+    None(부재) — 빈 억제 집합으로 계속하면 삭제 예정 파일 내용을 다시
+    해싱해 이 수리의 목적 자체가 무효화된다. `changeset` 인스턴스에서 직접
+    파생하지 않는 이유: `review_digest()`/`sensitive_security_digest()`
+    가 허용목록/태그 필터링 후 **새** `ChangeSet` 을 만들어 이 함수에
+    넘기므로(원본 인스턴스에 무언가를 붙여도 그 시점에 소실), 모든
+    WORKTREE 호출부에서 안정적인 입력은 `cwd` 뿐이다 — 매 필터링 단계마다
+    삭제 집합을 threading 하는 것보다 이 조회 하나가 더 작은 변경이다.
     """
     if changeset is None:
         return None
     if changeset.scope == SCOPE_WORKTREE:
-        reader = worktree_content_reader(cwd=cwd, max_bytes=max_bytes)
+        suppressed = worktree_deleted_paths(cwd=cwd)
+        if suppressed is None:
+            # The suppression query failed after the changeset itself was
+            # resolved — treat the digest as absent rather than hashing
+            # content the caller may have staged for deletion.
+            return None
+        reader = worktree_content_reader(
+            cwd=cwd, max_bytes=max_bytes, suppressed_paths=suppressed
+        )
     elif changeset.scope == SCOPE_STAGED:
         reader = staged_content_reader(cwd=cwd, max_bytes=max_bytes)
     else:
@@ -1058,6 +1188,35 @@ class PolicyVersionGitStateError(PolicyVersionError):
     """
 
 
+def _policy_dir_missing_error(policy_dir):
+    """`_resolve_git_toplevel()` 이 `cwd_missing=True` 를 신호했을 때
+    양쪽 호출자(`resolve_policy_version_digest_scope()`/
+    `resolve_policy_version_for_absent_worktree()`)가 공유하는 문구
+    — 정책 디렉터리 자체가 없다는
+    것과 git 조회 실패를 더 이상 같은 문구로 뭉뚱그리지 않는다: git 은
+    호출된 적이 없으므로 "git query failed"/"unable to confirm" 류의
+    표현을 쓰지 않고, 그 경로가 없다는 사실과(cwd 로 존재하지 않는
+    경로를 넘기면 subprocess 가 git 을 실행하기도 전에 실패한다) 이
+    축의 정책이 여기 provisioning 되지 않았다는 것(프로젝트 오버라이드도
+    번들 폴백도 이 경로에 없다)만 명시한다. 여전히 fail-closed다 —
+    "부재이니 통과"가 아니라 "확인할 자체가 없으니 명시 실패".
+    """
+    if os.path.lexists(policy_dir):
+        what = (
+            "policy directory path cannot be resolved (dangling symbolic "
+            "link): {path}"
+        )
+    else:
+        what = "policy directory does not exist: {path}"
+    return PolicyVersionGitStateError(
+        (
+            what + ". git was not invoked. This axis's policy is not "
+            "provisioned here — no project override at {path} and no "
+            "bundled fallback directory was supplied via REIN_POLICY_DIR"
+        ).format(path=policy_dir)
+    )
+
+
 # "캐시 힌트가 아예 주어지지 않음"을 "캐시 힌트가 None(확인했더니 파일
 # 자체가 없음)"과 구분하기 위한 센티널 — `object()` 자체를 비교하므로
 # 어떤 실제 인자 값과도 절대 충돌하지 않는다.
@@ -1113,8 +1272,15 @@ def resolve_policy_version_digest_scope(
     직접 `load_policy_version()` 을 호출한다(하위호환).
     """
     full_path = os.path.join(policy_dir, VERSION_FILENAME)
-    toplevel_out, confirmed_non_git = _resolve_git_toplevel(policy_dir)
+    toplevel_out, confirmed_non_git, cwd_missing = _resolve_git_toplevel(
+        policy_dir
+    )
     if toplevel_out is None:
+        if cwd_missing:
+            # policy_dir 자체가 존재하지 않는다 — git 은 호출된 적이
+            # 없다(위 confirmed_non_git 분기와 원인이 다르다 — 문구도
+            # 분리한다).
+            raise _policy_dir_missing_error(policy_dir)
         if not confirmed_non_git:
             # High (리뷰 지적, 2026-08-20) — 최초 git 조회가 "비-git" 을
             # 명시적으로 답한 게 아니라 실행 자체가 실패했다(timeout·
@@ -1135,11 +1301,10 @@ def resolve_policy_version_digest_scope(
                 "conflate git execution failure with a confirmed "
                 "non-git context)".format(full_path)
             )
-        # s5 — 확실히 비 git 문맥(policy_dir 자체가 존재하지 않는 경우도
-        # 이 분기로 흡수된다 — non-existent cwd 에서 git 은 "not a git
-        # repository" 로 응답한다). 기존 worktree 직접 로드 경로를 그대로
+        # s5 — 확실히 비 git 문맥. 기존 worktree 직접 로드 경로를 그대로
         # 유지한다 — 기존 fixture 다수가 policy_dir 을 git 저장소 밖
-        # (또는 안이어도 미추적)에 둔다.
+        # (또는 안이어도 미추적)에 둔다. (policy_dir 자체가 없는 경우는
+        # 더 이상 이 분기로 흡수되지 않는다 — 위 cwd_missing 분기 참조.)
         if cached_policy_version is not _NO_CACHED_POLICY_VERSION_HINT:
             if cached_policy_version is None:
                 return DIGEST_SCOPE_SENSITIVE
@@ -1360,8 +1525,16 @@ def resolve_policy_version_for_absent_worktree(policy_dir):
     """
     full_path = os.path.join(policy_dir, VERSION_FILENAME)
 
-    toplevel_out, confirmed_non_git = _resolve_git_toplevel(policy_dir)
+    toplevel_out, confirmed_non_git, cwd_missing = _resolve_git_toplevel(
+        policy_dir
+    )
     if toplevel_out is None:
+        if cwd_missing:
+            # policy_dir 자체가 존재하지 않는다 — git 은 호출된 적이
+            # 없다(위 confirmed_non_git 분기와 원인이 다르다 — 문구도
+            # 분리한다, `resolve_policy_version_digest_scope()` 와 동일
+            # 방향).
+            raise _policy_dir_missing_error(policy_dir)
         if not confirmed_non_git:
             # High (리뷰 지적, 2026-08-20) — 최초 조회가 "비-git" 을
             # 명시적으로 답한 게 아니라 실행 자체가 실패했다. 이걸 기존
@@ -1382,6 +1555,8 @@ def resolve_policy_version_for_absent_worktree(policy_dir):
             )
         # s5 — 확실히 비 git 문맥. 호출자의 기존 s5 경로(worktree 직접
         # 읽기)가 이미 부재를 "미설정"으로 정확히 판정한다. 새 판단 없음.
+        # (policy_dir 자체가 없는 경우는 더 이상 이 분기로 흡수되지
+        # 않는다 — 위 cwd_missing 분기 참조.)
         return None
 
     # macOS 등에서 tempdir 이 symlink 경유일 수 있다 — 양쪽을 realpath 로

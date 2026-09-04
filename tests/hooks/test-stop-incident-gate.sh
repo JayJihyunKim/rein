@@ -155,6 +155,27 @@ pass() {
 }
 
 # ---------------------------------------------------------------------------
+# Regression guard: the normal (bootstrapped) path must keep stamping
+# session_end=true. Only un-bootstrapped projects are exempt from stamping —
+# degraded and no-src-edit sessions in a bootstrapped project still stamp.
+# ---------------------------------------------------------------------------
+test_session_end_stamped_on_normal_path() {
+  seed_valid_state
+
+  run_stop_hook >/dev/null 2>&1
+
+  local snap="$SANDBOX/trail/incidents/.last-aggregate-state.json"
+  if [ ! -f "$snap" ]; then
+    fail "session_end snapshot not created on the normal (bootstrapped) path"
+    return
+  fi
+
+  local val
+  val=$(python3 -c "import json; d=json.load(open('$snap')); print(str(d.get('session_end', False)).lower())" 2>/dev/null)
+  [ "$val" = "true" ] || fail "expected session_end=true on the normal path, got '$val'"
+}
+
+# ---------------------------------------------------------------------------
 # Helper: alias for seed_valid_state (used by new Stage 2 tests)
 # ---------------------------------------------------------------------------
 setup_sandbox() {
@@ -279,6 +300,276 @@ SNAP
   echo "$out" | grep -q "직전 세션 종료가 확인되지 않았습니다" || fail "warning output contains 직전 세션 종료가 확인되지 않았습니다"
 }
 
+
+# ---------------------------------------------------------------------------
+# Raw-sandbox fixtures — bypass sandbox_setup/run_test. That harness always
+# pre-creates trail/dod, trail/inbox, trail/incidents (see lib/test-harness.sh
+# sandbox_setup), which defeats an "un-bootstrapped, trail/ absent from the
+# start" fixture. These invoke the real plugin-SSOT hook file directly with
+# CLAUDE_PLUGIN_ROOT pinned, exactly like the BG-I fixtures in
+# test-stop-gate-deadlock.sh.
+# ---------------------------------------------------------------------------
+STOPGATE_PLUGIN_ROOT="$REAL_PROJECT_DIR/plugins/rein-core"
+STOPGATE_HOOK="$STOPGATE_PLUGIN_ROOT/hooks/stop-session-gate.sh"
+
+_raw_record_pass() {
+  TEST_COUNT=$((TEST_COUNT + 1))
+  echo "RUN $1"
+  echo "  OK"
+}
+_raw_record_fail() {
+  TEST_COUNT=$((TEST_COUNT + 1))
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+  echo "RUN $1"
+  echo "  FAIL: $2" >&2
+}
+
+# Fixture: a project that was never bootstrapped (no .rein/project.json, no
+# trail/ at all) must come out of the Stop hook with trail/ still absent and
+# exit 0. Reproduces the stop-hook residue bug: the trap used to fire on
+# every early exit and unconditionally mkdir trail/incidents/, which flips
+# bootstrap-check.sh's tri-marker predicate to a false PARTIAL diagnosis on
+# the next prompt.
+fixture_unbootstrapped_no_trail_residue() {
+  local label="fixture_unbootstrapped_no_trail_residue"
+  local dir
+  dir="$(mktemp -d "/tmp/stopgate-nobootstrap-XXXXXX")"
+  local errfile
+  errfile="$(mktemp)"
+  local rc
+  (cd "$dir" \
+    && REIN_PROJECT_DIR_OVERRIDE="$dir" \
+       CLAUDE_PLUGIN_ROOT="$STOPGATE_PLUGIN_ROOT" \
+       bash "$STOPGATE_HOOK" </dev/null >/dev/null 2>"$errfile")
+  rc=$?
+  local err
+  err=$(cat "$errfile")
+  rm -f "$errfile"
+  if [ "$rc" -ne 0 ]; then
+    _raw_record_fail "$label" "expected exit 0, got $rc; stderr: $err"
+    rm -rf "$dir"
+    return
+  fi
+  if [ -e "$dir/trail" ]; then
+    _raw_record_fail "$label" "trail/ was created for an un-bootstrapped project (residue bug): $(find "$dir/trail" -type f 2>/dev/null | tr '\n' ' ')"
+    rm -rf "$dir"
+    return
+  fi
+  rm -rf "$dir"
+  _raw_record_pass "$label"
+}
+
+# Fixture: the advisory-summary call must read PROJECT_DIR, not the shell's
+# cwd. rein-aggregate-incidents.py falls back to "." when --project-dir is
+# omitted, so a stray shell cwd with its own noisy trail/incidents/
+# blocks.jsonl must never leak into the advisory shown for a different
+# project_dir.
+fixture_advisory_summary_respects_project_dir_not_cwd() {
+  local label="fixture_advisory_summary_respects_project_dir_not_cwd"
+  local proj today
+  proj="$(mktemp -d "/tmp/stopgate-advisory-proj-XXXXXX")"
+  today=$(date +%Y-%m-%d)
+  mkdir -p "$proj/trail/dod" "$proj/trail/inbox" "$proj/trail/incidents" "$proj/.rein"
+  printf '%s' '{"mode":"plugin","scope":"project","version":"1.0.0"}' > "$proj/.rein/project.json"
+  printf '# session note\n' > "$proj/trail/inbox/${today}-session.md"
+  cat > "$proj/trail/index.md" <<'EOF'
+# index
+- status: test
+- current: advisory cwd isolation
+- next: verify
+- note: fixture
+EOF
+  touch "$proj/trail/index.md"
+  touch "$proj/trail/dod/.session-has-src-edit"
+
+  # PROJECT_DIR's own blocks.jsonl, the same reason repeated >= 2 times (the
+  # incidents-to-rule advisory threshold) — this pattern MUST surface, to
+  # prove the isolation is real (not just "nothing gets through").
+  local j
+  for j in 1 2; do
+    printf '{"ts":"2026-01-01T00:01:0%dZ","hook":"pre-bash-safety-guard","reason":"project-side-pattern","target":"p%d"}\n' "$j" "$j" \
+      >> "$proj/trail/incidents/blocks.jsonl"
+  done
+
+  # A DIFFERENT directory standing in for the shell's cwd, with its own
+  # noisy blocks.jsonl. A leak surfaces as an [advisory] line quoting this
+  # pattern's count.
+  local cwd_dir i
+  cwd_dir="$(mktemp -d "/tmp/stopgate-advisory-cwd-XXXXXX")"
+  mkdir -p "$cwd_dir/trail/incidents"
+  for i in 1 2 3 4 5; do
+    printf '{"ts":"2026-01-01T00:00:0%dZ","hook":"pre-bash-safety-guard","reason":"cwd-leak-pattern","target":"d%d"}\n' "$i" "$i" \
+      >> "$cwd_dir/trail/incidents/blocks.jsonl"
+  done
+
+  local errfile
+  errfile="$(mktemp)"
+  local rc
+  (cd "$cwd_dir" \
+    && REIN_PROJECT_DIR_OVERRIDE="$proj" \
+       CLAUDE_PLUGIN_ROOT="$STOPGATE_PLUGIN_ROOT" \
+       bash "$STOPGATE_HOOK" </dev/null >/dev/null 2>"$errfile")
+  rc=$?
+  local err
+  err=$(cat "$errfile")
+  rm -f "$errfile"
+  rm -rf "$proj" "$cwd_dir"
+
+  if printf '%s' "$err" | grep -q "cwd-leak-pattern"; then
+    _raw_record_fail "$label" "advisory leaked the shell cwd's incidents into the sandbox project (stderr: $err)"
+    return
+  fi
+  if ! printf '%s' "$err" | grep -q "project-side-pattern"; then
+    _raw_record_fail "$label" "advisory did not surface PROJECT_DIR's own repeated pattern (stderr: $err)"
+    return
+  fi
+  if [ "$rc" -ne 0 ]; then
+    _raw_record_fail "$label" "expected exit 0 on the normal bootstrapped path, got $rc; stderr: $err"
+    return
+  fi
+  _raw_record_pass "$label"
+}
+
+# Fixture: a docs-only / read-only session (no source edit, SRC_EDIT_MARKER
+# absent) in a bootstrapped, non-degraded project is a NORMAL termination —
+# it just had nothing for the incident gate to check. It must still stamp
+# session_end=true, or the next SessionStart's abnormal-termination detector
+# (session-start-load-trail.sh, reads .last-aggregate-state.json) fires a
+# false "직전 세션 종료가 확인되지 않았습니다" notice on every no-edit session.
+fixture_docs_only_session_still_stamps_session_end() {
+  local label="fixture_docs_only_session_still_stamps_session_end"
+  local dir
+  dir="$(mktemp -d "/tmp/stopgate-docsonly-XXXXXX")"
+  mkdir -p "$dir/trail/incidents" "$dir/.rein"
+  printf '%s' '{"mode":"plugin","scope":"project","version":"1.0.0"}' > "$dir/.rein/project.json"
+  # Deliberately do NOT touch trail/dod/.session-has-src-edit.
+
+  local errfile
+  errfile="$(mktemp)"
+  local rc
+  (cd "$dir" \
+    && REIN_PROJECT_DIR_OVERRIDE="$dir" \
+       CLAUDE_PLUGIN_ROOT="$STOPGATE_PLUGIN_ROOT" \
+       bash "$STOPGATE_HOOK" </dev/null >/dev/null 2>"$errfile")
+  rc=$?
+  local err
+  err=$(cat "$errfile")
+  rm -f "$errfile"
+
+  if [ "$rc" -ne 0 ]; then
+    _raw_record_fail "$label" "expected exit 0 (no-src-edit early exit), got $rc; stderr: $err"
+    rm -rf "$dir"
+    return
+  fi
+
+  local snap="$dir/trail/incidents/.last-aggregate-state.json"
+  if [ ! -f "$snap" ]; then
+    _raw_record_fail "$label" "session_end snapshot not created for a docs-only (no src-edit) session in a bootstrapped project"
+    rm -rf "$dir"
+    return
+  fi
+  local val
+  val=$(python3 -c "import json; d=json.load(open('$snap')); print(str(d.get('session_end', False)).lower())" 2>/dev/null)
+  rm -rf "$dir"
+  if [ "$val" != "true" ]; then
+    _raw_record_fail "$label" "expected session_end=true for a docs-only session, got '$val'"
+    return
+  fi
+  _raw_record_pass "$label"
+}
+
+# Fixture: degraded mode does NOT skip the stamp. The project is still
+# bootstrapped, so "the hook ran to completion" is a fact independent of
+# degraded status. Skipping the stamp here would leave session_end=false,
+# and the next SessionStart's abnormal-termination detector would misreport
+# a normal, intentional degraded-mode exit as a crashed session (codex
+# round 1 finding — this was a DoD wording mistake, not a runtime need).
+fixture_degraded_but_bootstrapped_still_stamped() {
+  local label="fixture_degraded_but_bootstrapped_still_stamped"
+  local dir
+  dir="$(mktemp -d "/tmp/stopgate-degraded-XXXXXX")"
+  mkdir -p "$dir/trail/incidents" "$dir/trail/dod" "$dir/.rein" "$dir/.claude/cache"
+  printf '%s' '{"mode":"plugin","scope":"project","version":"1.0.0"}' > "$dir/.rein/project.json"
+  printf 'non-git-dir\n' > "$dir/.claude/cache/.rein-session-degraded"
+  touch "$dir/trail/dod/.session-has-src-edit"
+
+  local errfile
+  errfile="$(mktemp)"
+  local rc
+  (cd "$dir" \
+    && REIN_PROJECT_DIR_OVERRIDE="$dir" \
+       CLAUDE_PLUGIN_ROOT="$STOPGATE_PLUGIN_ROOT" \
+       bash "$STOPGATE_HOOK" </dev/null >/dev/null 2>"$errfile")
+  rc=$?
+  local err
+  err=$(cat "$errfile")
+  rm -f "$errfile"
+
+  if [ "$rc" -ne 0 ]; then
+    _raw_record_fail "$label" "expected exit 0 (degraded escape), got $rc; stderr: $err"
+    rm -rf "$dir"
+    return
+  fi
+  if ! printf '%s' "$err" | grep -q "degraded mode"; then
+    _raw_record_fail "$label" "stderr missing 'degraded mode' (got: $err)"
+    rm -rf "$dir"
+    return
+  fi
+  local snap="$dir/trail/incidents/.last-aggregate-state.json"
+  if [ ! -f "$snap" ]; then
+    _raw_record_fail "$label" "session_end snapshot should exist for a degraded-but-bootstrapped session (still stamped)"
+    rm -rf "$dir"
+    return
+  fi
+  local val
+  val=$(python3 -c "import json; d=json.load(open('$snap')); print(str(d.get('session_end', False)).lower())" 2>/dev/null)
+  rm -rf "$dir"
+  if [ "$val" != "true" ]; then
+    _raw_record_fail "$label" "expected session_end=true for a degraded-but-bootstrapped session, got '$val'"
+    return
+  fi
+  _raw_record_pass "$label"
+}
+
+# Fixture: REIN_BYPASS_STOP_GATE=1 in an un-bootstrapped project must not
+# create trail/ residue either. The bypass path writes its own audit line
+# directly (not through the aggregate script's set-session-end subcommand),
+# so it needs its own bootstrap guard, independent of the trap's.
+fixture_bypass_env_unbootstrapped_no_trail_residue() {
+  local label="fixture_bypass_env_unbootstrapped_no_trail_residue"
+  local dir
+  dir="$(mktemp -d "/tmp/stopgate-bypass-nobootstrap-XXXXXX")"
+  local errfile
+  errfile="$(mktemp)"
+  local rc
+  (cd "$dir" \
+    && REIN_PROJECT_DIR_OVERRIDE="$dir" \
+       CLAUDE_PLUGIN_ROOT="$STOPGATE_PLUGIN_ROOT" \
+       REIN_BYPASS_STOP_GATE=1 \
+       bash "$STOPGATE_HOOK" </dev/null >/dev/null 2>"$errfile")
+  rc=$?
+  local err
+  err=$(cat "$errfile")
+  rm -f "$errfile"
+  if [ "$rc" -ne 0 ]; then
+    _raw_record_fail "$label" "expected exit 0, got $rc; stderr: $err"
+    rm -rf "$dir"
+    return
+  fi
+  if [ -e "$dir/trail" ]; then
+    _raw_record_fail "$label" "trail/ was created by the bypass path for an un-bootstrapped project: $(find "$dir/trail" -type f 2>/dev/null | tr '\n' ' ')"
+    rm -rf "$dir"
+    return
+  fi
+  if ! printf '%s' "$err" | grep -q "BYPASS_ENV"; then
+    _raw_record_fail "$label" "audit line missing from stderr when un-bootstrapped (got: $err)"
+    rm -rf "$dir"
+    return
+  fi
+  rm -rf "$dir"
+  _raw_record_pass "$label"
+}
+
 main() {
   run_test test_emit_block_valid_json
   run_test test_emit_block_escapes_safely
@@ -291,6 +582,8 @@ main() {
     stop-session-gate.sh rein-aggregate-incidents.py rein-stop-emit-block.py
   run_test test_stop_passes_when_deferred \
     stop-session-gate.sh rein-aggregate-incidents.py rein-stop-emit-block.py
+  run_test test_session_end_stamped_on_normal_path \
+    stop-session-gate.sh rein-aggregate-incidents.py rein-stop-emit-block.py
   run_test test_block_counter_resets_on_hash_change \
     stop-session-gate.sh rein-aggregate-incidents.py rein-stop-emit-block.py rein-mark-incident-processed.py
   run_test test_three_blocks_require_bypass \
@@ -299,6 +592,11 @@ main() {
     stop-session-gate.sh rein-aggregate-incidents.py rein-stop-emit-block.py rein-mark-incident-processed.py
   run_test test_session_start_clears_session_scope_stamps
   run_test test_session_start_detects_abnormal_termination
+  fixture_unbootstrapped_no_trail_residue
+  fixture_advisory_summary_respects_project_dir_not_cwd
+  fixture_docs_only_session_still_stamps_session_end
+  fixture_degraded_but_bootstrapped_still_stamped
+  fixture_bypass_env_unbootstrapped_no_trail_residue
   summary
 }
 

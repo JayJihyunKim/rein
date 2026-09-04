@@ -143,7 +143,7 @@ Claude Code gives agents tools. Rein gives teams control. See [docs/architecture
 
 After install, the first time the agent tries a source edit (Edit / Write / MultiEdit) or a Bash command, Rein's bootstrap gate detects that `trail/` is missing, **blocks the operation**, and prints a one-line `python3 …/rein-bootstrap-project.py` command. Run that command to create `trail/` and `.rein/`; subsequent edits pass through normally. The same flow runs after `/reload-plugins` — it converges on the same path as a fresh session.
 
-Non-git projects are supported — `git init` is **not required**. When no `git_root` is found, bootstrap uses the project directory itself as the root.
+A git repository is **required** — Rein's review and commit gates are bound to git state, so a non-git folder only gets the edit gate. If the folder isn't a git repo yet, the agent asks before running `git init` for you; decline and Rein stays off there until you run it yourself. Non-git folders can still opt in explicitly via `--allow-non-git` on the bootstrap command, with that same edit-gate-only caveat.
 
 To disable the gate, set `bootstrap-gate: false` in `.rein/policy/hooks.yaml`. Detailed options are in the troubleshooting docs.
 
@@ -229,7 +229,7 @@ Use a recent version of Claude Code. The marketplace command is a single word: `
 
 Rein no longer auto-prompts on session start. The bootstrap command surfaces only when the agent attempts its **first source edit** (Edit / Write / MultiEdit) or **first Bash command** in a directory without `trail/`. Ask the agent to make any edit — the gate will print a one-line `python3 …/rein-bootstrap-project.py` command. Run it once and subsequent edits pass through.
 
-`/reload-plugins` produces the same behaviour — there is no separate "first session" path. Non-git projects are supported; `git init` is **not** required.
+`/reload-plugins` produces the same behaviour — there is no separate "first session" path. A git repository is **required**; the agent asks before running `git init` for you. `--allow-non-git` remains available as an explicit opt-in for non-git folders (edit gate only).
 
 To disable the gate entirely, set `bootstrap-gate: false` in `.rein/policy/hooks.yaml`. Individual hook keys (`pre-edit-trail-bootstrap-gate`, `pre-tool-use-bash-bootstrap-gate`) can be toggled the same way.
 
@@ -288,9 +288,9 @@ Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework str
 
 ## Release history
 
-Latest release: **v2.0.2** (2026-09-01) — the "pick a persona" flow is simplified to three fixed top-level choices (persona list / create your own / turn off), and built-in personas now go by their human display names (마르코 / 제니 / 최행배) instead of an internal file slug across chat, the picker, and session context — presets that carry an English notation (Marco Santoro, Jennie) use it in English conversations. ([CHANGELOG](CHANGELOG.md))
+Latest release: **v2.0.3** (2026-09-04) — four user-facing fixes: the security review gate no longer silently disappears when a project has no local policy (the policy now ships with the plugin); non-git folders get one consistent onboarding path (Rein requires a git repository — the agent asks before running `git init`, `--allow-non-git` stays as an explicit opt-in, and governance turns on in the same session once bootstrap finishes); and Rein's runtime state files are added to the project's `.gitignore` so they no longer drift review fingerprints (a repo that already tracks `.rein/state.json` needs a one-time `git rm --cached .rein/state.json`; see CHANGELOG); and ending a session in a project that was never bootstrapped no longer leaves `trail/` residue that the next session misread as a half-finished setup. ([CHANGELOG](CHANGELOG.md))
 
-Previous: **v2.0.1** (2026-08-28) — hotfix for v2.0.0: updating to v2.0.0 could block every file edit because the active-task gate's policy shipped without the plugin. The policy is now bundled and falls back to a deployed default when a project has none, so edits are allowed with an active task and otherwise get a recoverable prompt instead of a hard block. ([CHANGELOG](CHANGELOG.md))
+Previous: **v2.0.2** (2026-09-01) — the "pick a persona" flow is simplified to three fixed top-level choices (persona list / create your own / turn off), and built-in personas now go by their human display names (마르코 / 제니 / 최행배) instead of an internal file slug across chat, the picker, and session context — presets that carry an English notation (Marco Santoro, Jennie) use it in English conversations. ([CHANGELOG](CHANGELOG.md))
 
 For prior dev-cycle history (v0.x), see [docs/changelog-archive/2026-04-pre-v1.md](docs/changelog-archive/2026-04-pre-v1.md).
 

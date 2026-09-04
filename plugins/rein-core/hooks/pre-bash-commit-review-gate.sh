@@ -296,29 +296,53 @@ fi
 # delegate() 내부에서 파일 부재를 FAIL 로 전환해 v1 이 이어서 직접
 # 판정하게 만드는 방식이었다 — 그러나 이 훅에는 그 v1 폴백이 없다(위
 # 판정 트리 참조). 그래서 이 훅은 위임을 시도하기 전에 축 설정 자체를
-# 먼저 점검한다 — 전환 여부와 무관하게(미전환이어도) "폴더는 있는데
-# 파일이 없다"는 상태를 조용한 opt-out 으로 흘려보내지 않는다. 이 검사는
-# switched/delegate 트리보다 앞선다(先行) — 축이 아예 사라지는 경로를
-# 원천 차단하는 것이 목적이라, 전환 상태 분기 안쪽에 두면 미전환 경로가
-# 이 검사를 우회하게 된다.
-SECURITY_AXIS_DIR="$PROJECT_DIR/.rein/policy/security-axis"
-if [ ! -d "$SECURITY_AXIS_DIR" ]; then
-  # 폴더 자체가 없다 — 이 프로젝트는 커밋 시점 보안 요구를 선언하지
-  # 않는다. 번들 기본 정책(plugins/rein-core/policies/default/commit.yaml)
-  # 도 security_review 를 요구하지 않으므로 이 상태와 일치한다 — 명시적
-  # 미선언은 정당한 opt-out (사용자 기본 배포 상태). 릴리스 시 부트스트랩
-  # provisioning 으로 이 폴더를 기본 생성할지는 별도 결정 사항이며 이
-  # 훅의 범위 밖이다.
-  exit 0
-fi
-if [ ! -f "$SECURITY_AXIS_DIR/commit-security.yaml" ]; then
-  # 폴더는 있는데 정책 파일이 없다 — 의도된 미선언이 아니라 설정 손상
-  # 가능성이 높다(의도된 opt-out 이라면 폴더 자체를 지운다, 위 분기).
-  # fail-closed — 축이 로그 없이 사라지는 방향을 금지한다.
-  echo "[rein] The commit review gate cannot evaluate the security-review axis because its policy folder exists (.rein/policy/security-axis/) but the policy file (commit-security.yaml) inside it is missing. This looks like damaged configuration rather than an intentional opt-out — an intentional opt-out removes the whole folder, not just this file. The commit is blocked until the file is restored, or the folder is removed to declare no security-review axis for this project." >&2
-  log_block "보안 축 설정 손상 (fail-closed)" "$COMMAND"
-  exit 2
-fi
+# 먼저 점검한다 — 전환 여부와 무관하게(미전환이어도) 이 축을 판정할
+# 정책이 어디에도 없는 상태를 조용한 opt-out 으로 흘려보내지 않는다. 이
+# 검사는 switched/delegate 트리보다 앞선다(先行) — 축이 아예 사라지는
+# 경로를 원천 차단하는 것이 목적이라, 전환 상태 분기 안쪽에 두면 미전환
+# 경로가 이 검사를 우회하게 된다.
+#
+# 정책 위치는 hooks/lib/security-axis-policy-resolve.sh 의
+# rein_security_axis_policy_resolve() 로 해소한다 — project override
+# (.rein/policy/security-axis/) → 배포 번들(<plugin-root>/policies/
+# security-axis/) 순, hooks/lib/security-review-gate.sh 의 delegate 가 쓰는
+# 것과 완전히 같은 함수(그 lib 가 이미 이 함수를 소싱해 두었으므로 여기서
+# 다시 source 하지 않는다 — 위 "두 리뷰 lib 하드 소싱" 블록이 이미 이
+# 함수를 이 프로세스에 로드했다). "폴더 없음 = opt-out" 이라는 구 가정은
+# 더 이상 성립하지 않는다 — 배포 번들이 있는 한 project override 를 지운
+# 것만으로는 이 축이 꺼지지 않는다(active_task 축의 동일한 위변조 가드
+# 강화, hooks/lib/active-task-gate.sh 의 "위변조 가드는 오히려 강화된다"
+# 절과 동일한 원리). 이 축의 유일한 문서화된 opt-out 은 `.rein/policy/
+# authority.yaml` 로 capability 를 switched 목록에서 빼는 것뿐이며, 그
+# 판정은 아래 switched-check 가 담당한다.
+rein_security_axis_policy_resolve "$PROJECT_DIR" "$_REIN_SRG_PKG_PARENT"
+case "$rein_security_axis_policy_kind" in
+  PROJECT|BUNDLE)
+    # 정책을 어느 계층에서든 찾았다 — 아래 switched-check + 위임으로.
+    :
+    ;;
+  PROJECT_DAMAGED)
+    # 프로젝트 오버라이드 폴더는 있는데 commit-security.yaml 이 없다 —
+    # 의도된 미선언이 아니라 설정 손상 가능성이 높다. 배포 번들로도
+    # 넘어가지 않는다(resolver 자신의 계약 — 손상된 설정을 그럴듯한
+    # 기본값으로 가리면 사용자가 자신의 설정이 깨졌다는 사실 자체를 알
+    # 길이 없어진다). fail-closed — 축이 로그 없이 사라지는 방향을
+    # 금지한다.
+    echo "[rein] The commit review gate cannot evaluate the security-review axis because its project policy path (.rein/policy/security-axis) exists but is not a usable policy folder — either commit-security.yaml is missing inside it, or the path is not a directory at all (a regular file or a dangling symbolic link). This looks like damaged configuration, not an intentional opt-out — removing the whole folder no longer disables this axis either (the plugin's bundled default policy takes over). The commit is blocked until the file is restored, or the whole folder is removed to fall back to the bundled default." >&2
+    log_block "보안 축 설정 손상 (fail-closed)" "$COMMAND"
+    exit 2
+    ;;
+  *)
+    # NONE — project override 도, 배포 번들도 없다. 이것은 opt-out 이
+    # 아니라 설치 손상이다: security_review 는 배포 기본으로 v2 전환돼
+    # 있어 정상 플러그인 install 은 항상 번들 정책을 갖고 있어야 한다
+    # (hooks/pre-edit-task-gate.sh 의 동형 fail-closed 안내와 같은
+    # 형태 — active_task 축의 동일한 "정책이 배포본에 있어야 한다" 계약).
+    echo "[rein] The commit review gate cannot evaluate the security-review axis because no policy for it could be found anywhere — not in this project's override (.rein/policy/security-axis/) and not in the plugin's bundled default. The security-axis policy ships with the plugin; if it is missing, your install is damaged — reinstall the plugin with 'claude plugin update rein' to restore it. Do not hand-craft policy files to bypass this. The commit is blocked until the policy is restored." >&2
+    log_block "보안 축 정책 없음 (fail-closed)" "$COMMAND"
+    exit 2
+    ;;
+esac
 
 if rein_security_review_authority_switched; then
   rein_security_review_delegate
@@ -333,7 +357,7 @@ if rein_security_review_authority_switched; then
       exit 0
       ;;
     *)
-      echo "[rein] The security-review axis could not be evaluated (v2 delegation failed, timed out, or returned an unparseable response) after authority for this axis was confirmed switched to v2. This commit is blocked until the underlying failure is fixed — there is no v1 fallback judgment for this axis anymore. Check the v2 engine installation (bin/rein) and .rein/policy/security-axis/commit-security.yaml." >&2
+      echo "[rein] The security-review axis could not be evaluated (v2 delegation failed, timed out, or returned an unparseable response) after authority for this axis was confirmed switched to v2. This commit is blocked until the underlying failure is fixed — there is no v1 fallback judgment for this axis anymore. Check the v2 engine installation (bin/rein) and the security-axis policy (project override at .rein/policy/security-axis/, or the plugin's bundled default)." >&2
       log_block "보안 리뷰 위임 실패 (v2, fail-closed)" "$COMMAND"
       exit 2
       ;;

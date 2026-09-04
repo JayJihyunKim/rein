@@ -149,7 +149,11 @@ _sad_record_session_choice() {
   fi
   printf '%s\t%s\t%s\t%s\n' \
     "$(date -u +%FT%TZ)" "$tier" "$path" "$reason" >> "$log" 2>/dev/null || true
-  : > "$flag" 2>/dev/null || true
+  # printf, not `:` — a redirection error on a special builtin exits a
+  # POSIX-mode shell (bash 5 + POSIXLY_CORRECT=1) instead of failing the command.
+  # `2>/dev/null` BEFORE the `>`: redirections apply left to right, so a
+  # failing open of the target is reported to the already-silenced stderr.
+  printf '' 2>/dev/null > "$flag" || true
 }
 
 # select_active_dod: emit "<tier>\t<dod_path>\t<reason>" on stdout.

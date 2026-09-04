@@ -424,7 +424,27 @@ def next_suffix_path(incidents_dir: Path, hook: str, hash_: str):
         n += 1
 
 
+def _project_bootstrapped(project_dir: Path) -> bool:
+    """A project owns trail/ writes only once it has completed rein bootstrap.
+
+    `.rein/project.json` is the bootstrap completion marker (written last,
+    atomically, by rein-bootstrap-project.py) — it must be a regular file,
+    matching every other reader of this marker (the hooks' `[ -f ... ]`
+    checks, bootstrap-check.sh's tri-marker predicate). A directory or other
+    non-file entry at that path is not a valid marker and must be treated the
+    same as absent. Any aggregate-side write (mkdir included) must be gated
+    on this — a Stop-hook trap firing on an early exit in a never-bootstrapped
+    project must not leave a stray trail/incidents/ behind, or the next
+    prompt's bootstrap tri-marker check misreads it as a crashed-mid-run
+    PARTIAL state instead of "not started".
+    """
+    return (project_dir / ".rein" / "project.json").is_file()
+
+
 def aggregate(project_dir: Path):
+    if not _project_bootstrapped(project_dir):
+        return 0, 0
+
     incidents_dir = project_dir / "trail/incidents"
     blocks_jsonl = incidents_dir / "blocks.jsonl"
     watermark = incidents_dir / ".last-processed-line"
@@ -659,6 +679,9 @@ def set_session_end(project_dir: Path, value: bool) -> int:
 
     Lock contention 시 silent (return 0) — hook 흐름을 차단하지 않는다.
     """
+    if not _project_bootstrapped(project_dir):
+        return 0
+
     incidents_dir = project_dir / "trail/incidents"
     snapshot_path = incidents_dir / ".last-aggregate-state.json"
     lock_path = incidents_dir / ".aggregate.lock"

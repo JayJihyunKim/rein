@@ -12,14 +12,17 @@
 # 그 면제 판정은 v2 위임 **이전**(hooks/lib/security-review-gate.sh
 # 의 rein_check_security_review_stamp())에서 이미 끝나 있다 — 면제가
 # 성립하면 이 정책이 매칭되는 위임 자체가 아예 일어나지 않는다. 그래서
-# 이 정책 파일 자신은 면제 로직을 전혀 모르는 단순한 무조건 요구로
+# 이 정책 파일 자신은 면제 로직을 전혀 모르는 단순한 요구로
 # 남겨도 안전하다(호출자가 이미 걸러낸 뒤에만 도달하는 정책).
 #
-# 스키마는 policies/default/commit.yaml 과 완전히 같은 4필드 — 다른
-# 점은 require 값 하나(code_review → security_review)뿐이다.
+# 스키마는 policies/default/commit.yaml 과 완전히 같다 — task.exists
+# 조건화까지 그 파일과 동일한 이유로 상속한다(활성 작업 없이는 정직하게
+# 발급할 리뷰 증거 자체가 없다, plugins/rein-core/policies/security-axis/
+# commit-security.yaml 의 배포 번들 사본 주석 참조).
 trigger: tool.pre
 when:
   command.type: git.commit
+  task.exists: "true"
 require:
   - security_review
 failure_mode: closed

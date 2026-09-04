@@ -227,12 +227,42 @@ fi
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BIN_REIN="$PLUGIN_ROOT/bin/rein"
 
-# security-review-gate.sh 의 v1 위임과 정확히 동일한 env 계산
-# (REIN_PROJECT_ROOT + REIN_POLICY_DIR=.rein/policy/security-axis) —
-# bin/rein hook 이 `bin/rein hook` 을 통해 사용하는 것과 동일한
-# 축 전용 정책 폴더를 가리켜야 v2 가 이 커밋의 security_review 요구를
-# 올바르게 본다.
-POLICY_DIR="$PROJECT_DIR/.rein/policy/security-axis"
+# security-review-gate.sh 의 위임과 정확히 동일한 정책 위치 해소 — project
+# override(.rein/policy/security-axis) 우선, 없으면 배포 번들
+# (PLUGIN_ROOT/policies/security-axis). 세 소비 지점(이 스크립트,
+# hooks/lib/security-review-gate.sh 의 rein_security_review_delegate(),
+# hooks/pre-bash-commit-review-gate.sh 의 사전 점검)이 절대 서로 다른
+# 답을 내면 안 되므로 hooks/lib/security-axis-policy-resolve.sh 하나만
+# 소스로 삼는다 — 이 스크립트가 REIN_POLICY_DIR 로 넘기는 값이 커밋
+# 게이트가 판정에 실제로 쓰는 폴더와 어긋나면, "증거는 발급했는데 게이트는
+# 다른 정책을 보고 여전히 차단한다"는 불일치가 재발한다.
+#
+# PROJECT_DAMAGED(오버라이드 폴더는 있는데 파일이 없음)와 NONE(오버라이드도
+# 번들도 없음)은 이 스크립트가 발급을 시도할 만한 정책이 없다는 뜻이라
+# fail-closed 로 즉시 거부한다 — git 을 지목하지 않고 정확히 어느 폴더/
+# 파일이 없는지 명시한다(이 사이클에 반드시 기록이 남아야 하므로,
+# 사용자가 무엇을 고쳐야 하는지 바로 알 수 있어야 한다).
+_msr_pd_lib_dir="$PLUGIN_ROOT/hooks/lib"
+if [ ! -f "$_msr_pd_lib_dir/security-axis-policy-resolve.sh" ]; then
+  echo "ERROR: [mark-security-reviewed] required library missing: $_msr_pd_lib_dir/security-axis-policy-resolve.sh — cannot resolve the security-axis policy location. Reinstall the plugin to restore it." >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+. "$_msr_pd_lib_dir/security-axis-policy-resolve.sh"
+rein_security_axis_policy_resolve "$PROJECT_DIR" "$PLUGIN_ROOT"
+case "$rein_security_axis_policy_kind" in
+  PROJECT|BUNDLE)
+    POLICY_DIR="$rein_security_axis_policy_dir"
+    ;;
+  PROJECT_DAMAGED)
+    echo "ERROR: [mark-security-reviewed] the project's security-axis policy path ($PROJECT_DIR/.rein/policy/security-axis) exists but is not a usable policy folder — commit-security.yaml is missing inside it, or the path is not a directory (a regular file or a dangling symbolic link). Cannot issue v2 evidence against a damaged policy directory. Restore the folder and file, or remove the path entirely to fall back to the plugin's bundled default." >&2
+    exit 1
+    ;;
+  *)
+    echo "ERROR: [mark-security-reviewed] no security-axis policy could be found — not in the project override ($PROJECT_DIR/.rein/policy/security-axis) and not in the plugin's bundled default ($PLUGIN_ROOT/policies/security-axis). This install is damaged; reinstall the plugin to restore the bundled policy." >&2
+    exit 1
+    ;;
+esac
 
 # _msr_resolve_python — python3 탐색 하나로 통일 (print-digest / issuance
 # 둘 다 사용).

@@ -13,6 +13,10 @@
 #   SCOPE-TEST-BACKFILL — rc=0 (trail/ present) + marker absent → 1 emit + marker,
 #                         re-run silent
 #   SCOPE-PERF          — marker present (pass path) → no primer emit, no marker write
+#   Primer status footer — primer's one-line bootstrap-status footer:
+#                         un-bootstrapped → "초기화는 아직이에요", bootstrapped
+#                         (rc=0) → "초기화는 이미 끝났어요.", second session
+#                         (marker present, primer not shown at all) → neither.
 #   Helper unit (Task 1.1) — rein_is_onboarded / rein_mark_onboarded contract
 #
 # Strategy: real temp git repos + CLAUDE_PLUGIN_ROOT pointed at the repo's
@@ -149,6 +153,14 @@ CTX="$(extract_additional_context "$RL_OUT")"; ENV_RC=$?
 if [ "$ENV_RC" != "0" ]; then fail "rules envelope not exactly one / parse error"; else
   if printf '%s' "$CTX" | grep -qF "$PRIMER_FLOW_ANCHOR"; then pass "rules additionalContext carries primer (SCOPE-TEST-CHANNELS b)"; else fail "rules additionalContext missing primer"; fi
   if printf '%s' "$CTX" | grep -qF "operating-sequence" || printf '%s' "$CTX" | grep -qiF "operating sequence"; then pass "rules additionalContext still ships rule bodies"; else fail "rules additionalContext lost rule bodies"; fi
+  # Primer status footer: this block runs run_bootstrap() BEFORE run_rules(), and
+  # run_bootstrap on a plain fresh git repo auto-bootstraps it (BG-A branch
+  # 4) — so by the time rules.sh reads the tri-marker state here, the
+  # project IS already fully bootstrapped. Correct expectation is "already
+  # done"; the "not yet" case is covered by its own fixture below (rules.sh
+  # run in isolation, bootstrap.sh never invoked).
+  if printf '%s' "$CTX" | grep -qF "초기화는 이미 끝났어요"; then pass "primer footer shows 'already initialized' once BG-A auto-bootstrap has run"; else fail "primer footer missing '초기화는 이미 끝났어요' after auto-bootstrap"; fi
+  if printf '%s' "$CTX" | grep -qF "초기화는 아직이에요"; then fail "primer footer wrongly claims 'not yet' after auto-bootstrap already completed"; fi
 fi
 # SCOPE-TEST-FIRST: after rules, exactly one marker created.
 if [ -f "$REPO/.rein/.onboarded" ]; then pass "marker created by rules (SCOPE-TEST-FIRST)"; else fail "marker not created after rules"; fi
@@ -176,6 +188,9 @@ CTX2="$(extract_additional_context "$RL2")"; ENV2_RC=$?
 if [ "$ENV2_RC" != "0" ]; then fail "second-session rules envelope not exactly one"; else
   if printf '%s' "$CTX2" | grep -qF "$PRIMER_FLOW_ANCHOR"; then fail "rules re-emitted primer on second session"; else pass "rules additionalContext primer-free on second session (SCOPE-TEST-SECOND)"; fi
   if printf '%s' "$CTX2" | grep -qF "operating-sequence" || printf '%s' "$CTX2" | grep -qiF "operating sequence"; then pass "rules still ships rule bodies on second session"; else fail "rules lost rule bodies on second session"; fi
+  # Primer status footer: second session (marker present) → primer (and its status
+  # footer) is not shown at all, so NEITHER status line should appear.
+  if printf '%s' "$CTX2" | grep -qF "초기화는"; then fail "primer footer leaked into a second session where the primer itself should be silent"; else pass "no primer status footer on second session (primer itself is silent)"; fi
 fi
 M_AFTER="$(cat "$REPO/.rein/.onboarded")"
 if [ "$M_BEFORE" = "$M_AFTER" ]; then pass "marker not re-written on pass path (SCOPE-PERF)"; else fail "marker re-written on pass path (perf regression)"; fi
@@ -195,12 +210,34 @@ run_rules "$BREPO" > "$BR1"
 if [ -f "$BREPO/.rein/.onboarded" ]; then pass "rules wrote marker on rc=0 backfill"; else fail "rules did not write marker on rc=0 backfill"; fi
 CTXB="$(extract_additional_context "$BR1")"
 if printf '%s' "$CTXB" | grep -qF "$PRIMER_FLOW_ANCHOR"; then pass "rules backfill carries primer (rc=0)"; else fail "rules backfill missing primer (rc=0)"; fi
+# Primer status footer: bootstrapped project (rc=0 backfill) → the "already done" status line.
+if printf '%s' "$CTXB" | grep -qF "초기화는 이미 끝났어요"; then pass "primer footer shows 'already initialized' for a bootstrapped project"; else fail "primer footer missing '초기화는 이미 끝났어요' for a bootstrapped project"; fi
+if printf '%s' "$CTXB" | grep -qF "초기화는 아직이에요"; then fail "primer footer wrongly claims 'not yet' for a bootstrapped project"; fi
 # Re-run: both channels silent.
 run_bootstrap "$BREPO" > "$BB2"
 run_rules "$BREPO" > "$BR2"
 if grep -qF "$PRIMER_FLOW_ANCHOR" "$BB2"; then fail "bootstrap re-emitted after backfill"; else pass "bootstrap silent after backfill (SCOPE-TEST-BACKFILL)"; fi
 CTXB2="$(extract_additional_context "$BR2")"
 if printf '%s' "$CTXB2" | grep -qF "$PRIMER_FLOW_ANCHOR"; then fail "rules re-emitted after backfill"; else pass "rules silent after backfill (SCOPE-TEST-BACKFILL)"; fi
+
+# ==========================================================================
+# Primer status footer — "not yet" branch.
+# rules.sh run in ISOLATION (bootstrap.sh never invoked) on a fresh git repo
+# with no trail/.rein/project.json/trail-index at all, so the tri-marker
+# check genuinely sees an un-bootstrapped project.
+# ==========================================================================
+echo "RUN status_line_not_yet_bootstrapped"
+NY_REPO="$(mk_repo fresh)"
+NY_OUT="$(mktemp)"
+TMP_DIRS+=("$NY_OUT")
+run_rules "$NY_REPO" > "$NY_OUT"
+NY_CTX="$(extract_additional_context "$NY_OUT")"; NY_RC=$?
+if [ "$NY_RC" != "0" ]; then
+  fail "status_line_not_yet: rules envelope not exactly one / parse error"
+else
+  if printf '%s' "$NY_CTX" | grep -qF "초기화는 아직이에요"; then pass "primer footer shows 'not yet initialized' when nothing has bootstrapped the project"; else fail "primer footer missing '초기화는 아직이에요' for a genuinely un-bootstrapped project"; fi
+  if printf '%s' "$NY_CTX" | grep -qF "초기화는 이미 끝났어요"; then fail "primer footer wrongly claims 'already done' for a genuinely un-bootstrapped project"; fi
+fi
 
 echo ""
 if [ "$FAIL" -eq 0 ]; then
