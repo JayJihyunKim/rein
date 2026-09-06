@@ -124,7 +124,7 @@ Claude Code 는 에이전트에게 도구를 줍니다. Rein 은 팀에게 통�
 ## 무엇을 보장하나
 
 1. **코드 편집 전에 작업이 먼저 정의된다.** 모든 소스 편집 전에 완료 기준 (Definition of Done) 파일이 필요합니다.
-2. **리뷰 통과 전엔 commit·테스트가 차단된다.** 리뷰 기록이 생기기 전까지 `git commit` 과 테스트 실행이 막힙니다.
+2. **리뷰 통과 전엔 commit 이 차단된다.** 코드를 바꾸는 커밋은 리뷰 기록이 먼저 있어야 `git commit` 이 통과하고, 문서만 바꾼 커밋은 리뷰 없이 통과합니다. 리뷰 게이트는 테스트 실행을 막지 않습니다 — 코드나 리뷰 전에 실패하는 테스트를 먼저 돌릴 수 있습니다 (TDD).
 3. **증거가 자동으로 쌓이고 회전된다.** 새 작업은 `trail/inbox/` 에 기록됩니다. 다음 날 어제까지의 inbox 가 `daily/` 요약으로 병합되고, 7일 지난 daily 항목은 `weekly/` 로 병합됩니다. 다음 세션 시작 시 `trail/index.md` 만 자동 로드되며, 과거 요약은 필요 시 명시 read 합니다.
 4. **업데이트는 Claude Code 플러그인 매니저가 처리한다.** 플러그인이 자기 파일을 소유하므로 사용자 수정 파일은 건드리지 않습니다.
 5. **두 모델을 한 세션에서.** Rein 은 구현은 Claude 에, 코드 리뷰는 Codex 에 라우팅합니다 (Codex 미설치 시 자동으로 Claude fallback). 두 모델의 강점을 Claude Code 세션 안에서 그대로 활용하므로 도구를 전환할 필요가 없습니다.
@@ -169,7 +169,8 @@ your-repo/
 │   ├── project.json          ← Rein 모드 + scope (커밋 대상)
 │   └── policy/               ← 저장소 로컬 정책 템플릿
 │       ├── hooks.yaml
-│       └── rules.yaml
+│       ├── rules.yaml
+│       └── persona.yaml
 ├── trail/                    ← 증거 저장소 (자동 회전)
 │   ├── inbox/                ← 오늘 완료한 작업 기록 (다음 세션에 어제 항목이 daily/ 로 병합)
 │   ├── daily/                ← 일간 요약 (7일 지난 항목은 weekly/ 로 병합)
@@ -179,21 +180,25 @@ your-repo/
 │   ├── incidents/            ← hook 차단 기록 (규칙 발전에 사용)
 │   ├── agent-candidates/     ← 반복 incident 패턴에서 제안된 새 에이전트 후보
 │   └── index.md              ← 현재 프로젝트 상태 (5~25 줄, 세션 시작 시 자동 로드)
-└── .claude/
-    └── settings.json         ← 한 줄: `rein` 플러그인 핀
+├── .claude/
+│   └── security/
+│       └── profile.yaml      ← 보안 검토 레벨 (기본: standard)
+└── .gitignore                ← Rein 런타임 상태 파일 무시 항목 추가 (파일이 없으면 생성)
 ```
+
+플러그인이 활성화됐다는 기록은 설치 시 고른 scope 에 따라 Claude Code 가 자기 설정 파일에 남깁니다 — 기본 `user` scope 는 저장소 밖 `~/.claude/settings.json` 에 기록됩니다 (Claude Code 의 plugin scope 문서 참조). Rein 은 거기에 아무것도 쓰지 않습니다.
 
 이게 전부입니다. 프레임워크의 **hook·rule·agent·skill** 은 플러그인 안에 ship 되어 Claude Code 의 플러그인 캐시에 들어 있습니다 — 사용자 저장소에는 복사되지 않으므로, 플러그인 업데이트가 사용자 파일을 덮어쓰지 않습니다. 프로젝트 고유의 지시 사항을 함께 두고 싶다면 사용자 저장소에 직접 `AGENTS.md` (또는 `.claude/CLAUDE.md`) 를 작성하세요. Rein 은 이를 읽기만 하고 수정하지 않습니다.
 
-저장소 단위 hook 정책은 `.rein/policy/hooks.yaml` 에서 조정합니다 — `<hook-name>: false` 또는 `<hook-name>: { enabled: false }` 가 모두 허용됩니다. `profile:` 키 (`lean` / `standard` / `strict` 중 하나) 로 무거운 gate 의 기본값을 한꺼번에 바꿀 수 있습니다 — `lean` 은 `post-edit-plan-coverage`, `post-write-spec-review-gate`, `post-write-dod-routing-check` 를 끄고(탐색·문서 작업용), `standard` (기본) 는 모두 활성, `strict` 는 향후 추가 strictness 의 reserved slot 입니다. 개별 hook 항목은 항상 profile 보다 우선합니다.
+저장소 단위 hook 정책은 `.rein/policy/hooks.yaml` 에서 조정합니다 — `<hook-name>: false` 또는 `<hook-name>: { enabled: false }` 가 모두 허용됩니다. `profile:` 키 (`lean` / `standard` / `strict` 중 하나) 로 무거운 gate 의 기본값을 한꺼번에 바꿀 수 있습니다 — `lean` 은 `post-edit-plan-coverage`, `post-edit-spec-review-gate`, `post-edit-dod-routing-check` 를 끄고(탐색·문서 작업용), `standard` (기본) 는 모두 활성, `strict` 는 향후 추가 strictness 의 reserved slot 입니다. 개별 hook 항목은 항상 profile 보다 우선합니다.
 
-**페르소나 (선택).** Rein 의 응답은 기본적으로 담백한 중립 말투입니다. 플러그인에 내장 페르소나 2종이 들어 있습니다 — 세션에서 "페르소나 골라줘" 라고 말하면 하나를 고르거나, 질문 몇 개에 답해 나만의 페르소나를 만들 수 있습니다. 이전 기본 페르소나를 계속 쓰고 싶다면 한 줄로 복원됩니다 (자세한 내용은 [CHANGELOG](CHANGELOG.md)):
+**페르소나 (선택).** Rein 의 응답은 기본적으로 담백한 중립 말투입니다. 플러그인에 내장 페르소나 3종(마르코 / 제니 / 최행배)이 들어 있습니다 — 세션에서 "페르소나 골라줘" 라고 말하면 하나를 고르거나, 질문 몇 개에 답해 나만의 페르소나를 만들 수 있습니다. 이전 기본 페르소나를 계속 쓰고 싶다면 한 줄로 복원됩니다 (자세한 내용은 [CHANGELOG](CHANGELOG.md)):
 
 ```bash
 mkdir -p .rein/policy && printf 'enabled: true\npreset: boss-ace\n' > .rein/policy/persona.yaml
 ```
 
-> 권장: `trail/` 과 `.claude/cache/` 를 사용자 `.gitignore` 에 추가하세요 (세션 증거를 git 에 커밋하지 않으려는 경우). Rein 은 `.gitignore` 를 자동 편집하지 않습니다.
+> 권장: `trail/` 과 `.claude/cache/` 를 사용자 `.gitignore` 에 추가하세요 (세션 증거를 git 에 커밋하지 않으려는 경우) — 이건 사용자 선택입니다. Rein 자체는 bootstrap 때 자기 런타임 상태 파일(`.rein/state/`, `.rein/state.json` 등)의 무시 항목만 추가하고(이후 세션 시작 때 빠진 항목을 보강), 그 외 `.gitignore` 내용은 건드리지 않습니다.
 
 ---
 
@@ -273,7 +278,7 @@ claude plugin remove everything-claude-code
 4. 브랜치 Push: `git push origin feat/amazing-feature`
 5. Pull Request 열기
 
-PR 전에 [`AGENTS.md`](AGENTS.md) 에서 프레임워크 구조와 기여 규칙을 먼저 파악해 주세요.
+PR 전에 [docs/architecture.md](docs/architecture.md) (hook lifecycle) 와 [docs/policy-model.md](docs/policy-model.md) (governance 모델) 에서 프레임워크 구조와 기여 규칙을 먼저 파악해 주세요.
 
 | 커밋 타입 | 사용 시점 |
 |---|---|

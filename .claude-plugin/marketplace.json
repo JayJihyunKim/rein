@@ -1,12 +1,12 @@
 {
   "name": "rein",
   "owner": { "name": "rein-maintainer" },
-  "description": "Rein AI Native Development Framework marketplace. Add this repository in Claude Code via `/plugin marketplace add JayJihyunKim/rein`, then `/plugin install rein@rein`.",
+  "description": "Rein marketplace — guide autonomy, ship quality. Add this repository in Claude Code via `/plugin marketplace add JayJihyunKim/rein`, then `/plugin install rein@rein`.",
   "plugins": [
     {
       "name": "rein",
       "source": "./plugins/rein-core",
-      "description": "Rein AI Native Development Framework — core hooks, skills, agents"
+      "description": "Guide autonomy, ship quality — a Claude Code plugin that lets your AI agent move at full speed while requiring it to plan, leave evidence, and pass review before code lands."
     }
   ]
 }

@@ -124,7 +124,7 @@ Claude Code gives agents tools. Rein gives teams control. See [docs/architecture
 ## What you get
 
 1. **Tasks must be defined before code is edited.** A Definition-of-Done file is required before any source edit.
-2. **Reviews block commits and tests.** Until a review record exists, `git commit` and test runners are blocked.
+2. **Reviews block commits.** A commit that changes code needs a review record first, or `git commit` is blocked; docs-only commits pass without one. The review gate does not block test runs — a failing test can still be run before the code or the review exists (TDD).
 3. **Evidence accumulates and rotates automatically.** New work lands in `trail/inbox/`. The next day, yesterday's inbox merges into a `daily/` summary; daily entries older than 7 days merge into `weekly/`. The next session auto-loads `trail/index.md` for project state — older summaries are read on demand.
 4. **Updates are handled by Claude Code's plugin manager.** Your customisations are not overwritten because the plugin owns its own files.
 5. **Two models, one session.** Rein routes implementation to Claude and code reviews to Codex (with automatic Claude fallback if Codex isn't installed) — both happen inside the same Claude Code session, so you never have to switch tools.
@@ -169,7 +169,8 @@ your-repo/
 │   ├── project.json          ← Rein mode + scope (committed)
 │   └── policy/               ← repo-local policy templates
 │       ├── hooks.yaml
-│       └── rules.yaml
+│       ├── rules.yaml
+│       └── persona.yaml
 ├── trail/                    ← evidence store (auto-rotated)
 │   ├── inbox/                ← today's completed work (yesterday's entries merge into daily/ on the next session)
 │   ├── daily/                ← per-day summaries (entries older than 7 days merge into weekly/)
@@ -179,21 +180,25 @@ your-repo/
 │   ├── incidents/            ← hook-block records (used to evolve rules)
 │   ├── agent-candidates/     ← new agent suggestions from recurring incident patterns
 │   └── index.md              ← current project state (5–25 lines, auto-loaded on session start)
-└── .claude/
-    └── settings.json         ← one line: plugin pin for `rein`
+├── .claude/
+│   └── security/
+│       └── profile.yaml      ← security review level (default: standard)
+└── .gitignore                ← Rein's runtime-state ignore entries appended (file created if missing)
 ```
+
+Where Claude Code records that the plugin is enabled depends on the install scope you chose — the default `user` scope writes to `~/.claude/settings.json`, outside your repo (see Claude Code's plugin scopes). Rein writes nothing there.
 
 That's all. The framework's **hooks, rules, agents, and skills** ship inside the plugin and live in Claude Code's plugin cache, not in your repo — so plugin updates never overwrite anything. If you want project-specific instructions to ride alongside Rein, add your own `AGENTS.md` (or `.claude/CLAUDE.md`) in your repo; Rein reads them but never modifies them.
 
-For repo-local hook policy overrides, `.rein/policy/hooks.yaml` accepts either `<hook-name>: false` or `<hook-name>: { enabled: false }`. A `profile:` key (one of `lean`, `standard`, `strict`) sets defaults for the heavy gates — `lean` disables `post-edit-plan-coverage`, `post-write-spec-review-gate`, and `post-write-dod-routing-check` for exploratory work; `standard` (default) keeps all gates on; `strict` is reserved for stricter future defaults. Per-hook entries always override the profile.
+For repo-local hook policy overrides, `.rein/policy/hooks.yaml` accepts either `<hook-name>: false` or `<hook-name>: { enabled: false }`. A `profile:` key (one of `lean`, `standard`, `strict`) sets defaults for the heavy gates — `lean` disables `post-edit-plan-coverage`, `post-edit-spec-review-gate`, and `post-edit-dod-routing-check` for exploratory work; `standard` (default) keeps all gates on; `strict` is reserved for stricter future defaults. Per-hook entries always override the profile.
 
-**Persona (optional).** Rein replies in a plain, neutral tone by default. Two built-in personas ship with the plugin — say "pick a persona" in a session to choose one, or answer a few questions to create your own. If you relied on the previous default persona and want it back, one line restores it (details in the [CHANGELOG](CHANGELOG.md)):
+**Persona (optional).** Rein replies in a plain, neutral tone by default. Three built-in personas ship with the plugin (마르코 / 제니 / 최행배) — say "pick a persona" in a session to choose one, or answer a few questions to create your own. If you relied on the previous default persona and want it back, one line restores it (details in the [CHANGELOG](CHANGELOG.md)):
 
 ```bash
 mkdir -p .rein/policy && printf 'enabled: true\npreset: boss-ace\n' > .rein/policy/persona.yaml
 ```
 
-> Recommended: add `trail/` and `.claude/cache/` to your `.gitignore` if you don't want session evidence committed (Rein doesn't auto-edit `.gitignore`).
+> Recommended: add `trail/` and `.claude/cache/` to your `.gitignore` if you don't want session evidence committed — that choice is yours. Rein itself only appends ignore entries for its own runtime state files (`.rein/state/`, `.rein/state.json`, …) at bootstrap (and tops them up on later session starts); it never touches anything else in `.gitignore`.
 
 ---
 
@@ -273,7 +278,7 @@ Issues and pull requests are welcome.
 4. Push the branch: `git push origin feat/amazing-feature`
 5. Open a Pull Request
 
-Before submitting, read [`AGENTS.md`](AGENTS.md) to understand the framework structure and the rules that govern contributions.
+Before submitting, read [docs/architecture.md](docs/architecture.md) (hook lifecycle) and [docs/policy-model.md](docs/policy-model.md) (governance model) to understand the framework structure and the rules that govern contributions.
 
 | Commit type | When to use |
 |---|---|

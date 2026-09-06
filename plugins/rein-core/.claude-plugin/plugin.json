@@ -1,7 +1,7 @@
 {
   "name": "rein",
   "version": "2.0.3",
-  "description": "Rein AI Native Development Framework — core hooks, skills, agents",
+  "description": "Guide autonomy, ship quality — a Claude Code plugin that lets your AI agent move at full speed while requiring it to plan, leave evidence, and pass review before code lands.",
   "author": {
     "name": "Rein Maintainers",
     "url": "https://github.com/JayJihyunKim/rein-dev"
