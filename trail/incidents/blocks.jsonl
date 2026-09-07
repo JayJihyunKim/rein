@@ -387,3 +387,4 @@
 {"ts": "2026-09-04T07:32:21", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "import #dc0c573e6f18", "source": "live"}
 {"ts": "2026-09-04T07:32:37", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "git checkout #c5f3890e1642", "source": "live"}
 {"ts": "2026-09-04T12:44:50", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "$TITLE #b51d26ec5b4f", "source": "live"}
+{"ts": "2026-09-07T07:11:23", "hook": "pre-edit-coverage-gate", "reason": "dod covers mismatch (tier 1)", "target": "trail/dod/dod-2026-09-07-v2-1-0-release.md", "source": "live"}

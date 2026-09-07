@@ -69,6 +69,14 @@ assert_file_no_grep() {
   if grep -qF -- "$1" "$2" 2>/dev/null; then fail "$3 (unexpected '$1' in $2)"
   else echo "  ok: $3"; fi
 }
+# assert_sum_matches <scan_all 출력> <label>: MATCHES == REJECT + ADVISORY (h1)
+assert_sum_matches() {
+  local m r a
+  m=$(printf '%s\n' "$1" | sed -n 's/.*MATCHES=\([0-9]*\).*/\1/p' | head -1)
+  r=$(printf '%s\n' "$1" | sed -n 's/.*REJECT=\([0-9]*\).*/\1/p' | head -1)
+  a=$(printf '%s\n' "$1" | sed -n 's/.*ADVISORY=\([0-9]*\).*/\1/p' | head -1)
+  assert_eq "$m" "$((${r:-0} + ${a:-0}))" "$2 (MATCHES=$m REJECT=$r ADVISORY=$a)"
+}
 
 find_lib() {
   if [ -f "$REAL_PROJECT_DIR/plugins/rein-core/hooks/lib/select-active-dod.sh" ]; then
@@ -124,9 +132,9 @@ parse_all() {
   BODY="$1" src_eval 'PROMPT_BODY="$BODY"; _parse_evidence_blocks 2>&1; printf "RC=%s COUNT=%s\n" "$?" "${EVIDENCE_BLOCK_COUNT:-NA}"'
 }
 
-# scan_all <body> — parser then scanner; emits stderr + RC/MATCHES/FLAGS.
+# scan_all <body> — parser then scanner; emits stderr + RC/MATCHES/REJECT/ADVISORY/FLAGS.
 scan_all() {
-  BODY="$1" src_eval 'PROMPT_BODY="$BODY"; _parse_evidence_blocks 2>&1 && _scan_quant_claims 2>&1; printf "RC=%s MATCHES=%s\nFLAGS<<%s>>\n" "$?" "${QUANT_MATCH_COUNT:-NA}" "${QUANT_FLAGS:-}"'
+  BODY="$1" src_eval 'PROMPT_BODY="$BODY"; _parse_evidence_blocks 2>&1 && _scan_quant_claims 2>&1; printf "RC=%s MATCHES=%s REJECT=%s ADVISORY=%s\nFLAGS<<%s>>\n" "$?" "${QUANT_MATCH_COUNT:-NA}" "${QUANT_REJECT_COUNT:-NA}" "${QUANT_ADVISORY_COUNT:-NA}" "${QUANT_FLAGS:-}"'
 }
 
 # summary_of <body> — parser then EVIDENCE_BLOCK_SUMMARY (3-line records).
@@ -363,6 +371,7 @@ assert_contains "$summ" "count=999 문자열 포함 claim" "U14 claim 원문 보
 echo "-- S1: 정량+PASS 주장 매칭 (Q1/Q3)"
 res=$(scan_all "테스트 21건 GREEN")
 assert_contains "$res" "RC=0 MATCHES=1" "S1 '테스트 21건 GREEN' → 매칭 1"
+assert_sum_matches "$res" "S1 MATCHES=REJECT+ADVISORY 합"
 
 echo "-- S2: 블록 밖 수량 주장 + 발췌 산출"
 res=$(scan_all "서론
@@ -371,6 +380,7 @@ res=$(scan_all "서론
 assert_contains "$res" "MATCHES=1" "S2 '파일 5개' → 매칭 1"
 assert_contains "$res" "L2: " "S2 라인 번호 산출"
 assert_contains "$res" "파일 5개" "S2 발췌 내용"
+assert_sum_matches "$res" "S2 MATCHES=REJECT+ADVISORY 합"
 
 echo "-- S3: 제외 토큰 7종만 → 매칭 0"
 body='경로는 tests/foo.sh 와 21/21.md 를 참조한다.
@@ -386,6 +396,42 @@ assert_contains "$res" "MATCHES=0" "S3 제외 7종 → 매칭 0"
 echo "-- S4: 21/21 단독 토큰은 경로 마스킹 예외 (Q2 매칭)"
 res=$(scan_all "회귀 결과 21/21 확인")
 assert_contains "$res" "MATCHES=1" "S4 '21/21' 단독 → Q2 매칭"
+assert_sum_matches "$res" "S4 MATCHES=REJECT+ADVISORY 합"
+
+echo "-- S5: reject/advisory 혼합 — 총계는 항상 두 카테고리의 합 (h1)"
+res=$(scan_all "테스트 통과
+커버리지 85%
+실패 3건 발견
+함수 50줄 이내
+오차 상한 ±20%
+이것은 비매칭 라인입니다
+다른 비매칭 라인")
+assert_contains "$res" "MATCHES=5 REJECT=3 ADVISORY=2" "S5 혼합 본문 → MATCHES=5 REJECT=3 ADVISORY=2"
+assert_sum_matches "$res" "S5 MATCHES=REJECT+ADVISORY 합"
+
+echo "-- S6: 발췌 상한 10 은 tier 무관 문서 순서로 채워진다 (h2)"
+S6_BODY="실패 1건 발견
+함수 10줄 이내
+실패 2건 발견
+함수 20줄 이내
+커버리지 10%
+최대 재시도 1회
+커버리지 20%
+최대 재시도 2회
+테스트 통과 1
+오차 상한 ±10%
+테스트 통과 2
+오차 상한 ±20%
+커버리지 30%"
+res=$(scan_all "$S6_BODY")
+assert_contains "$res" "MATCHES=13 REJECT=7 ADVISORY=6" "S6 reject 7 + advisory 6 → 13매칭"
+flags_body=$(printf '%s\n' "$res" | tail -n +2)
+flags_body="${flags_body#FLAGS<<}"
+flags_body="${flags_body%>>}"
+flag_l_count=$(printf '%s\n' "$flags_body" | grep -c '^L[0-9]*:')
+assert_eq "$flag_l_count" "10" "S6 FLAGS 발췌가 정확히 10줄 (grep -c '^L[0-9]*:')"
+assert_contains "$flags_body" "L1: 실패 1건 발견" "S6 FLAGS 문서 순서 첫 줄(L1) 보존"
+assert_not_contains "$flags_body" "L11:" "S6 상한 초과분(L11) 부재 — tier 무관 doc-order cap"
 
 # ============================================================
 # E — e2e (Task 1.3 / 1.4)
@@ -623,7 +669,11 @@ e2e_teardown
 
 echo "-- E5a6: 발췌 UTF-8 문자 경계 보존 — 80바이트 절단이 한글 중간에 걸려도 valid UTF-8 (통합리뷰 R3 Medium)"
 e2e_setup
-LONG_KR="테스트 21건 GREEN 이고 이어지는 긴 한글 설명 문장이 팔십 바이트 경계를 정확히 넘어가도록 충분히 길게 이어진다"
+# 검증명사(테스트)와 pass word(GREEN 등)가 같은 줄에 있으면 Q3 reject-tier 로
+# 분류된다 — 이 테스트의 목적은 advisory 경로의 UTF-8 경계 보존이므로 pass word
+# 없는 Q1 전용 형태를 쓴다(reject-tier 로 넘어가면 codex 가 호출되지 않아
+# advisory envelope 자체가 생성되지 않는다).
+LONG_KR="테스트 21건 확인 완료 이고 이어지는 긴 한글 설명 문장이 팔십 바이트 경계를 정확히 넘어가도록 충분히 길게 이어진다"
 run_wrapper "$(mk_block '수정 완료' 'git diff --stat' 0 'done')
 $LONG_KR"
 assert_eq "$RC" "0" "E5a6 advisory 비차단"
@@ -694,6 +744,40 @@ assert_eq "$adv_hdr" "1" "E6 advisory 헤더 1회"
 assert_eq "$(count_reject_lines)" "0" "E6 거부 진단행 0"
 assert_file_grep "unbacked_quant_flags:" "$CAPTURE" "E6 envelope unbacked_quant_flags: 슬롯"
 assert_file_grep "파일 5개" "$CAPTURE" "E6 슬롯에 매칭 라인 발췌"
+e2e_teardown
+
+echo "-- E16: 블록 1 + advisory 13줄 → 비차단 + FLAGS 상한 10 + 초과분 표기 (h2 e2e)"
+e2e_setup
+adv13=""
+for _i in $(seq 1 13); do adv13="${adv13}함수 ${_i}줄 이내
+"; done
+run_wrapper "$(mk_block '수정 완료' 'git diff --stat' 0 'done')
+$adv13"
+assert_eq "$RC" "0" "E16 advisory-only 13줄 → verdict exit 0 (비차단)"
+assert_eq "$(count_reject_lines)" "0" "E16 거부 진단행 0 (advisory 만)"
+flags_section=$(sed -n '/^unbacked_quant_flags:/,/^$/p' "$CAPTURE")
+flag_l_count=$(printf '%s\n' "$flags_section" | grep -c '^  L[0-9]*:')
+assert_eq "$flag_l_count" "10" "E16 envelope unbacked_quant_flags: 발췌 정확히 10줄"
+assert_contains "$ERR" "(+3 more)" "E16 stderr 초과분 (+3 more) 표기"
+e2e_teardown
+
+echo "-- E17: evidence_manifest: 절 골든 — 정량 처분 축 변경 후에도 byte 동일 (h3)"
+e2e_setup
+run_wrapper "$VALID_BLOCK_PROMPT"
+assert_eq "$RC" "0" "E17 verdict PASS → exit 0"
+golden='evidence_manifest:
+  blocks: 2
+  block 1:
+    claim: 테스트 21건 GREEN
+    command: bash tests/skills/run-all.sh
+    exit_code: 0
+  block 2:
+    claim: 파일 2개 변경
+    command: git diff --name-only
+    exit_code: 0
+---'
+extracted=$(awk '/^evidence_manifest:/{p=1} p&&/^$/{exit} p' "$CAPTURE")
+assert_eq "$extracted" "$golden" "E17 evidence_manifest 절이 golden 리터럴과 완전 일치"
 e2e_teardown
 
 echo "-- E7: spec-review skip 차등 fixture (수용 8)"

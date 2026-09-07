@@ -99,6 +99,7 @@ e2e_setup() {
 tmpdir/
 trail/
 .claude/cache/
+bin/
 IGN
   ( cd "$SANDBOX" && git init -q && git config user.email t@e.com \
     && git config user.name t && git add -A && git commit -q -m base \
@@ -115,6 +116,89 @@ mk_dirty() {
   ( cd "$SANDBOX" && git add f.txt )
 }
 
+# ============================================================
+# Task 2.1 harness extension (spec §3.4/§6.1/§7 Axis 3) — SV21~SV32.
+# ============================================================
+
+# 문서-only dirty 재현: docs/note.md 를 커밋한 뒤 unstaged 로 수정한다
+# (스테이징하지 않음 — 스테이징도 unstaged 도 _selfverify_observation_
+# consistent 의 재관측(§6.1(3))에서 같은 집합으로 취급되므로 어느 쪽이든
+# 무방하지만, "review-before-commit" 관례(2026-06-09 B4)를 따라 unstaged
+# 로 둔다).
+mk_docs_dirty() {
+  mkdir -p "$SANDBOX/docs"
+  echo "base note" > "$SANDBOX/docs/note.md"
+  ( cd "$SANDBOX" && git add docs/note.md && git commit -q -m "docs note" )
+  echo "unstaged edit" >> "$SANDBOX/docs/note.md"
+}
+
+# clean 트리 + 커밋 범위(DIFF_BASE..HEAD)에 코드 파일 재현 (§7 (l)).
+mk_code_commit() {
+  echo "print('x')" > "$SANDBOX/f.py"
+  ( cd "$SANDBOX" && git add f.py && git commit -q -m "add f.py" )
+}
+
+# fake bin/rein 스텁 — tests/scripts/test-codex-review-evidence-issuance.sh
+# ::_mk_fixture_plugin 의 python 스텁에서 `--print-subject` 분기만 남겨
+# 복제한다(FAKE_REIN_SUBJECT_JSON 을 stdout 에 그대로 + 개행, 종료코드
+# FAKE_REIN_DIGEST_RC, 기본 0). 래퍼 self-location(`$_script_dir/../bin/
+# rein`, `$_script_dir` = `$SANDBOX/scripts`)이 `$SANDBOX/bin/rein` 을
+# 찾는다 — `.gitignore` 의 `bin/` 항목이 이 스텁을 untracked 관측(A1/A6/
+# untracked probe)에서 제외한다.
+mk_fake_rein_bin() {
+  mkdir -p "$SANDBOX/bin"
+  cat > "$SANDBOX/bin/rein" <<'PYEOF'
+#!/usr/bin/env python3
+import os
+import sys
+
+
+def main():
+    argv = sys.argv[1:]
+    if len(argv) < 2 or argv[0] != "issue-evidence" or argv[1] != "code_review":
+        sys.stderr.write("fake-bin-rein: unsupported invocation: %r\n" % (argv,))
+        return 2
+    rest = argv[2:]
+    if "--print-subject" in rest:
+        raw_json = os.environ.get("FAKE_REIN_SUBJECT_JSON", "")
+        rc = int(os.environ.get("FAKE_REIN_DIGEST_RC", "0"))
+        if raw_json:
+            sys.stdout.write(raw_json)
+            if not raw_json.endswith("\n"):
+                sys.stdout.write("\n")
+        return rc
+    sys.stderr.write("fake-bin-rein: unrecognized args: %r\n" % (rest,))
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+PYEOF
+  chmod +x "$SANDBOX/bin/rein"
+}
+
+# mk_git_shim <subcommand> — 실제 git 을 감싼 shim 디렉토리를 stdout 으로
+# 반환한다. `-C <dir>` 를 건너뛴 첫 인자가 <subcommand> 면 exit 128(취득
+# 실패 재현), 아니면 실제 git 으로 exec. WRAP_PATH_PREFIX 로 PATH 앞에
+# 꽂아 이 subcommand 호출만 골라 실패시킨다(다른 git 호출은 정상 동작).
+REAL_GIT="$(command -v git)"
+mk_git_shim() {
+  local subcmd="$1" dir
+  dir=$(mktemp -d "$SANDBOX/gitshim-XXXXXX")
+  cat > "$dir/git" <<EOF
+#!/usr/bin/env bash
+i=0
+if [ "\${1:-}" = "-C" ]; then i=2; fi
+args=("\$@")
+if [ "\${args[\$i]:-}" = "$subcmd" ]; then
+  exit 128
+fi
+exec "$REAL_GIT" "\$@"
+EOF
+  chmod +x "$dir/git"
+  printf '%s' "$dir"
+}
+
 # run_wrapper <stdin-content> [extra wrapper args...]
 RC=""; OUT=""; ERR=""; CAPTURE=""
 run_wrapper() {
@@ -127,6 +211,10 @@ run_wrapper() {
     export CODEX_BIN="$FAKE_CODEX"
     export FAKE_CODEX_CAPTURE="$CAPTURE"
     export TMPDIR="$SANDBOX/tmpdir"
+    # Task 2.1 seam — a git shim (mk_git_shim) prepended ahead of the real
+    # git so a single subcommand can be made to fail without touching the
+    # rest of the sandbox's git behavior.
+    if [ -n "${WRAP_PATH_PREFIX:-}" ]; then export PATH="$WRAP_PATH_PREFIX:$PATH"; fi
     bash "$SANDBOX/scripts/rein-codex-review.sh" --non-interactive "$@" \
       < "$SANDBOX/.stdin.txt" > "$SANDBOX/.out.txt" 2> "$SANDBOX/.err.txt"
   )
@@ -150,6 +238,12 @@ mk_block() {
 DIFF_LINE='diff_self_review: reviewed every hunk of the wrapper diff by hand'
 TC_BLOCK="$(mk_block '[axis:typecheck] bash -n clean' 'bash -n scripts/w.sh' 0 'ok')"
 TEST_BLOCK="$(mk_block '[axis:test] suite run clean' 'bash tests/run.sh' 0 'ok')"
+
+# Task 2.1 — FAKE_REIN_SUBJECT_JSON 리터럴 (spec §7 Axis 3).
+SUBJ_EMPTY_DOCS='{"subject": "empty:no-subject", "paths": [], "changeset_paths": ["docs/note.md"]}'
+SUBJ_EMPTY_NOKEY='{"subject": "empty:no-subject", "paths": []}'
+SUBJ_EMPTY_CLEAN='{"subject": "empty:no-subject", "paths": [], "changeset_paths": []}'
+SUBJ_CODE_F='{"subject": "sha256:0000000000000000000000000000000000000000000000000000000000000000", "paths": ["f.txt"], "changeset_paths": ["f.txt"]}'
 
 echo "== review selfverify gate tests =="
 
@@ -494,6 +588,143 @@ $RED_DECL
 $DIFF_LINE"
 assert_eq "$RC" "0" "SV20 none 상위 → verdict exit 0"
 assert_capture_exists "SV20 codex 도달"
+e2e_teardown
+
+# ============================================================
+# Task 2.1 / A7 — 문서-only SUBJECT_EMPTY 조기 통과 + 관측 일관성
+# (spec §3.4/§6.1(3)/§7 Axis 3)
+# ============================================================
+echo "-- SV21: 문서-only 변경 + 두 관측 일관(A7) → 자가검증 skip → codex 도달 (typecheck/test 증거 없이)"
+e2e_setup
+mk_docs_dirty
+mk_fake_rein_bin
+FAKE_REIN_SUBJECT_JSON="$SUBJ_EMPTY_DOCS" run_wrapper "code review please"
+assert_eq "$RC" "0" "SV21 문서-only + 관측 일관 → verdict exit 0"
+assert_capture_exists "SV21 codex 도달 (typecheck/test 증거 없이)"
+assert_eq "$(count_reject_lines)" "0" "SV21 거부 진단행 0"
+e2e_teardown
+
+echo "-- SV22: 코드 파일이 첫 관측부터 포함(digest) → 여전히 발동 (A7 값 조건 불성립, 회귀)"
+e2e_setup
+mk_dirty
+mk_fake_rein_bin
+FAKE_REIN_SUBJECT_JSON="$SUBJ_CODE_F" run_wrapper "code review please"
+assert_eq "$RC" "4" "SV22 코드 subject → exit 4"
+assert_contains "$ERR" "ERROR: [codex-review][readiness-reject]" "SV22 anchored 거부 진단행"
+assert_no_capture "SV22 codex spawn 이전 종료"
+e2e_teardown
+
+echo "-- SV23: --print-subject 조회 실패(rc!=0) → REIN_REVIEWED_DIGEST=\"\" 는 센티널과 다른 값 → A1 로 발동"
+e2e_setup
+mk_docs_dirty
+mk_fake_rein_bin
+FAKE_REIN_DIGEST_RC=1 run_wrapper "code review please"
+assert_eq "$RC" "4" "SV23 조회 실패 → exit 4"
+assert_contains "$ERR" "ERROR: [codex-review][readiness-reject]" "SV23 anchored 거부 진단행"
+assert_no_capture "SV23 codex spawn 이전 종료"
+e2e_teardown
+
+echo "-- SV24: 센티널 + changed_files 취득 실패(A6) 동시 → A6 이 A7 보다 먼저 발동 (순서 고정, 행위)"
+e2e_setup
+mk_docs_dirty
+mk_fake_rein_bin
+FAKE_REIN_SUBJECT_JSON="$SUBJ_EMPTY_DOCS" GIT_DIR="$SANDBOX/no-such-gitdir" run_wrapper "code review please"
+assert_eq "$RC" "4" "SV24 A6 우선 발동 → exit 4"
+assert_contains "$ERR" "ERROR: [codex-review][readiness-reject]" "SV24 anchored 거부 진단행"
+assert_no_capture "SV24 codex spawn 이전 종료"
+e2e_teardown
+
+echo "-- SV24s: 정적 순서 검사 — _selfverify_should_fire 본문에서 CHANGED_FILES_RC 검사 라인이 empty:no-subject 검사 라인보다, 그것이 -n \"\$CHANGED_FILES\" 검사 라인보다 앞"
+sv24s_body=$(awk '/^_selfverify_should_fire\(\)/,/^}/' "$WRAPPER_SRC")
+sv24s_a6=$(printf '%s\n' "$sv24s_body" | grep -n 'CHANGED_FILES_RC' | head -1 | cut -d: -f1)
+sv24s_a7=$(printf '%s\n' "$sv24s_body" | grep -n 'empty:no-subject' | head -1 | cut -d: -f1)
+sv24s_a1=$(printf '%s\n' "$sv24s_body" | grep -n '\-n "\$CHANGED_FILES"' | head -1 | cut -d: -f1)
+TEST_COUNT=$((TEST_COUNT + 1))
+if [ -n "$sv24s_a6" ] && [ -n "$sv24s_a7" ] && [ -n "$sv24s_a1" ] \
+   && [ "$sv24s_a6" -lt "$sv24s_a7" ] && [ "$sv24s_a7" -lt "$sv24s_a1" ]; then
+  echo "  ok: SV24s 정적 순서 A6 < A7 < A1"
+else
+  fail "SV24s 정적 순서 위반 (a6=$sv24s_a6 a7=$sv24s_a7 a1=$sv24s_a1)"
+fi
+
+echo "-- SV25: 관측 불일치(추적 파일) — CHANGED_FILES 에 changeset_paths 밖 코드 경로 → 발동"
+e2e_setup
+mk_dirty
+mk_fake_rein_bin
+FAKE_REIN_SUBJECT_JSON="$SUBJ_EMPTY_DOCS" run_wrapper "code review please"
+assert_eq "$RC" "4" "SV25 추적 파일 불일치 → exit 4"
+assert_contains "$ERR" "ERROR: [codex-review][readiness-reject]" "SV25 anchored 거부 진단행"
+assert_no_capture "SV25 codex spawn 이전 종료"
+e2e_teardown
+
+echo "-- SV26: 관측 불일치(untracked) — 새 미추적 코드 파일 → 발동 (A7 이 probe 를 가리지 않음)"
+e2e_setup
+mk_docs_dirty
+echo "x" > "$SANDBOX/new.py"
+mk_fake_rein_bin
+FAKE_REIN_SUBJECT_JSON="$SUBJ_EMPTY_DOCS" run_wrapper "code review please"
+assert_eq "$RC" "4" "SV26 untracked 불일치 → exit 4"
+assert_no_capture "SV26 codex spawn 이전 종료"
+e2e_teardown
+
+echo "-- SV27: changeset_paths 키 부재(구 CLI 목) → 발동 (fail-closed)"
+e2e_setup
+mk_docs_dirty
+mk_fake_rein_bin
+FAKE_REIN_SUBJECT_JSON="$SUBJ_EMPTY_NOKEY" run_wrapper "code review please"
+assert_eq "$RC" "4" "SV27 키 부재 → exit 4"
+assert_no_capture "SV27 codex spawn 이전 종료"
+e2e_teardown
+
+echo "-- SV28: untracked 목록 취득 실패(목) → 발동 (fail-closed)"
+e2e_setup
+mk_docs_dirty
+mk_fake_rein_bin
+WRAP_PATH_PREFIX="$(mk_git_shim ls-files)" FAKE_REIN_SUBJECT_JSON="$SUBJ_EMPTY_DOCS" run_wrapper "code review please"
+assert_eq "$RC" "4" "SV28 untracked 취득 실패 → exit 4"
+assert_no_capture "SV28 codex spawn 이전 종료"
+e2e_teardown
+
+echo "-- SV29: 반대 방향(subject 가 센티널 아니면 A7 자체가 불성립) → 발동 (보수 방향 문서화 케이스)"
+e2e_setup
+mk_dirty
+mk_fake_rein_bin
+FAKE_REIN_SUBJECT_JSON="$SUBJ_CODE_F" run_wrapper "code review please"
+assert_eq "$RC" "4" "SV29 반대 방향 → exit 4"
+assert_no_capture "SV29 codex spawn 이전 종료"
+e2e_teardown
+
+echo "-- SV30: clean 트리 + 커밋 범위 코드 → subject 센티널이어도 CHANGED_FILES(커밋 범위) ⊄ 빈 집합 → 발동"
+e2e_setup
+mk_code_commit
+mk_fake_rein_bin
+FAKE_REIN_SUBJECT_JSON="$SUBJ_EMPTY_CLEAN" run_wrapper "code review please"
+assert_eq "$RC" "4" "SV30 clean + 커밋 범위 코드 → exit 4"
+assert_no_capture "SV30 codex spawn 이전 종료"
+e2e_teardown
+
+echo "-- SV31: 개행 포함 파일명 — NUL 안전 부분집합 비교 (개행 분할이었다면 발동했을 것)"
+e2e_setup
+mkdir -p "$SANDBOX/docs"
+PYTHONDONTWRITEBYTECODE=1 python3 -c 'import os,sys; open(os.path.join(sys.argv[1],"docs","a\nb.md"),"w").write("x\n")' "$SANDBOX"
+( cd "$SANDBOX" && git add -A && git commit -q -m "newline filename" )
+PYTHONDONTWRITEBYTECODE=1 python3 -c 'import os,sys; open(os.path.join(sys.argv[1],"docs","a\nb.md"),"a").write("y\n")' "$SANDBOX"
+mk_fake_rein_bin
+FAKE_REIN_SUBJECT_JSON='{"subject": "empty:no-subject", "paths": [], "changeset_paths": ["docs/a\nb.md"]}' run_wrapper "code review please"
+assert_eq "$RC" "0" "SV31 개행 파일명 부분집합 일치 → verdict exit 0"
+assert_capture_exists "SV31 codex 도달"
+e2e_teardown
+
+echo "-- SV32: 발동 시 _selfverify_check 요구 축 무변경 (typecheck 만 있고 test 축 부재 → 여전히 거부 + 문구 동일)"
+e2e_setup
+mk_dirty
+mk_fake_rein_bin
+FAKE_REIN_SUBJECT_JSON="$SUBJ_CODE_F" run_wrapper "review request
+$TC_BLOCK
+$DIFF_LINE"
+assert_eq "$RC" "4" "SV32 test 축 부재 → exit 4"
+assert_contains "$ERR" "[axis:test]" "SV32 진단에 [axis:test] 언급 (SV8 과 같은 문구)"
+assert_no_capture "SV32 codex spawn 이전 종료"
 e2e_teardown
 
 # ============================================================

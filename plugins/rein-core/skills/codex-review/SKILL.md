@@ -52,7 +52,7 @@ Wrapper 가 context assembly, envelope 4 slots, codex exec, PASS 시 v2 code_rev
 
 ### 요청서 작성 규약 — review-readiness 사전검사
 
-정량(개수/비율/백분율)·테스트 통과 주장을 쓰려면 각 주장을 `[EVIDENCE]` 블록으로 선언한다. 블록 없이 주장을 쓰면 래퍼가 review-readiness 사전검사에서 **exit 4 로 거부**한다 (codex 미호출 — 비용 0). 주장 없는 요청서는 종전대로 블록 불필요 (완전 하위호환 — 기존 요청서 무변경). output 발췌에 `[EFFORT:...]` 리터럴을 포함하지 마라 — 래퍼의 기존 전역 strip 단계가 제거한다 (사전검사가 보는 "원문" 은 strip 이후의 PROMPT_BODY).
+정량(개수/비율/백분율)·테스트 통과 주장을 쓰려면 각 주장을 `[EVIDENCE]` 블록으로 선언한다. 블록 없이 주장을 쓰면 래퍼가 review-readiness 사전검사에서 **exit 4 로 거부**한다 (codex 미호출 — 비용 0). 주장 없는 요청서는 종전대로 블록 불필요 (완전 하위호환 — 기존 요청서 무변경). output 발췌에 `[EFFORT:...]` 리터럴을 포함하지 마라 — 래퍼의 기존 전역 strip 단계가 제거한다 (사전검사가 보는 "원문" 은 strip 이후의 PROMPT_BODY). **블록을 갖췄다고 모든 잔존 정량 서술이 통과하는 것은 아니다** — 블록 밖에 남은 정량/PASS 서술은 형태에 따라 두 tier 로 갈린다: 검증명사+통과어 공존(예: "테스트 통과"), 계약 문맥어 없이 또는 결과 서술어와 함께 쓰인 비율·백분율(예: "커버리지 85%"), 그리고 결과 서술어가 있고 계약 문맥어가 없는 수량+단위(예: "실패 3건 발견")는 **reject-tier** 로 블록이 있어도 exit 4 거부; 고정 계약 형태(예: "함수 50줄 이내", "오차 상한 ±20%")와 결과 서술어 없는 단독 수량(예: "파일 5개")은 **advisory-tier** 로 비차단 경고에 그친다 (문법·집합식: §4.1).
 
 - 증거 블록 문법 전문: §4.1
 - exit 4 판별 계약 + 호출자 행동: §4.2 (Sonnet 폴백 비대상)
@@ -189,7 +189,13 @@ ok 21 - test-codex-model-profile-routing
 7. **블록 수 상한**: 요청서당 유효 블록 16개 이하. 초과 = 형식 위반 (envelope 크기 보호).
 8. 다중 주장 = 다중 블록 (주장 1 : 블록 1). 하나의 명령 출력이 여러 주장을 뒷받침하면 블록을 주장별로 나누고 output 발췌를 각각 최소화한다 (규약 — 래퍼는 주장:블록 대응의 의미를 검증하지 않는다).
 
-**검증 깊이 (확정)**: 형식만. 래퍼는 `command:` 를 **재실행하지 않고**, output 과 exit_code 의 진위를 확인하지 않는다. 형식은 갖췄지만 거짓인 증거는 기존대로 codex 가 잡는다 — 유효 블록은 PROMPT_BODY 원문 위치에 그대로 보존되고, envelope 의 `evidence_manifest:` 슬롯(블록별 claim/command/exit_code 요약)과 Claim Audit sub-item 7 로 codex 에 구조화 전달된다. 블록 밖 잔존 정량 매칭은 비차단 advisory (`WARNING: [codex-review][readiness-advisory]`) + envelope `unbacked_quant_flags:` 슬롯으로 전달된다.
+**검증 깊이 (확정)**: 형식만. 래퍼는 `command:` 를 **재실행하지 않고**, output 과 exit_code 의 진위를 확인하지 않는다. 형식은 갖췄지만 거짓인 증거는 기존대로 codex 가 잡는다 — 유효 블록은 PROMPT_BODY 원문 위치에 그대로 보존되고, envelope 의 `evidence_manifest:` 슬롯(블록별 claim/command/exit_code 요약)과 Claim Audit sub-item 7 로 codex 에 구조화 전달된다.
+
+**블록 밖 잔존 정량 매칭 — 두 tier 처분 (reject-tier / advisory-tier)**: 형태 3종(Q1 수량+단위 / Q2 비율·백분율 / Q3 검증명사+통과어 공존)과 문맥어 2종(C = 계약 문맥어: 최소/최대/상한/하한/임계/목표/허용/오차/이내/이하/이상/threshold/limit/tolerance/target/quorum/budget/±, R = 결과 서술어: 발견/실패/오류/누락/남음/잔존/감지/검출/재현/fail·found·detected·remaining·flagged·missing·reproduced)를 각각 독립 변수로 평가한다 — 한 라인이 여러 형태에 동시에 매칭돼도 어느 하나가 reject 조건이면 reject-tier 다.
+
+- **reject-tier** (증거 블록이 있어도 `[readiness-reject]` 로 exit 4 거부): Q3(예: "테스트 통과 확인", "build passed") · Q2 중 C 가 없거나 R 이 있는 것(예: "커버리지 85%", "상한 20% 초과로 3/5 실패") · Q1 중 R 이 있고 C 가 없는 것(예: "실패 3건 발견", "2 files flagged").
+- **advisory-tier** (`WARNING: [codex-review][readiness-advisory]` 비차단 경고 + envelope `unbacked_quant_flags:` 슬롯): Q1 중 R 이 없거나 C 가 있는 것(예: "함수 50줄 이내", "최대 재시도 3회", "실패 상한 3회") · Q2 중 C 가 있고 R 이 없는 것(예: "오차 상한 ±20%", "완화 목표 2%", "quorum 2/3 이상").
+- **동률 규칙**: C 와 R 이 한 라인에 같이 있으면 형태의 기본 처분을 유지한다 — Q2(비율·백분율)는 reject 기본, Q1(수량+단위)은 advisory 기본. 문맥어는 신호가 한쪽뿐일 때만 기본 처분을 뒤집는다.
 
 ### 4.2 exit code 4 / 5 / 6 — 판별 계약 + 호출자 행동 (준비도 거부 / 래퍼 timeout / 회차 예산 소진)
 
@@ -197,7 +203,7 @@ ok 21 - test-codex-model-profile-routing
 
 | exit | 의미 | 호출자 행동 |
 |---|---|---|
-| 4 (+거부 진단행 — `ERROR: [codex-review][readiness-reject]` 로 시작하는 stderr 라인) | review-readiness 거부 — codex 미호출 (비용 0) | stderr 안내대로 요청서를 수정(증거 블록 추가 또는 형식 교정)해 **재호출**. Sonnet fallback 비대상 — codex 실행 실패가 아니라 요청서 결함이므로 fallback 으로 새면 결함이 가려진다 (exit 3 과 동일한 비대상 원리). 재리뷰 카운트(§3 escalation)에 포함하지 않는다 — 리뷰가 수행되지 않았다. |
+| 4 (+거부 진단행 — `ERROR: [codex-review][readiness-reject]` 로 시작하는 stderr 라인) | review-readiness 거부 — 블록 0개 + 정량/PASS 매칭, **또는 블록 ≥1 이어도 블록 밖 reject-tier 매칭**(§4.1) — codex 미호출 (비용 0) | stderr 안내대로 요청서를 수정(증거 블록 추가, 계약 형태로 고쳐 쓰기, 또는 형식 교정)해 **재호출**. Sonnet fallback 비대상 — codex 실행 실패가 아니라 요청서 결함이므로 fallback 으로 새면 결함이 가려진다 (exit 3 과 동일한 비대상 원리). 재리뷰 카운트(§3 escalation)에 포함하지 않는다 — 리뷰가 수행되지 않았다. |
 | 4 (거부 진단행 0 — advisory 경고·발췌 내용 무관) | codex 실행 실패 passthrough (드묾 — `CODEX_RC` passthrough 와의 이론적 겹침) | 기존 실행 실패 경로와 동일 — Sonnet fallback 후보 (§4 본문). |
 | 5 (+진단행 — `ERROR: [codex-review][review-timeout]` 로 **시작하는** stderr 라인 ≥1) | 래퍼 소유 timeout (정지 판정 종료 — verdict 없음, v2 발급 미시도) | **즉시 대체 리뷰** (Sonnet fallback, 사유 `codex_timeout` 재사용). 재시도·재호출 없음. 재리뷰 카운트(§3 escalation) 비포함 — 리뷰가 완료되지 않았다. |
 | 5 (진단행 0) | codex 자체 exit 5 passthrough | 기존 실행 실패 처리 (Sonnet fallback 후보) 그대로. |

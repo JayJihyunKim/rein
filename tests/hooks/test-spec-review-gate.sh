@@ -1219,6 +1219,90 @@ test_m4_bypass_reason_sanitized_in_stderr() {
 }
 
 # =================================================================
+# AXIS 3 NON-GOAL REGRESSION (plan 2026-09-06-review-cycle-selfamplification
+# Task 1.4; spec 2026-08-27-review-cycle-selfamplification.md §3.4/§6.2/§9
+# scope item subject-empty-selfverify-skip-does-not-exempt-spec-review-
+# pending-marker-gate). This file's gate + lib/spec-review-gate.sh source is
+# untouched by that axis — it only adds a new early-skip branch inside
+# rein-codex-review.sh's self-verify wrapper, a completely separate code
+# path. These 3 cases pin the pre-existing spec-review pending-marker
+# contract so a future change to the self-verify wrapper cannot silently
+# widen it into this gate.
+# =================================================================
+
+# Common fixture: a docs-only dirty work-tree (spec §7 (e)'s "문서-only
+# dirty" scenario). This gate never reads git status, so the commit+dirty-
+# edit sequence below has no bearing on its own verdict — it only
+# reproduces the scenario's narrative context.
+_axis3_seed_docs_only_dirty_tree() {
+  mkdir -p "$SANDBOX/docs/specs"
+  AXIS3_SPEC="$SANDBOX/docs/specs/x.md"
+  echo "# Spec x (v1, committed)" > "$AXIS3_SPEC"
+  _sr1b_git_init
+  git -C "$SANDBOX" add -- docs/specs/x.md 2>/dev/null
+  git -C "$SANDBOX" commit -q -m "add spec x" 2>/dev/null
+  echo "# Spec x (v2, doc-only dirty edit)" >> "$AXIS3_SPEC"
+}
+
+_axis3_seed_pending_for() {
+  local spec_file="$1"
+  mkdir -p "$SANDBOX/trail/dod/.spec-reviews"
+  local hash
+  hash=$(_sr1b_orphan_hash "$spec_file")
+  {
+    echo "path=$spec_file"
+    echo "created=$(date -u +%Y-%m-%dT%H:%M:%S)"
+  } > "$SANDBOX/trail/dod/.spec-reviews/${hash}.pending"
+}
+
+test_docs_only_worktree_related_pending_spec_still_blocks_source_edit() {
+  _axis3_seed_docs_only_dirty_tree
+  _axis3_seed_pending_for "$AXIS3_SPEC"
+  seed_dod "dod-2026-09-06-axis3-related.md" "# DoD: axis3-related
+- slug: axis3-related
+- 설계: docs/specs/x.md"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/foo.py"},
+    "tool_result": {}
+  }'
+  run_hook "pre-edit-discipline-gate.sh" "$input"
+  assert_exit 2 "docs-only dirty 작업트리에서도 활성 DoD 가 참조하는 pending spec 은 non-tests 소스 편집을 여전히 차단해야 한다 (self-verify SUBJECT_EMPTY 스킵과 무관한 별개 게이트)"
+}
+
+test_docs_only_worktree_unrelated_pending_spec_only_warns() {
+  _axis3_seed_docs_only_dirty_tree
+  _axis3_seed_pending_for "$AXIS3_SPEC"
+  seed_dod "dod-2026-09-06-axis3-unrelated.md" "# DoD: axis3-unrelated
+- slug: axis3-unrelated
+- 설계 문서 없음 (작업 기준서 단독)"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/src/foo.py"},
+    "tool_result": {}
+  }'
+  run_hook "pre-edit-discipline-gate.sh" "$input"
+  assert_exit 0 "활성 DoD 가 참조하지 않는 pending spec 은 소스 편집을 차단하지 않아야 한다 (경고만, 현행 GSD-2 계약 무변경)"
+  assert_stderr_contains "unreviewed/stale design document (not referenced by any active task record"
+  assert_stderr_contains "docs/specs/x.md"
+}
+
+test_docs_only_worktree_related_pending_spec_exempts_tests_edit() {
+  _axis3_seed_docs_only_dirty_tree
+  _axis3_seed_pending_for "$AXIS3_SPEC"
+  seed_dod "dod-2026-09-06-axis3-related-tests.md" "# DoD: axis3-related-tests
+- slug: axis3-related-tests
+- 설계: docs/specs/x.md"
+
+  local input='{
+    "tool_input": {"file_path": "'$SANDBOX'/tests/foo.sh"},
+    "tool_result": {}
+  }'
+  run_hook "pre-edit-discipline-gate.sh" "$input"
+  assert_exit 0 "관련 pending spec 이 있어도 tests/** 편집은 면제되어야 한다 (reproduction-first/TDD, 현행 DOD-GATE-FP-TESTS 계약 무변경)"
+}
+
+# =================================================================
 # RUN ALL TESTS
 # =================================================================
 
@@ -1285,5 +1369,11 @@ run_test test_m4_consumer_allows_when_marker_absent post-edit-spec-review-gate.s
 run_test test_m4_bypass_consumed_after_one_edit post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
 run_test test_m4_bypass_fail_closed_when_unremovable post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
 run_test test_m4_bypass_reason_sanitized_in_stderr post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+
+# Axis 3 non-goal regression — spec-review pending marker gate is unaffected
+# by the self-verify SUBJECT_EMPTY early-skip (plan Task 1.4)
+run_test test_docs_only_worktree_related_pending_spec_still_blocks_source_edit post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_docs_only_worktree_unrelated_pending_spec_only_warns post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
+run_test test_docs_only_worktree_related_pending_spec_exempts_tests_edit post-edit-spec-review-gate.sh pre-edit-discipline-gate.sh
 
 summary

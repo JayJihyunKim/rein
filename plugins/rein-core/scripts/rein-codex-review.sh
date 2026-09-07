@@ -455,16 +455,25 @@ _parse_evidence_blocks() {
 # 제외 마스킹(스캔 전): 경로 토큰(순수 [0-9]+/[0-9]+ 비율은 예외), ISO 날짜,
 # semver/§절 참조, L<n>, exit (code )?<n>, 영숫자·하이픈 전용 + 하이픈 ≥2 토큰.
 # 매칭: Q1 수량+단위 / Q2 비율·백분율 / Q3 PASS 공존 (case-insensitive, 라인 단위).
+# 처분(reject/advisory)은 형태(Q1/Q2/Q3)와 문맥어 C(계약)/R(결과)를 각각 독립
+# 변수로 평가한 뒤 집합식으로 갈린다 — spec §3.1.
 # 성공(return 0) 시 전역 산출:
-#   QUANT_MATCH_COUNT — 매칭 라인 총계
-#   QUANT_FLAGS       — "L<n>: <발췌 80자>" 목록 (최대 10건, 예약 태그 소독)
+#   QUANT_MATCH_COUNT    — 매칭 라인 총계 (reject + advisory, 카테고리 무관)
+#   QUANT_FLAGS          — "L<n>: <발췌 80자>" 목록 (최대 10건, 두 tier 혼합 문서
+#                          순서, 예약 태그 소독)
+#   QUANT_REJECT_COUNT   — reject-tier 매칭 라인 수 (spec §3.1)
+#   QUANT_ADVISORY_COUNT — advisory-tier 매칭 라인 수 (spec §3.1)
+#   QUANT_REJECT_FLAGS   — reject-tier 전용 발췌 목록 (최대 10건)
+#   QUANT_ADVISORY_FLAGS — advisory-tier 전용 발췌 목록 (최대 10건)
 _scan_quant_claims() {
-  local rc sum_f="" flg_f=""
+  local rc sum_f="" flg_f="" rj_f="" adv_f=""
   _rein_mktemp sum_f || return $?
   _rein_mktemp flg_f || return $?
+  _rein_mktemp rj_f  || return $?
+  _rein_mktemp adv_f || return $?
 
-  LC_ALL=C awk -v sumf="$sum_f" -v flgf="$flg_f" "$_REIN_AWK_UTF8TRIM"'
-    BEGIN { m = 0; kept = 0; nrl = 0 }
+  LC_ALL=C awk -v sumf="$sum_f" -v flgf="$flg_f" -v rjflgf="$rj_f" -v advflgf="$adv_f" "$_REIN_AWK_UTF8TRIM"'
+    BEGIN { m = 0; kept = 0; nrl = 0; rj = 0; adv = 0; rjkept = 0; advkept = 0 }
     { nrl++; origbuf[nrl] = $0; docbuf[nrl] = $0 }
     END {
       # 인라인 코드 스팬 마스킹 (패턴 스캐너 전용, spec §4.1 규칙 0) —
@@ -516,8 +525,10 @@ _scan_quant_claims() {
         scan_line(line, orig, r)
       }
       print "matches=" m > sumf
+      print "reject=" rj > sumf
+      print "advisory=" adv > sumf
     }
-    function scan_line(line, orig, lnum,   low, n, tok, out, i, t, h, matched, ex, exlen, b, ntail, conts) {
+    function scan_line(line, orig, lnum,   low, n, tok, out, i, t, h, matched, is_q1, is_q2, is_q3, has_c, has_r, reject, ex, exlen, b, ntail, conts) {
       low = tolower(line)
       # 제외 규칙 6 (다단어): exit <n> / exit code <n>.
       gsub(/exit ?(code ?)?[0-9]+/, " ", low)
@@ -539,24 +550,32 @@ _scan_quant_claims() {
         if (t ~ /^[a-z0-9-]+$/) { h = t; if (gsub(/-/, "-", h) >= 2) continue }
         out = out " " t
       }
-      matched = 0
-      if (out ~ /[0-9]+ ?(건|개소|개|회|줄|파일|케이스)/) matched = 1
-      else if (out ~ /[0-9]+ ?(tests?|files?|lines?|cases?|checks?|functions?)([^a-z0-9]|$)/) matched = 1
-      else if (out ~ /[0-9]+\/[0-9]+/) matched = 1
-      else if (out ~ /[0-9]+(\.[0-9]+)?%/) matched = 1
-      else if (out ~ /(^|[^a-z0-9])(테스트|tests?|suites?|검증|빌드|builds?|lints?|typechecks?|회귀|regressions?)([^a-z0-9]|$)/ \
-            && out ~ /(^|[^a-z0-9])(pass(ed)?|green|통과|성공)([^a-z0-9]|$)/) matched = 1
+      # 형태 3종 + 문맥어 2종 — 각각 독립 변수 (spec §3.1: first-match-wins 금지).
+      is_q1 = (out ~ /[0-9]+ ?(건|개소|개|회|줄|파일|케이스)/) \
+           || (out ~ /[0-9]+ ?(tests?|files?|lines?|cases?|checks?|functions?)([^a-z0-9]|$)/)
+      is_q2 = (out ~ /[0-9]+\/[0-9]+/) || (out ~ /[0-9]+(\.[0-9]+)?%/)
+      is_q3 = (out ~ /(^|[^a-z0-9])(테스트|tests?|suites?|검증|빌드|builds?|lints?|typechecks?|회귀|regressions?)([^a-z0-9]|$)/) \
+           && (out ~ /(^|[^a-z0-9])(pass(ed)?|green|통과|성공)([^a-z0-9]|$)/)
+      # C(계약)/R(결과) — 한국어는 토큰 접두(out 은 " " 로 이어붙인 토큰열: " " 뒤 = 토큰 시작),
+      # 영어는 단어 경계, ± 는 위치 무관 (LC_ALL=C 에서 UTF-8 바이트열 리터럴 매칭).
+      has_c = (out ~ /(^| )(최소|최대|상한|하한|임계|목표|허용|오차|이내|이하|이상)/) \
+           || (out ~ /(^|[^a-z0-9])(threshold|limit|tolerance|target|quorum|budget|at least|at most|up to)([^a-z0-9]|$)/) \
+           || (out ~ /±/)
+      has_r = (out ~ /(^| )(발견|실패|오류|누락|남음|잔존|감지|검출|재현)/) \
+           || (out ~ /(^|[^a-z0-9])(fail(s|ed|ure|ures|ing)?|errors?|found|detected|remaining|flagged|missing|reproduced)([^a-z0-9]|$)/)
+      reject = is_q3 || (is_q2 && !(has_c && !has_r)) || (is_q1 && has_r && !has_c)
+      matched = reject || is_q1 || is_q2
       if (matched) {
         m++
-        if (kept < 10) {
-          # utf8trim: byte 절단 후 문자 경계 보존 (공용 함수 — parser 진단과 동일).
-          ex = utf8trim(substr(orig, 1, 80))
-          ex = "L" lnum ": " ex
-          gsub(/\[readiness-reject\]/, "[readiness-…]", ex)
-          gsub(/\[readiness-advisory\]/, "[readiness-…]", ex)
-          print ex > flgf
-          kept++
-        }
+        if (reject) rj++; else adv++
+        # utf8trim: byte 절단 후 문자 경계 보존 (공용 함수 — parser 진단과 동일).
+        ex = utf8trim(substr(orig, 1, 80))
+        ex = "L" lnum ": " ex
+        gsub(/\[readiness-reject\]/, "[readiness-…]", ex)
+        gsub(/\[readiness-advisory\]/, "[readiness-…]", ex)
+        if (kept < 10) { print ex > flgf; kept++ }
+        if (reject) { if (rjkept < 10) { print ex > rjflgf; rjkept++ } }
+        else        { if (advkept < 10) { print ex > advflgf; advkept++ } }
       }
     }
   ' "$REIN_EV_MASKED_FILE" || {
@@ -565,10 +584,12 @@ _scan_quant_claims() {
     return "$rc"
   }
 
-  local matches="" line
+  local matches="" rejects="" advisories="" line
   while IFS= read -r line; do
     case "$line" in
       matches=*) matches="${line#matches=}" ;;
+      reject=*) rejects="${line#reject=}" ;;
+      advisory=*) advisories="${line#advisory=}" ;;
     esac
   done < "$sum_f"
   case "$matches" in
@@ -576,19 +597,44 @@ _scan_quant_claims() {
       echo "ERROR: [codex-review] readiness precheck: scanner summary corrupt (matches='$matches')" >&2
       return 1 ;;
   esac
+  case "$rejects" in
+    '' | *[!0-9]*)
+      echo "ERROR: [codex-review] readiness precheck: scanner summary corrupt (reject='$rejects')" >&2
+      return 1 ;;
+  esac
+  case "$advisories" in
+    '' | *[!0-9]*)
+      echo "ERROR: [codex-review] readiness precheck: scanner summary corrupt (advisory='$advisories')" >&2
+      return 1 ;;
+  esac
 
   QUANT_MATCH_COUNT="$matches"
+  QUANT_REJECT_COUNT="$rejects"
+  QUANT_ADVISORY_COUNT="$advisories"
   QUANT_FLAGS=$(cat "$flg_f" 2>/dev/null) || {
     rc=$?
     echo "ERROR: [codex-review] readiness precheck: flags read failed (rc=$rc)" >&2
     return "$rc"
   }
+  QUANT_REJECT_FLAGS=$(cat "$rj_f" 2>/dev/null) || {
+    rc=$?
+    echo "ERROR: [codex-review] readiness precheck: reject flags read failed (rc=$rc)" >&2
+    return "$rc"
+  }
+  QUANT_ADVISORY_FLAGS=$(cat "$adv_f" 2>/dev/null) || {
+    rc=$?
+    echo "ERROR: [codex-review] readiness precheck: advisory flags read failed (rc=$rc)" >&2
+    return "$rc"
+  }
   return 0
 }
 
-# _readiness_check — 처분 (spec §4.2):
-#   블록 0 + 매칭 ≥1 → 거부(실패 반환, [readiness-reject] 진단행)
-#   블록 ≥1 + 매칭 ≥1 → advisory([readiness-advisory] 경고) + 성공
+# _readiness_check — 처분 (spec §3.1/§4.2), 3분기:
+#   블록 0 + 매칭 ≥1(카테고리 무관) → 거부(실패 반환, [readiness-reject] 진단행)
+#   블록 ≥1 + reject-tier ≥1(QUANT_REJECT_COUNT) → 거부([readiness-reject] 진단행,
+#     블록이 있어도 실행 결과 서술은 결박 안 됨)
+#   블록 ≥1 + advisory-tier 만(QUANT_REJECT_COUNT==0, QUANT_ADVISORY_COUNT≥1) →
+#     advisory([readiness-advisory] 경고) + 성공
 #   매칭 0 → 무발화 성공
 # 파싱 결과(전역)는 build_envelope 가 §4.3 슬롯 방출에 재사용 — 파싱 1회,
 # 이중 조립 없음.
@@ -610,6 +656,20 @@ _readiness_check() {
       echo "ERROR: [codex-review][readiness-reject]   → [EVIDENCE] claim/command/exit_code/output 블록으로 각 주장의 재현 증거를 선언하거나, 주장 표현을 제거 후 재호출하라. 문법: SKILL.md §4.1" >&2
       return 1
     fi
+    if [ "${QUANT_REJECT_COUNT:-0}" -ge 1 ]; then
+      extra=$((QUANT_REJECT_COUNT - 10))
+      echo "ERROR: [codex-review][readiness-reject] 정량/PASS 주장 감지 — 증거 블록 밖 결박 안 됨 (블록 ${EVIDENCE_BLOCK_COUNT}개 존재, 실행 결과 서술 ${QUANT_REJECT_COUNT}건)" >&2
+      while IFS= read -r flag_line; do
+        [ -n "$flag_line" ] || continue
+        echo "ERROR: [codex-review][readiness-reject]   $flag_line" >&2
+      done <<< "${QUANT_REJECT_FLAGS:-}"
+      if [ "$extra" -gt 0 ]; then
+        echo "ERROR: [codex-review][readiness-reject]   ... (+${extra} more)" >&2
+      fi
+      echo "ERROR: [codex-review][readiness-reject]   → [EVIDENCE] claim/command/exit_code/output 블록으로 각 주장의 재현 증거를 선언하거나, 계약 형태로 고쳐 쓴(상한/최대/이내 등 문맥어 추가, 발견/실패 등 결과 서술어 제거) 뒤 재호출하라. 문법: SKILL.md §4.1" >&2
+      return 1
+    fi
+    extra=$((QUANT_ADVISORY_COUNT - 10))
     echo "WARNING: [codex-review][readiness-advisory] 블록 밖 정량/PASS 패턴 ${QUANT_MATCH_COUNT}건 — 증거 블록 미결박 (비차단)" >&2
     while IFS= read -r flag_line; do
       [ -n "$flag_line" ] || continue
@@ -1008,10 +1068,22 @@ _rein_v2_invoke() {
 _CERTIFIED_REVIEW_PATHS=""
 _CERTIFIED_HAS_UNTRACKED_FILE=0
 REIN_REVIEWED_DIGEST=""
+# _SUBJECT_CHANGESET_PRESENT / _SUBJECT_CHANGESET_PATHS_FILE — key-presence
+# flag + NUL-delimited path list backing _selfverify_observation_consistent()
+# (spec §3.4/§6.1 (3)). `changeset_paths` is the SAME worktree_changeset()
+# instance's full path list (allowlist NOT yet applied) as subject/paths
+# above — a later, independent re-observation compares itself against this
+# one to decide whether a SUBJECT_EMPTY self-verify skip is still safe (the
+# tree may have changed between the two observations). Both stay at their
+# fail-closed initializers unless the python parse below marks the key
+# present AND writes the list to disk successfully.
+_SUBJECT_CHANGESET_PRESENT=0
+_SUBJECT_CHANGESET_PATHS_FILE=""
 if [ "$REIN_REVIEW_MODE" = "code-review" ]; then
   _rein_v2_invoke --print-subject
   _v2subj_parsed=""
   _v2subj_paths_file=""
+  _v2subj_changeset_file=""
   if [ "$_rein_v2_invoke_rc" -eq 0 ] && [ -n "$_rein_v2_invoke_out" ]; then
     _v2subj_py=(python3)
     if [ -n "${PYTHON_RUNNER+x}" ] && [ "${#PYTHON_RUNNER[@]}" -gt 0 ]; then
@@ -1047,10 +1119,17 @@ if [ "$REIN_REVIEW_MODE" = "code-review" ]; then
     # initializers") holds — no head/tail newline parsing of the path
     # list remains anywhere in this wrapper.
     _rein_mktemp _v2subj_paths_file || _v2subj_paths_file=""
+    # changeset_paths (spec §3.4) rides the same NUL-safe boundary as paths
+    # above — a second scratch file, passed unconditionally (even when the
+    # allocation below fails and leaves it "") so the python snippet can
+    # fail closed on a missing path itself rather than needing a bash-side
+    # branch for "no file to write to".
+    _rein_mktemp _v2subj_changeset_file || _v2subj_changeset_file=""
     if [ -n "$_v2subj_paths_file" ]; then
       _v2subj_parsed=$(printf '%s' "$_rein_v2_invoke_out" \
         | REIN_V2SUBJ_PATHS_FILE="$_v2subj_paths_file" \
           REIN_V2SUBJ_PROJECT_DIR="$PROJECT_DIR" \
+          REIN_V2SUBJ_CHANGESET_FILE="$_v2subj_changeset_file" \
           "${_v2subj_py[@]}" -c '
 import json
 import os
@@ -1098,13 +1177,42 @@ try:
 except Exception:
     sys.exit(1)
 
+# changeset_paths (spec Section 3.4) -- key presence is independent of
+# subject/paths validity above: a missing/malformed key degrades this flag
+# to "0" without failing the whole parse (subject/paths still resolve
+# normally). Only a present, well-formed key AND a successful write to the
+# scratch file mark it present -- any failure along the way (no scratch
+# path, write error) folds back to absent so the bash fail-closed default
+# holds. (No apostrophes in this block -- it lives inside a bash single-
+# quoted python -c string; a literal quote here would close it early.)
+changeset_present = "0"
+changeset_paths = data.get("changeset_paths")
+if isinstance(changeset_paths, list) and all(isinstance(p, str) for p in changeset_paths):
+    changeset_present = "1"
+else:
+    changeset_paths = []
+cs_file = os.environ.get("REIN_V2SUBJ_CHANGESET_FILE", "")
+if changeset_present == "1":
+    if not cs_file:
+        changeset_present = "0"
+    else:
+        try:
+            with open(cs_file, "wb") as fh:
+                for p in changeset_paths:
+                    fh.write(p.encode("utf-8", "surrogateescape"))
+                    fh.write(b"\0")
+        except Exception:
+            changeset_present = "0"
+
 sys.stdout.write(subject + "\n")
 sys.stdout.write(has_untracked + "\n")
+sys.stdout.write(changeset_present + "\n")
 ' 2>/dev/null) || _v2subj_parsed=""
     fi
   fi
   if [ -n "$_v2subj_parsed" ]; then
     _v2subj_flag="0"
+    _v2subj_changeset_flag="0"
     _v2subj_line_idx=0
     while IFS= read -r _v2subj_line; do
       _v2subj_line_idx=$((_v2subj_line_idx + 1))
@@ -1112,9 +1220,19 @@ sys.stdout.write(has_untracked + "\n")
         REIN_REVIEWED_DIGEST="$_v2subj_line"
       elif [ "$_v2subj_line_idx" -eq 2 ]; then
         _v2subj_flag="$_v2subj_line"
+      elif [ "$_v2subj_line_idx" -eq 3 ]; then
+        _v2subj_changeset_flag="$_v2subj_line"
       fi
     done <<< "$_v2subj_parsed"
     [ "$_v2subj_flag" = "1" ] && _CERTIFIED_HAS_UNTRACKED_FILE=1
+    # Both new globals set together, only in this success branch — the
+    # failure branch below leaves them at their fail-closed initializers
+    # (§3.4: a missing/malformed changeset_paths key must degrade to "no
+    # consistency check possible", not to a stale or partial file path).
+    if [ "$_v2subj_changeset_flag" = "1" ]; then
+      _SUBJECT_CHANGESET_PRESENT=1
+      _SUBJECT_CHANGESET_PATHS_FILE="$_v2subj_changeset_file"
+    fi
     # Collection union — NUL-aware read only (no newline splitting of the
     # certified list itself). Each path gets its embedded newlines (if
     # any) escaped to a literal `\n` (two-char backslash-n) BEFORE joining
@@ -1148,15 +1266,19 @@ sys.stdout.write(has_untracked + "\n")
     fi
   else
     # Single failure point (rc!=0, empty stdout, mktemp failure, or
-    # unparseable JSON) — ALL THREE of _CERTIFIED_REVIEW_PATHS /
-    # _CERTIFIED_HAS_UNTRACKED_FILE / REIN_REVIEWED_DIGEST stay at their
-    # fail-closed initializers above. _changed_files()/
+    # unparseable JSON) — ALL FIVE of _CERTIFIED_REVIEW_PATHS /
+    # _CERTIFIED_HAS_UNTRACKED_FILE / REIN_REVIEWED_DIGEST /
+    # _SUBJECT_CHANGESET_PRESENT / _SUBJECT_CHANGESET_PATHS_FILE stay at
+    # their fail-closed initializers above. _changed_files()/
     # _resolve_review_subject() degrade to tracked-only collection, and
     # the "v2 evidence issuance" step near the end of
     # write_code_review_stamp() will not even attempt issuance (it gates
     # on `[ -n "${REIN_REVIEWED_DIGEST:-}" ]`) — there is no path where
     # the certified-paths half succeeds while the digest half silently
-    # fails (or vice versa), because they now come from one call.
+    # fails (or vice versa), because they now come from one call. The two
+    # new self-verify globals ride the same single failure point: a
+    # missing/malformed `changeset_paths` key never leaves a stale path
+    # pointing at a file that was never written to.
     echo "NOTICE: [codex-review] v2 certified review-subject snapshot unavailable (bin/rein issue-evidence rc=${_rein_v2_invoke_rc}) — falling back to tracked-only file collection for this cycle; this review cycle will not be able to issue v2 evidence (no digest was captured), so nothing will be recorded and the commit gate will require a re-review." >&2
   fi
 fi
@@ -1395,6 +1517,50 @@ _selfverify_check() {
   return 0
 }
 
+# (A7) 관측 일관성 (spec §3.4) — 현재 관측 O(= _changed_files 와 같은
+# 수집 규칙의 -z 재관측 ∪ untracked) ⊆ 첫 관측(--print-subject 의
+# changeset_paths) 이면 0. 키 부재·git 실패·mktemp 실패·비교 실패 → 1
+# (fail-closed = 발동). 판정 재료는 경로 문자열 집합의 포함 관계뿐이다 —
+# 허용목록 규칙은 python(review_subject_paths) 단일 정본이며 여기 복제하지
+# 않는다. bash 변수는 NUL 을 담지 못하므로 재관측 결과는 파일로만 흐르고
+# 비교는 python 이 한다(파이프 조기종료에 무관한 형태 — 이 저장소 기록:
+# 대용량 `printf | grep -q` 조기종료 클래스와 다른 경로).
+_selfverify_observation_consistent() {
+  [ "${_SUBJECT_CHANGESET_PRESENT:-0}" -eq 1 ] || return 1
+  [ -n "${_SUBJECT_CHANGESET_PATHS_FILE:-}" ] && [ -f "$_SUBJECT_CHANGESET_PATHS_FILE" ] || return 1
+  local obs_f=""
+  _rein_mktemp obs_f || return 1
+  git -C "$PROJECT_DIR" diff --cached --name-only -z > "$obs_f" 2>/dev/null || return 1
+  git -C "$PROJECT_DIR" diff --name-only -z >> "$obs_f" 2>/dev/null || return 1
+  if [ ! -s "$obs_f" ]; then
+    # 워킹 변경 없음 → 커밋 범위로 재관측 (§7 (l) — clean 트리 + 커밋
+    # 범위의 코드 파일도 발동해야 하므로 여기서 빈 채로 두지 않는다).
+    git -C "$PROJECT_DIR" diff --name-only -z "$DIFF_BASE"..HEAD > "$obs_f" 2>/dev/null || return 1
+  fi
+  git -C "$PROJECT_DIR" ls-files --others --exclude-standard -z >> "$obs_f" 2>/dev/null || return 1
+  local -a py=(python3)
+  if [ -n "${PYTHON_RUNNER+x}" ] && [ "${#PYTHON_RUNNER[@]}" -gt 0 ]; then
+    py=("${PYTHON_RUNNER[@]}")
+  fi
+  REIN_SV_OBS_FILE="$obs_f" REIN_SV_SUBJ_FILE="$_SUBJECT_CHANGESET_PATHS_FILE" "${py[@]}" -c '
+import os
+import sys
+
+
+def load(p):
+    with open(p, "rb") as fh:
+        return {s for s in fh.read().split(b"\0") if s}
+
+
+try:
+    obs = load(os.environ["REIN_SV_OBS_FILE"])
+    subj = load(os.environ["REIN_SV_SUBJ_FILE"])
+except Exception:
+    sys.exit(1)
+sys.exit(0 if obs <= subj else 1)
+' 2>/dev/null
+}
+
 # untracked 신규 파일 probe (코드리뷰 R1 High — A1/A6). 2026-08-20 정제
 # (Wave 3 ③-a High-1 재정제) 이후 CHANGED_FILES 는 staged∪unstaged∪
 # "인증된"(허용목록 제외) untracked 만 본다(_changed_files 참조) — 허용목록만
@@ -1420,12 +1586,25 @@ _selfverify_untracked_probe() {
   return 0                      # probe 실패 → fail-closed 발동
 }
 
-# 발동 판정 (spec §4.1 — A1/A5/A6). 반환 0 = 발동(증거 요구), 1 = skip.
+# 발동 판정 (spec §3.4/§4.1 — 순서 = (A5) → (A6) → (A7) → (A1) → probe).
+# 반환 0 = 발동(증거 요구), 1 = skip. `(A6)` 이 `(A7)` 보다 먼저인 이유:
+# `CHANGED_FILES_RC != 0` 은 "변경 파일 목록을 얻지 못했다"는 fail-closed
+# 신호라 어떤 스킵보다 먼저 발동으로 귀결돼야 한다 — `(A7)` 은
+# `CHANGED_FILES_RC == 0` 이 확인된 뒤에만 도달 가능하다(순서로 보장,
+# 조건에 RC 를 중복 검사하지 않는다). `REIN_REVIEWED_DIGEST` 의 두
+# "비어있음" 값은 서로 다르다 — 빈 문자열("")은 `--print-subject` 조회
+# 자체가 실패했다는 뜻(`(A7)` 값 조건 불성립 → 그대로 `(A1)`/probe 로
+# 흘러 발동 유지)이고, 센티널 `"empty:no-subject"` 는 조회가 성공해
+# 확실히 문서/trail-only 라고 판정됐다는 뜻(`(A7)` 스킵 후보 — 단,
+# `_selfverify_observation_consistent` 로 관측 일관성까지 확인해야
+# 스킵을 허용한다).
 _selfverify_should_fire() {
-  [ "$REIN_REVIEW_MODE" = "spec-review" ] && return 1        # (A5) 전면 skip
-  [ "${CHANGED_FILES_RC:-0}" -ne 0 ] && return 0             # (A6) 취득 실패 → 발동 (fail-closed)
-  [ -n "$CHANGED_FILES" ] && return 0                        # (A1) 변경 존재 → 발동
-  _selfverify_untracked_probe                                # (A1/A6) untracked-only 발동 / 진짜 빈 → skip
+  [ "$REIN_REVIEW_MODE" = "spec-review" ] && return 1         # (A5) 전면 skip
+  [ "${CHANGED_FILES_RC:-0}" -ne 0 ] && return 0               # (A6) 취득 실패 → 발동 (fail-closed — 어떤 skip 보다 먼저)
+  if [ "${REIN_REVIEWED_DIGEST:-}" = "empty:no-subject" ] \
+     && _selfverify_observation_consistent; then return 1; fi  # (A7) 문서/trail-only + 관측 일관 → skip
+  [ -n "$CHANGED_FILES" ] && return 0                          # (A1) 변경 존재 → 발동
+  _selfverify_untracked_probe                                  # (A1/A6) untracked-only 발동 / 진짜 빈 → skip
 }
 
 # 관문은 codex spawn 을 보호한다 — source-and-call(단위 테스트) 경로에는

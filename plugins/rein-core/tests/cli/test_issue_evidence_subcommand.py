@@ -321,7 +321,10 @@ class PrintSubjectEmptySetTest(unittest.TestCase):
             )
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
         response = json.loads(proc.stdout)
-        self.assertEqual(response, {"subject": "empty:no-subject", "paths": []})
+        self.assertEqual(
+            response,
+            {"subject": "empty:no-subject", "paths": [], "changeset_paths": []},
+        )
 
     def test_allowlisted_only_untracked_change_yields_empty_subject_and_paths(
         self,
@@ -339,7 +342,14 @@ class PrintSubjectEmptySetTest(unittest.TestCase):
             )
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
         response = json.loads(proc.stdout)
-        self.assertEqual(response, {"subject": "empty:no-subject", "paths": []})
+        self.assertEqual(
+            response,
+            {
+                "subject": "empty:no-subject",
+                "paths": [],
+                "changeset_paths": ["notes.md"],
+            },
+        )
 
 
 class PrintSubjectSecurityReviewSupportedTest(unittest.TestCase):
@@ -427,6 +437,69 @@ class PrintSubjectSecurityReviewSupportedTest(unittest.TestCase):
             msg="sensitive file trail/.npmrc must remain a certified "
             "review target even though its path is docs/trail-shaped — "
             "got paths={!r}".format(response["paths"]),
+        )
+
+
+class PrintSubjectCliSerializationTest(unittest.TestCase):
+    """(m2) `changeset_paths` 키의 CLI 직렬화 계약 (설계 §6.1 (2), §7 "(m2)
+    CLI 직렬화") — code_review 는 정렬된 `changeset_paths` 배열을 얻고,
+    security_review 의 raw stdout 은 이 축 변경 전과 byte 동일해야 한다."""
+
+    def test_code_review_document_only_serializes_full_changeset_paths(self):
+        with tempfile.TemporaryDirectory() as project_root:
+            _init_git_repo(project_root)
+            with open(
+                os.path.join(project_root, "notes.md"), "w", encoding="utf-8"
+            ) as handle:
+                handle.write("note\n")
+            proc = _run_issue_evidence(
+                ["code_review", "--print-subject"],
+                cwd=project_root,
+                extra_env={"REIN_PROJECT_ROOT": project_root},
+            )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        response = json.loads(proc.stdout)
+        self.assertEqual(
+            set(response), {"subject", "paths", "changeset_paths"}
+        )
+        self.assertEqual(response["changeset_paths"], ["notes.md"])
+        self.assertEqual(
+            response["changeset_paths"], sorted(response["changeset_paths"])
+        )
+
+    def test_code_review_digest_serializes_full_changeset_paths_as_superset(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as project_root:
+            _init_git_repo(project_root)
+            _write_code_change(project_root)
+            with open(
+                os.path.join(project_root, "notes.md"), "w", encoding="utf-8"
+            ) as handle:
+                handle.write("note\n")
+            proc = _run_issue_evidence(
+                ["code_review", "--print-subject"],
+                cwd=project_root,
+                extra_env={"REIN_PROJECT_ROOT": project_root},
+            )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        response = json.loads(proc.stdout)
+        self.assertEqual(response["changeset_paths"], ["a.py", "notes.md"])
+        self.assertTrue(
+            set(response["paths"]) <= set(response["changeset_paths"])
+        )
+
+    def test_security_review_raw_stdout_is_byte_identical_to_pre_axis3(self):
+        with tempfile.TemporaryDirectory() as project_root:
+            _init_git_repo(project_root)
+            proc = _run_issue_evidence(
+                ["security_review", "--print-subject"],
+                cwd=project_root,
+                extra_env={"REIN_PROJECT_ROOT": project_root},
+            )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertEqual(
+            proc.stdout, '{"subject": "empty:no-subject", "paths": []}\n'
         )
 
 

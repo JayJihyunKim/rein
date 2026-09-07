@@ -98,6 +98,7 @@ fi
 - [ ] 파라미터 3개 이하 (초과 시 객체 묶음 권고)
 - [ ] 중첩 depth 3단계 이하 (early return 또는 함수 분리)
 - [ ] `any` 타입(TypeScript) / `console.log`·`print` 운영 코드 방치 없음
+- [ ] 주석: diff 에서 **추가되거나 수정된(added/modified) 주석 줄만** 검사 — 회차 서수·수리 이력 서사·실행 결과 측정 수치가 새로 들어왔으면 삭제 또는 trail 이동을 요구하고, 해당 diff 목적과 무관한 기존 주석 전체의 일괄 청소는 요구하지 않는다
 
 ### 3. 테스트 (`plugins/rein-core/rules/testing.md` 기준)
 

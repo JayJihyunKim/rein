@@ -231,6 +231,116 @@ summary() {
 }
 
 # ------------------------------------------------------------
+# Axis 1 readiness reject-tier helpers (spec 2026-08-27-review-cycle-
+# selfamplification.md §3.1/§7). 유효 증거 블록 1개 — 스캐너는 블록 내부를
+# 마스킹하므로 블록 밖 라인만 판정 대상.
+# ------------------------------------------------------------
+READINESS_EV_BLOCK='[EVIDENCE]
+claim: harness block
+command: true
+exit_code: 0
+output:
+ok
+[/EVIDENCE]'
+
+# assert_readiness_reject <body> <label>: exit 4 + anchored 거부 진단행 + codex 미호출
+assert_readiness_reject() {
+  run_wrapper "$1" --non-interactive
+  [ "$RUN_WRAPPER_RC" = "4" ] || fail "$2: expected exit 4, got $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  printf '%s' "$RUN_WRAPPER_ERR" | grep -q '^ERROR: \[codex-review\]\[readiness-reject\]' \
+    || fail "$2: missing anchored [readiness-reject] line"
+  [ ! -f "$RUN_WRAPPER_PROMPT_FILE" ] || fail "$2: codex was spawned despite reject"
+  return 0
+}
+# assert_readiness_advisory <body> <label>: exit 0 + advisory 경고 + 거부 없음 + codex 호출
+assert_readiness_advisory() {
+  run_wrapper "$1" --non-interactive
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "$2: expected exit 0, got $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  printf '%s' "$RUN_WRAPPER_ERR" | grep -q '^WARNING: \[codex-review\]\[readiness-advisory\]' \
+    || fail "$2: missing [readiness-advisory] line"
+  printf '%s' "$RUN_WRAPPER_ERR" | grep -q '\[readiness-reject\]' && fail "$2: unexpected [readiness-reject]"
+  [ -f "$RUN_WRAPPER_PROMPT_FILE" ] || fail "$2: codex not spawned on advisory"
+  return 0
+}
+# assert_readiness_silent <body> <label>: exit 0 + readiness 진단 0줄
+assert_readiness_silent() {
+  run_wrapper "$1" --non-interactive
+  [ "$RUN_WRAPPER_RC" = "0" ] || fail "$2: expected exit 0, got $RUN_WRAPPER_RC (stderr: $RUN_WRAPPER_ERR)"
+  printf '%s' "$RUN_WRAPPER_ERR" | grep -q 'readiness' && fail "$2: unexpected readiness diagnostics: $RUN_WRAPPER_ERR"
+  return 0
+}
+
+# (a) Q2(비율/퍼센트) 블록 밖 단독 → reject.
+test_readiness_q2_ratio_percent_with_block_rejects() {
+  assert_readiness_reject "$READINESS_EV_BLOCK"$'\n'"커버리지 85% 달성" "(a) 커버리지 85%"
+  assert_readiness_reject "$READINESS_EV_BLOCK"$'\n'"회귀 결과 47/50 확인" "(a) 회귀 결과 47/50"
+}
+
+# (b) Q3(검증명사+통과어 공존) 블록 밖 단독 → reject.
+test_readiness_q3_pass_cooccurrence_with_block_rejects() {
+  assert_readiness_reject "$READINESS_EV_BLOCK"$'\n'"테스트 통과 확인" "(b) 테스트 통과 확인"
+  assert_readiness_reject "$READINESS_EV_BLOCK"$'\n'"build passed" "(b) build passed"
+}
+
+# (c) Q1 고정 계약 형태(문맥어 C 있음, R 없음) → advisory (회귀 유지).
+test_readiness_q1_contract_form_with_block_stays_advisory() {
+  assert_readiness_advisory "$READINESS_EV_BLOCK"$'\n'"함수 50줄 이내" "(c) 함수 50줄 이내"
+  assert_readiness_advisory "$READINESS_EV_BLOCK"$'\n'"최대 재시도 3회" "(c) 최대 재시도 3회"
+}
+
+# (d) 한 라인이 Q1 과 Q2 를 동시에 만족 — Q1 매칭이 Q2/Q3 판정을 가리지 않음.
+test_readiness_q1_and_q2_same_line_rejects() {
+  assert_readiness_reject "$READINESS_EV_BLOCK"$'\n'"47/50 tests passed" "(d) 47/50 tests passed"
+}
+
+# (e) 블록 0 + Q1 만 매칭 → reject (기존 블록-0 분기 무변경 회귀).
+test_readiness_zero_block_q1_still_rejects() {
+  assert_readiness_reject "파일 5개 수정했다" "(e) 블록 없이 파일 5개"
+}
+
+# (f) 제외 토큰 7종만 있는 라인 → 블록 개수·카테고리 무관 매칭 0 (silent).
+test_readiness_exclusion_only_tokens_stay_silent() {
+  assert_readiness_silent "$READINESS_EV_BLOCK"$'\n'"exit 0 과 exit code 3 은 정상이고 2026-09-06 기준 v2.0.3 에서 §3.1 절 L120 위치의 facts.py 와 fail-closed-path 를 보라" \
+    "(f) 제외 토큰 7종만"
+}
+
+# (f2) 제외 토큰과 실제 주장이 한 라인에 공존 — 토큰만 마스킹, 주장은 정상 검출.
+test_readiness_exclusion_token_mixed_with_claim_still_detected() {
+  assert_readiness_reject "$READINESS_EV_BLOCK"$'\n'"exit 0, tests passed" "(f2) exit 0, tests passed"
+  assert_readiness_reject "$READINESS_EV_BLOCK"$'\n'"v2.0.3 에서 커버리지 85%" "(f2) v2.0.3 커버리지 85%"
+}
+
+# (g) Q1r(수량+단위 + R 있음 + C 없음, 통과어 없음) → reject.
+test_readiness_q1r_result_verb_with_block_rejects() {
+  assert_readiness_reject "$READINESS_EV_BLOCK"$'\n'"실패 3건 발견" "(g) 실패 3건 발견"
+  assert_readiness_reject "$READINESS_EV_BLOCK"$'\n'"2 files flagged" "(g) 2 files flagged"
+}
+
+# (i) spec-review 모드는 _readiness_check 호출 자체를 타지 않음 — 모드 격리.
+test_readiness_spec_review_mode_not_rejected() {
+  assert_readiness_silent \
+    '[NON_INTERACTIVE] spec review for plan: docs/plans/foo-plan.md'$'\n'"$READINESS_EV_BLOCK"$'\n'"커버리지 85% 달성" \
+    "(i) spec-review 모드"
+}
+
+# (j) Q2c(비율·백분율 + C 있음 + R 없음) → advisory (고정 비율 계약 허용).
+test_readiness_q2c_contract_ratio_with_block_stays_advisory() {
+  assert_readiness_advisory "$READINESS_EV_BLOCK"$'\n'"오차 상한 ±20%" "(j) 오차 상한 ±20%"
+  assert_readiness_advisory "$READINESS_EV_BLOCK"$'\n'"완화 목표 2%" "(j) 완화 목표 2%"
+  assert_readiness_advisory "$READINESS_EV_BLOCK"$'\n'"quorum 2/3 이상" "(j) quorum 2/3 이상"
+}
+
+# (k) Q2 에 C 와 R 공존 — 동률 규칙: Q2 기본 처분(reject) 유지.
+test_readiness_q2_tie_c_and_r_rejects() {
+  assert_readiness_reject "$READINESS_EV_BLOCK"$'\n'"상한 20% 초과로 3/5 실패" "(k) 상한 20% 초과 3/5 실패"
+}
+
+# (l) Q1 에 C 와 R 공존 — 동률 규칙: Q1 기본 처분(advisory) 유지.
+test_readiness_q1_tie_c_and_r_stays_advisory() {
+  assert_readiness_advisory "$READINESS_EV_BLOCK"$'\n'"실패 상한 3회" "(l) 실패 상한 3회"
+}
+
+# ------------------------------------------------------------
 # Verification 1: fake-codex sees envelope containing all 4 slots.
 # Verification 2: Tier 1 marker path appears in assembled context
 #                 (not the later mtime DoD).
@@ -1824,6 +1934,20 @@ main() {
   run_test test_model_failsoft_guard_survives_large_output_with_early_verdict_echo
   # D2 모드 감지 SIGPIPE 무력화 회귀 (2026-06-11, Round 2 High)
   run_test test_spec_mode_detection_survives_large_prompt
+
+  run_test test_readiness_q2_ratio_percent_with_block_rejects
+  run_test test_readiness_q3_pass_cooccurrence_with_block_rejects
+  run_test test_readiness_q1_contract_form_with_block_stays_advisory
+  run_test test_readiness_q1_and_q2_same_line_rejects
+  run_test test_readiness_zero_block_q1_still_rejects
+  run_test test_readiness_exclusion_only_tokens_stay_silent
+  run_test test_readiness_exclusion_token_mixed_with_claim_still_detected
+  run_test test_readiness_q1r_result_verb_with_block_rejects
+  run_test test_readiness_spec_review_mode_not_rejected
+  run_test test_readiness_q2c_contract_ratio_with_block_stays_advisory
+  run_test test_readiness_q2_tie_c_and_r_rejects
+  run_test test_readiness_q1_tie_c_and_r_stays_advisory
+
   summary
 }
 

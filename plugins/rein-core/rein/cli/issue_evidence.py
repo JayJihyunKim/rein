@@ -338,7 +338,8 @@ def print_subject(capability):
     대상으로 삼을 수 있다, spec §3.6/§14 sensitive∩allowlist 보존 요구
     — Finding 2).
 
-    반환: `(subject, paths)` 2-tuple.
+    반환: `(subject, paths, changeset_paths)` 3-tuple (Axis 3, spec
+    §6.1 (1) — 이전 `(subject, paths)` 2-tuple 을 대체).
     - `subject` — `print_digest()` 가 내는 것과 정확히 같은 값 공간
       (`SUBJECT_EMPTY`/`SUBJECT_UNRESOLVED`/`"sha256:<hex>"`).
     - `paths` — `subject` 가 실제 digest 문자열일 때만 그 digest 가
@@ -347,6 +348,13 @@ def print_subject(capability):
       값 공간 계약이다(호출자가 paths 만 보고 "인증된 대상 있음"을
       추론하는 실수를 막는다 — 센티널일 때 paths 가 비어 있지 않으면
       그 자체가 이 함수의 버그다).
+    - `changeset_paths` — code_review 분기에서는 subject 를 계산한 것과
+      **같은** `worktree_changeset()` 인스턴스의 `tuple(changeset.paths)`
+      전체(허용목록 적용 전, subject 가 센티널이어도 채운다 — 새 git 호출
+      없음, `/codex-review` 래퍼의 `(A7)` 관측 일관성 검사가 소비한다,
+      spec §3.4). security_review 분기에서는 항상 `None`(그 분기는 이
+      전체 목록에 대응하는 단일 changeset 인스턴스가 없다 — `strict_
+      security_subject`/`sensitive_security_subject` 위임).
 
     capability 별 계산 경로 (둘 다 각자의 profile 전용 조합 함수 —
     `rein.platform.git.facts` 의 `review_digest`/`review_subject_paths`,
@@ -373,10 +381,14 @@ def print_subject(capability):
                     capability, project_root
                 )
             )
+        # 같은 changeset 인스턴스의 전체 경로(허용목록 적용 전) — subject
+        # 가 센티널이어도 채운다(§3.4 (A7) 일관성 검사가 소비, 새 git
+        # 호출 없음).
+        changeset_paths = tuple(changeset.paths)
         subject = review_digest(changeset, cwd=project_root)
         if subject in (SUBJECT_EMPTY, SUBJECT_UNRESOLVED):
-            return subject, ()
-        return subject, review_subject_paths(changeset)
+            return subject, (), changeset_paths
+        return subject, review_subject_paths(changeset), changeset_paths
 
     policy_dir = rein_cli._resolve_policy_dir()
     try:
@@ -384,8 +396,10 @@ def print_subject(capability):
     except PolicyLoadError as error:
         raise UsageError(str(error)) from error
     if digest_scope == DIGEST_SCOPE_STRICT:
-        return strict_security_subject(cwd=project_root)
-    return sensitive_security_subject(cwd=project_root)
+        subject, paths = strict_security_subject(cwd=project_root)
+    else:
+        subject, paths = sensitive_security_subject(cwd=project_root)
+    return subject, paths, None
 
 
 def issue(capability, verdict, reviewed_digest):

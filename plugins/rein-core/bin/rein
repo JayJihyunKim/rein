@@ -457,7 +457,9 @@ def _run_issue_evidence(argv_rest):
       + 개행, exit 0. `subject`/`paths` 는 같은 changeset 조회 한 번에서
       함께 파생된다(원자적 스냅샷 — `rein.cli.issue_evidence.
       print_subject()` docstring 참조); `subject` 가 센티널이면 `paths`
-      는 항상 빈 배열.
+      는 항상 빈 배열. code_review 는 정렬된 `changeset_paths`(허용목록
+      적용 전 전체 경로, 센티널이어도 채움) 키가 추가되고, security_review
+      는 이 키를 생략한다(Axis 3, spec §6.1 (2)).
     - 발급 성공 → 한 줄 JSON `{"issued": true, "requirement": ...,
       "subject": ...}`, exit 0.
     - 발급 거부(`RefusalError`) → 한 줄 JSON `{"issued": false, "reason":
@@ -508,11 +510,14 @@ def _run_issue_evidence(argv_rest):
             )
             return 1
         try:
-            subject, paths = print_subject(capability)
+            subject, paths, changeset_paths = print_subject(capability)
         except UsageError as error:
             sys.stderr.write("rein: {}\n".format(_redact(str(error))))
             return 1
-        json.dump({"subject": subject, "paths": list(paths)}, sys.stdout)
+        payload = {"subject": subject, "paths": list(paths)}
+        if changeset_paths is not None:
+            payload["changeset_paths"] = sorted(changeset_paths)
+        json.dump(payload, sys.stdout)
         sys.stdout.write("\n")
         return 0
 
