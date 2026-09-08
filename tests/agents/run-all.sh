@@ -6,6 +6,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 TOTAL_FAIL=0
+FAILED_SUITES=""
 
 for test_file in \
   "$SCRIPT_DIR/test-ag2-worktree-frontmatter.sh" \
@@ -19,9 +20,13 @@ do
   if [ ! -f "$test_file" ]; then
     echo "MISSING: $test_file" >&2
     TOTAL_FAIL=$((TOTAL_FAIL + 1))
+    FAILED_SUITES="$FAILED_SUITES $(basename "$test_file")"
     continue
   fi
-  bash "$test_file" || TOTAL_FAIL=$((TOTAL_FAIL + 1))
+  if ! bash "$test_file"; then
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+    FAILED_SUITES="$FAILED_SUITES $(basename "$test_file")"
+  fi
 done
 
 echo ""
@@ -31,5 +36,8 @@ if [ "$TOTAL_FAIL" -eq 0 ]; then
   exit 0
 else
   echo "${TOTAL_FAIL} SUITE(S) FAILED"
+  for _failed_suite in $FAILED_SUITES; do
+    echo "  - $_failed_suite"
+  done
   exit 1
 fi

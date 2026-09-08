@@ -9,11 +9,13 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 TOTAL_FAIL=0
+FAILED_SUITES=""
 
 for test_file in \
   "$SCRIPT_DIR/test-rein-policy-loader-bootstrap-gate.sh" \
   "$SCRIPT_DIR/test-rein-bootstrap-project-non-git.sh" \
   "$SCRIPT_DIR/test-bootstrap-gitignore.sh" \
+  "$SCRIPT_DIR/test-run-all-failure-listing.sh" \
   "$SCRIPT_DIR/test-advisory-summary.sh" \
   "$SCRIPT_DIR/test-aggregate-combined-cli.sh" \
   "$SCRIPT_DIR/test-aggregate-masking-ssot.sh" \
@@ -74,9 +76,13 @@ do
   if [ ! -f "$test_file" ]; then
     echo "MISSING: $test_file (update tests/scripts/run-all.sh after rename/delete)" >&2
     TOTAL_FAIL=$((TOTAL_FAIL + 1))
+    FAILED_SUITES="$FAILED_SUITES $(basename "$test_file")"
     continue
   fi
-  bash "$test_file" || TOTAL_FAIL=$((TOTAL_FAIL + 1))
+  if ! bash "$test_file"; then
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+    FAILED_SUITES="$FAILED_SUITES $(basename "$test_file")"
+  fi
 done
 
 echo ""
@@ -86,5 +92,8 @@ if [ "$TOTAL_FAIL" -eq 0 ]; then
   exit 0
 else
   echo "${TOTAL_FAIL} SUITE(S) FAILED"
+  for _failed_suite in $FAILED_SUITES; do
+    echo "  - $_failed_suite"
+  done
   exit 1
 fi

@@ -12,6 +12,7 @@
 #   [P9]  .env stage
 #   [P10] .env commit -am
 #   [P11] destructive git
+#   [P12] subagent git stash
 #   [I1]  python3 resolver failure   (common — lib/bash-guard-infra.sh)
 #   [I2]  hook JSON parse failure    (common — lib/bash-guard-infra.sh)
 #   [I6]  JSON deny emitter corrupt  (common — lib/bash-guard-infra.sh)
@@ -565,6 +566,333 @@ test_p11_destructive_git_blocks() {
 }
 
 # ============================================================
+# [P12] subagent git stash
+# ============================================================
+test_p12_subagent_stash_blocks() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git stash inside a subagent should emit JSON deny"
+}
+
+test_p12_subagent_stash_pop_blocks() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash pop"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git stash pop inside a subagent should emit JSON deny"
+}
+
+test_p12_subagent_stash_u_blocks() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash -u"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git stash -u inside a subagent should emit JSON deny"
+}
+
+test_p12_subagent_stash_push_after_and_blocks() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"cd /x && git stash push -m wip"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git stash push after && should emit JSON deny (clause anchoring)"
+}
+
+test_p12_subagent_stash_list_not_blocked() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash list"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 git stash list (read-only) should pass"
+}
+
+test_p12_subagent_stash_show_not_blocked() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash show -p"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 git stash show -p (read-only) should pass"
+}
+
+test_p12_main_session_stash_not_blocked() {
+  local input='{"tool_input":{"command":"git stash"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 git stash without agent_id (main session) should pass"
+}
+
+# This PASS holds only because no shell separator sits INSIDE the quotes.
+# command_invokes has no quote model — see
+# test_p12_quoted_mention_with_separator_denied below for the sibling case
+# where a separator inside the quotes DOES get treated as a real clause
+# boundary (known limitation, accepted by design).
+test_p12_mention_without_separator_not_blocked() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"echo \"git stash\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 echo mentioning git stash (no separator inside quotes) should pass"
+}
+
+# Known quote limitation (documented in the [P12] code comment): command_invokes
+# is not quote-aware, so a `;` INSIDE quotes is still treated as a clause
+# boundary. The classifier then sees "git stash;" as its own clause and denies
+# it — an accepted over-block, not a new bug.
+test_p12_quoted_mention_with_separator_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"echo \"note; git stash;\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 echo \"note; git stash;\" (separator inside quotes, known quote limitation) is denied by design"
+}
+
+test_p12_word_boundary_not_blocked() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stashes-are-fun"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 git stash as a prefix of a longer word should pass (token boundary)"
+}
+
+# Accepted conservative edge (documented in the [P12] code comment): `git
+# stash --help` is read-only, but the option-token branch (`-[^[:space:]]*`)
+# is deliberately not an enumerated allowlist — any dash-led token after
+# `stash` lands on the deny side, --help included.
+test_p12_stash_help_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash --help"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git stash --help (accepted conservative edge, not an enumerated allowlist) must block"
+}
+
+# ============================================================
+# [P12] global git options between `git` and `stash` (GIT_STASH_PREFIX,
+# same option grammar as P10's GIT_COMMIT_PREFIX — see GIT_GLOBAL_OPTS).
+# ============================================================
+test_p12_global_opt_C_blocks() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git -C /tmp stash"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git -C /tmp stash must block"
+}
+
+test_p12_global_opt_no_pager_push_blocks() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git --no-pager stash push"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git --no-pager stash push must block"
+}
+
+test_p12_global_opt_c_config_pop_blocks() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git -c core.pager=cat stash pop"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git -c core.pager=cat stash pop must block"
+}
+
+test_p12_global_opt_gitdir_worktree_u_blocks() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git --git-dir=/x/.git --work-tree=/x stash -u"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git --git-dir=/x/.git --work-tree=/x stash -u must block"
+}
+
+test_p12_global_opt_C_list_not_blocked() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git -C /tmp stash list"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 git -C /tmp stash list (read-only) must NOT block"
+}
+
+test_p12_global_opt_no_pager_show_not_blocked() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git --no-pager stash show -p"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 git --no-pager stash show -p (read-only) must NOT block"
+}
+
+test_p12_global_opt_C_no_agent_id_not_blocked() {
+  local input='{"tool_input":{"command":"git -C /tmp stash"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 git -C /tmp stash without agent_id (main session) must NOT block"
+}
+
+# ============================================================
+# [P12] agent_id extraction failure — the `|| { ...; exit 2; }` fail-closed
+# branch guarding the SECOND extract-hook-json.py call.
+# ============================================================
+test_p12_agent_id_extract_failure_fails_closed() {
+  # Replace the sandboxed extract-hook-json.py with a shim that succeeds for
+  # the FIRST extraction (tool_input.command, done earlier by bg_extract_command
+  # for [I2]) but fails for the SECOND (agent_id, done by P12 itself) — so the
+  # command reaches the P12 pattern match and only the agent_id lookup breaks.
+  # run_test gives every test its own fresh sandbox (test-harness.sh
+  # sandbox_setup/sandbox_teardown per test), so no restore step is needed
+  # afterwards — mirrors how test_i2_json_parse_failure_fails_closed does not
+  # need one either.
+  cat > "$SANDBOX/.claude/hooks/lib/extract-hook-json.py" <<'PY'
+#!/usr/bin/env python3
+import sys
+argv = sys.argv[1:]
+if "--field" in argv and "tool_input.command" in argv:
+    print("git stash")
+    sys.exit(0)
+if "--field" in argv and "agent_id" in argv:
+    sys.exit(3)
+sys.exit(1)
+PY
+  chmod +x "$SANDBOX/.claude/hooks/lib/extract-hook-json.py"
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_exit 2 "P12 agent_id extraction failure should fail closed (exit 2)"
+  [ -z "$HOOK_STDOUT" ] || fail "P12 agent_id extraction failure: expected no JSON deny stdout, got: $HOOK_STDOUT"
+}
+
+# ============================================================
+# [P12] terminator set (_P12_TERM) — what may follow `stash` (no-arg
+# branch) or a subcommand/option token (args branch): end of line,
+# optional whitespace then one of `; & | ) } # > <`, a quote char, an
+# fd-number redirection, or a trailing backslash — the no-arg branch must
+# accept every one of these, not only end/`;&|)`.
+# ============================================================
+test_p12_bare_stash_comment_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash # preserve work"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git stash # preserve work (comment terminator) should emit JSON deny"
+}
+
+test_p12_bare_stash_redirect_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash >/tmp/stash.out"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git stash >/tmp/stash.out (redirect terminator) should emit JSON deny"
+}
+
+test_p12_bare_stash_fd_redirect_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash 2>/dev/null"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git stash 2>/dev/null (fd-number redirect terminator) should emit JSON deny"
+}
+
+test_p12_quoted_arg_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash \"$msg\""},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git stash \"\$msg\" (quoted token lands on the deny side) should emit JSON deny"
+}
+
+# `{` is a clause start in the shared classifier (lib/bash-guard-infra.sh +
+# its twin in lib/git-subcommand-model.sh), so brace groups reach every
+# P-rule, not only P12 — pinned here at P11 and with a tab after `{`.
+test_p11_brace_group_reset_hard_blocks() {
+  local input='{"tool_input":{"command":"{ git reset --hard HEAD~1; }"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "DESTRUCTIVE_GIT_CONFIRM" "P11 brace group around the destructive command should emit JSON deny"
+}
+
+test_p12_brace_group_tab_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"{\tgit stash; }"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 {<tab>git stash; } should emit JSON deny"
+}
+
+# POSIX reserved words that introduce a command (if/then/elif/else/while/
+# until/do/!) and a command-substitution backtick are clause starts in the
+# shared classifier, so a literal invocation inside shell control flow is
+# still an invocation. A word merely ending in a reserved word is not.
+test_p12_if_then_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"if true; then git stash; fi"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 if…then git stash should emit JSON deny"
+}
+
+test_p12_while_do_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"while false; do git stash; done"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 while…do git stash should emit JSON deny"
+}
+
+test_p12_backtick_substitution_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"x=`git stash`"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 backtick command substitution should emit JSON deny"
+}
+
+test_p12_bang_negation_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"! git stash"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 ! git stash should emit JSON deny"
+}
+
+test_p12_if_then_stash_list_not_blocked() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"if true; then git stash list; fi"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 if…then git stash list is read-only"
+}
+
+test_p12_word_ending_in_reserved_word_not_clause_start() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"echo dothen git stash"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 'dothen' is not the reserved word then"
+}
+
+test_p11_if_then_reset_hard_blocks() {
+  local input='{"tool_input":{"command":"if true; then git reset --hard HEAD~1; fi"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "DESTRUCTIVE_GIT_CONFIRM" "P11 destructive command inside if…then should emit JSON deny"
+}
+
+test_p12_case_pattern_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"case x in x) git stash;; esac"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 command after a case pattern ) should emit JSON deny"
+}
+
+test_p12_stash_export_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash export --to-ref refs/stash-x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git stash export writes a ref and should emit JSON deny"
+}
+
+test_p12_stash_import_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash import refs/stash-x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git stash import rewrites the stash list and should emit JSON deny"
+}
+
+# Accepted conservative edge: the classifier checks token shape, not
+# grammatical position, so a mention placed right after a reserved word is
+# treated as an invocation (same class as the quoting limitation).
+test_p12_mention_after_reserved_word_denied_conservative_edge() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"echo then git stash"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 mention after a reserved-word token falls on the deny side (accepted edge)"
+}
+
+test_p12_brace_group_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"{ git stash; }"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 { git stash; } (brace group opener is a clause start) should emit JSON deny"
+}
+
+test_p12_stash_list_with_comment_not_blocked() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash list # c"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 git stash list # c (read-only, comment after) should pass"
+}
+
+test_p12_stash_show_with_redirect_not_blocked() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash show >/tmp/x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 git stash show >/tmp/x (read-only, redirect after) should pass"
+}
+
+test_p12_bare_stash_comment_without_agent_id_not_blocked() {
+  local input='{"tool_input":{"command":"git stash # x"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 git stash # x without agent_id (main session) should pass"
+}
+
+# ============================================================
+# [P12] backslash-newline continuation join (_p12_invokes) — a single git
+# invocation split across lines by a line-continuation backslash must not
+# escape detection. The command value below encodes a literal
+# backslash+LF pair via the JSON escapes \\ (one backslash) + \n (one
+# newline) so the extracted $COMMAND actually contains a line break.
+# ============================================================
+test_p12_continuation_after_stash_push_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git stash \\\npush"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git stash \\<LF>push (continuation joined before matching) should emit JSON deny"
+}
+
+test_p12_continuation_between_git_and_stash_push_denied() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git \\\nstash push"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_json_deny "SUBAGENT_STASH_BLOCKED" "P12 git \\<LF>stash push (continuation joined before matching) should emit JSON deny"
+}
+
+test_p12_continuation_between_git_and_stash_list_not_blocked() {
+  local input='{"agent_id":"agent-01","tool_input":{"command":"git \\\nstash list"},"tool_result":{}}'
+  run_hook "$HOOK" "$input"
+  assert_pass "P12 git \\<LF>stash list (read-only after join) should pass"
+}
+
+# ============================================================
 # Negative: a plain command passes (no block point fires).
 # ============================================================
 test_plain_ls_passes() {
@@ -685,6 +1013,49 @@ main() {
   run_test test_p10_no_pager_plain_commit_not_blocked     "$HOOK"
   run_test test_p10_no_env_present_commit_am_passes       "$HOOK"
   run_test test_p11_destructive_git_blocks                "$HOOK"
+  run_test test_p12_subagent_stash_blocks                 "$HOOK"
+  run_test test_p12_subagent_stash_pop_blocks             "$HOOK"
+  run_test test_p12_subagent_stash_u_blocks               "$HOOK"
+  run_test test_p12_subagent_stash_push_after_and_blocks  "$HOOK"
+  run_test test_p12_subagent_stash_list_not_blocked       "$HOOK"
+  run_test test_p12_subagent_stash_show_not_blocked       "$HOOK"
+  run_test test_p12_main_session_stash_not_blocked        "$HOOK"
+  run_test test_p12_mention_without_separator_not_blocked "$HOOK"
+  run_test test_p12_quoted_mention_with_separator_denied  "$HOOK"
+  run_test test_p12_word_boundary_not_blocked             "$HOOK"
+  run_test test_p12_stash_help_denied                     "$HOOK"
+  run_test test_p12_global_opt_C_blocks                   "$HOOK"
+  run_test test_p12_global_opt_no_pager_push_blocks       "$HOOK"
+  run_test test_p12_global_opt_c_config_pop_blocks        "$HOOK"
+  run_test test_p12_global_opt_gitdir_worktree_u_blocks   "$HOOK"
+  run_test test_p12_global_opt_C_list_not_blocked         "$HOOK"
+  run_test test_p12_global_opt_no_pager_show_not_blocked  "$HOOK"
+  run_test test_p12_global_opt_C_no_agent_id_not_blocked  "$HOOK"
+  run_test test_p12_agent_id_extract_failure_fails_closed "$HOOK"
+  run_test test_p12_bare_stash_comment_denied                          "$HOOK"
+  run_test test_p12_bare_stash_redirect_denied                         "$HOOK"
+  run_test test_p12_bare_stash_fd_redirect_denied                      "$HOOK"
+  run_test test_p12_quoted_arg_denied                                  "$HOOK"
+  run_test test_p11_brace_group_reset_hard_blocks                      "$HOOK"
+  run_test test_p12_brace_group_tab_denied                             "$HOOK"
+  run_test test_p12_if_then_denied                                  "$HOOK"
+  run_test test_p12_while_do_denied                                 "$HOOK"
+  run_test test_p12_backtick_substitution_denied                    "$HOOK"
+  run_test test_p12_bang_negation_denied                            "$HOOK"
+  run_test test_p12_if_then_stash_list_not_blocked                  "$HOOK"
+  run_test test_p12_word_ending_in_reserved_word_not_clause_start   "$HOOK"
+  run_test test_p11_if_then_reset_hard_blocks                       "$HOOK"
+  run_test test_p12_case_pattern_denied                             "$HOOK"
+  run_test test_p12_stash_export_denied                             "$HOOK"
+  run_test test_p12_stash_import_denied                             "$HOOK"
+  run_test test_p12_mention_after_reserved_word_denied_conservative_edge "$HOOK"
+  run_test test_p12_brace_group_denied                                 "$HOOK"
+  run_test test_p12_stash_list_with_comment_not_blocked                "$HOOK"
+  run_test test_p12_stash_show_with_redirect_not_blocked               "$HOOK"
+  run_test test_p12_bare_stash_comment_without_agent_id_not_blocked    "$HOOK"
+  run_test test_p12_continuation_after_stash_push_denied               "$HOOK"
+  run_test test_p12_continuation_between_git_and_stash_push_denied     "$HOOK"
+  run_test test_p12_continuation_between_git_and_stash_list_not_blocked "$HOOK"
   run_test test_plain_ls_passes                           "$HOOK"
   # GMF-4 policy-toggle fail-open seal
   run_test test_gmf4_python_absent_does_not_disable_gate  "$HOOK"

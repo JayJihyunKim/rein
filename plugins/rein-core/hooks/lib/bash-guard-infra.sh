@@ -182,10 +182,18 @@ bg_extract_command() {
 
 # command_invokes PATTERN
 #   Return 0 if PATTERN (an ERE alternation of command tokens) appears at a
-#   command-clause start in $COMMAND, else 1. Clause start = string/line start
-#   or right after a shell separator (`;` `&` `|` `(`, including the last char
-#   of `&&`/`||`). Leading `VAR=value` env assignments and command wrappers
-#   (`env`/`sudo`/`command`/`nohup`/`time`/`exec`) are allowed.
+#   command-clause start in $COMMAND, else 1. Clause start = string/line start,
+#   right after a shell separator (`;` `&` `|` `(` `)` `{` and a backtick,
+#   including the last char of `&&`/`||` and the `)` closing a `case`
+#   pattern), or right after a POSIX reserved word that introduces a command
+#   (`if` `then` `elif` `else` `while` `until` `do` `!`) when that word itself
+#   stands at a token start. Leading `VAR=value` env assignments and command
+#   wrappers (`env`/`sudo`/`command`/`nohup`/`time`/`exec`) are allowed.
+#   The classifier checks token shape, not grammatical position: a mention
+#   placed right after such a token (`echo then git …`, `echo {git …`, text
+#   after a closing backtick) is classified as an invocation. That is the
+#   accepted conservative direction — same class as the quoting limitation
+#   below — and is not a defect to fix without a shell parser.
 #
 #   Why clause anchoring: an un-anchored substring match would classify
 #   commands that merely mention a keyword as an arg/value/text — `grep
@@ -198,7 +206,7 @@ bg_extract_command() {
 #
 #   Reads $COMMAND from the caller's scope.
 command_invokes() {
-  local pattern="$1" _ci_cmd="$COMMAND"
+  local pattern="$1" _ci_cmd="$COMMAND" _bt='`'
   # GSD-3 (dod-2026-08-05-gate-scope-defects): heredoc 본문 줄은 데이터이지
   # 실행 절이 아니다 — 매칭 입력에서 소거한다 (원문 불변). grep 이 행 단위라
   # `^` 가 본문 줄머리에도 앵커돼, 파일에 기록될 텍스트의 `git commit` 줄이
@@ -210,5 +218,5 @@ command_invokes() {
     _ci_cmd=$(git_model_strip_heredocs "$_ci_cmd")
   fi
   printf '%s' "$_ci_cmd" | grep -qE \
-    "(^|[;&|(])[[:space:]]*((env|sudo|command|nohup|time|exec)[[:space:]]+|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*($pattern)"
+    "(^|[;&|(){${_bt}]|(^|[[:space:];&|(){${_bt}])(if|then|elif|else|while|until|do|!)[[:space:]]+)[[:space:]]*((env|sudo|command|nohup|time|exec)[[:space:]]+|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*($pattern)"
 }

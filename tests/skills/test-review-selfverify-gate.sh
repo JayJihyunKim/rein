@@ -244,6 +244,7 @@ SUBJ_EMPTY_DOCS='{"subject": "empty:no-subject", "paths": [], "changeset_paths":
 SUBJ_EMPTY_NOKEY='{"subject": "empty:no-subject", "paths": []}'
 SUBJ_EMPTY_CLEAN='{"subject": "empty:no-subject", "paths": [], "changeset_paths": []}'
 SUBJ_CODE_F='{"subject": "sha256:0000000000000000000000000000000000000000000000000000000000000000", "paths": ["f.txt"], "changeset_paths": ["f.txt"]}'
+SUBJ_CODE_DOCS='{"subject": "sha256:0000000000000000000000000000000000000000000000000000000000000000", "paths": ["docs/note.md"], "changeset_paths": ["docs/note.md"]}'
 
 echo "== review selfverify gate tests =="
 
@@ -685,12 +686,13 @@ assert_eq "$RC" "4" "SV28 untracked 취득 실패 → exit 4"
 assert_no_capture "SV28 codex spawn 이전 종료"
 e2e_teardown
 
-echo "-- SV29: 반대 방향(subject 가 센티널 아니면 A7 자체가 불성립) → 발동 (보수 방향 문서화 케이스)"
+echo "-- SV29: 반대 방향(subject 가 센티널 아니면 A7 자체가 불성립) → 발동 (SV21 과 문서-only 관측 동일, subject 만 비센티널 → 발동)"
 e2e_setup
-mk_dirty
+mk_docs_dirty
 mk_fake_rein_bin
-FAKE_REIN_SUBJECT_JSON="$SUBJ_CODE_F" run_wrapper "code review please"
+FAKE_REIN_SUBJECT_JSON="$SUBJ_CODE_DOCS" run_wrapper "code review please"
 assert_eq "$RC" "4" "SV29 반대 방향 → exit 4"
+assert_contains "$ERR" "ERROR: [codex-review][readiness-reject]" "SV29 anchored 거부 진단행"
 assert_no_capture "SV29 codex spawn 이전 종료"
 e2e_teardown
 

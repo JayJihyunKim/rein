@@ -44,7 +44,7 @@ python3 scripts/rein-validate-coverage-matrix.py schedule <plan>
 
 **공통 결과 스키마**(두 변형 동일): `task_id`(필수) / `status: completed|blocked`(필수) / `changed_files: [repo-relative path...]`(필수, advisory) / `blocked_reason`(blocked 시 필수) / `recommendation: parent_fallback|split|scope_expand`(blocked 시) / `summary`(1-3줄). 부모는 `status=blocked` 또는 **결과 누락(timeout/truncation)** 을 **미완** 처리 → 의존 후속 진입 불가, `recommendation` 으로 분기.
 
-**edit_only 변형**: 선언 `scope` 파일만 편집(best-effort). **금지** — 커밋 금지·스테이징·리뷰/보안 stamp 금지·trail 기록·전체 포매터·변경성 테스트/코드젠. 같은 웨이브 여러 edit_only 는 한 메시지 병렬 dispatch.
+**edit_only 변형**: 선언 `scope` 파일만 편집(best-effort). **금지** — 커밋 금지·스테이징·리뷰/보안 stamp 금지·trail 기록·전체 포매터·변경성 테스트/코드젠·git stash(가드가 차단). 같은 웨이브 여러 edit_only 는 한 메시지 병렬 dispatch.
 
 **mutating 변형**: 자기만의 **단독 웨이브**(서브에이전트 1개) dispatch. edit_only 금지목록 중 **변경성 명령 허용**(코드젠·변경성 테스트·설치). 단 커밋·스테이징·stamp·trail 은 부모 소유 금지. 공통 결과 스키마 **동일** 반환. 부모 검증 `scope` = 선언 + **예상 부작용 경로**(plan-writer 가 함께 선언). mutating 도 "선언(+부작용) 밖 변경 = reject".
 

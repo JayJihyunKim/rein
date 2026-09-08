@@ -368,6 +368,24 @@ def ensure_rein_runtime_gitignored(root: Path) -> bool:
 
 
 def _read_all(fd: int) -> str:
+    """Read the whole .gitignore without ever raising on its bytes.
+
+    Contract: `.gitignore` is a byte file to git, not a UTF-8 file — a
+    project's existing comments may be Latin-1 or any other encoding we
+    have no reason to assume. Bytes that are not valid UTF-8 are decoded
+    with the ``surrogateescape`` error handler so they round-trip losslessly
+    (re-encoding the result with the same handler reproduces the original
+    bytes exactly); we never re-encode this return value ourselves (writes
+    are append-only via ``_write_all`` on our own newly built, surrogate-free
+    ``block``, so
+    the original bytes on disk are never rewritten). Rejecting a non-UTF-8
+    file here instead would lock legitimate Latin-1 (or other non-UTF-8)
+    projects out of bootstrap entirely — preservation, not validation, is
+    the goal. The missing-pattern comparison this feeds
+    (``ensure_rein_runtime_gitignored``) is line-wise against the ASCII
+    patterns in ``REIN_RUNTIME_GITIGNORE_PATTERNS``, which stays correct
+    regardless of what encoding the rest of the file is in.
+    """
     os.lseek(fd, 0, os.SEEK_SET)
     chunks = []
     while True:
@@ -375,7 +393,7 @@ def _read_all(fd: int) -> str:
         if not chunk:
             break
         chunks.append(chunk)
-    return b"".join(chunks).decode("utf-8")
+    return b"".join(chunks).decode("utf-8", "surrogateescape")
 
 
 def _write_all(fd: int, data: bytes) -> None:
@@ -437,7 +455,11 @@ def ensure_gitignore_only(project_dir: Path) -> int:
 
 def _ensure_gitignore_only_unbounded(project_dir: Path) -> int:
     project_dir = project_dir.resolve()
-    if not (project_dir / ".rein" / "project.json").exists():
+    # is_file(), not exists(): a directory left at this path (e.g. by a
+    # mis-scripted tool) must NOT count as "already bootstrapped" — exists()
+    # would be true for a directory too, tricking this heal-only sub-mode
+    # into touching a project that never actually completed bootstrap().
+    if not (project_dir / ".rein" / "project.json").is_file():
         return 0
     if git_root_for(project_dir) is None:
         return 0
@@ -539,7 +561,15 @@ def bootstrap(
     # successful run we leave it (preserves user-edited fields if any future
     # version adds them).
     project_json = rein_dir / "project.json"
-    if not project_json.exists():
+    if project_json.is_dir():
+        # Explicit refusal instead of letting write_text()/os.replace() below
+        # raise IsADirectoryError — a directory at the marker path means
+        # something else created it (or a prior crash left it), and treating
+        # it as "already bootstrapped" (is_file() below would say no, so we
+        # would otherwise fall through and try to write) would either crash
+        # with a traceback or silently pretend to succeed.
+        fail(f".rein/project.json is a directory: {project_json} — remove it, then re-run.")
+    if not project_json.is_file():
         payload = {
             "mode": "plugin",
             "scope": scope,

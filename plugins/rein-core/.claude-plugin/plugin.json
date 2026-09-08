@@ -1,6 +1,6 @@
 {
   "name": "rein",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Guide autonomy, ship quality — a Claude Code plugin that lets your AI agent move at full speed while requiring it to plan, leave evidence, and pass review before code lands.",
   "author": {
     "name": "Rein Maintainers",

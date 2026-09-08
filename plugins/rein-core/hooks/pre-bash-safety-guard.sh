@@ -9,6 +9,7 @@
 #   [P9]  .env stage           — git add that would stage a .env file
 #   [P10] .env commit -am      — git commit -am with a .env present
 #   [P11] destructive git      — git reset --hard / push --force / checkout --
+#   [P12] subagent git stash   — git stash (mutating) invoked with an agent_id
 #
 # The test/commit-specific checks (P2-P7, I3-I5) moved to
 # pre-bash-test-commit-gate.sh, which hooks.json gates with `if` so it only
@@ -16,7 +17,7 @@
 # (I1·I2·I6) are common to both halves and live in lib/bash-guard-infra.sh.
 #
 # Exit code protocol (2-tier):
-#   정책 차단 [P1]/[P8]/[P9]/[P10]/[P11]: exit 0 + JSON deny (deny_emit)
+#   정책 차단 [P1]/[P8]/[P9]/[P10]/[P11]/[P12]: exit 0 + JSON deny (deny_emit)
 #   인프라 무결성 [I1]/[I2]/[I6]:         exit 2 + stderr   (fail-closed)
 # 분류 근거: docs/specs/2026-05-17-hook-message-assistant-tone.md §1
 # 주의: exit 1 은 non-blocking error (통과됨). 차단은 exit 0+JSON deny 또는 exit 2
@@ -200,7 +201,11 @@ fi
 #      mistake-prevention 가드의 보수적 방향 (의심스러우면 차단) 으로 수용한다.
 #      사용자는 `git add` + 별도 `-m` 으로 우회 가능. 따옴표 인식 분류기 (별도
 #      트랙) 가 도입되면 해소.
-GIT_COMMIT_PREFIX='git([[:space:]]+(-C[[:space:]]+[^;&|[:space:]]+|-c[[:space:]]+[^;&|[:space:]]+|--git-dir(=[^;&|[:space:]]+|[[:space:]]+[^;&|[:space:]]+)|--work-tree(=[^;&|[:space:]]+|[[:space:]]+[^;&|[:space:]]+)|-[^;&|[:space:]]*))*[[:space:]]+commit'
+# GIT_GLOBAL_OPTS: the option-token alternation shared by every
+# `git <global-opts> <subcommand>` prefix in this file (P10 commit, P12
+# stash) so the prefixes cannot drift apart.
+GIT_GLOBAL_OPTS='(-C[[:space:]]+[^;&|[:space:]]+|-c[[:space:]]+[^;&|[:space:]]+|--git-dir(=[^;&|[:space:]]+|[[:space:]]+[^;&|[:space:]]+)|--work-tree(=[^;&|[:space:]]+|[[:space:]]+[^;&|[:space:]]+)|-[^;&|[:space:]]*)'
+GIT_COMMIT_PREFIX="git([[:space:]]+${GIT_GLOBAL_OPTS})*[[:space:]]+commit"
 GIT_AM_ALL='(-a|--all)'
 GIT_AM_MSG='(-m([^;&|[:space:]]+)?|--message(=[^;&|[:space:]]+)?)'
 if command_invokes "${GIT_COMMIT_PREFIX}[^;&|]*(^|[[:space:]])-[[:alpha:]]*(a[[:alpha:]]*m|m[[:alpha:]]*a)[[:alpha:]]*([[:space:]]|[\"']|\$)" \
@@ -223,6 +228,55 @@ if command_invokes "git (reset --hard|push --force|push[^;&|]*-f( |\$)|checkout 
   deny_emit "This git command permanently discards work and cannot be undone after it runs. Before proceeding, confirm with the user that the intention is clear: what will be lost and why that is acceptable. If the user confirms, re-issue the command." "DESTRUCTIVE_GIT_CONFIRM" "$COMMAND"; rc=$?
   log_block "파괴적 git 명령" "$COMMAND"
   exit "$rc"
+fi
+
+# --- [P12] 서브에이전트 git stash 차단 ---
+# 위협 모델: 같은 작업 트리에서 부모와 동시에 실행되는 서브에이전트가 git
+# stash 를 왕복하면 부모가 편집 중인 파일이 통째로 사라졌다 되돌아와 부모의
+# DoD 에 충돌 마커를 남긴다. 메인 세션(hook JSON 에 agent_id 없음)은 이
+# 위협 모델 밖이라 차단하지 않는다 — agent_id 유무로만 구분한다. 정직한
+# 에이전트의 실수를 잡는 규율 가드이지 보안 경계가 아니다: git alias,
+# eval/변수 조립으로 재구성된 호출은 범위 밖이다.
+#
+# 매치 대상은 mutating stash invocation 만 — GIT_STASH_PREFIX(`git` 과
+# `stash` 사이의 전역 옵션을 GIT_GLOBAL_OPTS 로 흡수) 뒤에 종결자 _P12_TERM
+# 이 바로 오거나, 공백 + 서브커맨드(push/pop/apply/drop/clear/save/branch/
+# create/store/export/import — export·import 는 git 2.51 의 stash ref
+# 교환 명령으로 목록·ref 를 바꾼다) 또는 `-` 로 시작하는 옵션 토큰 +
+# 공백/종결자가 온다. 읽기 전용 `list`/`show` 만 제외된다.
+# _P12_TERM = 토큰 뒤에 올 수 있는 것: 줄 끝, 또는 선택적 공백 뒤의
+# 구분자 `; & | ) }`, 닫는 백틱, 주석 `#`, 리다이렉션 `> <`(fd 번호 포함), 따옴표,
+# 끝 백슬래시(다음 단어 미상인 continuation → deny 쪽). 따옴표로 감싼
+# 토큰(`git stash "$msg"`)도 이 집합으로 deny 쪽에 둔다 — 열거형
+# allowlist 로 세분하지 않는다(P10 과 같은 보수 방향).
+# _p12_invokes: command_invokes 는 $COMMAND 를 줄 단위로 보므로 백슬래시-
+# 개행으로 나뉜 한 invocation 은 P12 전용 사본에서만 이어 붙여 판정한다.
+# agent_id 추출은 패턴이 매치한 뒤에만 수행해 다른 명령의 비용을 더하지
+# 않는다.
+_P12_TERM='([[:space:]]*($|[;&|)}#><`'"'\""']|[0-9]+[<>]|\\$))'
+GIT_STASH_PREFIX="git([[:space:]]+${GIT_GLOBAL_OPTS})*[[:space:]]+stash"
+
+_p12_invokes() {
+  local _saved="$COMMAND" _rc
+  COMMAND="${COMMAND//\\$'\n'/}"
+  command_invokes "$1"; _rc=$?
+  COMMAND="$_saved"
+  return "$_rc"
+}
+
+if _p12_invokes "${GIT_STASH_PREFIX}${_P12_TERM}" \
+   || _p12_invokes "${GIT_STASH_PREFIX}[[:space:]]+(push|pop|apply|drop|clear|save|branch|create|store|export|import|-[^[:space:]]*)([[:space:]]|${_P12_TERM})"; then
+  AGENT_ID=$(printf '%s' "$INPUT" | "${PYTHON_RUNNER[@]}" "$SCRIPT_DIR/lib/extract-hook-json.py" --field agent_id --default '') || {
+    echo "[rein] The Bash guard cannot read the hook input to check for a subagent identity (extract-hook-json.py failed). This is an installation issue — run 'rein update' to repair." >&2
+    log_block "json parse failure" "$COMMAND"
+    exit 2
+  }
+  if [ -n "$AGENT_ID" ]; then
+    # [P12] policy block — JSON deny
+    deny_emit "A subagent working in this shared working tree must not run git stash. A stash/pop round-trip rewrites files the parent session may be editing at the same time, and has left conflict markers in the parent's DoD before. Edit the working tree directly instead — if it must end up clean, report status: blocked to the parent rather than stashing." "SUBAGENT_STASH_BLOCKED" "$COMMAND"; rc=$?
+    log_block "서브에이전트 git stash" "$COMMAND"
+    exit "$rc"
+  fi
 fi
 
 exit 0

@@ -388,3 +388,14 @@
 {"ts": "2026-09-04T07:32:37", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "git checkout #c5f3890e1642", "source": "live"}
 {"ts": "2026-09-04T12:44:50", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "$TITLE #b51d26ec5b4f", "source": "live"}
 {"ts": "2026-09-07T07:11:23", "hook": "pre-edit-coverage-gate", "reason": "dod covers mismatch (tier 1)", "target": "trail/dod/dod-2026-09-07-v2-1-0-release.md", "source": "live"}
+{"ts": "2026-09-08T02:54:23", "hook": "pre-bash-safety-guard", "reason": "서브에이전트 git stash", "target": "git stash #d507c6d60f27", "source": "live"}
+{"ts": "2026-09-08T05:01:27", "hook": "pre-bash-safety-guard", "reason": "서브에이전트 git stash", "target": "cd #486bc69b87f9", "source": "live"}
+{"ts": "2026-09-08T06:20:56", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "cd #18f0f7200d06", "source": "live"}
+{"ts": "2026-09-08T06:46:43", "hook": "pre-bash-safety-guard", "reason": "서브에이전트 git stash", "target": "<mask-unavailable> #79e2d8d39ad1", "source": "live"}
+{"ts": "2026-09-08T06:46:43", "hook": "pre-bash-safety-guard", "reason": "서브에이전트 git stash", "target": "<mask-unavailable> #74b2458a750a", "source": "live"}
+{"ts": "2026-09-08T06:46:43", "hook": "pre-bash-safety-guard", "reason": "서브에이전트 git stash", "target": "<mask-unavailable> #37df02e1427e", "source": "live"}
+{"ts": "2026-09-08T06:46:44", "hook": "pre-bash-safety-guard", "reason": "서브에이전트 git stash", "target": "<mask-unavailable> #0a8930f811f0", "source": "live"}
+{"ts": "2026-09-08T06:46:44", "hook": "pre-bash-safety-guard", "reason": "서브에이전트 git stash", "target": "<mask-unavailable> #eeade9156a36", "source": "live"}
+{"ts": "2026-09-08T06:46:44", "hook": "pre-bash-safety-guard", "reason": "서브에이전트 git stash", "target": "<mask-unavailable> #44ff2a916283", "source": "live"}
+{"ts": "2026-09-08T07:45:16", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "cd #29af5f04bf97", "source": "live"}
+{"ts": "2026-09-08T07:57:09", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "python3 #180764f748b0", "source": "live"}

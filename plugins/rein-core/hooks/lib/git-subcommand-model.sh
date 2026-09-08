@@ -49,10 +49,15 @@ GIT_MERGE_ERE="${GIT_SUBCMD_PREFIX}(merge|rebase|am)([[:space:]]|;|\||&|\(|\$)"
 
 # git_clause_invokes "<ERE>" "<command-string>"
 #   Return 0 if the ERE matches at a command-clause start in the command
-#   string, else 1. Clause start = string/line start or right after a shell
-#   separator (`;` `&` `|` `(`, incl. the last char of `&&`/`||`). Leading
-#   `VAR=value` env assignments and command wrappers (env/sudo/command/nohup/
-#   time/exec) are skipped. This is the SAME clause-start model as
+#   string, else 1. Clause start = string/line start, right after a shell
+#   separator (`;` `&` `|` `(` `)` `{` and a backtick, incl. the last char of
+#   `&&`/`||` and the `)` closing a `case` pattern), or right after a POSIX
+#   reserved word that introduces a command (`if` `then` `elif` `else`
+#   `while` `until` `do` `!`) standing at a token start. Token shape only,
+#   not grammatical position — a mention right after such a token is
+#   classified as an invocation (accepted conservative direction). Leading
+#   `VAR=value` env assignments and command wrappers (env/sudo/command/
+#   nohup/time/exec) are skipped. This is the SAME clause-start model as
 #   bash-guard-infra.sh::command_invokes (line 196), so a mention such as
 #   `echo "git commit"` / `grep git commit -m x` is correctly non-matched.
 #
@@ -60,9 +65,9 @@ GIT_MERGE_ERE="${GIT_SUBCMD_PREFIX}(merge|rebase|am)([[:space:]]|;|\||&|\(|\$)"
 #   bash-guard-infra.sh); test-commit-gate uses bash-guard-infra's
 #   command_invokes with the ERE constants above — both share the same anchor.
 git_clause_invokes() {
-  local ere="$1" cmd="$2"
+  local ere="$1" cmd="$2" _bt='`'
   git_model_strip_heredocs "$cmd" | grep -qE \
-    "(^|[;&|(])[[:space:]]*((env|sudo|command|nohup|time|exec)[[:space:]]+|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*(${ere})"
+    "(^|[;&|(){${_bt}]|(^|[[:space:];&|(){${_bt}])(if|then|elif|else|while|until|do|!)[[:space:]]+)[[:space:]]*((env|sudo|command|nohup|time|exec)[[:space:]]+|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*(${ere})"
 }
 
 # git_model_strip_heredocs <command-string> — stdout 으로 heredoc **본문 줄**을

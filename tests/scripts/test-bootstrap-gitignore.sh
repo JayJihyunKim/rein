@@ -21,6 +21,15 @@
 #     (ii)  re-run → byte-identical .gitignore, silent stdout
 #     (iii) non-git dir with .rein/project.json → no .gitignore written
 #     (iv)  git dir without .rein/project.json → no .gitignore written
+#   .rein/project.json must be a regular FILE to count as bootstrapped:
+#     (x)   .rein/project.json is a DIRECTORY → --ensure-gitignore treats it
+#           as NOT bootstrapped (is_file() gate) — exits 0, no .gitignore
+#     (xi)  full bootstrap with .rein/project.json pre-created as a
+#           DIRECTORY → explicit refusal (not a traceback), exit != 0
+#   non-UTF-8 .gitignore content is preserved byte-for-byte:
+#     (xii) .gitignore has non-UTF-8 (Latin-1) bytes → bootstrap doesn't
+#           raise UnicodeDecodeError; original bytes preserved byte-for-byte
+#           as a prefix, patterns appended once, re-run is byte-identical
 set -u
 
 RUNTIME_PATTERNS='/.rein/state/ /.rein/cache/ /.rein/logs/ /.rein/state.json /.rein/state-pending-*.log /.rein/.onboarded'
@@ -286,6 +295,66 @@ if [ "$G_RC" = "0" ]; then ok "(iv) uninitialized git dir exits 0"; else bad "(i
 if [ -e "$G/.gitignore" ]; then bad "(iv) .gitignore created without .rein/project.json"; else ok "(iv) no .gitignore created without .rein/project.json"; fi
 if [ -s "$G_OUT" ]; then bad "(iv) unexpected stdout for a no-op run"; else ok "(iv) silent no-op"; fi
 rm -rf "$G" "$G_OUT"
+
+# (x) .rein/project.json is a DIRECTORY (not a file) → --ensure-gitignore
+#     must NOT treat this as "already bootstrapped": is_file(), not
+#     exists(), gates the check in _ensure_gitignore_only_unbounded. Exits
+#     0 (silent no-op, same as (iii)/(iv)), no .gitignore is created.
+PJD=$(mktemp -d "/tmp/bootstrap-gitignore-PJD-XXXXXX")
+( cd "$PJD" && git init -q )
+mkdir -p "$PJD/.rein/project.json"   # DIRECTORY at the marker path
+PJD_OUT="$PJD.out"
+python3 "$BOOTSTRAP" --ensure-gitignore --project-dir "$PJD" >"$PJD_OUT" 2>&1
+PJD_RC=$?
+if [ "$PJD_RC" = "0" ]; then ok "(x) --ensure-gitignore exits 0 when .rein/project.json is a directory"; else bad "(x) exited $PJD_RC"; fi
+if [ -e "$PJD/.gitignore" ]; then bad "(x) .gitignore created despite .rein/project.json being a directory (not bootstrapped)"; else ok "(x) no .gitignore created — directory marker not treated as bootstrapped"; fi
+if [ -s "$PJD_OUT" ]; then bad "(x) unexpected stdout for a no-op run"; else ok "(x) silent no-op"; fi
+rm -rf "$PJD" "$PJD_OUT"
+
+# (xi) full bootstrap (no --ensure-gitignore) with .rein/project.json
+#      PRE-CREATED as a DIRECTORY → explicit refusal via fail(), not a
+#      traceback from Path.write_text()/os.replace() hitting IsADirectoryError.
+PJB=$(mktemp -d "/tmp/bootstrap-gitignore-PJB-XXXXXX")
+( cd "$PJB" && git init -q )
+mkdir -p "$PJB/.rein/project.json"
+PJB_ERR="$PJB.err"
+python3 "$BOOTSTRAP" --project-dir "$PJB" >/dev/null 2>"$PJB_ERR"
+PJB_RC=$?
+if [ "$PJB_RC" != "0" ]; then ok "(xi) full bootstrap refuses a directory .rein/project.json (rc=$PJB_RC)"; else bad "(xi) full bootstrap succeeded despite directory .rein/project.json"; fi
+if grep -q 'is a directory' "$PJB_ERR" 2>/dev/null; then ok "(xi) refusal names the reason"; else bad "(xi) stderr lacks 'is a directory': $(head -c 200 "$PJB_ERR")"; fi
+if grep -q 'Traceback' "$PJB_ERR" 2>/dev/null; then bad "(xi) traceback leaked to stderr"; else ok "(xi) no traceback"; fi
+rm -rf "$PJB" "$PJB_ERR"
+
+# (xii) .gitignore has non-UTF-8 (Latin-1) bytes → full bootstrap must not
+#       raise UnicodeDecodeError (_read_all decodes with surrogateescape);
+#       the original bytes are preserved byte-for-byte as an exact prefix
+#       (only appended to, never rewritten) and every runtime pattern is
+#       appended exactly once. Re-run is byte-identical (idempotent).
+LATIN=$(mktemp -d "/tmp/bootstrap-gitignore-LATIN-XXXXXX")
+( cd "$LATIN" && git init -q )
+printf 'node_modules/\n# caf\351 latin1\n' > "$LATIN/.gitignore"   # \351 octal = 0xE9, invalid UTF-8 here
+LATIN_ORIG="$LATIN.orig"
+cp "$LATIN/.gitignore" "$LATIN_ORIG"
+LATIN_ORIG_SIZE=$(wc -c < "$LATIN_ORIG" | tr -d ' ')
+LATIN_ERR="$LATIN.err"
+python3 "$BOOTSTRAP" --project-dir "$LATIN" >/dev/null 2>"$LATIN_ERR"
+LATIN_RC=$?
+if [ "$LATIN_RC" = "0" ]; then ok "(xii) non-UTF-8 .gitignore: bootstrap exits 0"; else bad "(xii) non-UTF-8 .gitignore: bootstrap exited $LATIN_RC"; fi
+if grep -q 'Traceback' "$LATIN_ERR" 2>/dev/null; then bad "(xii) non-UTF-8 .gitignore: traceback leaked to stderr"; else ok "(xii) non-UTF-8 .gitignore: no traceback"; fi
+# cmp's own -n/--bytes on this platform still reports "EOF on <shorter file>"
+# even when the compared prefix matches exactly (it still notices file2 is
+# longer overall) — so truncate BOTH sides to the same length first and cmp
+# those two equal-length streams instead.
+if cmp -s <(head -c "$LATIN_ORIG_SIZE" "$LATIN_ORIG") <(head -c "$LATIN_ORIG_SIZE" "$LATIN/.gitignore"); then ok "(xii) original non-UTF-8 bytes preserved as exact prefix"; else bad "(xii) original bytes altered/corrupted"; fi
+for p in $RUNTIME_PATTERNS; do
+  LATIN_CNT=$(grep -a -c -x -F -- "$p" "$LATIN/.gitignore" 2>/dev/null || true)
+  if [ "$LATIN_CNT" = "1" ]; then ok "(xii) $p appears exactly once"; else bad "(xii) $p count=$LATIN_CNT (want 1)"; fi
+done
+LATIN_HASH1=$(shasum -a 256 "$LATIN/.gitignore" | awk '{print $1}')
+python3 "$BOOTSTRAP" --project-dir "$LATIN" >/dev/null 2>&1
+LATIN_HASH2=$(shasum -a 256 "$LATIN/.gitignore" | awk '{print $1}')
+if [ "$LATIN_HASH1" = "$LATIN_HASH2" ]; then ok "(xii) re-run is byte-identical (idempotent)"; else bad "(xii) re-run changed .gitignore"; fi
+rm -rf "$LATIN" "$LATIN_ORIG" "$LATIN_ERR"
 
 echo ""
 echo "test-bootstrap-gitignore: $PASS passed, $FAIL failed"

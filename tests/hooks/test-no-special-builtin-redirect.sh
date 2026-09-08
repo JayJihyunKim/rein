@@ -6,7 +6,8 @@
 # shell instead of failing the command, so a read-only directory silently
 # killed the whole SessionStart helper on Linux CI (2026-09-04, fixture S of
 # test-session-start-bootstrap.sh). Regular builtins (printf, true) just fail
-# and `|| true` absorbs it. Scope: plugins/rein-core/{hooks,scripts,bin}.
+# and `|| true` absorbs it. Scope: plugins/rein-core/{hooks,scripts,bin} +
+# the root scripts/*.sh CLI (the user-installed `rein.sh` + helpers).
 #
 # Deliberately narrow: only `:` is scanned. The other special builtins
 # (eval/export/return/exit/./break/continue/set/shift/unset/times/trap) are
@@ -62,11 +63,11 @@ for sample in "printf '' > \"\$flag\" 2>/dev/null || true" ': 2>/dev/null' "trap
 done
 
 # The scan — comment-only lines are skipped.
-HITS="$(find "$PLUGIN/hooks" "$PLUGIN/scripts" "$PLUGIN/bin" -type f \( -name '*.sh' -o -name 'rein' \) 2>/dev/null | sort | while IFS= read -r f; do
+HITS="$(find "$PLUGIN/hooks" "$PLUGIN/scripts" "$PLUGIN/bin" "$PROJECT_DIR/scripts" -type f \( -name '*.sh' -o -name 'rein' \) 2>/dev/null | sort | while IFS= read -r f; do
   strip_quotes < "$f" | grep -nE "$PATTERN" | grep -vE '^[0-9]+:[[:space:]]*#' | sed "s|^|$f:|"
 done)"
 if [ -z "$HITS" ]; then
-  pass "no \`: > file\` idiom in plugin hooks/scripts/bin"
+  pass "no \`: > file\` idiom in plugin hooks/scripts/bin or root scripts/"
 else
   fail "\`: > file\` idiom found (use printf ''):"
   printf '%s\n' "$HITS" >&2

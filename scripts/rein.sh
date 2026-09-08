@@ -17,7 +17,7 @@ warn()  { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; }
 fatal() { echo -e "${RED}Fatal: $*${NC}" >&2; exit 1; }
 
-VERSION="2.1.0"
+VERSION="2.1.1"
 TEMPLATE_REPO="${REIN_TEMPLATE_REPO:-${CLAUDE_TEMPLATE_REPO:-git@github.com:JayJihyunKim/rein.git}}"
 
 # ---------------------------------------------------------------------------
@@ -365,7 +365,12 @@ PY
   # Initialise status + log so status probe + tail never hit ENOENT before
   # the wrapper writes its first atomic update.
   write_atomic "$statf" "running"
-  : > "$log"
+  # printf, not the `:` special builtin — a redirection failure on a special
+  # builtin EXITS a POSIX-mode shell (bash 5 + POSIXLY_CORRECT=1, i.e. a
+  # user's Linux environment) instead of just failing the command; printf is
+  # a regular builtin so a failure here only fails this statement. See
+  # tests/hooks/test-no-special-builtin-redirect.sh.
+  printf '' > "$log"
 
   _rein_job_launch "$pidf" "$exitf" "$statf" "$metaf" "$log" "$shell_mode" "$@"
 

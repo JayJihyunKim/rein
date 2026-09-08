@@ -18,7 +18,20 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$PROJECT_DIR/scripts/rein.sh" --source-only
 
 tmp=$(mktemp -d -t rein-job-status-XXXXXX)
-trap 'rm -rf "$tmp"' EXIT
+# Late writers (the job wrapper's final meta patch, the async GC forked by
+# cmd_job_start) can still be creating files under $tmp when this suite's
+# assertions are done; a single rm -rf then fails with "Directory not empty"
+# and, being the trap's last command, turns a passing suite's exit code into
+# 1. Retry with a bound instead of enumerating every writer.
+cleanup_tmp() {
+  local _i
+  for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    rm -rf "$tmp" 2>/dev/null && return 0
+    sleep 0.25
+  done
+  rm -rf "$tmp"
+}
+trap cleanup_tmp EXIT
 cd "$tmp"
 
 wait_done() {

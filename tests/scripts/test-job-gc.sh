@@ -18,7 +18,20 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$PROJECT_DIR/scripts/rein.sh" --source-only
 
 tmp=$(mktemp -d -t rein-job-gc-XXXXXX)
-trap 'rm -rf "$tmp"' EXIT
+# Late writers (the job wrapper's final meta patch, the async GC forked by
+# cmd_job_start) can still be creating files under $tmp when this suite's
+# assertions are done; a single rm -rf then fails with "Directory not empty"
+# and, being the trap's last command, turns a passing suite's exit code into
+# 1. Retry with a bound instead of enumerating every writer.
+cleanup_tmp() {
+  local _i
+  for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    rm -rf "$tmp" 2>/dev/null && return 0
+    sleep 0.25
+  done
+  rm -rf "$tmp"
+}
+trap cleanup_tmp EXIT
 cd "$tmp"
 
 jd=".claude/cache/jobs"
@@ -98,6 +111,28 @@ elapsed=$(( t_end - t_start ))
 }
 jid=$(echo "$out" | awk '/^started: /{print $2; exit}')
 [ -n "$jid" ] || { echo "FAIL[d]: start returned without jid" >&2; exit 1; }
+
+# Wait for the job wrapper to fully finish before the EXIT trap tries to
+# rm -rf our tempdir. The wrapper's LAST write is the meta .json's
+# finished_at/exit_code patch (see scripts/rein-job-wrapper.sh step 4,
+# AFTER the .exit file is written in step 3) — polling for .exit alone can
+# still race the wrapper mid meta-patch. Without waiting for both, the trap
+# intermittently hits "Directory not empty" / a non-zero rm exit. Poll
+# cheaply (0.25s steps, ~10s bound) rather than hang indefinitely.
+job_done=0
+JOB_WAITED=0
+while [ "$JOB_WAITED" -lt 40 ]; do
+  if [ -f "$jd/$jid.exit" ] && grep -q 'finished_at' "$jd/$jid.json" 2>/dev/null; then
+    job_done=1
+    break
+  fi
+  sleep 0.25
+  JOB_WAITED=$((JOB_WAITED + 1))
+done
+if [ "$job_done" != "1" ]; then
+  echo "FAIL[d]: job $jid did not finish (.exit + finished_at) within 10s" >&2
+  exit 1
+fi
 
 # Wait briefly for any async GC children spawned by cmd_job_start to exit
 # before the trap tries to rm -rf our tempdir. Without this the trap hits

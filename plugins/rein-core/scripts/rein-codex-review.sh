@@ -670,11 +670,11 @@ _readiness_check() {
       return 1
     fi
     extra=$((QUANT_ADVISORY_COUNT - 10))
-    echo "WARNING: [codex-review][readiness-advisory] 블록 밖 정량/PASS 패턴 ${QUANT_MATCH_COUNT}건 — 증거 블록 미결박 (비차단)" >&2
+    echo "WARNING: [codex-review][readiness-advisory] 블록 밖 정량/PASS 패턴 ${QUANT_ADVISORY_COUNT}건 — 증거 블록 미결박 (비차단)" >&2
     while IFS= read -r flag_line; do
       [ -n "$flag_line" ] || continue
       echo "WARNING: [codex-review][readiness-advisory]   $flag_line" >&2
-    done <<< "${QUANT_FLAGS:-}"
+    done <<< "${QUANT_ADVISORY_FLAGS:-}"
     if [ "$extra" -gt 0 ]; then
       echo "WARNING: [codex-review][readiness-advisory]   ... (+${extra} more)" >&2
     fi
@@ -700,14 +700,14 @@ _emit_evidence_manifest() {
 
 # _emit_unbacked_quant_flags — advisory 매칭 ≥1 일 때만 방출 (spec §4.3).
 _emit_unbacked_quant_flags() {
-  [ "${QUANT_MATCH_COUNT:-0}" -ge 1 ] 2>/dev/null || return 0
-  [ -n "${QUANT_FLAGS:-}" ] || return 0
+  [ "${QUANT_ADVISORY_COUNT:-0}" -ge 1 ] 2>/dev/null || return 0
+  [ -n "${QUANT_ADVISORY_FLAGS:-}" ] || return 0
   printf '\nunbacked_quant_flags:\n'
   local line
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     printf '  %s\n' "$line"
-  done <<< "$QUANT_FLAGS"
+  done <<< "$QUANT_ADVISORY_FLAGS"
 }
 
 # ---- Parse CLI options + read stdin prompt. ---------------------------
