@@ -75,14 +75,16 @@ rein 게이트(`exit 2`)에 막히면 **환경을 조작해 통과시키지 않�
 [ ] 재현 테스트 작성 완료 (수정 전 실패 → 수정 후 pass 확인)
 [ ] Root cause 명시 (DoD 또는 inbox 에 한 줄)
 [ ] 회귀 방지 테스트 추가됨
-[ ] codex 리뷰 실행 완료 (PASS 시 v2 code_review 증거 발급됨)
-[ ] 리뷰 후 추가 수정 시 재리뷰 완료
-[ ] 보안 리뷰 실행 완료 (PASS 시 v2 security_review 증거 발급됨, security_tier:light 면 면제)
+[ ] codex 리뷰 실행 완료 (PASS 시 v2 code_review 증거 발급됨) — 단독 실행 시 직접 수행 / 워커 dispatch 시 부모가 웨이브 barrier 에서 수행
+[ ] 리뷰 후 추가 수정 시 재리뷰 완료 — 단독 실행 시 직접 수행 / 워커 dispatch 시 부모가 웨이브 barrier 에서 수행
+[ ] 보안 리뷰 실행 완료 (PASS 시 v2 security_review 증거 발급됨, security_tier:light 면 면제) — 단독 실행 시 직접 수행 / 워커 dispatch 시 부모가 웨이브 barrier 에서 수행
 [ ] 기존 테스트 100% 통과
 [ ] lint/format 통과
 [ ] Self-review 완료
 [ ] 빠뜨린 규칙 → trail/incidents/ 초안 작성
 ```
+
+워커 dispatch 시 = 지휘자(부모)가 웨이브 단위로 리뷰하는 흐름에서 워커로 실행된 경우(부모가 dispatch 프롬프트로 작업 단위·쓰기 범위·금지목록을 전달한 경우). 그런 전달 없이 단일 하위 에이전트로 호출됐다면 단독 실행으로 본다. 워커 dispatch 시 세 리뷰 의무는 면제가 아니라 부모로 이관되며, 워커는 리뷰·보안 증거를 발급하지 않는다 (`AGENTS.md` §5-1 예외).
 
 ## 사용자 보고 방식
 

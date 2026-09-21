@@ -23,6 +23,10 @@ CLI modes:
     rein-policy-loader.py --rule-override <rule-name>
         Rule override (Task 2.8). Print override body to stdout if defined,
         else print nothing. Always exit 0.
+    rein-policy-loader.py --rule-enabled <rule-name>
+        Opt-in rule flag (OFD-FLAG-1). Print "true" to stdout only when
+        rules.yaml has `<rule-name>: {enabled: true}`, else "false".
+        FAIL-CLOSED — every error path answers "false". Always exit 0.
     rein-policy-loader.py --turn-brief
         Per-turn brief (PT-7). Emit the complete UserPromptSubmit envelope
         (answer-only + response-tone + persona summaries, optional bootstrap
@@ -290,6 +294,39 @@ def get_rule_override(rule_name: str):
     if not isinstance(override, str):
         return None
     return override
+
+
+def get_rule_enabled(rule_name: str) -> bool:
+    """Return True only when rules.yaml has `<rule_name>: {enabled: true}`.
+
+    FAIL-CLOSED — deliberately the opposite of get_rule_override()'s fail-open.
+    A failed override load leaves the shipped rule in place (safe), but this
+    flag switches a NEW default behaviour on, so every error path (PyYAML
+    missing, file missing or unreadable, parse error, non-dict shape, missing
+    key, non-bool value) must yield False. Only a YAML boolean true enables —
+    the string "true" and the number 1 do not. The existence probe sits inside
+    the try so an unreadable policy directory also answers False instead of
+    raising (the CLI promises exit 0 on every path).
+    """
+    if yaml is None:
+        return False
+    policy_path = Path(".rein/policy/rules.yaml")
+    try:
+        if not policy_path.exists():
+            return False
+        data = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    except Exception:
+        print(
+            f"warning: failed to load {policy_path} - rule '{rule_name}' stays disabled",
+            file=sys.stderr,
+        )
+        return False
+    if not isinstance(data, dict):
+        return False
+    rule_cfg = data.get(rule_name)
+    if not isinstance(rule_cfg, dict):
+        return False
+    return rule_cfg.get("enabled") is True
 
 
 def get_meta_check_policy() -> str:
@@ -677,7 +714,7 @@ def get_all_rule_overrides() -> dict:
 def main() -> int:
     if len(sys.argv) < 2:
         print(
-            "usage: rein-policy-loader.py <hook-name> | --strict <hook-name> | --rule-override <rule-name> | --meta-check-policy | --persona | --persona-file | --persona-greeting <name> | --turn-brief",
+            "usage: rein-policy-loader.py <hook-name> | --strict <hook-name> | --rule-override <rule-name> | --rule-enabled <rule-name> | --meta-check-policy | --persona | --persona-file | --persona-greeting <name> | --turn-brief",
             file=sys.stderr,
         )
         return 0  # fail-open - never block a hook due to internal usage error
@@ -739,6 +776,13 @@ def main() -> int:
         override = get_rule_override(rule_name)
         if override is not None:
             sys.stdout.write(override)
+        return 0
+
+    if sys.argv[1] == "--rule-enabled":
+        # OFD-FLAG-1 CLI: print "true"/"false", always exit 0. A missing
+        # rule-name arg answers "false" (fail-closed, unlike --rule-override).
+        enabled = len(sys.argv) >= 3 and get_rule_enabled(sys.argv[2])
+        sys.stdout.write("true" if enabled else "false")
         return 0
 
     if sys.argv[1] == "--meta-check-policy":

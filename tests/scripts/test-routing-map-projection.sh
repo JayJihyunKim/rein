@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MAP="$ROOT/plugins/rein-core/rules/routing-map.md"
 PROC="$ROOT/plugins/rein-core/rules/routing-procedure.md"
-MAX_BYTES=900
+MAX_BYTES=1100
 
 [ -f "$MAP" ]  || { echo "FAIL: routing-map.md 부재"; exit 1; }
 [ -f "$PROC" ] || { echo "FAIL: routing-procedure.md 부재"; exit 1; }

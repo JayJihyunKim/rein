@@ -23,6 +23,7 @@
 # Injection seam (test hook):
 #   CODEX_BIN — path to the codex binary. Defaults to the first `codex`
 #   on PATH. Tests override with tests/fixtures/fake-codex.sh.
+#   REIN_REVIEW_TEST_DELAY_AT (테스트 전용 — 운영 호출에서 설정 금지)
 #
 # Usage:
 #   bash scripts/rein-codex-review.sh
@@ -37,6 +38,18 @@
 #       Spec-review mode (design). No stamp written.
 
 set -euo pipefail
+
+# ---- Review event log: t0 (wrapper 진입 시점). ----
+_now_ms() {
+  local t="${EPOCHREALTIME:-}"   # 정수부·소수부를 각각 다시 읽으면(한 식
+  # 안에서 같은 특수 변수를 두 번 참조하면) 두 읽기 사이에 초 경계를 넘을
+  # 때 서로 다른 초의 값이 섞여 최대 1초까지 부풀 수 있다 — 한 번만 캡처.
+  t="${t//[^0-9]/}"              # 소수점 문자는 로케일을 따른다(. 또는 ,) — 숫자만 남기면 초 10자리 + 마이크로초 6자리
+  if [ "${#t}" -ge 13 ]; then printf '%s' "${t:0:13}"; return 0; fi
+  python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null && return 0
+  printf '%s000' "$(date +%s)"
+}
+REVIEW_EVENT_T0_MS=$(_now_ms)
 
 # ---- Locate project dir + select-active-dod library. -----------------
 #
@@ -115,6 +128,116 @@ if [ ! -r "$_select_active_dod_lib" ] || \
   exit 2
 fi
 . "$_select_active_dod_lib"
+
+# ---- Review event log helpers (spec §4.1). ----
+REVIEW_EVENTS_DIR="$PROJECT_DIR/trail/review-events"
+ROUND_BUDGET_PREV=""            # _round_budget_check 가 읽은 count (미도달이면 빈 값 → null)
+_iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+_json_str() { [ -n "${1:-}" ] || { printf 'null'; return 0; }   # 문자열 리터럴 또는 null. \ " \n \r \t + 기타 제어문자 \u00XX
+  # awk 는 RS="\n"(기본) 로 레코드를 나누므로 입력 끝의 개행 하나는 "그
+  # 뒤에 빈 레코드가 없다" 는 뜻이라 아무 것도 출력하지 않는다 — 원문이
+  # 개행으로 끝나면 그 개행 1개가 통째로 사라진다. 끝 개행 여부를 case 로
+  # 직접 검사해 이스케이프 결과 뒤에 보정해 붙인다(중간 개행은 awk 결과에
+  # 이미 올바르게 들어 있다).
+  local esc trailing=''
+  esc=$(printf '%s' "$1" | LC_ALL=C awk 'BEGIN{ORS=""} { if (NR>1) printf "\\n"; s=$0; gsub(/\\/,"\\\\\\\\",s); gsub(/"/,"\\\"",s); gsub(/\r/,"\\r",s); gsub(/\t/,"\\t",s);
+    out=""; for(i=1;i<=length(s);i++){c=substr(s,i,1); if (c<" ") out=out sprintf("\\u%04x", index("\001\002\003\004\005\006\007\010\011\012\013\014\015\016\017\020\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037",c)); else out=out c}; printf "%s", out }')
+  case "$1" in *$'\n') trailing='\n' ;; esac
+  printf '"%s%s"' "$esc" "$trailing"
+}
+_json_int() { printf '%s' "${1:-}" | grep -qE '^[0-9]+$' && printf '%s' "$1" || printf 'null'; }
+_review_event_mode() { [ "$REIN_REVIEW_MODE" = "spec-review" ] && printf 'spec' || printf 'code'; }
+REVIEW_EVENT_CYCLE_KEY=""   # 계약: _review_exit 진입 시 한 번만 계산해 두 함수가 공유한다 — selector 도 호출당 한 번만 실행된다.
+_review_event_ensure_sad_path() {   # 계약: code 모드에서 selector 미실행이면 한 번 읽기 실행 — 명령치환 밖에서 직접 호출해야 SAD_PATH 가 호출자 셸에 남는다.
+  if [ "$REIN_REVIEW_MODE" != "spec-review" ] && [ -z "${SAD_PATH+x}" ]; then SAD_PATH=$(select_active_dod 2>/dev/null | cut -f2) || SAD_PATH=""; fi
+}
+_review_event_cycle_key() {   # REVIEW_EVENT_CYCLE_KEY 캐시가 있으면 그것을 쓴다 — _review_exit
+  # 경로에서는 항상 캐시가 채워져 있다. 캐시가 비어 있으면(단위 테스트 등
+  # _review_exit 밖에서 직접 부르는 경우) 그 자리에서 1회 계산한다.
+  if [ -n "$REVIEW_EVENT_CYCLE_KEY" ]; then printf '%s' "$REVIEW_EVENT_CYCLE_KEY"; return 0; fi
+  _review_event_ensure_sad_path
+  _round_budget_key
+}
+_review_event_fingerprint() {   # spec 모드는 지문 미산출(null). code: 검토 대상 없음 sentinel·빈 값 → null (spec §4.4 판정 세부 (b))
+  if [ "$REIN_REVIEW_MODE" = "spec-review" ]; then printf ''; return 0; fi
+  case "${REIN_REVIEWED_DIGEST:-}" in ""|empty:no-subject) printf '' ;; *) printf '%s' "$REIN_REVIEWED_DIGEST" ;; esac
+}
+_review_event_line() {   # $1=outcome $2=wall_ms — cycle_key 는 REVIEW_EVENT_CYCLE_KEY 캐시를 그대로 쓴다.
+  printf '{"ts":%s,"mode":%s,"cycle_key":%s,"outcome":%s,"round_count_at_call":%s,"wall_clock_ms":%s,"extension_declared":%s,"subject_fingerprint":%s}' \
+    "$(_json_str "$(_iso_now)")" "$(_json_str "$(_review_event_mode)")" "$(_json_str "$REVIEW_EVENT_CYCLE_KEY")" "$(_json_str "$1")" \
+    "$(_json_int "$ROUND_BUDGET_PREV")" "$(_json_int "$2")" "$(_json_int "${REIN_ROUND_LIMIT_DECLARED:-}")" "$(_json_str "$(_review_event_fingerprint)")"
+}
+_review_event_key_file() { printf '%s/%s.jsonl' "$REVIEW_EVENTS_DIR" "$(_round_budget_hash "$REVIEW_EVENT_CYCLE_KEY")"; }
+_review_event_commit() {   # $1=outcome $2=wall_ms — 판정으로 끝난 호출의 로그 한 줄 append. 실패해도 호출자의 exit 는 불변.
+  local line f; line=$(_review_event_line "$1" "$2"); f=$(_review_event_key_file)
+  if [ -L "$PROJECT_DIR/trail" ] || [ -L "$REVIEW_EVENTS_DIR" ] || [ -L "$f" ]; then
+    echo "ERROR: [codex-review][review-events] 로그 경로가 심볼릭 링크다 ($f) — 기록하지 않는다" >&2
+    return 1
+  fi
+  mkdir -p "$REVIEW_EVENTS_DIR" 2>/dev/null || { echo "ERROR: [codex-review][review-events] 이벤트 기록 실패 ($f)" >&2; return 1; }
+  # canonical 경로 containment — 위 -L 검사는 review-events 자신과 그
+  # 직계 부모(trail) 만 본다. trail 보다 위(예: PROJECT_DIR 자체나 trail
+  # 의 조상)가 링크를 거쳐도, 혹은 mkdir 이 기존 링크를 따라가도 -L 검사는
+  # 못 잡는다 — mkdir 뒤 실제로 만들어진 경로를 cd -P + pwd -P 로 정규화해
+  # PROJECT_DIR/trail/review-events 로 시작하는지 직접 검증한다(realpath
+  # 미사용 — bash 3.2 호환).
+  local real_events_dir real_project_dir
+  real_events_dir=$(cd -P "$REVIEW_EVENTS_DIR" 2>/dev/null && pwd -P) || real_events_dir=""
+  real_project_dir=$(cd -P "$PROJECT_DIR" 2>/dev/null && pwd -P) || real_project_dir=""
+  if [ -z "$real_events_dir" ] || [ -z "$real_project_dir" ]; then
+    echo "ERROR: [codex-review][review-events] 로그 디렉토리 경로를 확인할 수 없다 ($f) — 기록하지 않는다" >&2
+    return 1
+  fi
+  case "$real_events_dir" in
+    "${real_project_dir}/trail/review-events"|"${real_project_dir}/trail/review-events"/*) ;;
+    *)
+      echo "ERROR: [codex-review][review-events] 로그 디렉토리가 저장소 경계 밖을 가리킨다 ($f) — 기록하지 않는다" >&2
+      return 1
+      ;;
+  esac
+  # TOCTOU 재검사 — 위 검사와 mkdir 사이에 경로가 심볼릭 링크로 바뀌었을
+  # 수 있다. append 직전 마지막 관문.
+  if [ -L "$REVIEW_EVENTS_DIR" ] || [ -L "$f" ]; then
+    echo "ERROR: [codex-review][review-events] 로그 경로가 심볼릭 링크다 ($f) — 기록하지 않는다" >&2
+    return 1
+  fi
+  # 대상이 이미 존재하는데 정규 파일이 아니면(디렉토리 등) 거부 — append
+  # 가 의도치 않은 경로로 향하지 않게 한다.
+  if [ -e "$f" ] && [ ! -f "$f" ]; then
+    echo "ERROR: [codex-review][review-events] 로그 경로가 정규 파일이 아니다 ($f) — 기록하지 않는다" >&2
+    return 1
+  fi
+  printf '%s\n' "$line" >> "$f" 2>/dev/null \
+    || { echo "ERROR: [codex-review][review-events] 이벤트 기록 실패 ($f)" >&2; return 1; }
+}
+_review_exit() {   # $1=outcome $2=exit — 판정 종료의 출구. 로그 기록의 성패와 무관하게 exit 는 불변.
+  local outcome="$1" code="$2" t_end wall
+  t_end=$(_now_ms)
+  case "$t_end" in ""|*[!0-9]*) t_end="" ;; esac                      # 두 시계 값을 각각 검사한다 — 하나라도 비었거나
+  case "$REVIEW_EVENT_T0_MS" in ""|*[!0-9]*) t_end="" ;; esac         # 숫자가 아니면 소요를 null 로 남기고 계속한다.
+  if [ -z "$t_end" ]; then wall=""; else wall=$((10#$t_end - 10#$REVIEW_EVENT_T0_MS)); [ "$wall" -ge 0 ] || wall=0; fi
+  # 키는 여기서 딱 1회 계산해 캐싱한다 — t_end 캡처 뒤(측정 구간 밖)이므로
+  # selector 재실행 시간은 wall_clock_ms 에 들지 않는다. ensure_sad_path
+  # 는 명령치환 밖에서 직접 호출해야 SAD_PATH 대입이 이 셸에 남는다.
+  _review_event_ensure_sad_path
+  REVIEW_EVENT_CYCLE_KEY=$(_round_budget_key) || REVIEW_EVENT_CYCLE_KEY=""
+  [ -z "$REVIEW_EVENT_CYCLE_KEY" ] || _review_event_commit "$outcome" "$wall" || true
+  exit "$code"
+}
+_test_delay_at() {   # $1=site — REIN_REVIEW_TEST_DELAY_AT="<site>:<sec>" 와 일치할 때만 sleep (테스트 전용 — 운영 호출에서 설정 금지)
+  [ -n "${REIN_REVIEW_TEST_DELAY_AT:-}" ] || return 0
+  [ "${REIN_REVIEW_TEST_DELAY_AT%%:*}" = "$1" ] || return 0
+  local _tda_sec="${REIN_REVIEW_TEST_DELAY_AT#*:}"
+  # sec 형식 검사 — set -e 아래에서도 어떤 경로로든 이 함수가 실패해 판정
+  # 호출을 죽이면 안 된다 (테스트 seam 오입력이 운영 경로를 죽이는 것과
+  # 같은 등급의 결함). `&&` 리스트 대신 if 로 분기해 sleep 실패도 삼킨다.
+  if printf '%s' "$_tda_sec" | grep -qE '^[0-9]+(\.[0-9]+)?$'; then
+    sleep "$_tda_sec" 2>/dev/null || true
+  else
+    echo "WARNING: [codex-review][test-seam] REIN_REVIEW_TEST_DELAY_AT 형식 무시 (${REIN_REVIEW_TEST_DELAY_AT})" >&2
+  fi
+  return 0
+}
 
 # ---- Load codex model single-source-of-truth. -------------------------
 #
@@ -3088,6 +3211,7 @@ _round_budget_check() {
     fi
     exts=$(grep -E '^extensions=' "$file" 2>/dev/null | head -1 | sed 's/^extensions=//')
   fi
+  ROUND_BUDGET_PREV="$prev"
 
   limit="$REIN_ROUND_LIMIT_DEFAULT"
   [ -n "$REIN_ROUND_LIMIT_DECLARED" ] && limit="$REIN_ROUND_LIMIT_DECLARED"
@@ -3534,6 +3658,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     _rb_clear_rc=0
     _round_budget_clear || _rb_clear_rc=$?
     [ "$_rb_clear_rc" -eq 0 ] || exit 7
+    _test_delay_at counter-clear
   else
     # 기록 실패는 fail-closed — 호출부가 반환값을 검사해 exit 7 로 끝낸다 (R4
     # High). 리뷰 본문은 이미 stdout 으로 방출됐으므로 결과가 유실되지는 않지만,
@@ -3541,12 +3666,14 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     _rb_commit_rc=0
     _round_budget_commit || _rb_commit_rc=$?
     [ "$_rb_commit_rc" -eq 0 ] || exit 7
+    _test_delay_at counter-commit
   fi
 
   # Mode-aware stamp handling.
   if [ "$REIN_REVIEW_MODE" = "code-review" ]; then
     if [ "$VERDICT" = "PASS" ]; then
       write_code_review_stamp "$VERDICT" "codex"
+      _test_delay_at evidence
     fi
     # NEEDS-FIX / REJECT → no stamp.
   else
@@ -3560,9 +3687,9 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
 
   # Signal verdict via exit code for scripted callers.
   case "$VERDICT" in
-    PASS) exit 0 ;;
-    NEEDS-FIX) exit 1 ;;
-    REJECT) exit 2 ;;
-    *) exit 1 ;;
+    PASS) _review_exit "verdict:PASS" 0 ;;
+    NEEDS-FIX) _review_exit "verdict:NEEDS-FIX" 1 ;;
+    REJECT) _review_exit "verdict:REJECT" 2 ;;
+    *) _review_exit "verdict:NEEDS-FIX" 1 ;;
   esac
 fi

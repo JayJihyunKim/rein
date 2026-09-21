@@ -6,7 +6,9 @@
 # 가 부재(a)하고, `docs/writing-plans-procedure.md` 가 frontmatter 없는 산문
 # 문서로 존재(b)하며, plan-writer 에이전트가 새 docs 경로를 가리키고 옛 skill
 # 경로 언급이 없음(c)을 검증한다. 라우팅 규칙 2곳도 `writing-plans` 토큰을
-# 더는 노출하지 않으며 routing-map 은 byte 예산(<=800) 안에 머문다(d, e).
+# 더는 노출하지 않으며 routing-map 은 byte 예산(<=1100) 안에 머문다(d, e).
+# 이 상한은 tests/scripts/test-routing-map-projection.sh 의 MAX_BYTES 와
+# tests/hooks/test-routing-map-emit.sh 의 비교값과 같은 값이어야 한다(세 곳 lockstep).
 #
 # 주의: assertion (c) 는 plan-writer.md 한 파일로 scope 한정 — docs/ 등의
 # 역사적 언급으로 인한 false-fail 을 피한다.
@@ -23,6 +25,7 @@ PROC_DOC="plugins/rein-core/docs/writing-plans-procedure.md"
 PLAN_WRITER="plugins/rein-core/agents/plan-writer.md"
 ROUTING_MAP="plugins/rein-core/rules/routing-map.md"
 ROUTING_PROC="plugins/rein-core/rules/routing-procedure.md"
+ROUTING_MAP_MAX_BYTES=1100
 
 PASS=0
 FAIL=0
@@ -90,18 +93,18 @@ else
 fi
 
 # -----------------------------------------------------------------------
-# (d) routing-map.md: 'writing-plans' 토큰 미포함 + byte 수 <= 800
+# (d) routing-map.md: 'writing-plans' 토큰 미포함 + byte 수 <= ROUTING_MAP_MAX_BYTES
 # -----------------------------------------------------------------------
 echo ""
-echo "[d] routing-map: no 'writing-plans' token, <= 800 bytes"
+echo "[d] routing-map: no 'writing-plans' token, <= ${ROUTING_MAP_MAX_BYTES} bytes"
 
 if [ -f "$ROUTING_MAP" ]; then
   if ! grep -qF "writing-plans" "$ROUTING_MAP"; then
     bytes="$(wc -c < "$ROUTING_MAP" | tr -d '[:space:]')"
-    if [ "$bytes" -le 800 ]; then
-      pass "$ROUTING_MAP has no 'writing-plans' token and is $bytes bytes (<= 800)"
+    if [ "$bytes" -le "$ROUTING_MAP_MAX_BYTES" ]; then
+      pass "$ROUTING_MAP has no 'writing-plans' token and is $bytes bytes (<= ${ROUTING_MAP_MAX_BYTES})"
     else
-      fail "$ROUTING_MAP is $bytes bytes (> 800)"
+      fail "$ROUTING_MAP is $bytes bytes (> ${ROUTING_MAP_MAX_BYTES})"
     fi
   else
     fail "$ROUTING_MAP still contains 'writing-plans' token"

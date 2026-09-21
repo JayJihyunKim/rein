@@ -95,6 +95,8 @@ for test_file in \
   "$SCRIPT_DIR/test-teach-forward-gates.sh" \
   "$SCRIPT_DIR/test-git-snapshot.sh" \
   "$SCRIPT_DIR/test-routing-map-emit.sh" \
+  "$SCRIPT_DIR/test-policy-rules-enabled-flag.sh" \
+  "$SCRIPT_DIR/test-orchestrator-first-emit.sh" \
   "$SCRIPT_DIR/test-session-start-persona-inject.sh" \
   "$SCRIPT_DIR/test-session-start-byte-budget.sh" \
   "$SCRIPT_DIR/../integration/test-governance-e2e.sh"

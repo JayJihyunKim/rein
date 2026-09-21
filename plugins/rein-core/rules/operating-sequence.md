@@ -16,7 +16,7 @@ spec/plan 은 전용 에이전트로 작성한다(인라인 작성 시 nudge 가
 | 1 | READ | `trail/index.md` 읽기 | 현재 상태·미해결 작업 파악 |
 | 2 | WRITE DoD | `trail/dod/dod-YYYY-MM-DD-<slug>.md` | 작업 기준 — gate 가 source 편집 차단 |
 | 3 | ROUTE | DoD `## 라우팅 추천` (agent/skills/mcps/approved_by_user) | 조합 추천 후 사용자 승인 |
-| 4 | IMPLEMENT | 승인된 조합으로 코드 편집 | DoD 범위 안에서만 변경 |
+| 4 | IMPLEMENT | 승인된 조합으로 코드 편집(비trivial 이면 분해·병렬 위임 먼저 판단 — 지휘자 기본, `orchestrator-first.md`) | DoD 범위 안에서만 변경 |
 | 5 | CODEX REVIEW | `/codex-review` → PASS 시 v2 code_review 증거 발급 | 외부 모델 second opinion. 이 증거는 commit gate 가 강제 |
 | 6 | SECURITY REVIEW | `security-reviewer` → PASS 시 v2 security_review 증거 발급 | profile.yaml 레벨 기준 검토. 이 증거는 commit gate 가 강제. **단**, DoD 라우팅 추천의 `security_tier: light` + `approved_by_user: true` 이면 이 증거 없이 commit 허용 (code_review 증거는 여전히 필수) |
 | 7 | FIX | 두 리뷰 결과 반영 수정 | 의견 반영 후에도 이미 발급된 증거는 유지되며, 재리뷰가 필요하면 재발급 |

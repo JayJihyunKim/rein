@@ -21,6 +21,7 @@ for test_file in \
   "$SCRIPT_DIR/test-review-watchdog.sh" \
   "$SCRIPT_DIR/test-review-doc-mode-slots.sh" \
   "$SCRIPT_DIR/test-review-round-budget.sh" \
+  "$SCRIPT_DIR/test-review-events.sh" \
   "$SCRIPT_DIR/test-persona-skill.sh" \
   "$SCRIPT_DIR/test-parallel-execute-skill.sh"
 do

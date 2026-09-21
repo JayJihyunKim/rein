@@ -399,3 +399,22 @@
 {"ts": "2026-09-08T06:46:44", "hook": "pre-bash-safety-guard", "reason": "서브에이전트 git stash", "target": "<mask-unavailable> #44ff2a916283", "source": "live"}
 {"ts": "2026-09-08T07:45:16", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "cd #29af5f04bf97", "source": "live"}
 {"ts": "2026-09-08T07:57:09", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "python3 #180764f748b0", "source": "live"}
+{"ts": "2026-09-14T12:40:04", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "$(printf #15a7d403dbf2", "source": "live"}
+{"ts": "2026-09-14T13:27:01", "hook": "pre-bash-commit-discipline-gate", "reason": "coverage-mismatch", "target": "python3 #1897e485f740", "source": "live"}
+{"ts": "2026-09-14T18:17:20", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "chore(trail): #e4b52f5a5a5a", "source": "live"}
+{"ts": "2026-09-14T18:17:31", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "chore(trail): #fb054ce6f33c", "source": "live"}
+{"ts": "2026-09-14T18:17:43", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "chore(trail): #1ce17580b51c", "source": "live"}
+{"ts": "2026-09-14T18:18:32", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "chore(trail): #5e8c404acbf3", "source": "live"}
+{"ts": "2026-09-14T18:18:45", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "chore(trail): #393ac5c3e323", "source": "live"}
+{"ts": "2026-09-14T18:18:45", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "chore(trail): #c99242905d3c", "source": "live"}
+{"ts": "2026-09-14T18:18:46", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "chore(trail): #1b5c03597ccc", "source": "live"}
+{"ts": "2026-09-14T18:18:46", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "chore(trail): #b958b5769a05", "source": "live"}
+{"ts": "2026-09-14T18:19:07", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "docs(trail): #47836effb455", "source": "live"}
+{"ts": "2026-09-14T18:19:07", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "docs(trail): #47836effb455", "source": "live"}
+{"ts": "2026-09-14T18:19:08", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "chore(plan): #815749427578", "source": "live"}
+{"ts": "2026-09-14T18:19:08", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "chore(plan): #815749427578", "source": "live"}
+{"ts": "2026-09-14T18:19:09", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "chore(trail): #9458b752fae5", "source": "live"}
+{"ts": "2026-09-14T18:19:10", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "chore(trail): #9458b752fae5", "source": "live"}
+{"ts": "2026-09-19T16:31:10", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "docs(codex-review): #4d2f6ad4d8f9", "source": "live"}
+{"ts": "2026-09-21T04:37:37", "hook": "pre-edit-task-gate", "reason": "활성 작업 위임 차단 (v2)", "target": "<HOME>/workspace/rein-dev/plugins/rein-core/scripts/rein-policy-loader.py", "source": "live"}
+{"ts": "2026-09-21T06:24:04", "hook": "pre-bash-safety-guard", "reason": "파이프 쉘 실행", "target": "echo #ae6c7317bb40", "source": "live"}

@@ -6,10 +6,11 @@
 # envelope, after the existing 4 rules.
 #
 # Assertions:
-#   (a) routing-map.md standalone byte count <= 900B (NFR token budget)
+#   (a) routing-map.md standalone byte count <= 1100B (NFR token budget)
 #       Budget unified to 900B by ROUTE-DOC-1 (projection note + §5 label
 #       harmonize grew the file to 875B; the reviewed budget was raised
-#       782B→900B). Kept in lockstep with tests/scripts/test-routing-map-projection.sh.
+#       782B→900B). 900B→1100B(orchestrator-first 교차 참조 추가, 2026-09-10, OFD-ROUTE-1).
+#       Kept in lockstep with tests/scripts/test-routing-map-projection.sh.
 #   (b) additionalContext contains routing-map.md substring
 #       (`> 상세: plugins/rein-core/rules/routing-procedure.md`)
 #   (c) Emit order: `code-style` body precedes `routing-map` body
@@ -29,10 +30,10 @@ ROUTING_MAP="$PLUGIN_ROOT/rules/routing-map.md"
 [ -x "$HOOK" ]        || { echo "FAIL: $HOOK is not executable" >&2; exit 1; }
 [ -f "$ROUTING_MAP" ] || { echo "FAIL: $ROUTING_MAP missing" >&2; exit 1; }
 
-# ---------- (a) Byte count <= 900B ----------------------------------------
+# ---------- (a) Byte count <= 1100B ----------------------------------------
 BYTES=$(wc -c < "$ROUTING_MAP")
-if [ "$BYTES" -gt 900 ]; then
-  echo "FAIL: routing-map.md $BYTES bytes exceeds 900B NFR budget" >&2
+if [ "$BYTES" -gt 1100 ]; then
+  echo "FAIL: routing-map.md $BYTES bytes exceeds 1100B NFR budget" >&2
   exit 1
 fi
 
@@ -104,5 +105,5 @@ if not (cs_idx < rm_idx):
     )
     sys.exit(1)
 
-print("test-routing-map-emit: OK (body byte<=900, summary marker present, code-style precedes routing-map)")
+print("test-routing-map-emit: OK (body byte<=1100, summary marker present, code-style precedes routing-map)")
 PY

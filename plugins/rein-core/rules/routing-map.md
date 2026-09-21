@@ -16,3 +16,4 @@ DoD 작성 직후 본 표로 1순위 조합을 확인.
 | 보안 리뷰 | `rein:security-reviewer` | — | 위협 모델 |
 
 > routing-procedure.md §5 의 압축 projection (SSOT=§5).
+> 메인 세션의 지휘자 기본 동작(분해·병렬 위임)은 `orchestrator-first.md` 참조 — 이 표는 하위 작업 단위의 agent 선택만 담당한다.

@@ -137,6 +137,8 @@ DoD 파일 저장 형식 (필수 — `pre-edit-dod-gate.sh` 가 이 섹션을 �
 ## 라우팅 추천
 
 agent: rein:feature-builder
+orchestration: main-session-orchestrated   # (선택) 지휘자가 작업을 분해해 병렬 위임할 때만 채움
+worker_strategy: 주로 feature-builder-worker, 보안 변경 발생 시 security-reviewer 추가 위임 가능   # (선택, 정보성 — 승인 대상 아님)
 skills:
   - rein:codex-review
 mcps:
@@ -151,6 +153,16 @@ approved_by_user: false  # 승인 시 true 로 교체
 ```
 
 신규 필드는 모두 **선택 사항**이다. 누락 시 기존 동작 그대로 (`security_tier: standard` 로 간주, complexity/model_hint/effort_hint 는 적용 안 함).
+
+### `agent:` / `orchestration:` / `worker_strategy:` 세 필드의 경계 (OFD-DOD-1)
+
+| 필드 | 무엇을 뜻하는가 | 승인 대상인가 |
+|---|---|---|
+| `agent:` | 이 DoD 의 주 작업을 수행할 것으로 라우팅 §1~§4 가 찾아낸 **단일 실재 capability**(에이전트 후보 하나 — `skills:`/`mcps:` 는 별도 필드) — 기존 의미 그대로이며 **실제 dispatch 에 반드시 포함된다**. 교체는 재승인 절차(§1~§6)를 따른다 | **예** — `approved_by_user: true` 가 승인하는 핵심 대상 |
+| `orchestration:` | 지휘자가 분해해 여러 워커에게 병렬/순차 위임하는 **방식**을 쓸지 여부(현재 값: `main-session-orchestrated`) | **예** — 방식 자체에 대한 승인. `agent:` 승인과 별개 축 |
+| `worker_strategy:` | 지휘자가 실제 위임 시점에 **주로 쓸 것으로 예상하는** 워커 유형에 대한 참고 정보. 실제 선택은 매 위임 시점 지휘자 재량 | **아니오** — 정보성 필드. 소비 코드 없음(`model_hint` 등 기존 정보성 필드와 같은 취급) |
+
+`orchestration:` 은 `main-session-orchestrated` 단일 값만 정의된 **닫힌 집합**이다(부재 시 일반 위임으로 간주). **실행 권위의 SSOT 는 `orchestrator-first.md`** 뿐이다 — 본 §6 은 결과를 기록할 뿐 계약을 재정의하지 않는다. `approved_by_user: true` 는 "이 조합"(agent + orchestration)에 대한 승인이며 `worker_strategy:` 는 승인 대상 밖이다. 소비 코드 없음(실측: `post-edit-dod-routing-check.sh`/`rein-route-record.py` 어디도 신규 필드를 검증하지 않음, 기존 `security_tier`/`model_hint` 와 동일 선상).
 
 ### security_tier 결정 기준 (RT-1)
 

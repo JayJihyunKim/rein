@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: 비trivial 개발 작업의 기본 진입점. Task 를 WorkUnit 으로 분해하고 Builder/Reviewer/Security 워커에게 위임·병렬 조율·통합 검증한다 — 실질 구현은 스스로 하지 않는다.
+description: 메인 세션이 명시적으로 호출하는 옵션 오케스트레이션 경로(기본 경로는 `orchestrator-first.md` 참조). Task 를 WorkUnit 으로 분해하고 Builder/Reviewer/Security 워커에게 위임·병렬 조율·통합 검증한다 — 실질 구현은 스스로 하지 않는다.
 ---
 
 # orchestrator
@@ -51,6 +51,8 @@ Use a single worker when decomposition or parallel execution would add more over
 ### 깊이 규칙 — 워커의 추가 위임 금지 (spec §2.5 조건 2)
 
 <!-- anchor:depth-rule -->
+이 계약은 Orchestrator 서브에이전트가 명시적으로 호출된 경우에 적용된다. 기본 경로(메인 세션이 직접 지휘자 역할을 맡는 경우)는 `orchestrator-first.md` 를 따르되, 워커 위임 금지·깊이 규칙의 **원칙**은 동일하게 적용한다(워커가 또 다른 서브에이전트를 낳는 4단계는 없다).
+
 깊이 예산 기본 한도는 **3단계**다: 메인 세션(1) → Orchestrator(2) → Worker(3) 에서 끝난다. Builder Worker 든 Reviewer/Security Worker 든 전부 이 3단계(Worker 계층)에 위치하며, **모두 Orchestrator 가 직접 디스패치**한다 — 워커가 워커를 낳는 4단계는 존재하지 않는다. **워커는 자신이 받은 WorkUnit 을 또 다른 서브에이전트에게 위임하지 않는다** — 추가 위임은 예외 없이 금지이며 Orchestrator 만의 권한이다. **리뷰어·보안 워커도 Orchestrator 가 디스패치한다** — Builder 워커가 리뷰어·보안 워커를 직접 호출하는 경우는 없다(아래 "워커 dispatch 계약"·"워커 매핑" 절 참조). Worker 가 작업이 너무 커서 분해가 필요하다고 판단하면 스스로 위임하지 않고 `status: blocked` + `recommendation: split` 으로 Orchestrator 에게 되돌린다 (아래 WorkUnit 직렬화의 `expected_output` 스키마 참조).
 <!-- /anchor:depth-rule -->
 

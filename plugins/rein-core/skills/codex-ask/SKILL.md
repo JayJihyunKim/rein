@@ -111,7 +111,7 @@ Hang 감지 시: `lsof -p <pid> -i` 결과가 비어 있거나 (`ps -o %cpu` 가
 | ------------- | ---------------------------- | ----------------------- |
 | 용도          | 리뷰 게이트                  | Second opinion          |
 | 리뷰 결과 기록 | 검토 대상이 있으면 **필수** (v2 code_review 증거 발급) | **절대 금지**           |
-| Resume --last | 같은 사이클 내 허용          | **금지** — 매번 새 세션 |
+| Resume --last | 래퍼는 매번 새 세션 (codex-review §7) | **금지** — 매번 새 세션 |
 | Sandbox       | 상황별 (기본 read-only)      | 항상 `read-only`        |
 | **Fallback**  | codex 실행 **실패** 시에만 Sonnet/code-reviewer/human fallback 허용 | **same-session Claude fallback 금지**. 독립 reviewer 부재 시 degraded / no-second-opinion 으로 명시 |
 

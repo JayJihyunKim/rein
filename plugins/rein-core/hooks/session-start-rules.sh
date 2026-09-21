@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 # Plugin SessionStart hook — emit prompt-only rules to additionalContext.
 #
-# For each of the 6 prompt-only rules (code-style, security, testing,
-# operating-sequence, routing-map, response-tone) it injects the SHORT
+# For each of the 7 prompt-only rules — 6 always-on (code-style, security,
+# testing, operating-sequence, routing-map, response-tone) plus 1 opt-in
+# (`orchestrator-first`, slotted between operating-sequence and routing-map
+# only when `.rein/policy/rules.yaml` enables it) — it injects the SHORT
 # "행동 강령" summary from ${CLAUDE_PLUGIN_ROOT}/rules/short/<rule>-summary.md,
 # concatenates them (separated by `\n\n`), JSON-encodes the result, and prints
 # a single SessionStart envelope to stdout:
 #
 #   {"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":<concatenated>}}
 #
-# Summaries (not full bodies) keep this hook's output ~4KB, under the platform
-# per-hook cap (10,000 chars). Full bodies (~22KB combined) overflowed the cap
-# and truncated the envelope tail (the persona/rule-loss bug, PT-2). Full
-# bodies remain in plugin source for on-demand Read.
+# Summaries (not full bodies) keep the emitted JSON line under the platform
+# per-hook cap (10,000 chars). Measured line length: opt-in off — 6,861 chars
+# (8,085 on a first session, which prepends the onboarding primer); opt-in on
+# — 9,212 chars on a first session, the largest envelope this hook produces.
+# Full bodies (~22KB combined) overflowed the cap and truncated the envelope
+# tail (the persona/rule-loss bug, PT-2). Full bodies remain in plugin source
+# for on-demand Read.
 #
 # Per-rule policy override (Phase 2 Task 2.8):
 #   For each rule, if `.rein/policy/rules.yaml` defines
@@ -75,8 +80,30 @@ if [ "$ONBOARDED_HELPER_LOADED" = "1" ] && ! rein_is_onboarded "$PROJECT_DIR"; t
   ONBOARD_FIRST_SESSION=1
 fi
 
-CONTENT=""
-for RULE in code-style security testing operating-sequence routing-map response-tone; do
+# OFD-INJECT-1: orchestrator-first is an OPT-IN 7th rule, injected only when
+# `.rein/policy/rules.yaml` has `orchestrator-first: {enabled: true}`.
+# FAIL-CLOSED (unlike the fail-open override probe in append_rule): it turns ON
+# only when the loader exits 0 AND its stdout is byte-for-byte `true`. A missing
+# loader, a non-zero exit (even one that printed "true" before dying),
+# malformed yaml, an older loader's empty answer or any other stdout leaves it
+# OFF, so a broken loader or policy file can never switch the new default on.
+# The answer is compared with `cmp`, not captured with `$(...)`: command
+# substitution drops trailing newlines and NUL bytes, which would let a
+# near-miss answer pass. `pipefail` (set above) makes a non-zero loader exit
+# fail the pipeline, and the `if` keeps that failure from tripping `set -e`.
+# stderr is dropped — the override probes already surface the yaml warning.
+OFD_ENABLED=0
+if [ -f "$LOADER" ]; then
+  if python3 "$LOADER" --rule-enabled orchestrator-first 2>/dev/null \
+    | cmp -s - <(printf 'true'); then
+    OFD_ENABLED=1
+  fi
+fi
+
+# Append one rule to CONTENT: the policy override body when defined, else the
+# SHORT summary, else the full body; nothing when neither file exists.
+append_rule() {
+  local rule="$1" override="" summary_file rule_file
   # Per-rule override probe (Task 2.8). The loader prints the override body
   # if `.rein/policy/rules.yaml` defines one for this rule, else nothing.
   # We deliberately do NOT silence loader stderr — when the user's
@@ -85,34 +112,40 @@ for RULE in code-style security testing operating-sequence routing-map response-
   # gives the user a single, visible diagnostic instead of swallowing it.
   # `|| true` keeps the loop alive on any non-zero exit (defence-in-depth
   # — the loader's own contract is exit 0 on every path).
-  OVERRIDE=""
   if [ -f "$LOADER" ]; then
-    OVERRIDE=$(python3 "$LOADER" --rule-override "$RULE" || true)
+    override=$(python3 "$LOADER" --rule-override "$rule" || true)
   fi
-
-  if [ -n "$OVERRIDE" ]; then
+  if [ -n "$override" ]; then
     # Override body replaces the default for this rule (power-user opt-in;
     # the user owns the override's size). Overrides bypass summarization.
-    CONTENT+="$OVERRIDE"$'\n\n'
-  else
-    # No override → inject the SHORT summary (PT-2). Full rule bodies are
-    # ~22KB combined and overflow the per-hook cap (10,000 chars), which
-    # truncates the tail of the envelope (the original persona/rule-loss
-    # bug). The "행동 강령" summary keeps this hook's output ~4KB, safely
-    # under the cap, while full bodies stay in plugin source for on-demand
-    # Read. Fall back to the full body only if the summary file is missing,
-    # so a missing summary degrades to the old behaviour instead of dropping
-    # the rule entirely.
-    SUMMARY_FILE="$RULES_DIR/short/${RULE}-summary.md"
-    RULE_FILE="$RULES_DIR/${RULE}.md"
-    if [ -f "$SUMMARY_FILE" ]; then
-      CONTENT+="$(cat "$SUMMARY_FILE")"$'\n\n'
-    elif [ -f "$RULE_FILE" ]; then
-      CONTENT+="$(cat "$RULE_FILE")"$'\n\n'
-    else
-      continue
-    fi
+    CONTENT+="$override"$'\n\n'
+    return 0
   fi
+  # No override → inject the SHORT summary (PT-2). Full rule bodies are
+  # ~22KB combined and overflow the per-hook cap (10,000 chars), which
+  # truncates the tail of the envelope (the original persona/rule-loss
+  # bug). The "행동 강령" summary keeps this hook's output safely under
+  # the cap, while full bodies stay in plugin source for on-demand
+  # Read. Fall back to the full body only if the summary file is missing,
+  # so a missing summary degrades to the old behaviour instead of dropping
+  # the rule entirely.
+  summary_file="$RULES_DIR/short/${rule}-summary.md"
+  rule_file="$RULES_DIR/${rule}.md"
+  if [ -f "$summary_file" ]; then
+    CONTENT+="$(cat "$summary_file")"$'\n\n'
+  elif [ -f "$rule_file" ]; then
+    CONTENT+="$(cat "$rule_file")"$'\n\n'
+  fi
+}
+
+CONTENT=""
+for RULE in code-style security testing operating-sequence routing-map response-tone; do
+  # The opt-in slot sits between operating-sequence and routing-map. The 6-rule
+  # list literal above is pinned by test-ups1-short-rule-injection.sh — keep it.
+  if [ "$RULE" = "routing-map" ] && [ "$OFD_ENABLED" = "1" ]; then
+    append_rule orchestrator-first
+  fi
+  append_rule "$RULE"
 done
 
 # persona injection moved to its own SessionStart hook (PT-3, PT-4):
@@ -125,7 +158,7 @@ if [ -z "$CONTENT" ]; then
   exit 0
 fi
 
-# ONBOARD-1: on the first session prepend the primer to the front of the 6-rule
+# ONBOARD-1: on the first session prepend the primer to the front of the rule
 # additionalContext (same envelope's content extended — NOT a second envelope,
 # preserving the one-envelope-per-SessionStart contract). The primer body comes
 # from the shared single definition (rein_primer_body) so it is byte-identical

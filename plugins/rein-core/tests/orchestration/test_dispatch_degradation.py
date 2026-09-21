@@ -12,6 +12,14 @@ spec §4.5 실패 처리 원문 인용:
     "Orchestration failure 로 일반 개발 작업 전체를 BLOCK 하지 않는다 —
     `병렬 실패 → 단일 실행 → Governance 는 계속 적용`."
 
+재해석(`docs/specs/2026-09-10-orchestrator-first-default.md` §3.8):
+위 두 인용의 "메인 세션 직접 디스패치로 강등한다"는 "Orchestrator 서브에이전트가 사라지고 메인 세션이 구현을
+스스로 떠맡는다"는 뜻이 아니다 — 강등 결과는 항상 메인 세션의 **병렬**
+Worker 서브에이전트 dispatch 가 불가·실패하면 Worker 서브에이전트
+**하나**에게 직접 위임하는 것이며, 지휘자의 자체 구현으로 바뀌는 경우는
+없다. 아래 상태(`STATE_*`)·모드(`MODE_*`)·사유(`REASON_*`) 어휘는
+토폴로지 중립적이라 이 재해석과 충돌하지 않는다.
+
 검증 축 (plan Task 5.4 Step 1, 3계열):
 (a) 불가 환경 시뮬레이션 → 강등 경로 + 통지 문자열 출력 + recorder 가
     강등 사유를 받는다.
@@ -99,7 +107,12 @@ class VocabularyTest(unittest.TestCase):
 
 
 class IncapableEnvironmentDegradationTest(unittest.TestCase):
-    """(a) 불가 환경 시뮬레이션 → 강등 경로 + 통지 문자열 + recorder 사유 수신."""
+    """(a) 불가 환경 시뮬레이션 → 강등 경로 + 통지 문자열 + recorder 사유 수신.
+
+    강등 경로 = 메인 세션의 병렬 Worker 서브에이전트 dispatch 가 불가하면
+    Worker 서브에이전트 하나에게 직접 위임하는 것 — 지휘자의 자체 구현이
+    아니다(모듈 docstring 의 재해석 참조).
+    """
 
     def test_incapable_probe_result_degrades_to_single_worker_mode(self):
         env = DispatchEnvironment()
@@ -212,7 +225,12 @@ class SessionScopeCacheTest(unittest.TestCase):
 
 
 class ObservedFailureDowngradeTest(unittest.TestCase):
-    """(c) 실패 주입 → 단일 실행 지속 + governance 흐름 무중단(BLOCK 없음)."""
+    """(c) 실패 주입 → 단일 실행 지속 + governance 흐름 무중단(BLOCK 없음).
+
+    단일 실행 지속 = 병렬 Worker 서브에이전트 dispatch 관측 실패 이후에도
+    Worker 서브에이전트 하나에게 직접 위임하는 방식으로 강등을 유지하는 것
+    — 지휘자의 자체 구현으로 전환되지 않는다(모듈 docstring 의 재해석 참조).
+    """
 
     def test_observed_failure_downgrades_even_after_capable_verdict(self):
         recorder = _RecorderStub()
