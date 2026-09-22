@@ -473,7 +473,11 @@ e2e_teardown
 echo "-- EV3a: 자연 주입 (iv) — 초기화(selector 로드) 지연도 t0 뒤 구간에 포함 (짝지은 baseline 상대)"
 _ev_nat4_base=$(ev3a_baseline spec "$PASS_BODY" "$PROMPT_A")
 e2e_setup
-sed -i "1a sleep ${EV3A_DELAY_S}" "$SANDBOX/.claude/hooks/lib/select-active-dod.sh"
+# 첫 줄(shebang) 뒤에 sleep 줄을 끼운 새 파일로 교체한다 — sed 의 제자리 편집
+# 옵션과 한 줄 형식 `1a text` 는 GNU sed 전용이라 BSD sed 에서는 주입 없이 지나간다.
+_ev_nat4_lib="$SANDBOX/.claude/hooks/lib/select-active-dod.sh"
+{ head -n 1 "$_ev_nat4_lib"; printf 'sleep %s\n' "$EV3A_DELAY_S"; tail -n +2 "$_ev_nat4_lib"; } > "$_ev_nat4_lib.new" \
+  && mv "$_ev_nat4_lib.new" "$_ev_nat4_lib"
 FAKE_CODEX_VERDICT="$PASS_BODY" run_wrapper "$PROMPT_A"
 assert_ge "$(last_event_field wall_clock_ms)" "$((_ev_nat4_base + EV3A_DELAY_MS * EV3A_POS_FRAC_NUM / EV3A_POS_FRAC_DEN))" "EV3a-natural-iv: selector 로드 지연이 wall_clock_ms 에 포함 (baseline=${_ev_nat4_base}ms, t0=wrapper 진입)"
 e2e_teardown

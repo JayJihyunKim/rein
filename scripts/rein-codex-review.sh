@@ -139,9 +139,12 @@ _json_str() { [ -n "${1:-}" ] || { printf 'null'; return 0; }   # 문자열 리�
   # 개행으로 끝나면 그 개행 1개가 통째로 사라진다. 끝 개행 여부를 case 로
   # 직접 검사해 이스케이프 결과 뒤에 보정해 붙인다(중간 개행은 awk 결과에
   # 이미 올바르게 들어 있다).
+  # 이스케이프는 문자 단위 루프의 문자열 연결로만 만든다 — gsub 치환 문자열
+  # 안의 백슬래시를 접는지는 awk 구현마다 달라 같은 입력이 다른 출력을 낸다.
+  # \r·\t 는 \u00XX 분기보다 먼저 검사한다.
   local esc trailing=''
-  esc=$(printf '%s' "$1" | LC_ALL=C awk 'BEGIN{ORS=""} { if (NR>1) printf "\\n"; s=$0; gsub(/\\/,"\\\\\\\\",s); gsub(/"/,"\\\"",s); gsub(/\r/,"\\r",s); gsub(/\t/,"\\t",s);
-    out=""; for(i=1;i<=length(s);i++){c=substr(s,i,1); if (c<" ") out=out sprintf("\\u%04x", index("\001\002\003\004\005\006\007\010\011\012\013\014\015\016\017\020\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037",c)); else out=out c}; printf "%s", out }')
+  esc=$(printf '%s' "$1" | LC_ALL=C awk 'BEGIN{ORS=""} { if (NR>1) printf "\\n"; s=$0;
+    out=""; for(i=1;i<=length(s);i++){c=substr(s,i,1); if (c=="\\") out=out "\\\\"; else if (c=="\"") out=out "\\\""; else if (c=="\r") out=out "\\r"; else if (c=="\t") out=out "\\t"; else if (c<" ") out=out sprintf("\\u%04x", index("\001\002\003\004\005\006\007\010\011\012\013\014\015\016\017\020\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037",c)); else out=out c}; printf "%s", out }')
   case "$1" in *$'\n') trailing='\n' ;; esac
   printf '"%s%s"' "$esc" "$trailing"
 }
