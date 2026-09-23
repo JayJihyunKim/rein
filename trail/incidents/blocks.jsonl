@@ -418,3 +418,8 @@
 {"ts": "2026-09-19T16:31:10", "hook": "pre-bash-commit-discipline-gate", "reason": "커밋 메시지 포맷 위반", "target": "docs(codex-review): #4d2f6ad4d8f9", "source": "live"}
 {"ts": "2026-09-21T04:37:37", "hook": "pre-edit-task-gate", "reason": "활성 작업 위임 차단 (v2)", "target": "<HOME>/workspace/rein-dev/plugins/rein-core/scripts/rein-policy-loader.py", "source": "live"}
 {"ts": "2026-09-21T06:24:04", "hook": "pre-bash-safety-guard", "reason": "파이프 쉘 실행", "target": "echo #ae6c7317bb40", "source": "live"}
+{"ts": "2026-09-22T07:19:27", "hook": "pre-bash-safety-guard", "reason": "서브에이전트 git stash", "target": "echo #517880fb853c", "source": "live"}
+{"ts": "2026-09-22T05:20:44", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "git status #025a6eb5ffff", "source": "live"}
+{"ts": "2026-09-22T05:20:55", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "test #a976c595bb87", "source": "live"}
+{"ts": "2026-09-22T08:23:53", "hook": "pre-edit-discipline-gate", "reason": "미리뷰 사양 문서", "target": "<HOME>/workspace/rein-dev-ropefish/plugins/rein-core/tests/orchestration/test_prompt_contract.py", "source": "live"}
+{"ts": "2026-09-22T08:23:56", "hook": "pre-edit-discipline-gate", "reason": "미리뷰 사양 문서", "target": "<HOME>/workspace/rein-dev-ropefish/plugins/rein-core/tests/orchestration/test_prompt_contract.py", "source": "live"}

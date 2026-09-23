@@ -5960,3 +5960,84 @@ rationale:
   - 파일 수는 12 안팎이지만 v2.0.1 task-axis 수리(dc1b421)의 기존 패턴 복제라 아키텍처 변경 아님 → medium
 approved_by_user: true
 
+---
+## dod-2026-09-21-v2-1-3-hotfix.md (mtime: 2026-09-22, archived: 2026-09-23)
+# DoD: v2.1.3 핫픽스 — 맥에서 리뷰 소요 시간 기록의 백슬래시 이중 이스케이프 + 테스트 이식성 (발행 차단 해소)
+
+- 작성일: 2026-09-21 (작업 시작일)
+- plan ref: 없음 (핫픽스 — 원인 확정, 수정 범위 파일 3개)
+- 사용자 지시: "A" (2026-09-21 — 제시한 세 안 중 "고쳐서 v2.1.3 핫픽스로 발행")
+- 선행: v2.1.2 가 main `1a78b4d`·tag·공개 저장소 `e1b8efb` 까지 반영됐으나 마켓플레이스 발행이 건너뛰어짐 (`trail/inbox/2026-09-21-v2-1-2-release.md`)
+
+## 배경 / 등급
+
+발행 워크플로의 자체 검사 중 맥 테스트에서 `tests/skills/test-review-events.sh` 가 3건 실패해 발행 잡이 실행되지 않았다. dev CI 는 우분투만 돌려, 9월 15~19일에 들어온 이 테스트가 맥에서 실행된 것은 v2.1.2 태그가 처음이었다.
+
+등급 **patch (2.1.3)**. 착수 시점(09-21)에는 같은 날 두 번째 버전이라 긴급 핫픽스 예외(버전 규칙 Rule B)로 잡았으나, 리뷰 도중 날짜가 넘어가 발행은 09-22 — 그날 첫 main 머지이므로 예외 없이 일반 patch 다. CHANGELOG·README 의 날짜와 "당일 핫픽스" 문구를 그에 맞게 고쳤다(코드 리뷰 지문 대상 밖의 문서 변경, 자체 검토).
+
+## 범위
+
+IN
+
+1. 실제 결함: `plugins/rein-core/scripts/rein-codex-review.sh` 의 `_json_str` — 백슬래시·큰따옴표·CR·탭 이스케이프를 awk `gsub` 의 치환 문자열이 아니라 문자 단위 루프의 문자열 연결로 옮긴다(치환 문자열의 백슬래시 해석은 awk 구현마다 다르고, 문자열 연결에는 그런 특수 의미가 없다). 루트 미러 `scripts/rein-codex-review.sh` 는 `cp` 로만 맞춘다. 리눅스에서의 출력은 바이트 단위로 그대로여야 한다.
+2. 테스트 이식성: `tests/skills/test-review-events.sh` 의 `sed -i "1a sleep …"`(GNU 전용)를 이식 가능한 방식으로 바꾼다. 같은 파일에 다른 GNU 전용 구문이 있으면 함께 고친다.
+3. 버전 표면 2곳 `2.1.3`, `CHANGELOG.md` v2.1.3 항목(핫픽스 표기 포함), `README.md`/`README.ko.md` 최신 릴리스 줄.
+4. dev 커밋 → push → dev 의 테스트 워크플로 **수동 실행**(우분투 + 맥)으로 맥 통과 확인 → main 선별 체크아웃(격리 작업 트리) → 태그 `v2.1.3` → push → 미러·발행 워크플로 success → 공개 저장소 strip 검증 → GitHub Release(v2.1.3 Latest).
+
+OUT
+
+- 리뷰 소요 시간 기록의 기능 변경, 이 기기에서 떨어지는 다른 기존 테스트 26개(CI 에서는 통과), dev CI 에 맥을 상시 포함시키는 워크플로 변경(비용 결정 — 후속 후보로 기록만), v2.1.2 재태깅.
+
+## 재현 / 검증의 한계
+
+결함은 맥의 awk·sed 에서만 나타나 이 기기(리눅스)에서는 재현되지 않는다. 재현 증거 = v2.1.2 발행 워크플로의 맥 잡 로그(EV-JSON-quote-backslash, EV-JSON-injection, EV3a-natural-iv). 수정 확인 = dev 에서 수동 실행한 테스트 워크플로의 맥 잡이 통과하는 것 — 태그를 달기 **전에** 확인한다.
+
+## Definition of Done
+
+- [x] `_json_str` 수정 + 미러 동일, 리눅스에서 `tests/skills/test-review-events.sh` 그대로 통과(출력 불변)
+- [x] 테스트의 GNU 전용 구문 제거
+- [x] 버전 두 곳 `2.1.3`, CHANGELOG·README 두 벌 갱신
+- [x] 스테이징 → 코드 리뷰 + 보안 리뷰 통과 → dev 커밋·push
+- [x] dev 테스트 워크플로 수동 실행: 우분투·맥 둘 다 success
+- [x] main 반영 → 태그 `v2.1.3` → 미러·발행 워크플로 success → 공개 저장소 strip 검증
+- [x] GitHub Release v2.1.3 Latest, index 의 "직전 릴리스" 갱신 + 완료 기록
+
+## 검증 기준
+
+- `bash tests/skills/test-review-events.sh` → 리눅스에서 통과, `cmp plugins/rein-core/scripts/rein-codex-review.sh scripts/rein-codex-review.sh` → 동일
+- `grep -n "sed -i" tests/skills/test-review-events.sh` → GNU 전용 형태 0건
+- `gh run view <수동 실행 id>` → `tests (macos-latest)` success
+- `git ls-remote --tags https://github.com/JayJihyunKim/rein.git v2.1.3` → 태그 존재, `gh release list --repo JayJihyunKim/rein --limit 3` → v2.1.3 Latest
+
+## 라우팅 추천
+
+agent: rein:feature-builder-fix
+orchestration: main-session-orchestrated
+worker_strategy: 버그 수정 워커 1개(래퍼 + 미러 + 테스트), 버전·안내 문서와 발행 절차는 메인 세션
+skills:
+  - rein:codex-review
+mcps: []
+security_tier: standard      # 리뷰 래퍼(셸)의 JSON 이스케이프 — 주입 방어 경로
+complexity: low
+model_hint: opus
+effort_hint: medium
+rationale:
+  - 버그 수정 → feature-builder-fix. 부모가 작업 단위·쓰기 범위·금지목록을 넘기는 워커 실행 — 리뷰·커밋은 부모가 끝에서 한 번
+  - 이스케이프는 기록 값의 주입 방어 경로라 워커 모델은 세션 모델 그대로 (지휘자 판단)
+  - 분해하지 않는다: 세 파일이 한 결함에 묶여 있고 선행 의존이 있어(테스트가 래퍼를 검증) 단일 워커
+approved_by_user: true  # 사용자 지시 "A" (2026-09-21)
+
+## 변경 파일
+
+- plugins/rein-core/scripts/rein-codex-review.sh
+- scripts/rein-codex-review.sh
+- tests/skills/test-review-events.sh
+- scripts/rein.sh
+- plugins/rein-core/.claude-plugin/plugin.json
+- CHANGELOG.md
+- README.md
+- README.ko.md
+- trail/inbox/2026-09-21-v2-1-2-release.md
+- trail/inbox/2026-09-22-v2-1-3-release.md
+- trail/index.md
+

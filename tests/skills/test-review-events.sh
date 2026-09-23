@@ -13,8 +13,9 @@
 # 비판정 종료 경로는 로그를 거치지 않는다 — 이 로그로 "모든 호출의 총 대기" 를 집계하면 안 된다.
 #
 # 검증 축:
-#   EV1a 판정 outcome(PASS/NEEDS-FIX/REJECT × code/spec) 의 필수 8필드 로그
-#        (RW1-event-log-per-call-required-fields)
+#   EV1a 판정 outcome(PASS/NEEDS-FIX/REJECT × code/spec) 의 필수 10필드 로그
+#        (RW1-event-log-per-call-required-fields) — 실제 전달한 강도
+#        effort/effort_source 포함
 #   EV3a 판정 경로의 후처리(카운터 정리·v2 evidence)가 wall_clock_ms 안에
 #        포함된다 (RW1-wallclock-includes-postverdict-bookkeeping)
 #   EV-JSON  _json_str 이스케이프 안전성 (JSON 왕복·구조 주입 차단)
@@ -282,12 +283,12 @@ PROMPT_A='[NON_INTERACTIVE] spec review for design: docs/specs/sample-a.md
 Validate technical soundness.'
 CODE_PROMPT='code review please'
 
-KEY_ORDER_EXPECT="ts,mode,cycle_key,outcome,round_count_at_call,wall_clock_ms,extension_declared,subject_fingerprint"
+KEY_ORDER_EXPECT="ts,mode,cycle_key,outcome,round_count_at_call,wall_clock_ms,extension_declared,subject_fingerprint,effort,effort_source"
 
 echo "== review event log tests (spec §4.1) =="
 
 # ============================================================
-# EV1a — 판정 outcome 6조합의 필수 8필드 로그
+# EV1a — 판정 outcome 6조합의 필수 10필드 로그
 # (RW1-event-log-per-call-required-fields)
 # ============================================================
 
@@ -296,28 +297,35 @@ EV1A_SUBJ_JSON="{\"subject\": \"$EV1A_SHA\", \"paths\": [], \"changeset_paths\":
 
 ev1a_case() {
   # $1=label $2=mode(code|spec) $3=verdict-body $4=expected-outcome $5=prompt
-  # 8필드 값 전부를 직접 단언한다. code 모드는
+  # 10필드 값 전부를 직접 단언한다. code 모드는
   # mk_fake_rein_bin 으로 REIN_REVIEWED_DIGEST 를 실제로 채워
   # subject_fingerprint 가 sha256:… 로 나오는 것까지 확인한다 — code 분기는
   # code 분기는 배선돼 있고 spec 분기는 지문 미산출이라 null 이다.
+  # effort/effort_source 는 마커 없는 요청서의 산출 경로 값이다 — code 모드는
+  # 샌드박스 HEAD 가 빈 커밋이라 규모 측정 불가 → fail-closed 페어(high),
+  # spec 모드는 짧은 샘플 문서 길이 산출(low).
   local label="$1" mode="$2" body="$3" expect_outcome="$4" prompt="$5"
   e2e_setup
-  local expect_fp expect_key t0 t1 total_ms
+  local expect_fp expect_key expect_effort expect_effort_source t0 t1 total_ms
   t0=$(_test_now_ms)
   if [ "$mode" = "code" ]; then
     mk_fake_rein_bin
     FAKE_REIN_SUBJECT_JSON="$EV1A_SUBJ_JSON" FAKE_CODEX_VERDICT="$body" run_wrapper "$prompt"
     expect_key="code:(no-dod)"
     expect_fp="$EV1A_SHA"
+    expect_effort="high"; expect_effort_source="fail_closed"
   else
     FAKE_CODEX_VERDICT="$body" run_wrapper "$prompt"
     expect_key="spec:$(realpath "$SANDBOX/docs/specs/sample-a.md" 2>/dev/null || printf '%s' "$SANDBOX/docs/specs/sample-a.md")"
     expect_fp="null"
+    expect_effort="low"; expect_effort_source="computed"
   fi
   t1=$(_test_now_ms)
   total_ms=$((t1 - t0))
   assert_eq "$(event_line_count)" "1" "$label: event_line_count == 1 (정확히 +1)"
-  assert_eq "$(last_event_key_order)" "$KEY_ORDER_EXPECT" "$label: 8키 고정 순서"
+  assert_eq "$(last_event_key_order)" "$KEY_ORDER_EXPECT" "$label: 10키 고정 순서"
+  assert_eq "$(last_event_field effort)" "$expect_effort" "$label: effort=$expect_effort (실제 전달한 강도)"
+  assert_eq "$(last_event_field effort_source)" "$expect_effort_source" "$label: effort_source=$expect_effort_source"
   assert_matches "$(last_event_field ts)" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$label: ts ISO-8601 Z"
   assert_eq "$(last_event_field mode)" "$mode" "$label: mode=$mode"
   assert_eq "$(last_event_field cycle_key)" "$expect_key" "$label: cycle_key 기대 키와 일치"
@@ -358,6 +366,14 @@ $CODE_PROMPT"
 assert_eq "$(event_line_count)" "1" "EV1a-declared: event_line_count == 1"
 assert_eq "$(last_event_field outcome)" "verdict:NEEDS-FIX" "EV1a-declared: outcome"
 assert_eq "$(last_event_field extension_declared)" "8" "EV1a-declared: extension_declared=8"
+e2e_teardown
+
+echo "-- EV1a: [EFFORT:medium] 마커 변형 — effort=medium, effort_source=marker (후속 회차 medium 의 측정 근거)"
+e2e_setup
+FAKE_CODEX_VERDICT="$PASS_BODY" run_wrapper "[EFFORT:medium]
+$CODE_PROMPT"
+assert_eq "$(last_event_field effort)" "medium" "EV1a-marker: effort=medium (마커가 산출·floor 보다 우선)"
+assert_eq "$(last_event_field effort_source)" "marker" "EV1a-marker: effort_source=marker"
 e2e_teardown
 
 # ============================================================

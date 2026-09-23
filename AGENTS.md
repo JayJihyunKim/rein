@@ -183,6 +183,7 @@ pending 마커는 원래 경로를 기억한다. 이동/리네임 후 gate 가 "
 - 리뷰 없이 결과를 반환하거나 테스트/커밋 시도 시 hook이 차단함 (exit 2)
 - 리뷰 후 추가 코드 수정 시 `.review-pending` 재생성 → 재리뷰 필수
 - **예외 — 워커 실행 시 리뷰 이관**: 지휘자(부모)가 웨이브 barrier 에서 리뷰를 수행하고 그 증거를 발급하는 흐름에서는, 워커로 실행된 에이전트가 자체 codex 리뷰와 수정 후 재리뷰를 수행하지 않는다 — 리뷰 책임이 면제되는 것이 아니라 부모로 **이관**된다. 부모는 웨이브마다 취합해 리뷰하고, 커밋 시점의 리뷰 요구 게이트는 그대로 적용된다.
+  보안 통과 기록(v2 security_review 증거)도 지휘 경로에서는 부모가 발급한다 — 절차는 `plugins/rein-core/agents/orchestrator.md` 의 발급 절차 anchor. 단독 호출된 검토자는 직접 발급한다(이중 모드).
 - **`rm trail/dod/.review-pending && git commit` 류 marker 수동 삭제 + 즉시 commit 우회 금지** — review stamp 는 코드 변경분에 대한 검증 증거이므로, 추가 변경분에 대한 재리뷰 없이 marker 만 제거해 게이트를 우회하면 검증되지 않은 코드가 main 으로 흘러간다. marker 가 재생성됐다면 반드시 `/codex-review` 재실행 후 stamp 갱신.
 
 ### 리뷰 에스컬레이션 규칙

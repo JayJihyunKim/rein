@@ -166,9 +166,13 @@ _review_event_fingerprint() {   # spec 모드는 지문 미산출(null). code: �
   case "${REIN_REVIEWED_DIGEST:-}" in ""|empty:no-subject) printf '' ;; *) printf '%s' "$REIN_REVIEWED_DIGEST" ;; esac
 }
 _review_event_line() {   # $1=outcome $2=wall_ms — cycle_key 는 REVIEW_EVENT_CYCLE_KEY 캐시를 그대로 쓴다.
-  printf '{"ts":%s,"mode":%s,"cycle_key":%s,"outcome":%s,"round_count_at_call":%s,"wall_clock_ms":%s,"extension_declared":%s,"subject_fingerprint":%s}' \
+  # effort/effort_source 는 spawn 직전 결정 체인이 확정한 값을 그대로 적는다
+  # (실제 전달한 강도와 그 출처 — 강도별 소요를 로그만으로 대조하기 위함).
+  # 판정 없이 끝난 경로나 함수 단위 호출처럼 값이 비어 있으면 null.
+  printf '{"ts":%s,"mode":%s,"cycle_key":%s,"outcome":%s,"round_count_at_call":%s,"wall_clock_ms":%s,"extension_declared":%s,"subject_fingerprint":%s,"effort":%s,"effort_source":%s}' \
     "$(_json_str "$(_iso_now)")" "$(_json_str "$(_review_event_mode)")" "$(_json_str "$REVIEW_EVENT_CYCLE_KEY")" "$(_json_str "$1")" \
-    "$(_json_int "$ROUND_BUDGET_PREV")" "$(_json_int "$2")" "$(_json_int "${REIN_ROUND_LIMIT_DECLARED:-}")" "$(_json_str "$(_review_event_fingerprint)")"
+    "$(_json_int "$ROUND_BUDGET_PREV")" "$(_json_int "$2")" "$(_json_int "${REIN_ROUND_LIMIT_DECLARED:-}")" "$(_json_str "$(_review_event_fingerprint)")" \
+    "$(_json_str "${REIN_EFFORT:-}")" "$(_json_str "${EFFORT_SOURCE:-}")"
 }
 _review_event_key_file() { printf '%s/%s.jsonl' "$REVIEW_EVENTS_DIR" "$(_round_budget_hash "$REVIEW_EVENT_CYCLE_KEY")"; }
 _review_event_commit() {   # $1=outcome $2=wall_ms — 판정으로 끝난 호출의 로그 한 줄 append. 실패해도 호출자의 exit 는 불변.
@@ -2412,6 +2416,28 @@ CTX
   printf -- '---\n'
 }
 
+# _emit_needs_fix_bar — 문서 지적의 차단 기준 문단. 문서 봉투의 판정 규율 (iv) 와
+# 코드 봉투의 Claim Audit 이 **같은 문장**을 방출한다 — 한 곳에서만 정의해 두
+# 봉투의 기준이 갈라지지 않게 한다 (릴리스 안내처럼 코드와 함께 검토되는
+# 문서는 코드 봉투를 받으므로, 문서 봉투만 고치면 그쪽 반려는 그대로 남는다).
+# $1 = 첫 줄 접두(모드별 라벨) $2 = 이어지는 줄 들여쓰기. 본문은 접두와 무관하게
+# 같은 위치에서 줄바꿈한다.
+_emit_needs_fix_bar() {
+  local _nfb_first=1 _nfb_line
+  while IFS= read -r _nfb_line; do
+    if [ "$_nfb_first" = 1 ]; then printf '%s%s\n' "$1" "$_nfb_line"; _nfb_first=0
+    else printf '%s%s\n' "$2" "$_nfb_line"; fi
+  done <<'BAR'
+수정 필요(NEEDS-FIX)로 이어지는 지적은 결정·범위·사실의 오류여야 하고,
+무엇을 잘못 전달하는지와 그 근거를 지적에 적어라. 같은 뜻의 표현 선택·
+배치·명칭 취향은 "참고사항" 으로 분리하고 verdict 를 승격시키지 않는다.
+실질 결함 — 잘못된 사용법, 영향 범위(예: 특정 플랫폼 한정이라는 과장),
+필수 보안·안전 제약의 누락(인증, TLS 검증, 안전한 역직렬화 등 — 범위의
+오류이며 "구현 단계 이관" 참고사항으로 돌리지 않는다),
+완료 주장, 수치 불일치, 누락된 추적 연결 — 은 계속 차단한다.
+BAR
+}
+
 # _emit_doc_review_slots — 문서(설계·계획) 리뷰 전용 슬롯 + 판정 규율.
 #
 # 배경 (2026-08-04): build_envelope 에 모드 분기가 없어 문서 리뷰에도 코드 리뷰
@@ -2457,7 +2483,7 @@ SLOTS
   fi
   cat <<'SLOTS'
 
-문서 리뷰 판정 축 (필수 — 아래 세 규율은 verdict 결정에 직접 적용된다):
+문서 리뷰 판정 축 (필수 — 아래 네 규율은 verdict 결정에 직접 적용된다):
 
    (i) 심도-계층. 구현 수준 결함 — 오류 처리 경로, 자원/핸들 수명주기, 버퍼링
        방식, 자료구조 선택, 함수 분해 같은 코드 실물의 문제 — 은 이 리뷰의
@@ -2475,6 +2501,11 @@ SLOTS
        특정 스타일 가이드 등)을 근거로 반려 판정하지 마라. 지적은 두 부류로
        나눠 표기하라 — "저장소 계약 위반"(규칙 문서·기존 선례에 근거)과
        "일반론 참고사항". 후자는 verdict 를 승격시키지 않는다.
+SLOTS
+  # (iv) 차단 기준 — 코드 봉투 Claim Audit 과 같은 문장 (_emit_needs_fix_bar).
+  printf '\n'
+  _emit_needs_fix_bar '  (iv) 차단 기준. ' '       '
+  cat <<'SLOTS'
 
 출력 밀도:
 - 통과 항목: 섹션별 "검사 N개 / 통과 N개" 한 줄 요약만.
@@ -2586,9 +2617,11 @@ SLOTS
 
    covers 외 Scope ID 는 "out of scope of this change".
 
-   TO-scope-id-measurable-contract-required 자기 강제: Scope ID 자체가
-   direction/scenario 가 결여된 서술이면 MEDIUM 으로 플래그 ("ID 포맷 미달").
-   bad ID 가 slot 을 오염시키는 것을 막는다.
+   TO-scope-id-measurable-contract-required 자기 강제: Scope ID 의 측정 가능성은
+   ID 문자열이 아니라 context 블록 scope_items 의 해당 행(설명·검증 방법)까지
+   읽어 판정한다. entity/direction/scenario 세 요소가 설명에 있으면 문자열
+   형식만으로는 플래그하지 않는다. 설명에도 세 요소 중 하나가 없을 때만 MEDIUM
+   으로 플래그 ("ID 포맷 미달"). bad ID 가 slot 을 오염시키는 것을 막는다.
 
 3. Test Alignment  [Spec B policy — 단일 deterministic rule, parent/child 분리 구조 사용 금지]
 
@@ -2710,7 +2743,12 @@ SLOTS
       boolean/qualitative 이므로 본 rule 대상 아님 — 기존 High 판정 규칙 유지.
       Evidence freshness (sub-item 5) 의 HIGH 판정도 본 rule 의 verdict 승격
       대상이 **아님** (numeric mapping claim 전용).
+
 SLOTS
+  # 문서 주장의 차단 기준 — 문서 봉투 규율 (iv) 와 같은 문장 (_emit_needs_fix_bar).
+  # 릴리스 안내·CHANGELOG·README 가 코드와 함께 검토될 때 이 슬롯이 판정하므로
+  # 여기에도 둔다.
+  _emit_needs_fix_bar $'   문서 주장(안내·CHANGELOG·README)의 차단 기준:\n   ' '   '
   # Evidence manifest cross-check (EV6, 2026-07-13): additive sub-item 7 —
   # evidence_manifest: 슬롯 방출 시(유효 블록 ≥1)에만 함께 방출. 미방출 시
   # 앞뒤 heredoc 이 그대로 이어져 기존 slot 텍스트와 byte 동일 (하위호환).

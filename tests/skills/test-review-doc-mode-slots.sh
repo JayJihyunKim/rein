@@ -12,7 +12,7 @@
 #   DM1 문서 모드 — 코드 결함 슬롯 미방출
 #   DM2 문서 모드 — 테스트 정합 슬롯 미방출
 #   DM3 문서 모드 — 결정 건전성 / 범위 추적성 슬롯 방출
-#   DM4 문서 모드 — 판정 규율 3종(심도-계층 / 결함 족 일괄 / 근거 출처 분리) 방출
+#   DM4 문서 모드 — 판정 규율 4종(심도-계층 / 결함 족 일괄 / 근거 출처 분리 / 차단 기준) 방출
 #   DM5 문서 모드 — 주장 감사 슬롯은 유지
 #   DM6 코드 모드 — 4슬롯 전부 유지 + 문서 규율 문구 미방출 (무회귀)
 #   DM7 plan/design 두 문서 마커 모두 동일 적용
@@ -141,11 +141,12 @@ echo "-- DM3: 문서 리뷰 — 결정 건전성 / 범위 추적성 슬롯 방�
 assert_file_grep "Decision Soundness" "$CAPTURE" "DM3 결정 건전성 슬롯 방출"
 assert_file_grep "Scope & Traceability" "$CAPTURE" "DM3 범위 추적성 슬롯 방출"
 
-echo "-- DM4: 문서 리뷰 — 판정 규율 3종 방출"
+echo "-- DM4: 문서 리뷰 — 판정 규율 4종 방출"
 assert_file_grep "문서 리뷰 판정 축" "$CAPTURE" "DM4 판정 축 선언 방출"
 assert_file_grep "구현 단계 이관" "$CAPTURE" "DM4 (i) 심도-계층 — 구현 결함은 이관 advisory"
 assert_file_grep "일괄 열거" "$CAPTURE" "DM4 (ii) 결함 족 일괄 열거"
 assert_file_grep "저장소 계약 위반" "$CAPTURE" "DM4 (iii) 근거 출처 분리"
+assert_file_grep "(iv) 차단 기준" "$CAPTURE" "DM4 (iv) 차단 기준 — 결정·범위·사실의 오류만 수정 필요"
 
 echo "-- DM5: 문서 리뷰 — 주장 감사 슬롯은 유지"
 assert_file_grep "Claim Audit" "$CAPTURE" "DM5 주장 감사 슬롯 유지"

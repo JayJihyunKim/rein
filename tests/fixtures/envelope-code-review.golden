@@ -27,9 +27,11 @@ Required review sections (모두 응답에 포함해야 한다):
 
    covers 외 Scope ID 는 "out of scope of this change".
 
-   TO-scope-id-measurable-contract-required 자기 강제: Scope ID 자체가
-   direction/scenario 가 결여된 서술이면 MEDIUM 으로 플래그 ("ID 포맷 미달").
-   bad ID 가 slot 을 오염시키는 것을 막는다.
+   TO-scope-id-measurable-contract-required 자기 강제: Scope ID 의 측정 가능성은
+   ID 문자열이 아니라 context 블록 scope_items 의 해당 행(설명·검증 방법)까지
+   읽어 판정한다. entity/direction/scenario 세 요소가 설명에 있으면 문자열
+   형식만으로는 플래그하지 않는다. 설명에도 세 요소 중 하나가 없을 때만 MEDIUM
+   으로 플래그 ("ID 포맷 미달"). bad ID 가 slot 을 오염시키는 것을 막는다.
 
 3. Test Alignment  [Spec B policy — 단일 deterministic rule, parent/child 분리 구조 사용 금지]
 
@@ -135,6 +137,15 @@ Required review sections (모두 응답에 포함해야 한다):
       boolean/qualitative 이므로 본 rule 대상 아님 — 기존 High 판정 규칙 유지.
       Evidence freshness (sub-item 5) 의 HIGH 판정도 본 rule 의 verdict 승격
       대상이 **아님** (numeric mapping claim 전용).
+
+   문서 주장(안내·CHANGELOG·README)의 차단 기준:
+   수정 필요(NEEDS-FIX)로 이어지는 지적은 결정·범위·사실의 오류여야 하고,
+   무엇을 잘못 전달하는지와 그 근거를 지적에 적어라. 같은 뜻의 표현 선택·
+   배치·명칭 취향은 "참고사항" 으로 분리하고 verdict 를 승격시키지 않는다.
+   실질 결함 — 잘못된 사용법, 영향 범위(예: 특정 플랫폼 한정이라는 과장),
+   필수 보안·안전 제약의 누락(인증, TLS 검증, 안전한 역직렬화 등 — 범위의
+   오류이며 "구현 단계 이관" 참고사항으로 돌리지 않는다),
+   완료 주장, 수치 불일치, 누락된 추적 연결 — 은 계속 차단한다.
 
 출력 밀도 (기본 — 축소):
 - 통과(MATCH) 항목: slot 별 "검사 N개 / 통과 N개" 한 줄 요약만. 개별 MATCH 서술 생략.

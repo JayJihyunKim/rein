@@ -512,10 +512,10 @@ assert_not_contains "$ERR" "command not found" "E5 함수 정의 순서 스모�
 assert_file_no_grep "evidence_manifest:" "$CAPTURE" "E5 envelope 신규 슬롯 부재 (manifest)"
 assert_file_no_grep "unbacked_quant_flags:" "$CAPTURE" "E5 envelope 신규 슬롯 부재 (flags)"
 assert_file_no_grep "Evidence manifest cross-check" "$CAPTURE" "E5 sub-item 7 부재"
-# sub-item 6 말미 → (빈 줄) → 출력 밀도 블록 인접성 (2026-07-21 review-cycle-
-# efficiency C1 이후 의도된 레이아웃 — 이전 인접 대상은 "응답 출력 형식").
-adj=$(sed -n '/numeric mapping claim 전용/{n;n;p;}' "$CAPTURE")
-assert_contains "$adj" "출력 밀도" "E5 sub-item 6 직후 출력 밀도 블록 인접"
+# Claim Audit 슬롯 말미(sub-item 6 뒤의 문서 주장 차단 기준 문단) → (빈 줄) →
+# 출력 밀도 블록 인접성 — 무주장 요청서에서는 그 사이에 sub-item 7 이 끼면 안 된다.
+adj=$(sed -n '/누락된 추적 연결 — 은 계속 차단한다/{n;n;p;}' "$CAPTURE")
+assert_contains "$adj" "출력 밀도" "E5 차단 기준 문단 직후 출력 밀도 블록 인접(sub-item 7 미유입)"
 assert_file_grep "응답 출력 형식" "$CAPTURE" "E5 응답 출력 형식 섹션 보존"
 assert_eq "$(count_tmp_leftovers)" "0" "E5 통과 경로 임시파일 정리"
 e2e_teardown
@@ -710,10 +710,15 @@ if [ -s "$SANDBOX/scripts/base-wrapper.sh" ]; then
   rm -f "$SANDBOX/trail/dod/.codex-reviewed" "$SANDBOX/trail/dod/.review-pending" 2>/dev/null
   run_wrapper "code review please"
   TEST_COUNT=$((TEST_COUNT + 1))
-  # 출력 밀도 블록(2026-07-21 review-cycle-efficiency C1)은 의도된 envelope
-  # 변경 — 정규화(블록 제거 + 연속 빈 줄 압축) 후 나머지가 기준 래퍼와 동일함
-  # 을 검사한다. HEAD 가 이 사이클을 포함하면 정규화는 no-op (동일성 유지).
-  norm_env() { sed '/^출력 밀도/,/^위 축소는/d' "$1" | cat -s; }
+  # 의도된 envelope 변경 블록은 정규화(블록 제거 + 연속 빈 줄 압축) 후 나머지가
+  # 기준 래퍼와 동일함을 검사한다 — 출력 밀도 블록, Design Alignment 의 Scope ID
+  # 자기 강제 문단, Claim Audit 의 문서 주장 차단 기준 문단. HEAD 가 그 변경을
+  # 포함하면 정규화는 양쪽에 같이 걸려 no-op (동일성 유지).
+  norm_env() {
+    sed -e '/^출력 밀도/,/^위 축소는/d' \
+        -e '/TO-scope-id-measurable-contract-required 자기 강제/,/오염시키는 것을 막는다\.$/d' \
+        -e '/문서 주장(안내·CHANGELOG·README)의 차단 기준:/,/은 계속 차단한다\.$/d' "$1" | cat -s
+  }
   if [ -f "$BASE_CAPTURE" ] && [ -f "$CAPTURE" ]; then
     norm_env "$BASE_CAPTURE" > "$SANDBOX/.norm-base.txt"
     norm_env "$CAPTURE" > "$SANDBOX/.norm-new.txt"

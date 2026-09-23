@@ -97,13 +97,6 @@ jobs:
             git commit -m "chore: strip maintainer-only plugin-drift-check workflow for public"
           fi
 
-          # Strip maintainer-only daily-trail-audit workflow. Operates on the
-          # rein-dev trail/ skeleton; public repo has no trail/ to audit.
-          if [ -f .github/workflows/daily-trail-audit.yml ]; then
-            git rm -q .github/workflows/daily-trail-audit.yml
-            git commit -m "chore: strip maintainer-only daily-trail-audit workflow for public"
-          fi
-
           # Strip maintainer-only repo-audit workflow. Internal governance
           # audit job, not user-facing.
           if [ -f .github/workflows/repo-audit.yml ]; then

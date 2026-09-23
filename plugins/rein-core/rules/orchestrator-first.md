@@ -44,12 +44,13 @@
 
 ## 4. 실행 규율과 워커 선택 — `agents/orchestrator.md` 참조
 
-아래 네 가지는 `${CLAUDE_PLUGIN_ROOT}/agents/orchestrator.md` 가 정본이다. 이 규칙은 내용을 옮겨 적지 않고 가리키기만 한다 — 두 파일이 어긋나면 `agents/orchestrator.md` 가 이긴다.
+아래 다섯 가지는 `${CLAUDE_PLUGIN_ROOT}/agents/orchestrator.md` 가 정본이다. 이 규칙은 내용을 옮겨 적지 않고 가리키기만 한다 — 두 파일이 어긋나면 `agents/orchestrator.md` 가 이긴다.
 
 - **워커 dispatch 금지목록 5종** (`prohibition-list` anchor) — 커밋·스테이징·리뷰/보안 증거 발급·trail 기록·stash. 전부 부모 소유다.
 - **깊이 규칙** (`depth-rule` anchor) — 워커는 받은 작업을 또 다른 서브에이전트에게 위임하지 않는다.
 - **barrier 통합 절차** (`barrier-procedure` anchor) — 검증 → 테스트 → 리뷰 → 커밋, 부모 소유.
 - **워커 매핑** (`worker-mapping` anchor) — Builder / Reviewer / Security 닫힌 집합. 새 워커 에이전트를 만들지 않는다.
+- **보안 통과 기록 발급 절차** (`security-evidence-issuance` anchor) — 캡처 → 디스패치 → 확인 → 발급, 부모 발급. 워커는 판정·근거·검토 subject 만 반환한다.
 
 **읽는 법**: 참조 대상 본문에서 부모(Orchestrator) 자리는 기본 경로에서 메인 세션이 맡는다. 기본 경로는 메인 세션 → Worker 두 단계이며, 워커가 또 다른 서브에이전트를 낳지 않는다는 원칙은 같다.
 

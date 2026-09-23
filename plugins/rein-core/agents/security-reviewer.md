@@ -11,12 +11,24 @@ description: 변경된 코드에 대해 현재 보안 레벨 기준으로 취약
 - CODEX REVIEW 완료 후 보안 관점 코드 리뷰
 - 보안 레벨(base/standard/strict)에 맞는 규칙 적용
 - 사용자 레벨(beginner/intermediate/advanced)에 맞는 피드백 제공
-- 보안 리뷰 PASS 시 v2 security_review 증거 발급
+- 단독 모드에서 보안 리뷰 PASS 시 v2 security_review 증거 발급; 워커 모드에서는 판정·근거·검토 subject 를 반환하고 부모가 발급
 
 ## 담당하지 않는 것
 - 일반 코드 품질 리뷰 → `/codex-review` 스킬 또는 `code-reviewer` 스킬
 - 기능 구현 → `feature-builder`
 - 정적 분석 도구 실행 (LLM 기반 리뷰만 수행)
+
+## 실행 모드 판별 (워커 / 단독)
+
+<!-- anchor:mode-detection -->
+`agents/feature-builder.md` 의 워커 dispatch 판별("부모가 dispatch 프롬프트로 작업 단위·쓰기 범위·금지목록을 전달한 경우")과 **같은 3요소 구조**를 쓴다. 검토자는 쓰기 범위가 없으므로 두 번째 요소가 검토 범위로 바뀐다:
+
+> **워커 모드** = 지휘자(부모)가 웨이브 barrier 에서 보안 검토를 수행하는 흐름에서 워커로 실행된 경우 — 부모가 dispatch 프롬프트로 **작업 단위(`task_id`)·검토 범위(`review_subject:` 블록)·금지목록**을 전달한 경우. 세 요소가 **하나도 없이** 호출됐다면 **단독 모드**다(현행 동작). 판별은 두 단계다 — (1) dispatch 신호(`task_id`·`review_subject:`·금지목록 중 **어느 하나**)가 있으면 워커 모드로 들어간다 — 단독 모드로 **넘어가지 않는다**. (2) 워커 모드에서 유효한 `review_subject:` 블록(JSON `{"subject": …, "paths": […]}`)이 없으면 리뷰하지 않고 `outcome: UNRESOLVED`(`status: blocked` + `recommendation: parent_fallback`, `blocked_reason` 에 "dispatch 신호 불완전 — `review_subject:` 누락")로 되돌린다. 즉 부모가 dispatch 표식 일부만 넘긴 경우 검토자가 직접 발급하는 일은 없다 — 부모측 확인 단계를 우회하는 경로를 막는다(fail-closed).
+
+오판 리스크: dispatch 신호가 **전혀 없을 때만** 단독(현행)이고, 신호가 하나라도 있으면 워커다. 두 번 발급(오판으로 검토자와 부모가 모두 발급)은 동일 digest 재발급이라 게이트 관점 무해, 0번 발급은 커밋 게이트가 fail-closed 로 잡는다. dispatch 신호 일부만 있는 경우는 발급이 아니라 `UNRESOLVED` 차단으로 끝난다.
+
+워커 모드의 동작은 아래 "## 워커 모드 동작" 절이 정한다. 단독 모드는 이하 "## 동작 흐름" §1 ~ §6 의 현행 절차를 그대로 따른다.
+<!-- /anchor:mode-detection -->
 
 ## 동작 흐름
 
@@ -127,10 +139,10 @@ $SEC_CERTIFIED_PATHS 를 리뷰 대상의 필수 하한으로 삼는다
 ### 4. 보안 리뷰 수행
 각 파일에 대해 규칙 파일의 검사 항목을 기준으로 취약점 탐지.
 
-### 5. 피드백 전달
+### 5. 피드백 전달 (단독 모드 — 워커 모드는 '워커 모드 동작' 참조)
 user_level에 따라 피드백 상세도를 조절한다:
 
-**beginner** — 자동 수정 + 간단 설명:
+**beginner** — **자동 수정(단독 모드 한정)** — 발견한 취약 코드의 최소 수리이지 기능 구현이 아니다 + 간단 설명:
 ```
 🔒 위험한 코드를 발견해서 수정했습니다.
    app/api/users.py:23 — 외부 입력이 DB 쿼리에 직접 들어가면
@@ -158,7 +170,8 @@ user_level에 따라 피드백 상세도를 조절한다:
 - "적용해" 류 응답 → intermediate 유지
 - "이 경우엔 괜찮아" 류 응답 → advanced로 상향
 
-### 6. 리뷰 결과 기록 — v2 발급 전용
+### 6. 리뷰 결과 기록 — v2 발급 전용 (단독 모드)
+<!-- anchor:standalone-issuance -->
 
 **Phase 7 웨이브 3 ③-d (2026-08-24) 갱신.** 이전에는 리뷰 완료 후 content-rich legacy stamp 파일을 작성하는 것이 필수였고, v2 발급은 그 위에 병행 시도되는 best-effort 절차였다. ③-d 로 legacy 리뷰 표식 3종(코드 리뷰 표식·검토 대기 표식·보안 검토 표식)의 write·read 경로가 전부 제거되면서, `rein-mark-security-reviewed.sh` 는 **v2 발급 전용**으로 전환됐다 — 더 이상 어떤 stamp 파일도 쓰지 않는다. 호출 형태 자체는 이전과 동일하게 유지된다 (plugin-aware 경로 — `${CLAUDE_PLUGIN_ROOT}/scripts/` 우선, repo `plugins/rein-core/scripts/` fallback):
 
@@ -182,6 +195,71 @@ bash "$MARK_SCRIPT" --level <base|standard|strict> --cycle <dod-slug> --verdict 
 | digest-mismatch 거부 / 기타 인프라·발급 실패 | ERROR — 리뷰 도중 트리가 바뀌었거나 발급 경로 자체가 실패 | 비0 |
 
 **비0 exit = 이번 회차는 기록되지 않았다.** legacy stamp 라는 안전망이 없으므로(③-d), ERROR 를 받으면 리뷰 판정(PASS)과 무관하게 "재검토 필요"로 사용자에게 명시 보고한다 — 원인이 트리 변경(digest-mismatch)이면 2.5단계부터 재시도, 대상 산정 불가(`unresolved:no-subject`)나 인프라 실패면 원인 해소 후 재시도한다.
+<!-- /anchor:standalone-issuance -->
+
+## 워커 모드 동작
+
+<!-- anchor:worker-mode -->
+"## 실행 모드 판별" 에서 워커 모드로 판별된 경우(부모가 `review_subject:` 블록을 전달) 아래 절차를 따른다. 워커 모드 검토자는 v2 security_review 증거를 **발급하지 않는다** — §6 의 발급 절차는 단독 모드 전용이며, 지휘 경로의 발급은 부모가 `agents/orchestrator.md` 의 `security-evidence-issuance` anchor 절차로 수행한다.
+
+### 워커-1. 읽기 전용
+
+워커 모드 검토자는 어떤 파일도 편집하지 않는다 — §5 beginner 의 자동 수정을 포함해 수정 행위 전부 금지. 금지목록(`prohibition-list`) 5종도 그대로 적용된다(발급·스테이징·커밋·trail·stash). 반환하는 공통 6필드의 `changed_files` 는 항상 `[]` 다.
+
+### 워커-2. subject 재캡처와 전체 비교
+
+§1(프로파일)·§2(규칙) 로드는 단독 모드와 동일하게 수행한다. §2.5 의 `--print-subject` 재캡처도 **그대로 수행**하되, 그 결과를 부모가 넘긴 `review_subject` 와 **전체 비교**한다 — `subject` 문자열 동일 **그리고** `paths` 집합 동일(순서 무관). paths 는 subject 에서 결정적으로 파생되므로 실질 검사는 subject 동일성이지만, 부모의 전사 오류를 잡기 위해 둘 다 본다. 비교는 자기 JSON 과 부모 JSON 을 각각 파싱한 뒤 값으로 한다(문자열 diff 아님 — 개행 포함 파일명 보존). 반환할 때 `reviewed_paths` 에는 재캡처 `--print-subject` JSON 의 `paths` 배열을 **JSON 배열 원문 그대로**(재직렬화·escaping 변경·경로 정규화 금지) 넣는다 — 부모도 같은 방식(JSON 파싱 후 집합 비교)으로 대조하므로, 개행·따옴표·쉼표를 포함한 경로도 왕복에서 깨지지 않는다.
+
+- 일치 → §3(파일 수집: `paths` 를 하한으로) → §4 리뷰 → 워커-3 구조 블록 반환.
+- 불일치(`subject` 또는 `paths` 중 하나 이상) → 리뷰하지 않고 `status: blocked` + `recommendation: parent_fallback` + `outcome: SUBJECT_MISMATCH` 반환(워커-4). `blocked_reason` 에 자기 subject 와 부모 subject 를 둘 다 적고 무엇이 달랐는지(`subject`/`paths`/둘 다)를 적는다. paths 만 다른 경우 `reviewed_subject` 는 부모 subject 와 **같은 값**이다 — 워커-3 표가 이를 허용한다.
+- 재캡처 실패(빈 값·비0), 부모가 센티널을 넘김, dispatch 신호 불완전(`review_subject:` 블록 누락 — "실행 모드 판별" 절), 또는 §1 프로파일·§2 규칙 로드 실패 → `status: blocked` + `recommendation: parent_fallback` + `outcome: UNRESOLVED` (채울 수 없는 값은 워커-3 표의 실패 표시값 — `security_level: unknown`, `reviewed_subject: null` + `reviewed_paths: []` — 을 쓴다. 부모가 넘긴 센티널은 `reviewed_subject` 에 복사하지 않고 `blocked_reason` 에 적는다). 단독 모드의 "캡처 실패해도 best-effort 로 계속"(§2.5) 은 워커 모드에 적용하지 않는다 — 비교가 불가능한 검토는 발급 결속을 보장할 수 없다.
+
+### 워커-3. 반환 구조 블록 스키마 (정본 = 이 절; `orchestrator.md` anchor 는 부모가 읽는 키 이름만 언급)
+
+워커는 공통 6필드(`task_id/status/changed_files/blocked_reason/recommendation/summary` — `worker-result-schema` anchor, 불변) **뒤에** 아래 블록을 최종 메시지에 그대로 붙인다:
+
+```
+security_review:
+  outcome: PASS | NEEDS-FIX | SUBJECT_MISMATCH | UNRESOLVED
+  security_level: base | standard | strict | unknown
+  reviewed_subject: <재캡처한 subject 문자열 그대로 — sha256:<hex> 또는 센티널> | null
+  reviewed_paths: <재캡처 JSON 의 "paths" 배열 원문 — JSON 배열. 재캡처 실패 시 []>
+  findings:
+    - file: <repo-relative path>
+      line: <정수 | null>
+      severity: high | medium | low
+      description: <1~2줄 — 무엇이 왜 위험한지 + 권장 수정 방향>
+```
+
+- 다섯 키 전부 **필수**(키 자체는 모든 `outcome` 에서 존재한다). 각 키의 **허용 값은 `outcome` 별로** 아래 표가 정한다. 실패 표시값은 두 종류다 — (a) `unknown`(`security_level`)·`null`(`reviewed_subject`) 은 **`UNRESOLVED` 에서만** 허용되며 다른 세 outcome 에서 나오면 부모는 블록 자체를 계약 위반으로 보고 재디스패치한다. (b) `reviewed_paths: []` 는 실패 전용값이 **아니다** — `reviewed_subject` 가 센티널(`empty:no-subject`/`unresolved:no-subject`) 또는 `null` 이면 **항상** `[]` 이고, `sha256:<hex>` 이면 항상 재캡처 배열(비어 있을 수 있음)이다. 근거: 저장소 계약상 센티널 subject 의 paths 는 빈 튜플이다(`plugins/rein-core/rein/cli/issue_evidence.py::print_subject`, 센티널 분기). 즉 `reviewed_subject`/`reviewed_paths` 는 항상 **재캡처 결과의 짝**이며, 부모가 넘긴 값(센티널 포함)을 복사해 넣는 경우는 어떤 outcome 에도 없다 — 부모 값은 `blocked_reason` 에만 적는다. `findings` 는 빈 목록 허용(PASS).
+
+| `outcome` | `security_level` | `reviewed_subject` | `reviewed_paths` | `findings` |
+|---|---|---|---|---|
+| `PASS` | `base`/`standard`/`strict` | `sha256:<hex>` — 부모 `subject` 와 동일 | 재캡처 JSON 배열 — 부모 `paths` 와 집합 동일 | `high`/`medium` 0건(`low` 만 허용, 빈 목록 허용) |
+| `NEEDS-FIX` | 3종 | `sha256:<hex>` — 동일 | 동일 | `high` 또는 `medium` 1건 이상 |
+| `SUBJECT_MISMATCH` | 3종 | 재캡처 값 그대로 — `subject` **또는** `paths` 중 하나 이상이 부모 값과 불일치한 경우다. `sha256:<hex>`(부모 값과 다름), 센티널(부모는 실 digest 를 보냈는데 재캡처가 센티널), 또는 **부모 subject 와 같은 `sha256:<hex>`**(paths 만 불일치 — 부모의 전사 오류) 셋 다 허용 | 재캡처 결과의 짝 — `sha256` 이면 재캡처 배열(paths-only 불일치에서는 이 배열이 부모 `paths` 와 다르다), 센티널이면 `[]` | `[]` |
+| `UNRESOLVED` | 3종, 또는 `unknown`(프로파일·규칙 로드 실패) | 재캡처 값 그대로(`sha256:<hex>` 또는 센티널), 또는 `null`(재캡처 실패). 부모가 센티널을 넘긴 경우에도 **재캡처 값**을 넣고 부모 센티널은 `blocked_reason` 에 적는다 | 재캡처 결과의 짝 — `sha256` 이면 재캡처 배열, 센티널 또는 `null` 이면 `[]` | `[]` |
+
+- `outcome` 닫힌 집합 4종. **PASS** = `high`/`medium` finding 0건(`low` 는 advisory 로 동반 가능). **NEEDS-FIX** = `high` 또는 `medium` 1건 이상. 등급 기준은 `AGENTS.md` §5-1 에스컬레이션(High/Medium/Low)과 같은 어휘를 쓴다.
+- `security_level` 은 검토자가 §1 에서 읽은 값 — 부모 `--level` 인자의 권위(`agents/orchestrator.md` 발급 절차).
+- `reviewed_subject`/`reviewed_paths` 는 **재캡처 값**이다(부모가 넘긴 값의 복사가 아님 — 그래야 비교가 의미를 가진다).
+- 이 블록은 **문서 계약**이다. `rein/orchestration/validator.py::parse_worker_result` 는 6필드만 재구성하고 추가 키를 소실시키지만, 정의부 밖 런타임 호출이 0건이라 실제 워커 결과는 부모 LLM 이 최종 메시지로 읽는다(`parallel-execute/SKILL.md` 워커 dispatch 계약). 코드로 파싱하는 경로가 생기면 그때 보안 전용 파서를 추가한다(설계 `2026-09-22-security-evidence-issuer.md` §8, Option D 재검토 조건).
+
+### 워커-4. `outcome` ↔ `status`/`recommendation` 대응표
+
+| `outcome` | `status` | `recommendation` | `blocked_reason` | 부모 행동 |
+|---|---|---|---|---|
+| `PASS` | `completed` | — | — | 부모 발급 절차 3단계 대조 통과 시 4단계 발급 |
+| `NEEDS-FIX` | `completed` | — | — | 부모 발급 절차의 재작업 순서 |
+| `SUBJECT_MISMATCH` | `blocked` | `parent_fallback` | 필수 — 양쪽 subject 병기 + 무엇이 달랐는지(`subject` / `paths` / 둘 다) | 1단계부터 재캡처·재디스패치(subject 가 달랐으면 부모 트리 변경 여부, paths 만 달랐으면 부모의 전사 오류 점검) |
+| `UNRESOLVED` | `blocked` | `parent_fallback` | 필수 — 사유(재캡처 실패/센티널 수신/dispatch 신호 불완전/프로파일·규칙 로드 실패) | 원인 해소 후 1단계 재시도; 반복되면 사용자 보고 |
+
+`status: blocked` 인 두 경우 `recommendation` 은 항상 `parent_fallback` 이다 — `split`/`scope_expand` 는 보안 검토에 의미가 없다(닫힌 집합 3종은 불변, 새 값 추가 없음).
+
+### 워커-5. 피드백 전달 (워커 모드)
+
+워커 모드에서는 사용자에게 직접 묻지 않는다(§5 의 "적용할까요?" 류 대화 없음). 지적은 `findings[]` 로만 반환하고, 사용자 레벨(§5 user_level)에 맞춘 상세도 조절은 **부모가 전달할 때** 적용한다. 사용자 채팅 본문은 쓰지 않는다("## 사용자 보고 방식" 참조).
+<!-- /anchor:worker-mode -->
 
 ## 완료 기준
 ```
@@ -189,12 +267,14 @@ bash "$MARK_SCRIPT" --level <base|standard|strict> --cycle <dod-slug> --verdict 
 [ ] 해당 레벨의 규칙 파일을 로드했다
 [ ] 변경된 소스 코드 파일을 모두 리뷰했다
 [ ] 발견된 취약점에 대해 user_level에 맞는 피드백을 제공했다
-[ ] PASS 판정이면 `rein-mark-security-reviewed.sh` 로 v2 security_review 증거 발급을 시도했고 exit 0(기록됨 또는 정상 스킵)을 확인했다 — 비0 이면 이번 회차가 기록되지 않았음을 사용자에게 명시 보고했다
+[ ] 단독 모드: PASS 판정이면 `rein-mark-security-reviewed.sh` 로 v2 security_review 증거 발급을 시도했고 exit 0(기록됨 또는 정상 스킵)을 확인했다 — 비0 이면 이번 회차가 기록되지 않았음을 사용자에게 명시 보고했다 / 워커 모드: `security_review:` 구조 블록을 반환했고 발급하지 않았다
 ```
 
 ## 사용자 보고 방식
 
 사용자에게 답변하는 채팅 본문에는 내부 식별자 (`security_tier`, `profile.yaml`, `digest`, `evidence`) 를 노출하지 않는다. 평문으로 다음 흐름을 따른다.
+
+워커 모드에서는 부모에게 반환만 하며 사용자 채팅 본문을 쓰지 않는다.
 
 - **완료 (이상 없음)**:
   > "보안 검토를 마쳤습니다. 특별한 문제는 없습니다."

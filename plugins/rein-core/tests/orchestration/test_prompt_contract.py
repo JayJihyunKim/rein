@@ -374,6 +374,66 @@ class WorkerAgentMappingTest(unittest.TestCase):
         self.assertIn("security-reviewer", self.block)
 
 
+class SecurityEvidenceIssuanceTest(unittest.TestCase):
+    """보안 통과 기록 발급 절차 — 캡처→디스패치→확인→발급, 부모 소유.
+
+    docs/specs/2026-09-22-security-evidence-issuer.md §3.1/§3.7. 지휘 경로의
+    security_review 증거는 워커(security-reviewer)가 아니라 부모가 발급하며,
+    발급은 `--print-subject` 로 캡처한 검토 시작 시점 subject 를
+    `--reviewed-digest` 에 그대로 넣어 결속한다. 센티널 2종과 NEEDS-FIX
+    재디스패치도 이 anchor 의 리터럴로 고정한다.
+    """
+
+    _STEP_LITERALS = ["1. **캡처**", "2. **디스패치**", "3. **확인**", "4. **발급**"]
+
+    def setUp(self):
+        self.content = _read_orchestrator_md()
+        self.block = _extract_anchor(self.content, "security-evidence-issuance")
+
+    def test_anchor_present(self):
+        # _extract_anchor 가 AssertionError 를 내지 않았고(setUp), 블록이 비어 있지 않다.
+        self.assertTrue(
+            self.block.strip(),
+            "security-evidence-issuance anchor must not be empty",
+        )
+
+    def test_four_steps_in_capture_dispatch_verify_issue_order(self):
+        positions = [self.block.find(literal) for literal in self._STEP_LITERALS]
+        self.assertTrue(
+            all(p != -1 for p in positions),
+            "all four issuance steps must be present before order can be checked",
+        )
+        self.assertEqual(
+            positions,
+            sorted(positions),
+            "issuance procedure must state steps in capture -> dispatch -> verify -> issue order",
+        )
+
+    def test_parent_ownership_stated(self):
+        self.assertIn("부모", self.block)
+        # 문안 고정 — 이 테스트는 절차 문서의 리터럴만 고정한다(동작 증명이
+        # 아니다; 런타임 파서는 설계 §8 항목 4 로 유보). 확인 단계가 반환 블록의
+        # 계약 위반을 발급 거부 사유로 서술하는지를 세 리터럴로 본다.
+        self.assertIn("계약 위반", self.block)
+        self.assertIn("발급하지 않", self.block)
+        self.assertIn("fail-closed", self.block)
+
+    def test_capture_and_binding_flags_stated(self):
+        self.assertIn("--print-subject", self.block)
+        self.assertIn("--reviewed-digest", self.block)
+
+    def test_sentinels_stated(self):
+        self.assertIn("empty:no-subject", self.block)
+        self.assertIn("unresolved:no-subject", self.block)
+
+    def test_rework_redispatch_stated(self):
+        self.assertIn("재디스패치", self.block)
+        self.assertIn("review_subject", self.block)
+        # 재작업은 NEEDS-FIX 판정에서 출발하고 새 subject 캡처로 끝난다.
+        self.assertIn("NEEDS-FIX", self.block)
+        self.assertIn("새 subject", self.block)
+
+
 class DocumentWideConsistencyTest(unittest.TestCase):
     """Round 8 코드 리뷰 Medium 지적 수정 — 워커 위임 금지의 전역 일관성.
 

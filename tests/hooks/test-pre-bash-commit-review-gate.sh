@@ -818,10 +818,13 @@ test_toctou_no_sx_function_definitions_anywhere_in_hooks() {
 # 호출(`bin/rein issue-evidence security_review ... --verdict PASS`)을
 # 정확히 지시하고, 제거된 legacy 필드/파일명을 더 이상 언급하지 않는지로
 # 재조준한다.
+# 2026-09-22 확장: mode-detection / worker-mode / standalone-issuance 분기 검사
+# (docs/specs/2026-09-22-security-evidence-issuer.md §3.7)
 # ============================================================
 
 test_security_reviewer_doc_issues_v2_evidence_not_legacy_stamp() {
   local doc="$REAL_PROJECT_DIR/plugins/rein-core/agents/security-reviewer.md"
+  local worker standalone detect
   [ -f "$doc" ] || { fail "security-reviewer.md not found at $doc"; return; }
   if grep -q '\.security-reviewed' "$doc"; then
     fail "security-reviewer.md still references the removed legacy .security-reviewed marker"
@@ -836,6 +839,28 @@ test_security_reviewer_doc_issues_v2_evidence_not_legacy_stamp() {
     || fail "doc must instruct --verdict PASS on the issuance call"
   grep -q -- '--reviewed-digest' "$doc" \
     || fail "doc must instruct passing --reviewed-digest (review-start capture) on the issuance call"
+  # 2026-09-22 (security-evidence-issuer §3.7): 이중 모드 분기 — 워커 모드는
+  # 발급을 지시하지 않고 구조 블록을 반환, 단독 모드는 기존 발급 호출 유지.
+  _sec_anchor_block() {  # $1=doc $2=anchor-key
+    awk -v k="$2" '$0 ~ ("<!-- anchor:" k " -->") {f=1; next} $0 ~ ("<!-- /anchor:" k " -->") {f=0} f' "$1"
+  }
+  worker=$(_sec_anchor_block "$doc" worker-mode)
+  standalone=$(_sec_anchor_block "$doc" standalone-issuance)
+  detect=$(_sec_anchor_block "$doc" mode-detection)
+  [ -n "$worker" ] && [ -n "$standalone" ] && [ -n "$detect" ] || fail "security-reviewer.md must carry mode-detection / worker-mode / standalone-issuance anchors"
+  printf '%s' "$detect"     | grep -q 'review_subject'          || fail "mode-detection must key worker mode on the review_subject block"
+  printf '%s' "$detect"     | grep -q 'UNRESOLVED'              || fail "mode-detection must send partial dispatch signals to UNRESOLVED, never to standalone issuance"
+  printf '%s' "$worker"     | grep -q '발급하지 않'              || fail "worker-mode must forbid issuance"
+  printf '%s' "$worker"     | grep -q 'reviewed_subject'        || fail "worker-mode must return reviewed_subject"
+  printf '%s' "$worker"     | grep -q 'SUBJECT_MISMATCH'        || fail "worker-mode must define the SUBJECT_MISMATCH outcome"
+  printf '%s' "$worker"     | grep -q 'UNRESOLVED'              || fail "worker-mode must define the UNRESOLVED outcome"
+  printf '%s' "$worker"     | grep -q 'unknown'                 || fail "worker-mode must define the unknown failure value for security_level (UNRESOLVED-only)"
+  printf '%s' "$worker"     | grep -qE 'UNRESOLVED.*에서만'      || fail "worker-mode must restrict the failure values (unknown/null) to the UNRESOLVED outcome"
+  printf '%s' "$worker"     | grep -qF 'finding 0건'            || fail "worker-mode must define PASS as zero high/medium findings"
+  printf '%s' "$worker"     | grep -q -- '--verdict PASS' && fail "worker-mode must not instruct the issuance call"
+  printf '%s' "$standalone" | grep -q 'rein-mark-security-reviewed.sh' || fail "standalone-issuance must keep the wrapper call"
+  printf '%s' "$standalone" | grep -q -- '--verdict PASS'       || fail "standalone-issuance must keep --verdict PASS"
+  printf '%s' "$standalone" | grep -q -- '--reviewed-digest'    || fail "standalone-issuance must keep --reviewed-digest"
 }
 
 test_toctou_new_hooks_have_no_command_form_guard() {

@@ -140,6 +140,43 @@ Orchestrator 는 각 워커 Task 를 생성(`TaskCreate`)할 때 **`task_subject
 
 Builder 워커는 이 4단계 중 어느 것도 스스로 수행하지 않는다. 검증·테스트·커밋은 **부모**(Orchestrator, 강등 시 메인 세션)가 직접 수행하고, 리뷰는 **부모**가 리뷰어·보안 워커를 디스패치해 수행한다 — 어느 경우든 리뷰어·보안 워커를 포함해 Builder 워커가 다음 실행 주체를 스스로 개시하지 않는다.
 
+### 보안 통과 기록 발급 절차 (barrier 3단계의 보안 축 — 부모 소유)
+
+<!-- anchor:security-evidence-issuance -->
+1. **캡처** — 부모는 barrier 1·2단계(검증·테스트)를 통과한 웨이브 델타를 **스테이징한 뒤**(스테이징은 부모 소유 — 금지목록의 반대편), 코드 리뷰(`rein-codex-review.sh`, 기존 절차) PASS 후에 `rein-mark-security-reviewed.sh --print-subject` 를 **한 번** 호출해 `{"subject": ..., "paths": [...]}` JSON 한 줄을 얻는다. 이 값이 이 웨이브의 **검토 subject** 이며 발급까지 그대로 보관한다. 부모는 이 JSON 을 **가공하지 않고**(재직렬화·경로 정규화 금지 — 개행 포함 파일명이 깨진다) 다음 단계에 그대로 넘긴다. `subject` 값에 따른 분기는 아래 "센티널 처리" 표를 따른다 — 실 digest(`sha256:<hex>`)일 때만 2단계로 간다.
+2. **디스패치** — 부모는 `security-reviewer` 워커를 `worker-mapping` 대로 디스패치한다(WorkUnit id 예: `<wave>-security-review`, `[unit:<id>]` 마커 규약 그대로). dispatch 프롬프트에는 **워커 모드 판별 요소 3종**을 반드시 넣는다 — (a) `task_id`, (b) `review_subject:` 블록(1단계 JSON 원문), (c) 금지목록(`prohibition-list`). 형식:
+   ```
+   task_id: <WorkUnit id>
+   review_subject: {"subject": "sha256:<hex>", "paths": [<--print-subject 가 낸 배열 그대로>]}
+   ```
+   워커 실행 중 부모는 **트리를 바꾸지 않는다** — 편집·스테이징·다른 Builder 워커 디스패치 금지(같은 barrier 안이므로 원래 없다). 이 규율이 깨지면 4단계가 `digest-mismatch` 로 거부되어 1단계부터 다시 한다.
+3. **확인** — 부모는 워커 최종 메시지의 공통 6필드와 보안 전용 구조 블록(키 `security_review:` — 스키마 정본은 `security-reviewer.md` 반환 구조 블록 절)을 읽고 다음을 **전부** 대조한다: `status: completed` / `outcome: PASS` / `reviewed_subject` 가 1단계 `subject` 와 문자열 동일 / `reviewed_paths`(JSON 배열)를 파싱한 집합이 1단계 `paths` 를 파싱한 집합과 동일(문자열 diff 아님 — 개행·따옴표·쉼표 포함 파일명은 JSON 파싱으로만 복원한다) / `changed_files` 가 빈 목록(읽기 전용 — 부모 델타 검증에서 보안 워커 실행 전후 델타 0 을 함께 확인). 추가로 블록 **자체의 계약**(`security-reviewer.md` 반환 구조 블록 절과 대응표 — 다섯 키 존재, `outcome`·`security_level`·`severity` 의 허용값, `outcome: PASS` 이면 `high`/`medium` finding 0건, `outcome`↔`status`/`recommendation` 대응)을 확인한다 — 하나라도 어긋나면(예: `PASS` 인데 `high` finding 동반, 필수 키 누락, `blocked` 인데 `recommendation` 누락) **계약 위반**으로 보고 발급하지 않으며 `UNRESOLVED` 와 같이 취급해 재디스패치한다(fail-closed). 대조 항목이 어긋나면 4단계로 가지 않고 `security-reviewer.md` 의 `outcome` ↔ `status`/`recommendation` 대응표에 따라 분기한다(`NEEDS-FIX` → 아래 "NEEDS-FIX 재작업 순서", `blocked` → 재캡처·재디스패치 또는 보고).
+4. **발급** — 부모가 `rein-mark-security-reviewed.sh --level <블록의 security_level> --cycle <active DoD slug> --verdict PASS --reviewed-digest <1단계 subject>` 를 호출한다. `--reviewed-digest` 에는 **1단계에서 캡처한 값 그대로** 넣는다 — 발급 시점에 다시 캡처하지 않는다(다시 캡처하면 결속의 의미가 사라진다). 발급 직전의 "현재 지문 재대조"는 `bin/rein` 이 이미 수행한다(`plugins/rein-core/rein/capabilities/security/capability.py` 의 `digest-mismatch` 거부) — 부모는 대조 로직을 새로 두지 않는다. exit 0 을 확인한 뒤 barrier 4단계(커밋)로 간다. 비0 이면 이번 웨이브는 기록되지 않은 것이다: `digest-mismatch` 면 트리가 바뀐 것이므로 1단계부터 재시도, 그 외(인프라·`--level` enum 거부 등)는 원인 해소 후 4단계만 재시도.
+
+`--level` 값의 권위는 검토자가 프로파일 로드로 읽어 블록에 적어 보낸 `security_level` 이다 — 부모는 옮겨 적기만 한다(`--level`/`--cycle` 은 래퍼의 enum 검증·로그용이지 발급 결속 인자가 아니다). 블록 값이 enum 밖이면 래퍼가 거부하므로 부모는 `UNRESOLVED` 와 같이 취급해 재디스패치한다. `unknown` 은 `UNRESOLVED` 전용 실패 표시값이므로 그 값으로는 발급을 시도하지 않는다.
+
+#### 센티널 처리 (1단계 `subject` 값 분기)
+
+| 1단계 `subject` | 의미 | 부모 행동 |
+|---|---|---|
+| `sha256:<hex>` (실 digest) | 검토 대상 있음 | 2단계로 진행 |
+| `empty:no-subject` | 이 프로필에서 검토할 민감 대상이 없음(확인됨) | **보안 워커를 디스패치하지 않는다.** 통과와 동등 — 발급 호출도 생략(호출해도 래퍼가 exit 0 정상 스킵). barrier 4단계로 진행하고 완료 기록의 오케스트레이션 줄에 "보안 검토 대상 없음" 을 남긴다 |
+| `unresolved:no-subject` | 대상을 산정할 수 없음(strict 프로필에서 미스테이징 등) | **차단·보고.** 워커를 디스패치하지 않는다. 스테이징 상태를 바로잡고 1단계부터 재시도. 해소 불가면 사용자에게 평문 보고 |
+| 빈 값 / 호출 비0 | 캡처 자체 실패 | 차단·보고. 원인 해소 후 1단계 재시도 |
+
+부모가 센티널을 워커에게 넘기는 경우는 **없다** — 워커가 `review_subject` 에서 센티널을 받으면 그것은 부모 측 절차 위반이므로 워커는 `UNRESOLVED` 로 되돌린다.
+
+#### NEEDS-FIX 재작업 순서
+
+1. 워커가 `status: completed` + `outcome: NEEDS-FIX` + `findings[]` 를 반환한다 — 검토는 **완료**됐고 판정이 미통과인 것이다(`completed` 와 판정의 분리).
+2. 부모는 `findings[]` 를 수정 담당(Builder 워커, 강등 시 메인 세션)에게 전달해 고치게 한다 — 보안 워커가 고치지 않는다(읽기 전용).
+3. 수정 델타에 대해 barrier 1·2단계(검증·테스트)를 다시 수행하고 **재스테이징**한다.
+4. 코드 리뷰 재리뷰 필요 여부는 기존 escalation 규칙(`AGENTS.md` §5-1)을 그대로 따른다 — code_review 증거도 digest 에 결속되므로 수정 후에는 보통 재발급이 필요하다.
+5. 1단계로 돌아가 **새 subject 를 캡처**하고 보안 워커를 **재디스패치**한다. 재디스패치 프롬프트에 이전 `findings[]` 를 "이전 회차 지적" 으로 첨부할 수 있으나, **이전 digest·findings 는 참고일 뿐** 발급 결속은 오직 새 subject 다.
+
+기본 경로에서 부모 자리는 메인 세션이 맡는다 — `rules/orchestrator-first.md` §4 "읽는 법" 참조(옵션 경로는 `rein:orchestrator`).
+<!-- /anchor:security-evidence-issuance -->
+
 ## 워커 매핑 (D5 결정 — 신규 워커 에이전트 신설 안 함)
 
 <!-- anchor:worker-mapping -->

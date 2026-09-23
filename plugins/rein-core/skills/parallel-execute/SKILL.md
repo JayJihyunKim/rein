@@ -5,11 +5,11 @@ description: 활성 plan 의 `## 실행 전략`(depends_on/mode/scope v2) 을 �
 
 # parallel-execute
 
-스키마 상세: `plugins/rein-core/docs/exec-strategy-schema.md`(v2). 이 스킬은 그 스키마를 **소비**한다.
+스키마 상세: `plugins/rein-core/docs/exec-strategy-schema.md`(v2) — 이 스킬은 소비만 한다.
 
 ## 목적
 
-검증 통과한 plan 의 `## 실행 전략` v2(`tasks[]`+`depends_on`+`mode`+`scope`)를 위상정렬로 웨이브로 나눠, 같은 작업 트리에서 독립 edit_only 태스크를 병렬 서브에이전트로 실행, mutating·의존 태스크는 순차 실행. 부모가 웨이브 경계마다 검증·테스트·커밋. 격리는 강제 sandbox 가 아니라 워커 규율 + 부모 사후 델타 검증 두 겹.
+검증 통과한 plan 의 `## 실행 전략` v2 를 위상정렬 웨이브로 나눠 독립 edit_only 태스크는 병렬, mutating·의존 태스크는 순차 실행하고, 부모가 웨이브 경계마다 검증·테스트·커밋한다. 격리는 강제 sandbox 가 아니라 워커 규율 + 부모 사후 델타 검증 두 겹.
 
 ## 사용 시점
 
@@ -60,7 +60,7 @@ python3 scripts/rein-validate-coverage-matrix.py schedule <plan>
 2. **시작 이후 델타** 산출(기계가독): `git status --porcelain=v1 -z -uall --ignored=no` (fallback: `git diff --name-only HEAD` + `git ls-files --others --exclude-standard` — `-z` 아니므로 4번 정규화 상속) → **repo-relative literal 파일 경로** 정규화(`-uall` 로 untracked 디렉토리 collapse 방지).
 3. **부분집합 검증** — 델타 ⊆ 그 웨이브 `scope`(mutating 은 +예상 부작용 경로) 합집합. per-worker 귀속 불가 → 워커 `changed_files` 는 advisory.
 4. **scope 경로 안전화(보안, 필수)** — `scope`·델타 경로를 검증 전 정규화: **절대경로·`..`·`..\`·NUL·드라이브문자(`C:`) 포함 시 reject** (path traversal 차단), 나머지는 `realpath`(symlink resolve) 후 프로젝트 루트 prefix **containment** 검증(밖이면 reject). 정규화 실패 경로는 합집합에서 제외. **scope·델타 양쪽을 동일 정규형으로** 비교(검증기 미필터 — 이 단계가 유일 방어선).
-5. 선언 밖 변경 → **reject + 보고**(커밋 안 함). 통과 → 웨이브 단위 1회 포맷/린트/테스트/리뷰 → 그 델타만 **웨이브당 1커밋** → 다음(다시 클린 시작).
+5. 선언 밖 변경 → **reject + 보고**(커밋 안 함). 통과 → 웨이브 단위 1회 포맷/린트/테스트/리뷰(보안 기록 발급·재작업 순서: `agents/orchestrator.md` `security-evidence-issuance`) → 그 델타만 **웨이브당 1커밋** → 다음(다시 클린 시작).
 
 ## 사용자 보고 방식
 

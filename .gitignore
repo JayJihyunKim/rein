@@ -42,9 +42,11 @@ data/processed/
 
 # rein hook runtime cache + state machine runtime (영역 A/C, 2026-05-22).
 # .rein/project.json 만 ship (branch-strategy 포함 대상). cache/state.json 은
-# hook 실행 중 생성되는 휘발성 산출물 — commit 배제.
+# hook 실행 중 생성되는 휘발성 산출물 — commit 배제. state.lock 은 상태 기계의
+# flock 잠금(빈 파일, 훅마다 재생성) — 추적하면 리뷰 지문(미추적 포함)을 오염시킨다.
 /.rein/cache/
 /.rein/state.json
+/.rein/state.lock
 /.rein/state-pending-*.log
 
 # rein first-session onboarding marker (ONBOARD-1) — 영속 runtime marker, 추적 제외.
@@ -80,3 +82,6 @@ worktrees/
 
 # Serena MCP 로컬 프로젝트 캐시 (도구 상태 — 공유 불가)
 .serena/
+
+# omo 로컬 작업 폴더 (병렬 QA 도구의 증거 덤프 — 공유 불가, 리뷰 지문 오염 방지)
+.omo/

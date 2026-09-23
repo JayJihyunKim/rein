@@ -18,7 +18,7 @@ spec/plan 은 전용 에이전트로 작성한다(인라인 작성 시 nudge 가
 | 3 | ROUTE | DoD `## 라우팅 추천` (agent/skills/mcps/approved_by_user) | 조합 추천 후 사용자 승인 |
 | 4 | IMPLEMENT | 승인된 조합으로 코드 편집(비trivial 이면 분해·병렬 위임 먼저 판단 — 지휘자 기본, `orchestrator-first.md`) | DoD 범위 안에서만 변경 |
 | 5 | CODEX REVIEW | `/codex-review` → PASS 시 v2 code_review 증거 발급 | 외부 모델 second opinion. 이 증거는 commit gate 가 강제 |
-| 6 | SECURITY REVIEW | `security-reviewer` → PASS 시 v2 security_review 증거 발급 | profile.yaml 레벨 기준 검토. 이 증거는 commit gate 가 강제. **단**, DoD 라우팅 추천의 `security_tier: light` + `approved_by_user: true` 이면 이 증거 없이 commit 허용 (code_review 증거는 여전히 필수) |
+| 6 | SECURITY REVIEW | `security-reviewer` → PASS 시 v2 security_review 증거 발급 | profile.yaml 레벨 기준 검토. 이 증거는 commit gate 가 강제. **단**, DoD 라우팅 추천의 `security_tier: light` + `approved_by_user: true` 이면 이 증거 없이 commit 허용 (code_review 증거는 여전히 필수) 지휘 경로에서는 부모가 발급(`agents/orchestrator.md` 발급 절차), 단독 호출 시 검토자 직접. |
 | 7 | FIX | 두 리뷰 결과 반영 수정 | 의견 반영 후에도 이미 발급된 증거는 유지되며, 재리뷰가 필요하면 재발급 |
 | 8 | TEST | 테스트 실행 | 테스트 실행 자체는 비차단 (TDD red-green 허용) — 두 v2 증거는 `git commit` gate 가 강제 (`pre-bash-commit-discipline-gate.sh` → `pre-bash-commit-review-gate.sh`) |
 | 9 | SELF-REVIEW | AGENTS.md §6 명시적 답변 | 자가 점검으로 누락 방지 |
