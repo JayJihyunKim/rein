@@ -44,7 +44,9 @@ for name in code-style security testing answer-only-mode subagent-review design-
 done
 out=$(python3 "$DRIFT" --repo-root "$T2ROOT" --skip-parity --skip-validation 2>&1)
 rc=$?
-shared_violations=$(printf '%s' "$out" | grep -c '^BOUNDARY:.*\.claude/rules/.*\.md$' || true)
+# 검사 메시지가 다국어 텍스트를 포함하므로 줄 매칭은 바이트 로케일(C)로 고정한다 —
+# grep 구현·버전에 따라 UTF-8 로케일의 `.*` 가 다국어 구간을 가로지르지 못한다.
+shared_violations=$(printf '%s' "$out" | LC_ALL=C grep -c '^BOUNDARY:.*\.claude/rules/.*\.md$' || true)
 if [ "$rc" = "1" ] && [ "$shared_violations" = "7" ]; then
   record_pass "T2 (S1): boundary check 가 shared 7 mirror 모두 감지"
 else
@@ -61,7 +63,7 @@ mkdir -p "$TMPROOT/plugins/rein-core/hooks"
 echo "# Code Style Rules" > "$TMPROOT/.claude/rules/code-style.md"
 out=$(python3 "$DRIFT" --repo-root "$TMPROOT" --skip-parity --skip-validation 2>&1)
 rc=$?
-if [ "$rc" = "1" ] && printf '%s' "$out" | grep -q 'BOUNDARY:.*code-style.md'; then
+if [ "$rc" = "1" ] && printf '%s' "$out" | LC_ALL=C grep -q 'BOUNDARY:.*code-style.md'; then
   record_pass "T3 (S1): isolated mirror 감지 — exit 1 + stderr boundary 위반 path"
 else
   record_fail "T3 (S1): isolated boundary 미작동 (rc=$rc)"
@@ -116,17 +118,25 @@ fi
 # Phase 3 Task 3.6 가 shared 7 파일 삭제 후 dev-only 4 (branch-strategy /
 # legacy-shipped-pending / readme-style / versioning) 만 남아야 함.
 # T7 의 boundary check 는 stray non-shared 파일을 잡지 못하므로 별도 assertion.
+# 이 묶음은 dev 와 main(태그 발행 preflight) 양쪽 트리에서 돈다. main 은 정책상
+# `.claude/rules/` 를 싣지 않으므로(branch-strategy 제외 목록) 오버레이 디렉토리
+# 부재는 위반이 아니라 "오버레이 없는 배포 형태" 다 — 그 경우 불변식은 공허하게
+# 성립한다. 디렉토리가 있으면 dev-only 4 파일과 정확히 일치해야 한다.
 echo "=== T8 (S5 invariant): dev-only 4 파일 정확 일치 ==="
 expected_files="branch-strategy.md
 legacy-shipped-pending.md
 readme-style.md
 versioning.md"
-actual_files=$(cd "$REPO_ROOT/.claude/rules" && /bin/ls *.md 2>/dev/null | LC_ALL=C sort)
-if [ "$actual_files" = "$expected_files" ]; then
-  record_pass "T8 (S5): .claude/rules/ 가 정확히 4 dev-only 파일만 보유"
+if [ ! -d "$REPO_ROOT/.claude/rules" ]; then
+  record_pass "T8 (S5): .claude/rules/ 부재 — 오버레이 없는 트리(main 배포 형태), 불변식 공허 성립"
 else
-  record_fail "T8 (S5): expected exact 4 dev-only files, got:
+  actual_files=$(cd "$REPO_ROOT/.claude/rules" && /bin/ls *.md 2>/dev/null | LC_ALL=C sort)
+  if [ "$actual_files" = "$expected_files" ]; then
+    record_pass "T8 (S5): .claude/rules/ 가 정확히 4 dev-only 파일만 보유"
+  else
+    record_fail "T8 (S5): expected exact 4 dev-only files, got:
 $actual_files"
+  fi
 fi
 
 # Summary

@@ -423,3 +423,5 @@
 {"ts": "2026-09-22T05:20:55", "hook": "pre-bash-safety-guard", "reason": "파괴적 git 명령", "target": "test #a976c595bb87", "source": "live"}
 {"ts": "2026-09-22T08:23:53", "hook": "pre-edit-discipline-gate", "reason": "미리뷰 사양 문서", "target": "<HOME>/workspace/rein-dev-ropefish/plugins/rein-core/tests/orchestration/test_prompt_contract.py", "source": "live"}
 {"ts": "2026-09-22T08:23:56", "hook": "pre-edit-discipline-gate", "reason": "미리뷰 사양 문서", "target": "<HOME>/workspace/rein-dev-ropefish/plugins/rein-core/tests/orchestration/test_prompt_contract.py", "source": "live"}
+{"ts": "2026-09-29T01:59:14", "hook": "pre-bash-safety-guard", "reason": ".env Bash 읽기 시도", "target": "echo #f7f211d4b38f", "source": "live"}
+{"ts": "2026-09-29T02:19:37", "hook": "pre-bash-safety-guard", "reason": ".env Bash 읽기 시도", "target": "echo #809183098d96", "source": "live"}

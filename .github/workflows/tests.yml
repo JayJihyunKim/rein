@@ -66,6 +66,18 @@ jobs:
           python3 --version
           uname -a
 
+      # governance 자가검사를 실제 저장소 트리에 대해 실행한다 (2026-09-29,
+      # 수동 전용 govcheck 워크플로를 폐기하며 이전 — 단위 테스트는 샌드박스
+      # 사본만 검사하므로 실저장소 실행은 이 단계가 유일하다).
+      - name: Run governance self-test
+        run: python3 scripts/rein-govcheck.py
+
+      # plugin SSOT drift 검사를 실제 저장소 트리에 대해 실행한다 (2026-09-29,
+      # 수동 전용 drift 워크플로를 폐기하며 이전 — 발행 preflight 는 태그 push
+      # 때만 돌아 dev push 에서는 이 단계가 유일한 실저장소 실행이다).
+      - name: Run plugin drift check
+        run: python3 scripts/rein-check-plugin-drift.py
+
       - name: Run hook tests
         run: bash tests/hooks/run-all.sh
 

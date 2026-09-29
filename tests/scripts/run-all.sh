@@ -57,6 +57,7 @@ for test_file in \
   "$SCRIPT_DIR/test-plugin-skills-bundle.sh" \
   "$SCRIPT_DIR/test-version-parity.sh" \
   "$SCRIPT_DIR/test-plugin-drift-detection.sh" \
+  "$SCRIPT_DIR/test-rein-check-plugin-drift-boundary.sh" \
   "$SCRIPT_DIR/test-heal-legacy-git-env.sh" \
   "$SCRIPT_DIR/test-pln1-execution-strategy.sh" \
   "$SCRIPT_DIR/test-wave-scheduler-and-parent-delta.sh" \

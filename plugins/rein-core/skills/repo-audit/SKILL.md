@@ -2,7 +2,6 @@
 name: repo-audit
 description: 저장소 전체 상태 점검. 오래된 규칙, 누락 테스트, 비활성 에이전트, trail 일관성 확인.
 triggers:
-  - 주 1회 (GitHub Actions repo-audit.yml)
   - 수동: "저장소 상태 점검해줘"
 ---
 
