@@ -1,6 +1,7 @@
 ---
 name: docs-writer
 description: 문서화 및 changelog 작성 전담. README, API 문서, 운영 가이드, changelog 작성.
+model: sonnet
 ---
 
 # docs-writer

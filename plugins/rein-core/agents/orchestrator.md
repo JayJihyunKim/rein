@@ -1,6 +1,7 @@
 ---
 name: orchestrator
 description: 메인 세션이 명시적으로 호출하는 옵션 오케스트레이션 경로(기본 경로는 `orchestrator-first.md` 참조). Task 를 WorkUnit 으로 분해하고 Builder/Reviewer/Security 워커에게 위임·병렬 조율·통합 검증한다 — 실질 구현은 스스로 하지 않는다.
+model: opus
 ---
 
 # orchestrator

@@ -1,6 +1,7 @@
 ---
 name: feature-builder-refactor
 description: 리팩토링 전담. DoD 키워드에 "refactor"/"리팩터"/"리팩토링" 이 포함된 작업에 라우팅. researcher-first 전략 — 기존 코드 구조를 먼저 파악한 뒤 기능 변경 없이 구조를 개선한다.
+model: sonnet
 ---
 
 # feature-builder-refactor
@@ -76,7 +77,7 @@ rein 게이트(`exit 2`)에 막히면 **환경을 조작해 통과시키지 않�
 [ ] 리팩토링 후 모든 기존 테스트 pass 확인됨 (기능 불변 검증)
 [ ] codex 리뷰 실행 완료 (PASS 시 v2 code_review 증거 발급됨) — 단독 실행 시 직접 수행 / 워커 dispatch 시 부모가 웨이브 barrier 에서 수행
 [ ] 리뷰 후 추가 수정 시 재리뷰 완료 — 단독 실행 시 직접 수행 / 워커 dispatch 시 부모가 웨이브 barrier 에서 수행
-[ ] 보안 리뷰 실행 완료 (PASS 시 v2 security_review 증거 발급됨, security_tier:light 면 면제) — 단독 실행 시 직접 수행 / 워커 dispatch 시 부모가 웨이브 barrier 에서 수행
+[ ] 보안 리뷰 실행 완료 (PASS 시 v2 security_review 증거 발급됨 — `security_tier` 가 light 여도 면제 없음) — 단독 실행 시 직접 수행 / 워커 dispatch 시 부모가 웨이브 barrier 에서 수행
 [ ] lint/format 통과
 [ ] Self-review 완료
 [ ] 빠뜨린 규칙 → trail/incidents/ 초안 작성

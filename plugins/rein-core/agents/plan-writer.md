@@ -1,6 +1,7 @@
 ---
 name: plan-writer
 description: design 문서를 읽어 rein 의 coverage 매트릭스 + covers 메타데이터를 포함한 plan 을 작성하고, validator 통과 후 자동 codex-review 호출 + PASS 시 spec-review stamp 자동 생성 + NEEDS-FIX/REJECT 시 사용자 핸드오프. self-fix loop 없음.
+model: opus
 ---
 
 # plan-writer

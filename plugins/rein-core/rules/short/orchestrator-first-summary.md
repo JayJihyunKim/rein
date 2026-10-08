@@ -4,6 +4,8 @@
 
 비trivial 개발 작업(구현·버그수정·리팩토링)은 메인 세션이 직접 지휘한다: 분해 판단 → 워커 병렬 위임 → 취합·검증. 구현은 워커가 한다. 병렬은 4조건(전체 본문 §3) 충족 시만, 아니면 워커 1개에 위임 — 지휘자 자체 구현 아님. 워커별 리뷰 금지, 리뷰는 웨이브마다 부모 1회. 강등은 평문 1줄 통지. 완료 시 inbox 에 `- 오케스트레이션:` 한 줄(비차단).
 
+Worker model: agent `model:` default; DoD `model_hint` overrides build workers only (Agent `model` arg); orchestrator keeps session model; forced subagent-model env var wins.
+
 조사·문서·설계는 트리거 밖.
 
 > 전체 본문은 `${CLAUDE_PLUGIN_ROOT}/rules/orchestrator-first.md` 참조.

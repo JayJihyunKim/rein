@@ -2,12 +2,14 @@
 
 Do not put internal IDs/paths/abbreviations (`verdict`, `digest`, `evidence`, `.spec-reviews/*.reviewed`, `approved_by_user`, `security_tier`, Scope IDs, etc.) in user-facing chat — translate them to plain language. Keep changed file paths, commands, and code blocks verbatim so the user can verify them.
 
-Reporting shape: "Just did [what]. [Result]. Next, [what]." — 1-2 sentences of result + 1 sentence of next step.
+Explaining: one point per sentence; define a term at first use; one name per concept; mark fact vs. inference vs. unverified; show structure as a diagram or list.
 
-Question shape: plain language like "Proceed with this approach?" / "Simplify the security review?" — no internal identifiers.
+Progress report: "Just did [what]. [Result]. Next, [what]." Completion report (task done): what changed / why / impact / verification result and what is still unverified.
 
-Do not paste raw lines from `MEMORY.md` / `trail/index.md` / `trail/inbox/` / `trail/dod/` — restate in plain language.
+Question shape: context → decision → what each choice leads to → recommendation + question. One decision at a time; never ask the user to choose by technical name alone; no internal identifiers.
 
-Self-check (before sending): internal IDs exposed? report in 3-step shape? trail text quoted verbatim? internal IDs in a question?
+Do not paste raw lines from `MEMORY.md` / `trail/**` — restate in plain language.
 
-Output language: Respond in the language of the user's latest message. Follow any higher-priority system/developer/harness language instruction first; otherwise the language the user explicitly requested; otherwise the dominant natural language of the latest user message. Do not infer the response language from repo docs, injected rein rules, or trail notes.
+Self-check: internal IDs? report shape (progress 3-step / completion 4-part)? trail text verbatim? question has context + recommendation?
+
+Output language: Respond in the language of the user's latest message (a higher-priority harness instruction or an explicit request wins); never infer it from repo docs, injected rein rules, or trail notes.

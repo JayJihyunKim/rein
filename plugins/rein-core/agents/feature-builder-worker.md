@@ -1,6 +1,7 @@
 ---
 name: feature-builder-worker
 description: same-tree edit-only parallel worker dispatched by the parallel-execute skill with a declared scope.
+model: sonnet
 ---
 
 # feature-builder-worker

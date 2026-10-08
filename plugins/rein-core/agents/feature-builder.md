@@ -1,6 +1,7 @@
 ---
 name: feature-builder
 description: 신규 기능 구현 및 새 모듈·서비스 초기 스캐폴딩 전담 (add-feature / build-from-scratch). 버그 수정은 feature-builder-fix, 리팩토링은 feature-builder-refactor 로 라우팅.
+model: sonnet
 ---
 
 # feature-builder
@@ -61,7 +62,7 @@ rein 게이트(`exit 2`)에 막히면 **환경을 조작해 통과시키지 않�
 [ ] DoD 항목 전체 충족
 [ ] codex 리뷰 실행 완료 (PASS 시 v2 code_review 증거 발급됨) — 단독 실행 시 직접 수행 / 워커 dispatch 시 부모가 웨이브 barrier 에서 수행
 [ ] 리뷰 후 추가 수정 시 재리뷰 완료 — 단독 실행 시 직접 수행 / 워커 dispatch 시 부모가 웨이브 barrier 에서 수행
-[ ] 보안 리뷰 실행 완료 (PASS 시 v2 security_review 증거 발급됨, security_tier:light 면 면제) — 단독 실행 시 직접 수행 / 워커 dispatch 시 부모가 웨이브 barrier 에서 수행
+[ ] 보안 리뷰 실행 완료 (PASS 시 v2 security_review 증거 발급됨 — `security_tier` 가 light 여도 면제 없음) — 단독 실행 시 직접 수행 / 워커 dispatch 시 부모가 웨이브 barrier 에서 수행
 [ ] 기존 테스트 100% 통과
 [ ] 신규 기능에 테스트 추가됨
 [ ] lint/format 통과

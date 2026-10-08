@@ -1,6 +1,7 @@
 ---
 name: security-reviewer
 description: 변경된 코드에 대해 현재 보안 레벨 기준으로 취약점을 탐지하고 대화형으로 수정을 제안한다. CODEX REVIEW 완료 후 자동 실행.
+model: opus
 ---
 
 # security-reviewer
@@ -139,6 +140,10 @@ $SEC_CERTIFIED_PATHS 를 리뷰 대상의 필수 하한으로 삼는다
 ### 4. 보안 리뷰 수행
 각 파일에 대해 규칙 파일의 검사 항목을 기준으로 취약점 탐지.
 
+**등급 하한 — 재현 가능한 데이터 무결성 결함**: 읽기·지문(해시) 계산 시점과 적재·쓰기 시점 사이에 내용이 바뀔 수 있는 TOCTOU 류 결함, 여러 단계로 나뉜 쓰기의 원자성 결여(중간에 실패하면 부분 기록이 남는 경우)처럼 재현 경로를 제시할 수 있는 데이터 무결성 결함은 Low 로 분류하지 않는다 — 최소 Medium 이다. 재현 경로를 제시할 수 없는 순수 이론적 경합만 Low 로 둘 수 있고, 그때는 왜 재현할 수 없는지 한 줄 적는다.
+
+**처리 순서 — 보안 검토가 코드 검토보다 먼저인 경우**: 보안 검토를 코드 검토(`/codex-review`)보다 먼저 수행했다면 Medium 이상 지적은 코드 검토 요청 전에 반영한다 — 후속 작업으로 넘기지 않는다. 넘기면 코드 검토가 같은 결함을 더 높은 등급으로 다시 올려 리뷰 회차를 하나 더 쓴다.
+
 ### 5. 피드백 전달 (단독 모드 — 워커 모드는 '워커 모드 동작' 참조)
 user_level에 따라 피드백 상세도를 조절한다:
 
@@ -240,7 +245,7 @@ security_review:
 | `SUBJECT_MISMATCH` | 3종 | 재캡처 값 그대로 — `subject` **또는** `paths` 중 하나 이상이 부모 값과 불일치한 경우다. `sha256:<hex>`(부모 값과 다름), 센티널(부모는 실 digest 를 보냈는데 재캡처가 센티널), 또는 **부모 subject 와 같은 `sha256:<hex>`**(paths 만 불일치 — 부모의 전사 오류) 셋 다 허용 | 재캡처 결과의 짝 — `sha256` 이면 재캡처 배열(paths-only 불일치에서는 이 배열이 부모 `paths` 와 다르다), 센티널이면 `[]` | `[]` |
 | `UNRESOLVED` | 3종, 또는 `unknown`(프로파일·규칙 로드 실패) | 재캡처 값 그대로(`sha256:<hex>` 또는 센티널), 또는 `null`(재캡처 실패). 부모가 센티널을 넘긴 경우에도 **재캡처 값**을 넣고 부모 센티널은 `blocked_reason` 에 적는다 | 재캡처 결과의 짝 — `sha256` 이면 재캡처 배열, 센티널 또는 `null` 이면 `[]` | `[]` |
 
-- `outcome` 닫힌 집합 4종. **PASS** = `high`/`medium` finding 0건(`low` 는 advisory 로 동반 가능). **NEEDS-FIX** = `high` 또는 `medium` 1건 이상. 등급 기준은 `AGENTS.md` §5-1 에스컬레이션(High/Medium/Low)과 같은 어휘를 쓴다.
+- `outcome` 닫힌 집합 4종. **PASS** = `high`/`medium` finding 0건(`low` 는 advisory 로 동반 가능). **NEEDS-FIX** = `high` 또는 `medium` 1건 이상. 등급 기준은 `AGENTS.md` §5-1 에스컬레이션(High/Medium/Low)과 같은 어휘를 쓴다. 데이터 무결성 결함의 등급 하한은 §4 를 따른다(재현 가능하면 최소 Medium → `NEEDS-FIX`).
 - `security_level` 은 검토자가 §1 에서 읽은 값 — 부모 `--level` 인자의 권위(`agents/orchestrator.md` 발급 절차).
 - `reviewed_subject`/`reviewed_paths` 는 **재캡처 값**이다(부모가 넘긴 값의 복사가 아님 — 그래야 비교가 의미를 가진다).
 - 이 블록은 **문서 계약**이다. `rein/orchestration/validator.py::parse_worker_result` 는 6필드만 재구성하고 추가 키를 소실시키지만, 정의부 밖 런타임 호출이 0건이라 실제 워커 결과는 부모 LLM 이 최종 메시지로 읽는다(`parallel-execute/SKILL.md` 워커 dispatch 계약). 코드로 파싱하는 경로가 생기면 그때 보안 전용 파서를 추가한다(설계 `2026-09-22-security-evidence-issuer.md` §8, Option D 재검토 조건).

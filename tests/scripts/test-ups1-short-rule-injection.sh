@@ -2,8 +2,8 @@
 # Test UPS-1: short rule injection acceptance criteria
 #
 # Verifies:
-#   1. short rule 3 파일 존재 + 각 ≤ 600 B (단, response-tone-summary 는 ≤ 1300 B —
-#      번역 테이블 + 보고 구조 + 질문 형식 4 항목 포함이라 더 큼)
+#   1. short rule 3 파일 존재 + 각 ≤ 600 B (단, response-tone-summary 는 ≤ 1800 B —
+#      설명·질문·완료 보고 원칙 추가, 2026-10-07)
 #   2. user-prompt-submit-rules.sh 가 short/answer-only-summary inject (full body 미참조)
 #   3. user-prompt-submit-rules.sh 가 short/response-tone-summary inject (full body 미참조)
 #   4. pre-tool-use-bash-rules.sh 가 short/background-jobs-summary inject (full body 미참조)
@@ -49,8 +49,8 @@ check "answer-only-summary ≤ 600 B (실측 ${ANSWER_SIZE} B)" \
   "[ ${ANSWER_SIZE} -le 600 ]"
 check "background-jobs-summary ≤ 600 B (실측 ${BG_SIZE} B)" \
   "[ ${BG_SIZE} -le 600 ]"
-check "response-tone-summary ≤ 1300 B (실측 ${TONE_SIZE} B — 번역 테이블·보고 구조·질문 형식 4 항목 포함이라 더 큼)" \
-  "[ ${TONE_SIZE} -le 1300 ]"
+check "response-tone-summary ≤ 1800 B (실측 ${TONE_SIZE} B — 설명·질문·완료 보고 원칙 추가, 2026-10-07)" \
+  "[ ${TONE_SIZE} -le 1800 ]"
 
 # 3. user-prompt-submit-rules.sh — single-spawn --turn-brief delegation (PT-8).
 #    The hook no longer calls rule_inject_body per rule; the loader's

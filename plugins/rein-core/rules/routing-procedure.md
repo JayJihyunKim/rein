@@ -152,7 +152,7 @@ rationale:
 approved_by_user: false  # 승인 시 true 로 교체
 ```
 
-신규 필드는 모두 **선택 사항**이다. 누락 시 기존 동작 그대로 (`security_tier: standard` 로 간주, complexity/model_hint/effort_hint 는 적용 안 함).
+신규 필드는 모두 **선택 사항**이다. 누락 시 기존 동작 그대로 (`security_tier: standard` 로 간주, complexity/effort_hint 는 적용 안 함, `model_hint` 가 없으면 에이전트 정의의 기본 모델을 쓴다).
 
 ### `agent:` / `orchestration:` / `worker_strategy:` 세 필드의 경계 (OFD-DOD-1)
 
@@ -160,9 +160,9 @@ approved_by_user: false  # 승인 시 true 로 교체
 |---|---|---|
 | `agent:` | 이 DoD 의 주 작업을 수행할 것으로 라우팅 §1~§4 가 찾아낸 **단일 실재 capability**(에이전트 후보 하나 — `skills:`/`mcps:` 는 별도 필드) — 기존 의미 그대로이며 **실제 dispatch 에 반드시 포함된다**. 교체는 재승인 절차(§1~§6)를 따른다 | **예** — `approved_by_user: true` 가 승인하는 핵심 대상 |
 | `orchestration:` | 지휘자가 분해해 여러 워커에게 병렬/순차 위임하는 **방식**을 쓸지 여부(현재 값: `main-session-orchestrated`) | **예** — 방식 자체에 대한 승인. `agent:` 승인과 별개 축 |
-| `worker_strategy:` | 지휘자가 실제 위임 시점에 **주로 쓸 것으로 예상하는** 워커 유형에 대한 참고 정보. 실제 선택은 매 위임 시점 지휘자 재량 | **아니오** — 정보성 필드. 소비 코드 없음(`model_hint` 등 기존 정보성 필드와 같은 취급) |
+| `worker_strategy:` | 지휘자가 실제 위임 시점에 **주로 쓸 것으로 예상하는** 워커 유형에 대한 참고 정보. 실제 선택은 매 위임 시점 지휘자 재량 | **아니오** — 정보성 필드. 소비 코드 없음(`effort_hint` 등 기존 정보성 필드와 같은 취급) |
 
-`orchestration:` 은 `main-session-orchestrated` 단일 값만 정의된 **닫힌 집합**이다(부재 시 일반 위임으로 간주). **실행 권위의 SSOT 는 `orchestrator-first.md`** 뿐이다 — 본 §6 은 결과를 기록할 뿐 계약을 재정의하지 않는다. `approved_by_user: true` 는 "이 조합"(agent + orchestration)에 대한 승인이며 `worker_strategy:` 는 승인 대상 밖이다. 소비 코드 없음(실측: `post-edit-dod-routing-check.sh`/`rein-route-record.py` 어디도 신규 필드를 검증하지 않음, 기존 `security_tier`/`model_hint` 와 동일 선상).
+`orchestration:` 은 `main-session-orchestrated` 단일 값만 정의된 **닫힌 집합**이다(부재 시 일반 위임으로 간주). **실행 권위의 SSOT 는 `orchestrator-first.md`** 뿐이다 — 본 §6 은 결과를 기록할 뿐 계약을 재정의하지 않는다. `approved_by_user: true` 는 "이 조합"(agent + orchestration)에 대한 승인이며 `worker_strategy:` 는 승인 대상 밖이다. 검증 코드 없음(실측: `post-edit-dod-routing-check.sh`/`rein-route-record.py` 어디도 신규 필드를 검증하지 않음). `model_hint` 는 아래 서술대로 지휘 규칙이 dispatch 시 소비하는 힌트이지만 훅·게이트는 읽지 않으며, `worker_strategy:` 는 어떤 규칙도 소비하지 않는 순수 정보성 필드다.
 
 ### security_tier 결정 기준 (RT-1)
 
@@ -173,7 +173,7 @@ approved_by_user: false  # 승인 시 true 로 교체
 | 1~2개 파일, 기존 패턴 확장만 (위 항목 미해당) | `light` |
 | **판단이 불명확하면** | `standard` (false-negative 방지) |
 
-`security_tier: light` 효과: `approved_by_user: true` 이면 `git commit` 게이트에서 v2 security_review 증거 요구를 건너뜀. **v2 code_review 증거는 항상 필수**이며 `light` 여도 면제되지 않는다. 승인 전(`approved_by_user: false`)이거나 `security_tier` 파싱 불가 시 fail-closed — 기존대로 증거 필요.
+`security_tier` 는 검토 강도의 기록용 힌트다 — `git commit` 게이트는 이 필드를 읽지 않으며, `light` 여도 v2 security_review 증거와 v2 code_review 증거는 **둘 다 필수**다(`tests/hooks/test-security-tier-gate.sh` 가 고정 — light 면제는 폐기됨). 승인 여부·파싱 가능 여부와 무관하게 증거가 없으면 커밋은 차단된다.
 
 ### complexity 결정 기준 (RT-2)
 
@@ -183,7 +183,7 @@ approved_by_user: false  # 승인 시 true 로 교체
 | 3~10개 파일, 신규 기능 | `medium` |
 | 10개 이상 파일, 아키텍처 변경 | `high` |
 
-`model_hint` 와 `effort_hint` 는 정보성 힌트이며 현재 게이트를 변경하지 않는다. 향후 라우팅 통계 수집에 사용한다.
+`model_hint` 는 **규칙이 소비하는 힌트**다 — 값이 있으면 지휘자(메인 세션 또는 `rein:orchestrator`)가 그 DoD 의 구현 워커를 위임할 때 Agent 호출의 `model` 인자로 그대로 넘겨 에이전트 정의의 기본 모델(frontmatter `model:`)을 덮는다(`orchestrator-first.md` §5). 값이 없으면 에이전트 기본값을 쓴다. 이 전달을 검증하는 코드는 없다 — 훅·게이트는 `model_hint` 를 읽지 않으며 게이트 동작도 바뀌지 않는다. `effort_hint` 는 종전대로 정보성 힌트이며 향후 라우팅 통계 수집에 사용한다.
 
 ---
 

@@ -513,9 +513,17 @@ assert_file_no_grep "evidence_manifest:" "$CAPTURE" "E5 envelope 신규 슬롯 �
 assert_file_no_grep "unbacked_quant_flags:" "$CAPTURE" "E5 envelope 신규 슬롯 부재 (flags)"
 assert_file_no_grep "Evidence manifest cross-check" "$CAPTURE" "E5 sub-item 7 부재"
 # Claim Audit 슬롯 말미(sub-item 6 뒤의 문서 주장 차단 기준 문단) → (빈 줄) →
-# 출력 밀도 블록 인접성 — 무주장 요청서에서는 그 사이에 sub-item 7 이 끼면 안 된다.
-adj=$(sed -n '/누락된 추적 연결 — 은 계속 차단한다/{n;n;p;}' "$CAPTURE")
-assert_contains "$adj" "출력 밀도" "E5 차단 기준 문단 직후 출력 밀도 블록 인접(sub-item 7 미유입)"
+# 출력 밀도 블록 인접성 — 무주장 요청서에서는 차단 기준 문단과 출력 밀도 블록 사이에
+# sub-item 7 이 끼면 안 된다. sub-item 8(Delta evidence, spec 2026-10-07 §3.2.2)은
+# 조건 없이 항상 방출되어 그 사이에 온다.
+adj=$(sed -n '/누락된 추적 연결 — 은 계속 차단한다/,/^출력 밀도/p' "$CAPTURE")
+assert_not_contains "$adj" "Evidence manifest cross-check" "E5 차단 기준 문단 ~ 출력 밀도 사이 sub-item 7 미유입"
+assert_contains "$adj" "8. Delta evidence" "E5 차단 기준 문단 ~ 출력 밀도 사이 sub-item 8 존재(항상 방출)"
+adj_last=$(printf '%s\n' "$adj" | tail -1)
+case "$adj_last" in
+  "출력 밀도"*) TEST_COUNT=$((TEST_COUNT + 1)); echo "  ok: E5 영역 끝 = 출력 밀도 블록 시작" ;;
+  *) TEST_COUNT=$((TEST_COUNT + 1)); fail "E5 영역 끝이 출력 밀도 블록이 아님 (got '$adj_last')" ;;
+esac
 assert_file_grep "응답 출력 형식" "$CAPTURE" "E5 응답 출력 형식 섹션 보존"
 assert_eq "$(count_tmp_leftovers)" "0" "E5 통과 경로 임시파일 정리"
 e2e_teardown
@@ -717,7 +725,9 @@ if [ -s "$SANDBOX/scripts/base-wrapper.sh" ]; then
   norm_env() {
     sed -e '/^출력 밀도/,/^위 축소는/d' \
         -e '/TO-scope-id-measurable-contract-required 자기 강제/,/오염시키는 것을 막는다\.$/d' \
-        -e '/문서 주장(안내·CHANGELOG·README)의 차단 기준:/,/은 계속 차단한다\.$/d' "$1" | cat -s
+        -e '/문서 주장(안내·CHANGELOG·README)의 차단 기준:/,/은 계속 차단한다\.$/d' \
+        -e '/^   8\. Delta evidence$/,/규칙을 따른다\.$/d' \
+        -e '/^      (c) 구성 단서/,/그대로 적용한다\.$/d' "$1" | cat -s
   }
   if [ -f "$BASE_CAPTURE" ] && [ -f "$CAPTURE" ]; then
     norm_env "$BASE_CAPTURE" > "$SANDBOX/.norm-base.txt"

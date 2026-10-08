@@ -1,6 +1,7 @@
 ---
 name: researcher
 description: 기술 조사 및 문서 수집 전담. 라이브러리 비교, 아키텍처 조사, 외부 API 통합 방법 조사.
+model: opus
 ---
 
 # researcher

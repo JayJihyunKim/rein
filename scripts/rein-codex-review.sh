@@ -2739,6 +2739,13 @@ SLOTS
       (a) |expected - observed| / max(|expected|, 1) > 0.20
       (b) 1:1 mapping 누락 항목 수 ≥ 1
 
+      (c) 구성 단서 — 요청서가 숫자에 구성을 적었으면
+          (<합계> = <값>(<출처>) + <값>(<출처>) … 형식) 각 항목을 출처
+          (파일·절·명령)에서 확인하라. 모든 항목이 확인되고 합이 일치하면
+          그 숫자는 1:1 mapping 을 갖춘 것으로 보고 (b) 의 누락으로 세지
+          않는다. 한 항목이라도 확인되지 않거나 합이 다르면 (a)·(b) 를
+          그대로 적용한다.
+
       sub-item 2 (feature name) / sub-item 3 (Matrix deferred 사유) 는
       boolean/qualitative 이므로 본 rule 대상 아님 — 기존 High 판정 규칙 유지.
       Evidence freshness (sub-item 5) 의 HIGH 판정도 본 rule 의 verdict 승격
@@ -2765,6 +2772,60 @@ SLOTS
       output "20 passed") sub-item 6 discrepancy 기준을 그대로 적용한다.
 SLOTS
   fi
+  # Delta evidence (spec 2026-10-07 §3.2.2): additive sub-item 8 — 항상 방출.
+  # 후속 회차 델타 증거를 인정하고 전체 재실행 복귀 조건을 Medium 으로 판정.
+  cat <<'SLOTS'
+
+   8. Delta evidence
+
+      요청서에 delta_evidence: 절(후속 회차의 델타 증거)이 있으면 아래를
+      판정하라. 없으면 이 sub-item 은 "해당 없음" 한 줄로 끝낸다.
+
+      - 기준 실행 기록(full_run_tree 식별자 + 그 트리에서의 전체 스위트
+        실행 블록, exit_code 0), untracked_at_full_run, 델타 파일 목록,
+        delta_lines·delta_source_files, 델타가 닿는 대상 테스트를 실행한
+        [axis:test] 블록, external_inputs: unchanged 가 모두 있으면 이것을
+        이 회차의 충분한 테스트 증거로 인정한다. 이 회차에 전체 스위트
+        재실행을 요구하지 마라.
+      - 위 칸이 하나라도 비었거나, 기준 실행 블록의 exit_code 가 0 이
+        아니거나, external_inputs 가 unchanged 가 아니거나, git 을 실행할
+        수 있는데 기준 커밋이 없으면(git cat-file -e <full_run_tree> 실패)
+        Medium "델타 증거 불완전 — 전체 실행 후 재요청".
+      - 대상 테스트 매핑(델타 파일 → 그 파일을 import 하거나 그 동작을
+        실행하는 테스트 파일)이 불명확하거나, 매핑이 빠진 델타 파일이
+        있으면 Medium "대상 테스트 매핑 불명확 — 전체 실행 후 재요청".
+      - 델타가 아래 전체 재실행 복귀 조건 중 하나라도 충족하는데 대상
+        테스트만 실행했으면 Medium "전체 실행 후 재요청".
+        복귀 조건: 의존성·빌드 설정 파일(lockfile·pyproject.toml·
+        package.json·setup.* 류) 변경 / 테스트 공용 설정·픽스처
+        (conftest.py·tests/fixtures/**·tests/helpers/** 류) 변경 / 둘 이상
+        테스트 파일이 import 하는 공용 모듈 변경 / 소스 파일 5개 초과
+        (delta_source_files) 또는 변경 200줄 초과(delta_lines) / 소스 파일
+        삭제·이름 변경 / 테스트가 읽는 외부 입력 변경.
+      - git 을 실행할 수 있으면 git cat-file -e <full_run_tree> 로 기준
+        커밋 존재를 확인한 뒤 git diff --name-status <full_run_tree> 로
+        델타 목록을 대조하라(읽기 전용). git 자체를 실행할 수 없을 때만
+        요청서의 목록으로 판정한다 — 기준 커밋 부재는 위 "불완전" 이다.
+      - 미추적 파일은 git diff 에 나오지 않는다. untracked_at_full_run 의
+        스냅샷(<경로> <sha256> <줄 수>)과 현재 미추적 목록(git ls-files
+        --others --exclude-standard 를 요청서의 untracked_scope 로 거른 것 —
+        기준과 **같은 범위**, 읽기 전용, 필요하면 sha256sum·wc -l)을 대조해
+        세 경우를 확인하라: 스냅샷에 없는 파일 = added(지금 줄 수),
+        sha256 이 다른 파일 = modified(스냅샷·지금 중 큰 줄 수), 스냅샷에
+        있는데 지금 미추적 목록에 없는 파일 = deleted(스냅샷 줄 수).
+        추적 전환 규칙: 스냅샷 파일이 지금 추적 파일이면(--name-status 의
+        A) deleted 가 아니라 --name-status 항목으로만 한 번 센다.
+      - 합계 재계산: numstat 합 + ?? 줄 수 = delta_lines,
+        --name-status 소스 + ?? 소스 = delta_source_files 를
+        다시 계산해 대조하라. ?? 항목이 위 비교와 다르거나 빠진 파일이
+        있거나 재계산 값이 요청서와 다르면 Medium "델타 증거 불완전 —
+        전체 실행 후 재요청". git 을 실행할 수 없으면 요청서의 ?? 항목이
+        세 경우를 모두 다뤘는지와 합계 산식이 맞는지 서술로 판정한다.
+
+      위 세 Medium 은 테스트 증거 범위에 대한 판정이며 High 로 올리지
+      않는다. 델타 안의 코드 결함 판정은 이 sub-item 과 무관하게 slot 1
+      규칙을 따른다.
+SLOTS
   # 출력 밀도 (spec 2026-07-20 C1/C2/C4): 통과(MATCH) 서술을 카운트 요약으로
   # 축소해 리뷰 결과 읽기 시간을 줄인다. 축소는 서술 형식 지시일 뿐 — 네
   # Required review section 의 검사 수행 자체는 불변 (C5 정적 검사가 보장).

@@ -1,6 +1,7 @@
 ---
 name: spec-writer
 description: brainstorm 문서를 읽어 rein spec(`docs/specs/YYYY-MM-DD-<slug>.md`) 을 작성하고, 작성 직후 자동 codex-review(`spec review for design:`) 를 호출 + PASS 시 spec-review 표식 자동 생성 + NEEDS-FIX/REJECT 시 사용자 핸드오프. self-fix loop 없음.
+model: opus
 ---
 
 # spec-writer

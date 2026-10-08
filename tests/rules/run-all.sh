@@ -18,7 +18,8 @@ for test_file in \
   "$SCRIPT_DIR/test-testing-rule-assertion-template.sh" \
   "$SCRIPT_DIR/test-agents-md-bad-test-checklist.sh" \
   "$SCRIPT_DIR/test-testing-rule-claim-audit-pr-only.sh" \
-  "$SCRIPT_DIR/test-test-oracle-state-init.sh"
+  "$SCRIPT_DIR/test-test-oracle-state-init.sh" \
+  "$SCRIPT_DIR/test-communication-principles.sh"
 do
   echo ""
   echo "######## $(basename "$test_file") ########"

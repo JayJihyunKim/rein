@@ -13,7 +13,8 @@ for test_file in \
   "$SCRIPT_DIR/test-plan-writer-exec-strategy-v2.sh" \
   "$SCRIPT_DIR/test-dod-changed-files-section.sh" \
   "$SCRIPT_DIR/test-spec-writer-auto-review-contract.sh" \
-  "$SCRIPT_DIR/test-plan-path-consistency.sh"
+  "$SCRIPT_DIR/test-plan-path-consistency.sh" \
+  "$SCRIPT_DIR/test-agent-model-frontmatter.sh"
 do
   echo ""
   echo "######## $(basename "$test_file") ########"

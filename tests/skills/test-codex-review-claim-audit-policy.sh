@@ -86,6 +86,27 @@ else
   _fail "'(unavailable)' degrade 문구가 Claim Audit slot 에서 찾지 못함"
 fi
 
+echo "### Test 9: sub-item 6 (c) 구성 단서 (spec 2026-10-07 §3.2.1)"
+if printf '%s' "$slot_block" | LC_ALL=C grep -qF "(c) 구성 단서"; then
+  _pass "'(c) 구성 단서' 가 Claim Audit slot 내부에 명시"
+else
+  _fail "'(c) 구성 단서' 를 Claim Audit slot 에서 찾지 못함"
+fi
+
+echo "### Test 10: sub-item 8 Delta evidence (spec 2026-10-07 §3.2.2)"
+if printf '%s' "$slot_block" | LC_ALL=C grep -qF "8. Delta evidence"; then
+  _pass "'8. Delta evidence' 가 Claim Audit slot 내부에 명시"
+else
+  _fail "'8. Delta evidence' 를 Claim Audit slot 에서 찾지 못함"
+fi
+
+echo "### Test 11: 델타 증거 Medium 문구 '전체 실행 후 재요청' (spec 2026-10-07 §3.2.2)"
+if printf '%s' "$slot_block" | LC_ALL=C grep -qF "전체 실행 후 재요청"; then
+  _pass "'전체 실행 후 재요청' 이 Claim Audit slot 내부에 명시"
+else
+  _fail "'전체 실행 후 재요청' 을 Claim Audit slot 에서 찾지 못함"
+fi
+
 echo ""
 echo "## Summary: $PASS pass, $FAIL fail"
 [ "$FAIL" -eq 0 ] || exit 2
