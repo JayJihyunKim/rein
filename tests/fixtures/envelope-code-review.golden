@@ -177,9 +177,31 @@ Required review sections (모두 응답에 포함해야 한다):
         복귀 조건: 의존성·빌드 설정 파일(lockfile·pyproject.toml·
         package.json·setup.* 류) 변경 / 테스트 공용 설정·픽스처
         (conftest.py·tests/fixtures/**·tests/helpers/** 류) 변경 / 둘 이상
-        테스트 파일이 import 하는 공용 모듈 변경 / 소스 파일 5개 초과
+        테스트 파일이 import 하는 공용 모듈 변경(selection 이 import-search·
+        manual 이거나 없을 때만 — 아래 selection 판정) / 소스 파일 5개 초과
         (delta_source_files) 또는 변경 200줄 초과(delta_lines) / 소스 파일
         삭제·이름 변경 / 테스트가 읽는 외부 입력 변경.
+      - selection 판정: selection 이 manual 이 아니면(칸이 없으면 manual)
+        선택기 실행 [EVIDENCE] 블록(axis 토큰 없음, command 는 선택기
+        호출 그대로이며 --base <full_run_tree> 와 --format json 포함)이
+        있어야 하고, 그 output JSON 을 delta_evidence 와 대조한다:
+        base = full_run_tree, untracked_scope 가 같다, changed 집합 =
+        delta 목록(?? 항목 포함), delta_lines·delta_source_files 가 같다,
+        method = selection, full_run_required = false, [axis:test] 블록의
+        command = JSON 의 command. 하나라도 어긋나거나(선택기 실행 뒤
+        추가 변경도 여기서 드러난다) selection 이 여섯 값 밖이면
+        Medium "델타 증거 불완전 — 전체 실행 후 재요청".
+        selection 이 testmon 이면 기준 실행 블록의 command 에
+        --testmon-noselect 가 있어야 한다. 없으면 같은 Medium 이다.
+        공용 모듈 조건: selection 이 도구 보증(project-script·jest·vitest·
+        testmon)이면 적용하지 않는다 — 대상 완전성은 프로젝트 스크립트
+        또는 도구(jest·vitest 의 import 그래프, testmon 의 실행 기록)가
+        책임지며 rein 은 검증하지 않는다(jest·vitest 는 선택기가 저장소의
+        동적 import 흔적 파일과 거기에 닿는 테스트를 command 에 더한다).
+        jest·vitest·testmon 은 도구가 실행 시 대상을 정하므로 targeted_tests
+        가 "* -> <selection> 선택" 한 줄이어도 매핑 불명확으로 보지 않는다.
+        selection 이 import-search 이거나 manual 이면 공용 모듈 조건을
+        그대로 적용한다.
       - git 을 실행할 수 있으면 git cat-file -e <full_run_tree> 로 기준
         커밋 존재를 확인한 뒤 git diff --name-status <full_run_tree> 로
         델타 목록을 대조하라(읽기 전용). git 자체를 실행할 수 없을 때만

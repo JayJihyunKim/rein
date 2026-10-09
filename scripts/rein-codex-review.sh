@@ -330,6 +330,21 @@ _rein_cleanup_tmp() {
   for _f in ${_REIN_TMP_FILES[@]+"${_REIN_TMP_FILES[@]}"}; do
     rm -f "$_f" 2>/dev/null || true
   done
+  # 프로젝트 사전 검사가 꺼낸 기준 판 트리 (디렉터리라 rm -rf). 정상 경로는
+  # _review_precheck_run 이 직접 지우고, 신호·내부 오류 종료는 여기서 지운다.
+  # drop_tree 가 권한 복원 후 지우고, 실패하면 _PC_TREE 를 남겨 둔다 — 여기가 마지막 재시도.
+  if [ -n "${_PC_TREE:-}" ]; then
+    if declare -F _review_precheck_drop_tree >/dev/null 2>&1; then
+      _review_precheck_drop_tree
+    else
+      rm -rf -- "$_PC_TREE" 2>/dev/null || true
+      if [ ! -e "$_PC_TREE" ] && [ ! -L "$_PC_TREE" ]; then _PC_TREE=""; fi
+    fi
+    if [ -n "${_PC_TREE:-}" ]; then
+      echo "WARNING: [codex-review][precheck] 기준 판 임시 트리를 지우지 못했다 — 직접 지워라: $_PC_TREE" >&2
+      _PC_TREE=""
+    fi
+  fi
 }
 # source-and-call(테스트) 경로에서는 호출자 shell 의 기존 EXIT trap 을 덮어쓰지
 # 않는다 — 실행형 경로에서만 등록. sourced 호출자는 함수 사용 후
@@ -1757,6 +1772,304 @@ if [ "${BASH_SOURCE[0]:-}" = "$0" ] \
   _selfverify_check || exit 4
 fi
 
+# ---- 프로젝트 사전 검사 훅 (spec 2026-10-08 §3.3) ---------------------------
+# 자가검증 관문 직후 · 회차 예산 판정 전 · codex spawn 전. 검토 대상 이전 판
+# (working_tree → HEAD, commit_range → DIFF_BASE)의 트리 전체를 저장소 밖 임시
+# 디렉터리로 꺼내(git archive | tar) 그 디렉터리를 cwd 로 실행한다(D12) —
+# 스크립트가 source 하는 helper 까지 기준 판으로 고정된다. 작업 트리는 데이터
+# 로만 REIN_PRECHECK_TARGET 에 넘기고 직접 실행하지 않는다. 셸 시작 환경
+# (BASH_ENV·ENV·CDPATH·SHELLOPTS·BASHOPTS·내보낸 함수 BASH_FUNC_*)은 지우고
+# bash --noprofile --norc 로 띄운다. 실패는 전부 exit 4 +
+# 'ERROR: [codex-review][readiness-reject]' 접두 — codex 미호출, 회차 비소모,
+# Sonnet 폴백 비대상(SKILL §4.2). errexit 규율: 모든 비0 경로는 `|| rc=$?` /
+# `|| exit 4` / if 조건 안에서만 발생한다. watchdog 함수는 이 지점에서 아직
+# 정의되지 않았으므로 프로세스 그룹 종료 시퀀스를 자체로 둔다(D13).
+REIN_REVIEW_PRECHECK_REL=".rein/review-precheck.sh"
+REIN_REVIEW_PRECHECK_TAIL_LINES=20
+REIN_REVIEW_PRECHECK_OUTPUT_MAX=1048576
+
+_review_precheck_reject() {
+  echo "ERROR: [codex-review][readiness-reject] 프로젝트 사전 검사 $1 (codex 미호출, 회차 비소모)" >&2
+}
+
+_review_precheck_timeout() {
+  local t="${REIN_REVIEW_PRECHECK_TIMEOUT:-120}"
+  case "$t" in ''|*[!0-9]*|0*) t="" ;; esac
+  if [ -z "$t" ] || [ "${#t}" -gt 4 ]; then
+    echo "WARNING: [codex-review][precheck] REIN_REVIEW_PRECHECK_TIMEOUT='${REIN_REVIEW_PRECHECK_TIMEOUT:-}' 은 1~9999 정수가 아니다 — 기본 120초를 쓴다" >&2
+    t=120
+  fi
+  printf '%s' "$t"
+}
+
+# stdout: 기준 ref (빈 값 = 판정 불가)
+_review_precheck_ref() {
+  case "${REVIEW_SUBJECT:-}" in
+    working_tree) printf 'HEAD' ;;
+    commit_range) printf '%s' "${DIFF_BASE:-}" ;;
+    *) printf '' ;;
+  esac
+}
+
+# $1=ref. stdout: none | bad-mode | blob
+_review_precheck_mode() {
+  local mode=""
+  [ -n "$1" ] && mode=$(git -C "$PROJECT_DIR" ls-tree "$1" -- "$REIN_REVIEW_PRECHECK_REL" 2>/dev/null | awk '{print $1}') || mode=""
+  case "$mode" in
+    "") printf 'none' ;;
+    100644|100755) printf 'blob' ;;
+    *) printf 'bad-mode' ;;
+  esac
+}
+
+_review_precheck_excerpt() {
+  # $1 = 출력 파일. 마지막 N줄 · 제어 문자 제거 · 줄당 400바이트 · 예약 태그 무력화.
+  local _pc_line
+  tail -n "$REIN_REVIEW_PRECHECK_TAIL_LINES" "$1" 2>/dev/null \
+    | LC_ALL=C tr -d '\000-\010\013-\037\177' \
+    | cut -b 1-400 \
+    | sed 's/\[readiness-reject\]/[readiness-…]/g; s/\[readiness-advisory\]/[readiness-…]/g' \
+    | while IFS= read -r _pc_line || [ -n "$_pc_line" ]; do
+        echo "ERROR: [codex-review][readiness-reject]   $_pc_line" >&2
+      done
+}
+
+# 전역 _PC_LAUNCHER 배열에 그룹 리더 접두를 둔다. 반환 1 = 도구 없음.
+_review_precheck_launcher() {
+  if command -v setsid >/dev/null 2>&1; then
+    _PC_LAUNCHER=(setsid)
+  elif command -v perl >/dev/null 2>&1; then
+    _PC_LAUNCHER=(perl -e 'setpgrp(0,0); exec @ARGV or die "exec: $!\n"')
+  else
+    return 1
+  fi
+}
+
+_review_precheck_kill() {
+  # 프로세스 그룹 TERM → 최대 2초 → KILL → 회수 (래퍼 watchdog 와 같은 종료 시퀀스).
+  local pid="$1" n=0
+  kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+  while [ "$n" -lt 2 ] && kill -0 "$pid" 2>/dev/null; do sleep 1 || break; n=$((n + 1)); done
+  kill -KILL -- "-$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
+# 전역 _PC_UNSET 배열에 env -u 인자를 둔다 — 셸 시작 환경 변수 + 현재 환경의
+# 내보낸 함수(BASH_FUNC_<이름>%%). 값에 개행이 있어 가짜 이름이 섞여도 없는
+# 변수를 지우는 것뿐이라 무해하다.
+_review_precheck_env_unsets() {
+  local _pc_n
+  _PC_UNSET=(-u BASH_ENV -u ENV -u CDPATH -u SHELLOPTS -u BASHOPTS)
+  while IFS= read -r _pc_n; do
+    if [ -n "$_pc_n" ]; then _PC_UNSET+=(-u "$_pc_n"); fi
+  done < <(env 2>/dev/null | sed -n 's/^\(BASH_FUNC_[^=]*\)=.*/\1/p')
+  return 0
+}
+
+_review_precheck_exec() {
+  # $1=기준 판 트리 $2=초 $3=변경 목록 $4=출력. 반환 = 스크립트 rc (시간 초과 124).
+  local pid rc=0 waited=0
+  _review_precheck_env_unsets
+  ( cd "$1" && exec env "${_PC_UNSET[@]}" \
+      REIN_PRECHECK_PROJECT_DIR="$PROJECT_DIR" \
+      REIN_PRECHECK_TARGET="$PROJECT_DIR" \
+      REIN_PRECHECK_CHANGED_FILES="$3" \
+      REIN_PRECHECK_CHANGED_FILES_RC="${CHANGED_FILES_RC:-0}" \
+      REIN_PRECHECK_DIFF_BASE="${DIFF_BASE:-}" \
+      REIN_PRECHECK_REVIEW_SUBJECT="${REVIEW_SUBJECT:-}" \
+      "${_PC_LAUNCHER[@]}" bash --noprofile --norc -c \
+      'set -o pipefail; bash --noprofile --norc "$1" 2>&1 | { head -c "$2" > "$3"; cat > /dev/null; }' \
+      rein-precheck "$1/$REIN_REVIEW_PRECHECK_REL" "$REIN_REVIEW_PRECHECK_OUTPUT_MAX" "$4" ) </dev/null >/dev/null 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$2" ]; then _review_precheck_kill "$pid"; return 124; fi
+    sleep 1 || { _review_precheck_kill "$pid"; return 124; }
+    waited=$((waited + 1))
+  done
+  wait "$pid" || rc=$?
+  return "$rc"
+}
+
+# 전역 _PC_TREE 에 기준 판 트리를 꺼낸 임시 디렉터리를 둔다. 반환 0=실행, 1=거부, 2=건너뜀.
+_review_precheck_resolve() {
+  local ref mode
+  ref=$(_review_precheck_ref)
+  mode=$(_review_precheck_mode "$ref")
+  case "$mode" in
+    none)
+      if [ -e "$PROJECT_DIR/$REIN_REVIEW_PRECHECK_REL" ] || [ -L "$PROJECT_DIR/$REIN_REVIEW_PRECHECK_REL" ]; then
+        echo "WARNING: [codex-review][readiness-advisory] 사전 검사 스크립트 $REIN_REVIEW_PRECHECK_REL 가 검토 기준(${ref:-판정 불가})에 없다 — 실행하지 않고 리뷰를 진행한다" >&2
+      fi
+      return 2 ;;
+    bad-mode)
+      _review_precheck_reject "거부 — 검토 기준($ref)의 $REIN_REVIEW_PRECHECK_REL 가 일반 파일이 아니다"; return 1 ;;
+  esac
+  if ! _PC_TREE=$(mktemp -d "${TMPDIR:-/tmp}/rein-precheck-tree.XXXXXX" 2>/dev/null) || [ -z "$_PC_TREE" ]; then
+    _PC_TREE=""
+    _review_precheck_reject "실행 불가 — 임시 파일 준비 실패"; return 1
+  fi
+  local arch why
+  if ! _rein_mktemp arch; then
+    _review_precheck_reject "실행 불가 — 임시 파일 준비 실패"; return 1
+  fi
+  if ! git -C "$PROJECT_DIR" archive --format=tar -o "$arch" "$ref" 2>/dev/null; then
+    _review_precheck_reject "실행 불가 — 검토 기준($ref) 트리를 임시 디렉터리로 꺼내지 못했다"; return 1
+  fi
+  # 검사와 추출은 한 번의 python 호출 — 아카이브 전 항목 검사가 통과해야만 꺼낸다.
+  # rc 3 = 신뢰 경계 위반(아무것도 꺼내지 않음), 그 밖의 비0 = 추출 실패·python 미가용.
+  local xrc=0
+  why=$(_review_precheck_extract_tree "$arch" "$_PC_TREE") || xrc=$?
+  if [ "$xrc" -eq 3 ]; then
+    why=$(printf '%s' "$why" | head -n 1 | LC_ALL=C tr -d '\000-\037\177' | cut -b 1-300)
+    _review_precheck_reject "실행 불가 — 검토 기준($ref) 트리에 밖을 가리키는 링크나 허용되지 않는 항목이 있다: ${why:-검사 도구 실행 실패}"; return 1
+  fi
+  if [ "$xrc" -ne 0 ] \
+     || [ ! -f "$_PC_TREE/$REIN_REVIEW_PRECHECK_REL" ] || [ -L "$_PC_TREE/$REIN_REVIEW_PRECHECK_REL" ]; then
+    _review_precheck_reject "실행 불가 — 검토 기준($ref) 트리를 임시 디렉터리로 꺼내지 못했다 (python3 tarfile 필요)"; return 1
+  fi
+  return 0
+}
+
+# 기준 판 트리 신뢰 경계 검사 + 추출. $1=git archive tar $2=꺼낼 루트(빈 디렉터리).
+# 반환 0=검사 통과 후 추출 완료, 3=검사 거부(stdout = 사유 1줄, 아무것도 꺼내지 않음),
+# 그 밖의 비0=추출 실패·python 미가용(tar 명령은 쓰지 않는다 — python3 tarfile 이 필수).
+# 추출 전(아카이브만 보고): 절대 경로·'..' 항목·일반 파일/디렉터리/심볼릭 링크 밖의 유형,
+# 링크를 거쳐 놓이는 항목, 절대 경로 링크, 다른 링크를 거치는 경우까지 가상으로 끝까지
+# 풀었을 때 루트 밖이거나 순환하는 링크를 모두 거부한다. 전부 통과해야만 extractall
+# (지원되면 filter="data"). 꺼낸 뒤에도 모든 링크를 realpath 로 재검사한다(2차 방어).
+_review_precheck_extract_tree() {
+  local -a py=(python3)
+  if [ -n "${PYTHON_RUNNER+x}" ] && [ "${#PYTHON_RUNNER[@]}" -gt 0 ]; then
+    py=("${PYTHON_RUNNER[@]}")
+  fi
+  "${py[@]}" -I -c '
+import os, posixpath, sys, tarfile
+
+arch, root = sys.argv[1], sys.argv[2]
+
+
+def bad(msg):
+    print(msg)
+    sys.exit(3)
+
+
+def norm(name):
+    return "/".join(c for c in name.split("/") if c not in ("", "."))
+
+
+with tarfile.open(arch, "r:") as tf:
+    members = tf.getmembers()
+    links = {}
+    for m in members:
+        name = m.name
+        if name.startswith("/") or ".." in name.split("/"):
+            bad("항목 경로 %r" % name)
+        if not (m.isreg() or m.isdir() or m.issym()):
+            bad("허용되지 않는 항목 유형 %r" % name)
+        if m.issym():
+            if m.linkname.startswith("/"):
+                bad("절대 경로 링크 %r -> %r" % (name, m.linkname))
+            links[norm(name)] = m.linkname
+
+    def resolve(path, follow_last):
+        # 루트 기준 가상 해석. 루트 밖이면 None, 순환이면 False.
+        parts, queue, hops = [], [c for c in path.split("/")], 0
+        while queue:
+            c = queue.pop(0)
+            if c in ("", "."):
+                continue
+            if c == "..":
+                if not parts:
+                    return None
+                parts.pop()
+                continue
+            cur = "/".join(parts + [c])
+            if cur in links and (queue or follow_last):
+                hops += 1
+                if hops > 40:
+                    return False
+                t = links[cur]
+                if t.startswith("/"):
+                    return None
+                queue = t.split("/") + queue
+                continue
+            parts.append(c)
+        return parts
+
+    for m in members:
+        n = norm(m.name)
+        parent = posixpath.dirname(n)
+        if parent and resolve(parent, True) != parent.split("/"):
+            bad("링크를 거쳐 놓이는 항목 %r" % m.name)
+        if m.issym():
+            r = resolve(n, True)
+            if r is None:
+                bad("링크를 따라가면 루트 밖 %r -> %r" % (m.name, m.linkname))
+            if r is False:
+                bad("순환 링크 %r" % m.name)
+
+    if os.listdir(root):
+        bad("추출 대상 디렉터리가 비어 있지 않다")
+    if hasattr(tarfile, "data_filter"):
+        tf.extractall(root, filter="data")
+    else:
+        tf.extractall(root)
+
+rroot = os.path.realpath(root)
+for d, dirs, files in os.walk(root):
+    for n in dirs + files:
+        p = os.path.join(d, n)
+        if os.path.islink(p):
+            r = os.path.realpath(p)
+            if os.path.commonpath([rroot, r]) != rroot:
+                bad("링크를 따라가면 루트 밖 %r" % os.path.relpath(p, root))
+' "$1" "$2" 2>/dev/null
+}
+
+# 꺼낸 트리 삭제. 사전 검사가 권한을 바꿨어도 지우도록 최상위부터 u+rwx 복원 후
+# rm -rf. 지우지 못하면 _PC_TREE 를 남겨 EXIT 정리(_rein_cleanup_tmp)가 재시도한다.
+_review_precheck_drop_tree() {
+  [ -n "${_PC_TREE:-}" ] || return 0
+  if [ -d "$_PC_TREE" ] && [ ! -L "$_PC_TREE" ]; then
+    chmod -R u+rwx -- "$_PC_TREE" 2>/dev/null || true
+  fi
+  rm -rf -- "$_PC_TREE" 2>/dev/null || true
+  if [ ! -e "$_PC_TREE" ] && [ ! -L "$_PC_TREE" ]; then _PC_TREE=""; fi
+  return 0
+}
+
+_review_precheck_run() {
+  local t out list rc=0 rrc=0
+  _PC_TREE=""
+  _review_precheck_resolve || rrc=$?
+  case "$rrc" in 0) ;; 2) return 0 ;; *) _review_precheck_drop_tree; return 1 ;; esac
+  if ! _review_precheck_launcher; then
+    _review_precheck_drop_tree
+    _review_precheck_reject "실행 불가 — 프로세스 그룹 도구(setsid·perl)가 없어 시간 제한을 지킬 수 없다"; return 1
+  fi
+  t=$(_review_precheck_timeout)
+  if ! _rein_mktemp out || ! _rein_mktemp list; then
+    _review_precheck_drop_tree
+    _review_precheck_reject "실행 불가 — 임시 파일 준비 실패"; return 1
+  fi
+  if [ -n "${CHANGED_FILES:-}" ]; then printf '%s\n' "$CHANGED_FILES" > "$list"; fi
+  _review_precheck_exec "$_PC_TREE" "$t" "$list" "$out" || rc=$?
+  _review_precheck_drop_tree
+  [ "$rc" -eq 0 ] && return 0
+  case "$rc" in
+    124|137) _review_precheck_reject "시간 초과 — ${t}초 안에 끝나지 않았다 (REIN_REVIEW_PRECHECK_TIMEOUT 로 조정)" ;;
+    126|127) _review_precheck_reject "실행 불가 — rc=${rc} (bash 가 스크립트나 그 안의 명령을 실행하지 못했다)" ;;
+    *)       _review_precheck_reject "실패 — rc=${rc}" ;;
+  esac
+  _review_precheck_excerpt "$out"
+  echo "ERROR: [codex-review][readiness-reject]   → 사전 검사가 가리킨 문제를 고친 뒤 재호출하라. 훅 계약: SKILL.md §2 \"리뷰 전 프로젝트 사전 검사\"" >&2
+  return 1
+}
+
+if [ "${BASH_SOURCE[0]:-}" = "$0" ] && [ "$REIN_REVIEW_MODE" = "code-review" ]; then
+  _review_precheck_run || exit 4
+fi
+
 # ---- Deterministic effort computation (Plan 2026-06-26 Phase 2). ------
 #
 # Derive the codex reasoning effort from the size of the change instead of a
@@ -2799,9 +3112,31 @@ SLOTS
         복귀 조건: 의존성·빌드 설정 파일(lockfile·pyproject.toml·
         package.json·setup.* 류) 변경 / 테스트 공용 설정·픽스처
         (conftest.py·tests/fixtures/**·tests/helpers/** 류) 변경 / 둘 이상
-        테스트 파일이 import 하는 공용 모듈 변경 / 소스 파일 5개 초과
+        테스트 파일이 import 하는 공용 모듈 변경(selection 이 import-search·
+        manual 이거나 없을 때만 — 아래 selection 판정) / 소스 파일 5개 초과
         (delta_source_files) 또는 변경 200줄 초과(delta_lines) / 소스 파일
         삭제·이름 변경 / 테스트가 읽는 외부 입력 변경.
+      - selection 판정: selection 이 manual 이 아니면(칸이 없으면 manual)
+        선택기 실행 [EVIDENCE] 블록(axis 토큰 없음, command 는 선택기
+        호출 그대로이며 --base <full_run_tree> 와 --format json 포함)이
+        있어야 하고, 그 output JSON 을 delta_evidence 와 대조한다:
+        base = full_run_tree, untracked_scope 가 같다, changed 집합 =
+        delta 목록(?? 항목 포함), delta_lines·delta_source_files 가 같다,
+        method = selection, full_run_required = false, [axis:test] 블록의
+        command = JSON 의 command. 하나라도 어긋나거나(선택기 실행 뒤
+        추가 변경도 여기서 드러난다) selection 이 여섯 값 밖이면
+        Medium "델타 증거 불완전 — 전체 실행 후 재요청".
+        selection 이 testmon 이면 기준 실행 블록의 command 에
+        --testmon-noselect 가 있어야 한다. 없으면 같은 Medium 이다.
+        공용 모듈 조건: selection 이 도구 보증(project-script·jest·vitest·
+        testmon)이면 적용하지 않는다 — 대상 완전성은 프로젝트 스크립트
+        또는 도구(jest·vitest 의 import 그래프, testmon 의 실행 기록)가
+        책임지며 rein 은 검증하지 않는다(jest·vitest 는 선택기가 저장소의
+        동적 import 흔적 파일과 거기에 닿는 테스트를 command 에 더한다).
+        jest·vitest·testmon 은 도구가 실행 시 대상을 정하므로 targeted_tests
+        가 "* -> <selection> 선택" 한 줄이어도 매핑 불명확으로 보지 않는다.
+        selection 이 import-search 이거나 manual 이면 공용 모듈 조건을
+        그대로 적용한다.
       - git 을 실행할 수 있으면 git cat-file -e <full_run_tree> 로 기준
         커밋 존재를 확인한 뒤 git diff --name-status <full_run_tree> 로
         델타 목록을 대조하라(읽기 전용). git 자체를 실행할 수 없을 때만

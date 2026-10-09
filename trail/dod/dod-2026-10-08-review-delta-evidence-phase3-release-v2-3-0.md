@@ -26,9 +26,9 @@ OUT
 
 ## Definition of Done
 
-- [ ] 코드 리뷰 통과 기록 + 보안 검토 통과 기록(두 v2 증거) → feature 커밋 → dev 병합·push
-- [ ] main `chore: v2.3.0` 커밋 + 태그 push, 공개 저장소 main·태그 = strip 커밋, GitHub Release Latest
-- [ ] 완료 기록·index 갱신
+- [x] 코드 리뷰 통과 기록 + 보안 검토 통과 기록(두 v2 증거) → feature 커밋 → dev 병합·push
+- [x] main `chore: v2.3.0` 커밋 + 태그 push, 공개 저장소 main·태그 = strip 커밋, GitHub Release Latest
+- [x] 완료 기록·index 갱신
 
 ## 검증 기준
 

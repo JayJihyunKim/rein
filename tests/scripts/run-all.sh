@@ -68,7 +68,9 @@ for test_file in \
   "$SCRIPT_DIR/test-bootstrap-persona-neutral.sh" \
   "$SCRIPT_DIR/test-mark-security-reviewed.sh" \
   "$SCRIPT_DIR/test-codex-review-evidence-issuance.sh" \
-  "$SCRIPT_DIR/../integration/test-slash-command-namespace.sh"
+  "$SCRIPT_DIR/../integration/test-slash-command-namespace.sh" \
+  "$SCRIPT_DIR/test-affected-tests.sh" \
+  "$SCRIPT_DIR/test-policy-loader-test-selection.sh"
 do
   echo ""
   echo "######## $(basename "$test_file") ########"

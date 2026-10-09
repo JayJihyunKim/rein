@@ -74,6 +74,51 @@ Wrapper 가 context assembly, envelope 4 slots, codex exec, PASS 시 v2 code_rev
 - `verification_commands: none` — 이 저장소에 실행할 검증 명령이 없을 때. 두 블록 요구를 면제하고 `diff_self_review:` 만 요구한다.
 - `verification_state: tests-intentionally-red` + `expected_failure: <무엇이 왜 실패해야 하는가>` — TDD 의 red 단계. `[axis:typecheck]` exit0 블록 + `[axis:test]` 블록(exit 1~123·125·126 허용, 0·124·127·128 이상은 거부) + `diff_self_review:` 를 요구한다.
 
+### 대상 테스트 선택 도구 — `rein-affected-tests.py`
+
+후속 회차 델타 증거의 대상 테스트(아래 "델타 증거" 3번 칸)를 눈으로 고르지 않고 기계로 고른다. 요청서 작성자가 직접 실행한다 — 래퍼는 이 도구를 부르지도, 테스트를 실행하지도 않는다.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT:-$PWD/plugins/rein-core}/scripts/rein-affected-tests.py" \
+  --base <full_run_tree> --untracked-scope '<untracked_scope 의 glob>' \
+  --untracked-snapshot <untracked_at_full_run 줄을 담은 파일> --format json
+```
+
+`--base` 를 생략하면 `HEAD` 대비 작업 트리 변경을 본다. `--untracked-scope` 는 델타 증거의 `untracked_scope:` 와 같은 glob 을 준다(여러 번 지정 가능, 생략하면 전체). `--untracked-snapshot` 은 `untracked_at_full_run:` 의 줄들(`<경로> <sha256> <줄 수>`, 없으면 `none`)을 담은 파일이다 — 도구가 미추적 항목을 델타 증거 2번 칸과 같은 규칙으로 계산한다. 외부 입력이 바뀌었거나 알 수 없으면 `--external-inputs-changed` 를 붙인다. `--format text` 는 사람용 요약, `--no-install` 은 아래 자동 설치를 건너뛴다. 종료 코드 0 이면 출력이 있다(전체 실행 판정 포함). 0 이 아니면 도구를 쓰지 못한 것이다 — 전체 스위트를 돌리거나 직접 골라 `selection: manual` 로 적는다. 도구 전체 실행 시간은 최대 600초다.
+
+**판정 순서**:
+
+1. 먼저 아래 "전체 테스트 재실행으로 돌아가는 조건" 의 의존성·빌드 설정, 테스트 공용 설정·픽스처, 소스 5개·200줄 초과(줄 수는 같은 산식 — 문서 포함 델타 전체), 소스 삭제·이름 변경, 외부 입력 변경, 변경 없음을 본다. 하나라도 걸리면 어떤 방법도 쓰지 않고 `전체 실행 필요: 예` 다 — 프로젝트 스크립트도 이를 뒤집지 못한다.
+2. `project-script` — 프로젝트가 둔 `.rein/affected-tests.sh`. 계약: stdin 으로 바뀐 경로를 한 줄에 하나 받고, stdout 으로 `{"tests": [...], "command": "..."}` JSON 을 낸다(최대 1 MiB). 종료 코드 0 = 결과 유효, 3 = 전체 실행 필요, 그 밖·120초 초과·형식 오류 = 다음 방법으로 내려간다. **고른 테스트가 빠짐없는지는 프로젝트가 책임진다 — rein 은 검증하지 않는다.** 도구는 `--base` 에 커밋된 판을 꺼내 실행한다 — 기준 이후 바뀐 내용은 실행하지 않고, 기준에 없는 새 파일이면 건너뛴다. 스크립트는 그 판의 트리 전체를 임시 디렉터리로 꺼낸 곳을 작업 디렉터리로 실행되므로 같은 판의 보조 파일(source 하는 helper 등)도 그 판이 쓰인다. 현재(검토 대상) 저장소는 환경 변수 `REIN_AFFECTED_TARGET`(저장소 절대 경로)로만 전달되니, 선택 대상 파일은 이 경로 아래에서 읽어야 한다. 그 밖에 `REIN_AFFECTED_BASE`·`REIN_AFFECTED_ROOT` 를 받는다. 실행 환경에서는 `BASH_ENV`·`ENV`·`CDPATH`·내보낸 셸 함수를 제거하고 `bash --noprofile --norc` 로 실행한다.
+3. 두 스택이 함께 바뀌었거나 지원 스택(파이썬 pytest, JS/TS jest·vitest·`npm test`) 밖이면 `전체 실행 필요: 예` 다. 이후 방법 중 jest·vitest·import-search 는 저장소 전체에서 첫 인자가 고정 문자열 리터럴이 아닌 동적 import(`importlib.import_module(name)`·`__import__(name)`·`require(name)`·`import(name)`·인터폴레이션이 있는 템플릿 문자열, 따옴표 문자열에 다른 식을 이어 붙인 `import("./plugins/" + name)` 같은 형태 — 따옴표 문자열 하나만 인자로 오는 경우만 고정 경로로 본다)를 쓰는 파일을 찾아, 그런 테스트 파일과 그런 소스 파일에 import 로 (중간 모듈을 거쳐서라도) 닿는 테스트를 바뀐 파일과 무관하게 항상 대상에 더한다 — 동적 import 는 무엇을 불러오는지 정적으로 알 수 없기 때문이다. 테스트 파일 규칙을 바꾸는 설정(pytest 의 `python_files`·`testpaths`, jest 의 `testMatch`·`testRegex`·`roots`, vitest 의 `include`·`includeSource`)이 있거나, 저장소에 구문 오류가 있는 파이썬 파일·읽을 수 없거나 너무 큰 파일이 있거나, 저장소를 끝까지 훑지 못하면, 또는 더한 결과가 전체 테스트 파일의 절반을 넘으면 `전체 실행 필요: 예` 다(jest·vitest 의 이 절반 계산은 jest·vitest 의 실제 대상이 아니라 선택 도구 자신의 import 그래프로 센 근사다). testmon 은 실제 실행을 추적하므로 이 규칙에서 빠진다. 도구가 따라가지 못하는 경우가 남는다: JS 경로 별칭·번들러 설정 기반 모듈 해석, 함수 별칭으로 감싼 호출·`exec`·`eval`·설정 문자열 기반 플러그인 로딩 같은 패턴 밖의 동적 로딩, 그리고 JS 파일의 구문 오류(감지하지 않는다)다.
+4. `jest` / `vitest` / `testmon` — 정밀 도구. jest·vitest 는 `package.json` 의 의존성에 있고 `node_modules/.bin/` 에 실행 파일이 있을 때, 명령은 `jest --findRelatedTests <파일>` / `vitest related --run <파일>` 이고, 3 의 추가 대상이 있으면 `&& jest --runTestsByPath <추가 경로>` / `&& vitest run <추가 경로>` 가 붙는다. testmon 은 파이썬 프로젝트에 pytest-testmon 과 기록(`.testmondata`)이 있을 때, 명령은 `pytest --testmon` 이다. 세 도구 모두 대상은 도구가 실행 시 정한다. testmon 의 기록이 없으면 전체 실행이고 명령은 `pytest --testmon-noselect`(선택 없이 전체를 돌리며 기록을 만든다)다.
+5. `import-search` — rein 내장 검색. 바뀐 모듈을 import 하는 테스트, 그리고 바뀐 모듈을 import 하는 다른 모듈을 import 하는 테스트(2단계)를 고르고, 3 의 추가 대상을 더한다. 파이썬은 import 문, JS/TS 는 상대 경로 import·require 만 본다. 다음이면 전체 실행: 바뀐 모듈을 직접 import 하는 테스트가 둘 이상(공용 모듈 — 이 방법은 완화 대상이 아니다) / 어떤 테스트에도 매핑되지 않는 소스 / 대상이 전체 테스트 파일의 절반 초과.
+6. `full` — 위 어느 것으로도 고르지 못했다. 사유가 함께 나온다.
+
+도구 방법(`jest`·`vitest`·`testmon`)이 실행 시 "관련 테스트 없음" 으로 실패하면 전체 실행으로 간다. testmon 이 있는 프로젝트의 전체 실행(기준 실행 포함)은 `pytest --testmon-noselect` 로 돌린다 — `selection: testmon` 의 기준 실행 블록은 이 옵션을 포함해야 한다(아래 델타 증거 4번 칸).
+
+**정밀 도구 자동 설치** — 4단계에서 파이썬 프로젝트에 pytest-testmon 이 없으면 한 번 설치를 시도한다(1~3단계에서 결론이 나면 시도하지 않는다): `poetry.lock` 이 있으면 `poetry add --group dev "pytest-testmon>=2,<3"`, `uv.lock` 이 있으면 `uv add --dev "pytest-testmon>=2,<3"`, 그 외에는 활성 venv(`VIRTUAL_ENV`)가 있을 때만 그 venv 의 `python -m pip install "pytest-testmon>=2,<3"`(+ `requirements-dev.txt` 가 있으면 한 줄 추가). venv 없는 시스템 파이썬에는 설치하지 않는다. 결과는 `.rein/state/test-tools.json` 에 기록하고, 기록이 있으면 다시 시도하지 않는다 — 다시 시도하려면 그 파일을 지운다. 설치에 성공한 회차는 의존성이 바뀌었으므로 전체 실행(`pytest --testmon-noselect`)이다. 실패하면 `import-search` 로 내려간다. 끄려면:
+
+```yaml
+# .rein/policy/test-selection.yaml
+auto_install_test_tools: false
+```
+
+파일이 없으면 켜짐이다. 파일이 있는데 읽을 수 없으면(형식 오류·PyYAML 없음·true/false 가 아닌 값) 꺼짐으로 보고 경고한다.
+
+### 리뷰 전 프로젝트 사전 검사 — `.rein/review-precheck.sh`
+
+프로젝트가 저장소 루트에 `.rein/review-precheck.sh` 를 커밋해 두면, 래퍼가 코드 리뷰 모드에서 codex 를 부르기 전에 이를 실행한다. 린트·정적 규칙처럼 외부 리뷰 전에 기계로 잡을 수 있는 문제를 여기서 걸러 회차를 아낀다. 파일이 없으면 아무 일도 일어나지 않는다. 검사 항목은 프로젝트가 정한다 — rein 은 연결만 한다.
+
+- **시점**: 위 "자가검증 증거 — 두 축 계약" 확인을 통과한 뒤, 회차 예산 판정 전. spec-review 모드에서는 실행하지 않는다. 자가검증이 요구되지 않는 리뷰(문서·trail 뿐인 변경)에서도 코드 리뷰 모드면 실행한다.
+- **검토 대상 이전 판만 실행**: 작업 트리의 파일은 직접 실행하지 않는다. 작업 트리 리뷰에서는 HEAD 에 커밋된 판, 커밋 범위 리뷰에서는 검토 대상 커밋들 이전(리뷰 비교 기준)의 판을 꺼내 실행한다 — 리뷰 중인 변경이 이 스크립트를 추가·수정·삭제해도 그 내용은 이번 리뷰에서 실행되지 않는다. 그 기준에 파일이 없으면 실행하지 않고 경고(`WARNING: [codex-review][readiness-advisory]`) 후 리뷰를 진행한다.
+- **실행**: 검토 이전 판의 **트리 전체**를 먼저 검사(절대 경로·`..`·외부 심볼릭 링크 거부)한 뒤 저장소 밖 임시 디렉터리에 꺼내, 그 디렉터리를 작업 디렉터리로 `bash --noprofile --norc` 로 실행한다. 같은 판의 보조 파일(source 하는 helper)도 그 판이 쓰인다. 현재(검토 대상) 저장소는 환경 변수 `REIN_PRECHECK_TARGET`(저장소 절대 경로)으로만 전달되니, 검사 대상 파일은 이 경로 아래에서 읽어야 한다. stdin 은 비어 있다. 실행 환경에서는 `BASH_ENV`·`ENV`·`CDPATH`·내보낸 셸 함수를 제거한다. 기준 판이 일반 파일이 아니거나 트리 검사에 걸리면 거부한다.
+- **환경 변수**: `REIN_PRECHECK_TARGET`(검토 대상 저장소 절대 경로), `REIN_PRECHECK_PROJECT_DIR`(저장소 루트), `REIN_PRECHECK_CHANGED_FILES`(리뷰 대상 파일 목록을 한 줄에 하나 담은 파일의 경로), `REIN_PRECHECK_CHANGED_FILES_RC`(0 이 아니면 목록을 얻지 못한 것 — 전체 검사로 가라), `REIN_PRECHECK_DIFF_BASE`(리뷰 비교 기준), `REIN_PRECHECK_REVIEW_SUBJECT`(`working_tree` 또는 `commit_range`).
+- **시간 제한**: 기본 120초, `REIN_REVIEW_PRECHECK_TIMEOUT` 으로 조정(1~9999 정수). 래퍼가 스크립트를 자기 프로세스 그룹으로 띄워 직접 시간을 재므로 `timeout` 명령이 없는 환경(macOS 기본)에서도 지켜지고, 기한을 넘기면 그룹 전체(스크립트가 띄운 프로세스 포함)를 끝낸다. 이를 위해 `setsid` 또는 `perl` 이 필요하다 — 둘 다 없으면 실행하지 않고 거부한다.
+- **출력**: 1 MiB 까지만 보관하고 나머지는 버린다. 거부 시 마지막 20줄을 보여 준다.
+- **결과**: 종료 코드 0 = 통과(출력 없이 리뷰 진행). 그 밖은 exit 4 거부 — codex 를 부르지 않고 회차를 쓰지 않는다. 거부 진단행은 `ERROR: [codex-review][readiness-reject] 프로젝트 사전 검사` 로 시작하고 유형(실패 rc / 시간 초과 / 실행 불가 / 거부)을 밝힌다. 스크립트가 직접 124·137 로 끝나면 시간 초과로 보고된다.
+- **규약**: 작업 트리를 바꾸지 않는다(래퍼는 확인하지 않는다 — 바꾸면 리뷰 대상이 바뀐다). 같은 입력에 같은 결과를 낸다. 지적은 파일 경로와 줄을 포함해 stdout·stderr 에 쓴다.
+
 ### 후속 회차 요청서 양식 (2회차 이상)
 
 래퍼는 재리뷰마다 **새 codex 세션**을 띄운다 — 이전 회차의 검토 내용은 자동으로 전달되지 않는다(§7). 그래서 2회차부터는 호출자가 아래 다섯 칸을 요청서에 직접 싣는다. 목적은 리뷰어의 주의를 "이전 지적 + 수정분 + 그것이 닿는 계약" 에 모으는 것이다.
@@ -92,8 +137,8 @@ Wrapper 가 context assembly, envelope 4 slots, codex exec, PASS 시 v2 code_rev
 
 1. **기준 트리 식별자** — 전체 스위트를 돌린 **직후**에 `git stash create` 를 실행해 출력된 커밋 id 를 적는다. 이 명령은 작업 트리와 stash 목록을 바꾸지 않고 추적 파일의 현재 상태(스테이지 포함)를 커밋 객체로 고정한다. 출력이 비어 있으면(추적 변경 없음) `git rev-parse HEAD` 의 값을 쓴다. 이 커밋 객체는 어느 ref 에도 걸리지 않는다 — 가비지 수집 유예(기본 2주)는 보장이 아니므로, 요청서를 쓰기 직전에 `git cat-file -e <id>` 로 아직 있는지 확인하고 없으면 전체 스위트를 다시 돌려 새 식별자를 만든다. 전체 스위트 직후에 `git ls-files --others --exclude-standard` 의 결과를 `untracked_scope:` 에 적은 범위(glob 목록, 예: `src/** tests/**` — 생략하면 전체)로 거르고, 남은 파일마다 `<경로> <sha256> <줄 수>` 한 줄(`sha256sum`·`wc -l`)을 `untracked_at_full_run:` 에 적는다. 기준과 현재 비교는 항상 같은 `untracked_scope` 를 쓴다 — 집합이 다르면 문서·trail 파일이 added 로 오판된다 — `git stash create` 는 미추적 파일 내용을 고정하지 않으므로 이 지문·줄 수 스냅샷이 미추적 파일의 기준이다(없으면 `none`).
 2. **델타** — `git diff --name-status <기준 트리 식별자>` 의 출력을 그대로 싣고, `git diff --numstat <기준 트리 식별자>` 의 추가·삭제 합을 `delta_lines:` 에, 소스 파일(테스트·문서 제외) 수를 `delta_source_files:` 에 적는다. `--name-status` 에는 미추적 파일이 나오지 않으므로 `untracked_at_full_run` 스냅샷과 지금 `git ls-files --others --exclude-standard` 를 **같은 `untracked_scope`** 로 거른 목록을 비교해 세 경우를 `?? <경로> <added|modified|deleted>` 로 직접 추가한다: added(지금 줄 수) — 스냅샷에 없던 파일, modified(스냅샷·지금 중 큰 줄 수) — sha256 이 다른 파일, deleted(스냅샷 줄 수) — 스냅샷에 있었는데 지금 미추적 목록에 없는 파일. **추적 전환 규칙**: 스냅샷 파일이 지금 추적 파일이 됐으면(`git ls-files --error-unmatch <경로>` 성공, `--name-status` 에 `A` 로 나타남) deleted 가 아니다 — `--name-status` 항목으로만 한 번 센다. 세 경우의 줄 수를 `delta_lines` 에 더하고, 소스 파일이면 `delta_source_files` 에도 센다(산식: `numstat 합 + ?? 줄 수 = delta_lines`, `--name-status 소스 + ?? 소스 = delta_source_files` — 리뷰어가 같은 산식으로 재계산해 대조한다). 판단이 어려우면 범위 안 미추적 파일을 전부 modified 로 올린다.
-3. **대상 테스트** — 델타 파일마다, 그 파일을 import 하거나 그 동작을 실행하는 테스트 파일을 전부 나열한다(산정 책임은 요청서 작성자). 나열한 테스트를 실행한 명령을 `[axis:test]` 블록의 `command:` 로 싣는다.
-4. **기준 실행 기록** — 기준 시점의 전체 스위트 실행을 axis 토큰 없는 `[EVIDENCE]` 블록으로 싣는다(`claim:` 예: `기준 트리 <id> 에서 전체 스위트 실행`, output 은 요약 몇 줄). 이 블록은 `exit_code: 0` 이어야 한다 — 실패한 실행은 기준이 아니다. 새 세션의 리뷰어는 이전 요청서를 볼 수 없으므로 매 회차 다시 싣는다.
+3. **대상 테스트** — 델타 파일마다, 그 파일을 import 하거나 그 동작을 실행하는 테스트 파일을 전부 나열한다(산정 책임은 요청서 작성자). 위 "대상 테스트 선택 도구" 로 골랐으면 `selection:` 에 출력의 선택 방법을 적고, 도구 실행을 axis 토큰 없는 `[EVIDENCE]` 블록으로 싣는다 — `command:` 는 도구 호출 그대로(`--base <full_run_tree>`, `--untracked-scope`, `--untracked-snapshot`, `--format json` 포함), output 은 JSON 출력 전체다. 리뷰어는 그 JSON 의 `base`·`untracked_scope`·`changed`·`delta_lines`·`delta_source_files` 를 이 델타 증거의 값과 대조한다 — 도구를 실행한 뒤 파일이 더 바뀌었으면 대조가 어긋나므로 도구를 다시 실행한다. JSON 이 증거 블록 상한(60줄·8000바이트)을 넘으면 도구 방법을 쓸 수 없다 — `selection: manual` 로 쓰거나 전체 실행으로 간다. 도구가 `전체 실행 필요: 예`(`full_run_required: true`)를 내면 델타 증거를 쓰지 않는다. 눈으로 골랐으면 `selection: manual`. 나열한 테스트를 실행한 명령을 `[axis:test]` 블록의 `command:` 로 싣는다 — 도구로 골랐으면 JSON 의 `command` 와 같아야 한다. `jest`·`vitest`·`testmon` 은 도구가 실행 시 대상을 정하므로 `targeted_tests:` 에 `* -> <선택 방법> 선택` 한 줄로 적는다.
+4. **기준 실행 기록** — 기준 시점의 전체 스위트 실행을 axis 토큰 없는 `[EVIDENCE]` 블록으로 싣는다(`claim:` 예: `기준 트리 <id> 에서 전체 스위트 실행`, output 은 요약 몇 줄). 이 블록은 `exit_code: 0` 이어야 한다 — 실패한 실행은 기준이 아니다. 새 세션의 리뷰어는 이전 요청서를 볼 수 없으므로 매 회차 다시 싣는다. `selection: testmon` 이면 기준 실행 블록의 `command:` 에 `--testmon-noselect` 가 있어야 한다(선택 없이 전체를 돌리며 testmon 기록을 만든 실행 — 그 기록이 이후 회차의 선택 근거다).
 5. **외부 입력** — 테스트가 읽는 저장소 밖 입력과 gitignore 대상 입력(실데이터 디렉터리, 환경 변수, 인터프리터·의존성 설치 상태)이 기준 실행 이후 바뀌지 않았음을 `external_inputs: unchanged` 로 선언한다. 바뀌었거나 알 수 없으면 델타 증거를 쓰지 않고 전체 재실행으로 돌아간다.
 
 형식:
@@ -111,20 +156,22 @@ delta_evidence:
   delta_source_files: <델타 중 소스 파일 수 — 테스트·문서 제외>
   targeted_tests:
     <델타 파일> -> <테스트 파일>, <테스트 파일>
+  selection: <project-script|jest|vitest|testmon|import-search|manual>   # 생략하면 manual
   external_inputs: unchanged
 ```
 
-칸이 하나라도 비거나 산식이 맞지 않으면 델타 증거가 아니다 — 리뷰어는 Medium "델타 증거 불완전 — 전체 실행 후 재요청" 으로 돌려주므로 전체 재실행으로 돌아간다. 이어서 `[EVIDENCE]` 블록 두 개 — 기준 실행 기록(axis 토큰 없음, `exit_code: 0`) 1개, 대상 테스트 실행(`claim:` 에 `[axis:test]`) 1개 — 와 `[axis:typecheck]` 블록, `diff_self_review:` 라인을 싣는다. "대상 테스트 통과" 같은 문장을 블록 밖에 쓰지 않는다 — 검증명사와 통과어가 함께 있는 라인은 블록이 있어도 사전검사가 거부한다(§4.1 reject-tier). 통과 사실은 블록의 `claim:` 에만 쓴다.
+칸이 하나라도 비거나 산식이 맞지 않으면 델타 증거가 아니다 — 리뷰어는 Medium "델타 증거 불완전 — 전체 실행 후 재요청" 으로 돌려주므로 전체 재실행으로 돌아간다. 이어서 `[EVIDENCE]` 블록 두 개 — 기준 실행 기록(axis 토큰 없음, `exit_code: 0`) 1개, 대상 테스트 실행(`claim:` 에 `[axis:test]`) 1개 — 와, 선택 도구를 썼으면 도구 실행 블록(axis 토큰 없음, output 은 JSON) 1개, 그리고 `[axis:typecheck]` 블록과 `diff_self_review:` 라인을 싣는다. "대상 테스트 통과" 같은 문장을 블록 밖에 쓰지 않는다 — 검증명사와 통과어가 함께 있는 라인은 블록이 있어도 사전검사가 거부한다(§4.1 reject-tier). 통과 사실은 블록의 `claim:` 에만 쓴다.
 
 **전체 테스트 재실행으로 돌아가는 조건** — 델타가 다음 중 하나라도 포함하면 델타 증거를 쓰지 말고 전체 스위트를 다시 실행해 그 결과를 `[axis:test]` 블록으로 싣는다(새 기준 트리 식별자도 이때 만든다):
 
 - 의존성·빌드 설정 파일 변경 — lockfile, `pyproject.toml`, `package.json`, `setup.*` 류. 작성자가 아는 의존성 설치 상태·런타임 버전 변경도 여기에 든다.
 - 테스트 공용 설정·픽스처 변경 — `conftest.py`, `tests/fixtures/**`, `tests/helpers/**` 류.
-- 둘 이상의 테스트 파일이 import 하는 공용 모듈 변경.
+- 둘 이상의 테스트 파일이 import 하는 공용 모듈 변경 — `selection:` 이 `import-search` 이거나 `manual`(칸 없음 포함)일 때 적용한다. 도구 보증 방법(`project-script`·`jest`·`vitest`·`testmon`)으로 골랐으면 적용하지 않는다 — 대상의 완전성은 프로젝트 스크립트(프로젝트가 책임, rein 은 검증하지 않는다) 또는 도구(jest·vitest 의 import 그래프, testmon 의 실행 기록)가 보증하며, jest·vitest 를 쓸 때는 선택 도구가 저장소의 동적 import 흔적 파일과 그 파일에 import 로 닿는 테스트를 실행 명령에 더한다.
 - 소스 파일(테스트·문서 제외) 5개 초과 변경(`delta_source_files` > 5), 또는 델타 전체의 변경 200줄 초과(`delta_lines` > 200).
 - 소스 파일 삭제 또는 이름 변경(`--name-status` 의 `D`·`R`).
 - 테스트가 읽는 외부 입력(저장소 밖·gitignore 대상 데이터, 환경 변수, 인터프리터·의존성 설치 상태)이 기준 이후 바뀌었거나 알 수 없음(`external_inputs` 가 `unchanged` 가 아님).
 - 델타 증거의 칸이 하나라도 비었거나, 기준 실행 블록이 `exit_code: 0` 이 아니거나, 기준 커밋이 더 이상 없음(`git cat-file -e` 실패).
+- 대상 테스트 선택 도구가 `전체 실행 필요: 예` 를 냈음.
 
 이 숫자(5개·200줄)는 측정으로 정한 값이 아니라 운영 가설이다 — 놓친 결함이 드러나면 이 절에서 조정한다. "전체 검토로 복귀하는 조건"(아래)은 리뷰 범위의 조건이고, 이 절은 테스트 실행 범위의 조건이다 — 둘은 따로 판정한다.
 
@@ -290,7 +337,7 @@ ok 21 - test-codex-model-profile-routing
 
 | exit | 의미 | 호출자 행동 |
 |---|---|---|
-| 4 (+거부 진단행 — `ERROR: [codex-review][readiness-reject]` 로 시작하는 stderr 라인) | review-readiness 거부 — 블록 0개 + 정량/PASS 매칭, **또는 블록 ≥1 이어도 블록 밖 reject-tier 매칭**(§4.1) — codex 미호출 (비용 0) | stderr 안내대로 요청서를 수정(증거 블록 추가, 계약 형태로 고쳐 쓰기, 또는 형식 교정)해 **재호출**. Sonnet fallback 비대상 — codex 실행 실패가 아니라 요청서 결함이므로 fallback 으로 새면 결함이 가려진다 (exit 3 과 동일한 비대상 원리). 재리뷰 카운트(§3 escalation)에 포함하지 않는다 — 리뷰가 수행되지 않았다. |
+| 4 (+거부 진단행 — `ERROR: [codex-review][readiness-reject]` 로 시작하는 stderr 라인) | review-readiness 거부 — 블록 0개 + 정량/PASS 매칭, **또는 블록 ≥1 이어도 블록 밖 reject-tier 매칭**(§4.1) — codex 미호출 (비용 0) 프로젝트 사전 검사(`.rein/review-precheck.sh`, §2 "리뷰 전 프로젝트 사전 검사")의 실패·시간 초과·실행 불가·거부도 같은 접두로 이 행에 속한다. | stderr 안내대로 요청서를 수정(증거 블록 추가, 계약 형태로 고쳐 쓰기, 또는 형식 교정)해 **재호출**. Sonnet fallback 비대상 — codex 실행 실패가 아니라 요청서 결함이므로 fallback 으로 새면 결함이 가려진다 (exit 3 과 동일한 비대상 원리). 재리뷰 카운트(§3 escalation)에 포함하지 않는다 — 리뷰가 수행되지 않았다. |
 | 4 (거부 진단행 0 — advisory 경고·발췌 내용 무관) | codex 실행 실패 passthrough (드묾 — `CODEX_RC` passthrough 와의 이론적 겹침) | 기존 실행 실패 경로와 동일 — Sonnet fallback 후보 (§4 본문). |
 | 5 (+진단행 — `ERROR: [codex-review][review-timeout]` 로 **시작하는** stderr 라인 ≥1) | 래퍼 소유 timeout (정지 판정 종료 — verdict 없음, v2 발급 미시도) | **즉시 대체 리뷰** (Sonnet fallback, 사유 `codex_timeout` 재사용). 재시도·재호출 없음. 재리뷰 카운트(§3 escalation) 비포함 — 리뷰가 완료되지 않았다. |
 | 5 (진단행 0) | codex 자체 exit 5 passthrough | 기존 실행 실패 처리 (Sonnet fallback 후보) 그대로. |

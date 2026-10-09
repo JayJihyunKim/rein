@@ -2,6 +2,7 @@
 # tests/skills/test-codex-review-delta-evidence.sh
 # spec docs/specs/2026-10-07-review-delta-evidence-and-defaults.md §3.9.1 (3)
 # Scope IDs covered: RDE-SKILL-AXIS, RDE-SKILL-DELTA, RDE-SKILL-COMPOSE, RDE-WRAP-COMPOSE, RDE-WRAP-DELTA, RDE-SEC-FLOOR
+# spec docs/specs/2026-10-08-affected-tests-and-precheck.md §3.6.2 — Scope IDs: ATP-SKILL, ATP-ENVELOPE, ATP-SYNC
 set -u
 export LC_ALL=C   # GNU grep 3.7 + UTF-8 로케일의 한글 줄 매칭 결함 회피 (바이트 비교)
 
@@ -11,6 +12,7 @@ S="$ROOT/plugins/rein-core/skills/codex-review/SKILL.md"
 WP="$ROOT/plugins/rein-core/scripts/rein-codex-review.sh"
 WR="$ROOT/scripts/rein-codex-review.sh"
 SR="$ROOT/plugins/rein-core/agents/security-reviewer.md"
+SEL="$ROOT/plugins/rein-core/scripts/rein-affected-tests.py"
 
 PASS=0
 FAIL=0
@@ -86,6 +88,39 @@ for s in '등급 하한 — 재현 가능한 데이터 무결성 결함' 'TOCTOU
          '코드 검토 요청 전에 반영' '후속 작업으로 넘기지 않는다' '데이터 무결성 결함의 등급 하한은 §4'; do
   has "$SR" "$s"
 done
+
+echo "-- SKILL.md: 선택 도구·델타 칸 (spec 2026-10-08 §3.6.2 (a))"
+for s in 'selection:' 'selection: manual' '도구 보증 방법' 'rein 은 검증하지 않는다' '* -> <선택 방법> 선택' \
+         '대상 테스트 선택 도구가' '--testmon-noselect' '--untracked-snapshot' '--format json'; do
+  has "$S" "$s"
+done
+
+echo "-- SKILL.md: 선택 도구·사전 검사 문서 (§3.6.2 (b))"
+TS=$(pos "$S" '### 대상 테스트 선택 도구 — `rein-affected-tests.py`')
+PS=$(pos "$S" '### 리뷰 전 프로젝트 사전 검사 — `.rein/review-precheck.sh`')
+lt "두 축 소절 < 선택 도구 소절" "$(pos "$S" '### 자가검증 증거 — 두 축 계약')" "$TS"
+lt "선택 도구 소절 < 사전 검사 소절" "$TS" "$PS"
+lt "사전 검사 소절 < '### 후속 회차 요청서 양식'" "$PS" "$(pos "$S" '### 후속 회차 요청서 양식')"
+for s in 'auto_install_test_tools: false' 'pytest-testmon>=2,<3' '.rein/state/test-tools.json' 'REIN_REVIEW_PRECHECK_TIMEOUT' \
+         'REIN_PRECHECK_CHANGED_FILES' '검토 대상 이전 판' 'setsid' '프로젝트 사전 검사'; do
+  has "$S" "$s"
+done
+
+echo "-- 래퍼 두 사본: sub-item 8 selection 판정 (§3.6.2 (c))"
+for W in "$WP" "$WR"; do
+  tag="${W#$ROOT/}"
+  BLK=$(awk '/^4\. Claim Audit /,/^응답 출력 형식/' "$W")
+  for s in 'selection 판정' '도구 보증' 'rein 은 검증하지 않는다' '"* -> <selection> 선택"' '--testmon-noselect' \
+           'changed 집합' 'delta_lines·delta_source_files 가 같다' 'base = full_run_tree' 'untracked_scope 가 같다'; do
+    if printf '%s\n' "$BLK" | grep -qF -- "$s"; then _pass "$tag Claim Audit: '$s'"; else _fail "$tag Claim Audit: missing '$s'"; fi
+  done
+done
+
+echo "-- 선택 방법·JSON 필드·숫자 동기화 (§3.6.2 (d))"
+for s in project-script jest vitest testmon import-search delta_lines delta_source_files untracked_scope; do
+  for F in "$S" "$WP" "$WR" "$SEL"; do has "$F" "$s"; done
+done
+for s in 'MAX_SOURCE_FILES = 5' 'MAX_DELTA_LINES = 200'; do has "$SEL" "$s"; done
 
 echo ""
 echo "PASS: $PASS  FAIL: $FAIL"

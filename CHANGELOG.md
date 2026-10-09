@@ -2,6 +2,15 @@
 
 > **Versioning policy**: 버전 bump 는 `.claude/rules/versioning.md` 의 Rule A/B/C 를 따른다.
 
+## v2.4.0 — 2026-10-10 (영향받는 테스트 자동 선택 + pytest-testmon 자동 설치 + 리뷰 전 프로젝트 사전 검사)
+
+`rein update` 후 사용자 세션에서 바뀌는 것:
+
+- **재리뷰 때 돌릴 테스트를 기계가 고릅니다.** 새 명령 `rein-affected-tests.py` 가 바뀐 파일에서 돌릴 테스트, 실행 명령, 고른 방법, 전체 실행이 필요한지와 그 이유를 알려줍니다. 의존성·설정·픽스처 변경, 소스 5개·200줄 초과, 삭제·이름 변경, 외부 입력 변경이면 먼저 전체 실행을 요구합니다. 그렇지 않으면 프로젝트가 둔 `.rein/affected-tests.sh`(기준 시점에 커밋된 판만 실행), jest·vitest 의 관련 테스트 기능, pytest-testmon, rein 내장 import 검색 순으로 고르고, jest·vitest·내장 검색으로 고를 때는 인자가 변수인 동적 import 를 쓰는 파일과 그 파일에 (중간 모듈을 거쳐서라도) 닿는 테스트를 늘 대상에 더하고, 그 때문에 대상이 너무 많아지거나 저장소를 끝까지 분석하지 못하면 전체 실행을 요구합니다. 테스트 파일 규칙을 설정으로 바꾼 프로젝트(pytest `python_files`·`testpaths`, jest `testMatch`·`testRegex`·`roots`, vitest `include`)에서는 jest·vitest·내장 검색 대신 전체 실행을 요구합니다. JS 경로 별칭·번들러 설정 기반 모듈 해석, 함수 별칭·`exec`·설정 문자열로 감싼 동적 로딩, JS 파일의 구문 오류는 따라가지 못합니다. 출력 JSON 을 재리뷰 요청서에 그대로 실으면 리뷰어가 바뀐 파일 목록·줄 수와 대조합니다. 지원 스택은 파이썬(pytest)과 JS/TS(jest·vitest·`npm test`)입니다.
+- **파이썬 프로젝트에 pytest-testmon 이 없으면 한 번 설치를 시도합니다.** `poetry.lock` 이 있으면 poetry, `uv.lock` 이 있으면 uv, 그 외에는 활성 가상환경이 있을 때만 그 환경의 pip 으로 개발용 의존성에 `pytest-testmon>=2,<3` 을 넣습니다(pip 은 `requirements-dev.txt` 가 있으면 한 줄 추가). 가상환경 없는 시스템 파이썬에는 설치하지 않습니다. 결과는 `.rein/state/test-tools.json` 에 남고 다시 시도하지 않습니다 — 다시 시도하려면 그 파일을 지우세요. 설치한 회차와 testmon 기록이 없는 회차는 `pytest --testmon-noselect` 로 전체 테스트를 돌려 기록을 만듭니다. `.rein/policy/test-selection.yaml` 에 `auto_install_test_tools: false` 를 쓰면 설치하지 않습니다.
+- **리뷰 전에 프로젝트 자체 검사를 걸 수 있습니다.** `.rein/review-precheck.sh` 를 커밋해 두면 `/codex-review` 가 코드 리뷰 전에 실행하고, 실패하면 외부 리뷰를 부르지 않고 비용·회차 소모 없이 이유(실패·시간 초과·실행 불가)와 출력 마지막 20줄을 돌려줍니다. 실행하는 것은 리뷰 대상 변경 이전에 커밋된 판뿐입니다 — 리뷰 중인 변경이 이 스크립트를 고치거나 새로 넣어도 그 내용은 실행되지 않습니다. 시간 제한은 기본 120초(`REIN_REVIEW_PRECHECK_TIMEOUT`)이며 `timeout` 명령이 없는 macOS 에서도 지켜지고, 기한을 넘기면 스크립트가 띄운 프로세스까지 끝냅니다(`setsid` 또는 `perl` 필요). 이 파일이 없으면 동작은 그대로입니다.
+- **v2.3.0 의 "여러 테스트가 쓰는 공용 모듈이 바뀌면 전체 실행" 조건을 일부 완화했습니다.** 대상 테스트를 프로젝트 스크립트·jest·vitest·testmon 으로 골랐으면(요청서에 `selection:` 칸으로 표시) 이 조건을 적용하지 않습니다 — 완전성은 프로젝트 스크립트(프로젝트 책임) 또는 도구가 보증합니다. rein 내장 import 검색이나 직접 고른 경우는 종전 조건 그대로이고, 의존성·설정·픽스처·소스 5개·200줄 초과·삭제·외부 입력 변경 조건은 선택 방법과 무관하게 유지됩니다.
+
 ## v2.3.0 — 2026-10-08 (리뷰 회차 델타 증거·수치 구성 인정 + 보안 무결성 등급 하한 + 설명·질문·운영 원칙 + 에이전트 기본 모델)
 
 `rein update` 후 사용자 세션에서 바뀌는 것:

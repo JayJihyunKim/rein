@@ -31,6 +31,13 @@ CLI modes:
         Per-turn brief (PT-7). Emit the complete UserPromptSubmit envelope
         (answer-only + response-tone + persona summaries, optional bootstrap
         prepend via env REIN_TURN_BRIEF_PREPEND) in ONE process. Always exit 0.
+    rein-policy-loader.py --test-selection-auto-install
+        Test-tool auto-install switch. Reads .rein/policy/test-selection.yaml's
+        top-level `auto_install_test_tools`. Prints "true" or "false" to
+        stdout, always exit 0. Missing file -> "true" (user-decided default).
+        File present but unreadable (PyYAML absent, parse error, non-dict
+        top level, non-bool value) -> "false" + a stderr warning
+        (install stays conservative). Valid dict without the key -> "true".
 
 Fail-open: every error path (missing file, malformed yaml, missing key,
 unexpected shape, missing PyYAML) returns the most permissive default — never
@@ -364,6 +371,49 @@ def get_meta_check_policy() -> str:
         if normalized in ("true", "false", "auto"):
             return normalized
     return "auto"
+
+
+def get_test_selection_auto_install() -> bool:
+    """Return the effective auto_install_test_tools switch.
+
+    Reads .rein/policy/test-selection.yaml. Missing file -> True (user
+    decision 2026-10-08). File present but unreadable -> False + warning:
+    a broken policy file must not trigger package installs.
+
+    Scope ID: ATP-POLICY
+    """
+    policy_path = Path(".rein/policy/test-selection.yaml")
+    if not policy_path.exists():
+        return True
+    if yaml is None:
+        print(
+            f"warning: PyYAML unavailable - cannot read {policy_path}; auto install off",
+            file=sys.stderr,
+        )
+        return False
+    try:
+        data = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    except Exception:
+        print(f"warning: failed to parse {policy_path} - auto install off", file=sys.stderr)
+        return False
+    if data is None:
+        return True
+    if not isinstance(data, dict):
+        print(
+            f"warning: {policy_path} top level is not a mapping - auto install off",
+            file=sys.stderr,
+        )
+        return False
+    if "auto_install_test_tools" not in data:
+        return True
+    value = data["auto_install_test_tools"]
+    if isinstance(value, bool):
+        return value
+    print(
+        f"warning: {policy_path} auto_install_test_tools must be true/false - auto install off",
+        file=sys.stderr,
+    )
+    return False
 
 
 def get_persona() -> tuple[bool, object]:
@@ -714,7 +764,7 @@ def get_all_rule_overrides() -> dict:
 def main() -> int:
     if len(sys.argv) < 2:
         print(
-            "usage: rein-policy-loader.py <hook-name> | --strict <hook-name> | --rule-override <rule-name> | --rule-enabled <rule-name> | --meta-check-policy | --persona | --persona-file | --persona-greeting <name> | --turn-brief",
+            "usage: rein-policy-loader.py <hook-name> | --strict <hook-name> | --rule-override <rule-name> | --rule-enabled <rule-name> | --meta-check-policy | --persona | --persona-file | --persona-greeting <name> | --test-selection-auto-install | --turn-brief",
             file=sys.stderr,
         )
         return 0  # fail-open - never block a hook due to internal usage error
@@ -789,6 +839,11 @@ def main() -> int:
         # G3 Phase 2 Task 2.1: print effective meta-check policy
         # ('true' | 'false' | 'auto') to stdout, always exit 0.
         sys.stdout.write(get_meta_check_policy())
+        return 0
+
+    if sys.argv[1] == "--test-selection-auto-install":
+        # Scope ID ATP-POLICY: always exit 0, stdout "true" | "false".
+        sys.stdout.write("true" if get_test_selection_auto_install() else "false")
         return 0
 
     if sys.argv[1] == "--persona":

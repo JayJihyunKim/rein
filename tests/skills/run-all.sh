@@ -24,7 +24,8 @@ for test_file in \
   "$SCRIPT_DIR/test-review-events.sh" \
   "$SCRIPT_DIR/test-persona-skill.sh" \
   "$SCRIPT_DIR/test-parallel-execute-skill.sh" \
-  "$SCRIPT_DIR/test-codex-review-delta-evidence.sh"
+  "$SCRIPT_DIR/test-codex-review-delta-evidence.sh" \
+  "$SCRIPT_DIR/test-review-precheck-hook.sh"
 do
   echo ""
   echo "######## $(basename "$test_file") ########"
