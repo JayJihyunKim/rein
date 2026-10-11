@@ -2,6 +2,13 @@
 
 > **Versioning policy**: 버전 bump 는 `.claude/rules/versioning.md` 의 Rule A/B/C 를 따른다.
 
+## v2.4.1 — 2026-10-11 (리뷰어 codex 샌드박스 read-only 고정 + 테스트 선택 도구 보안 보강)
+
+`rein update` 후 사용자 세션에서 바뀌는 것:
+
+- **`/codex-review` 의 리뷰어가 항상 읽기 전용 샌드박스에서 돕니다.** 래퍼가 codex 에 `--sandbox read-only` 를 넘깁니다(코드·문서 리뷰 공통). 이전에는 샌드박스를 지정하지 않아 `~/.codex/config.toml` 의 `sandbox_mode` 를 그대로 따랐고, 그 값이 `danger-full-access` 이면 리뷰어 명령이 저장소 밖 파일을 쓰고 네트워크에 접근할 수 있었습니다. 이제 리뷰어 셸 명령은 어디에도 쓰지 못하고 네트워크도 쓰지 못합니다 — 임시 폴더를 쓰는 테스트를 리뷰어가 직접 다시 돌릴 수 없으므로, 테스트 결과는 종전 안내대로 요청서의 증거 블록에 실어 주세요. 프롬프트의 `[SANDBOX:…]` 표기나 환경 변수로는 바꿀 수 없습니다. codex 설정에 등록된 MCP 서버는 이 샌드박스 밖에서 돕니다.
+- **`rein-affected-tests.py` 의 보안 보강 세 가지.** 가상환경에 pytest-testmon 을 설치할 때 `python -I -m pip` 로 실행해 프로젝트 폴더에 있는 같은 이름 모듈(예: `pip.py`)이 pip 대신 실행되지 않습니다. 프로젝트 스크립트(`.rein/affected-tests.sh`)를 돌릴 때 `SHELLOPTS`·`BASHOPTS` 를 빼서 환경 변수로 셸 옵션을 강제로 켤 수 없습니다. 사람용 출력(`--format text`)은 각 줄의 제어 문자(줄바꿈·CR·탭 포함)를 `?` 로 바꿔, 파일 이름에 섞인 줄바꿈으로 가짜 줄을 만들 수 없습니다. JSON 출력은 그대로입니다.
+
 ## v2.4.0 — 2026-10-10 (영향받는 테스트 자동 선택 + pytest-testmon 자동 설치 + 리뷰 전 프로젝트 사전 검사)
 
 `rein update` 후 사용자 세션에서 바뀌는 것:

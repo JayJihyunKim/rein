@@ -3968,6 +3968,16 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     exit 3
   }
   CODEX_ARGS+=(-m "$CODE_GATE_MODEL")
+  # Sandbox: 항상 read-only 로 명시한다(코드·문서 리뷰 공통). 생략하면 사용자
+  # ~/.codex/config.toml 의 sandbox_mode(danger-full-access 포함)를 상속한다.
+  # workspace-write 를 쓰지 않는 이유: 리뷰어가 저장소 안의 게이트 제어 파일
+  # (통과 기록·훅 정책·회차 카운터·문서 리뷰 표식·.claude 설정)을 쓸 수 있게
+  # 되고, 이 경로는 리뷰 대상 지문에 들어가지 않아 리뷰 대상 내용에 심은
+  # 지시로 게이트를 약화해도 감지되지 않는다. 대가로 리뷰어는 임시 파일을
+  # 쓰는 테스트를 다시 돌리지 못한다 — 테스트 결과는 요청서의 증거 블록으로
+  # 전달된다. 프롬프트 마커·환경 변수로 넓히는 경로는 두지 않는다.
+  REVIEW_SANDBOX_MODE="read-only"
+  CODEX_ARGS+=(--sandbox "$REVIEW_SANDBOX_MODE")
   # Effort 4단계 결정 체인 (spec 2026-07-10 §4.3) — EFFORT_SOURCE 가 실제
   # 경로를 기록한다 (도장 증빙 §4.4):
   #   1) 유효 [EFFORT:] 마커 (marker) — floor 미적용. 마커 경로는 산출/floor

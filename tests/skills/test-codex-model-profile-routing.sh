@@ -595,6 +595,40 @@ check_vocab "$(SUBJECT=bogus_mode src_compute)" \
   "알 수 없는 subject → 빈 출력 ∈ vocab"
 
 # ------------------------------------------------------------
+# Group 10 — sandbox-fixed. 래퍼는 codex 에 --sandbox read-only 를 항상
+# 명시한다(코드·문서 리뷰 공통) — 사용자 ~/.codex/config.toml 의
+# sandbox_mode(예: danger-full-access)를 상속하지 않는다. workspace-write 는
+# 리뷰어가 저장소 안의 게이트 제어 파일(통과 기록·훅 정책·회차 카운터)을
+# 쓸 수 있게 해 쓰지 않는다. 프롬프트 마커로 바꿀 수 없다.
+# ------------------------------------------------------------
+echo "-- group 10: sandbox-fixed"
+count_sandbox() { grep -o -- '--sandbox' "$1" 2>/dev/null | wc -l | tr -d ' '; }
+
+sandbox_setup newconf
+stage_file "util.sh" 5
+STUB_ARGS_OUT="$SANDBOX/args.txt" run_wrapper "code review please"
+assert_grep '--sandbox read-only' "$SANDBOX/args.txt" "코드 리뷰 → --sandbox read-only 전달"
+assert_eq "$(count_sandbox "$SANDBOX/args.txt")" 1 "코드 리뷰 → --sandbox 정확히 1회"
+assert_no_grep 'workspace-write' "$SANDBOX/args.txt" "코드 리뷰 → workspace-write 없음"
+sandbox_teardown
+
+sandbox_setup newconf
+( cd "$SANDBOX" && seq 1 20 > spec20.md )
+STUB_ARGS_OUT="$SANDBOX/args.txt" \
+  run_wrapper "[NON_INTERACTIVE] spec review for design: spec20.md"
+assert_grep '--sandbox read-only' "$SANDBOX/args.txt" "문서 리뷰 → --sandbox read-only 전달"
+assert_eq "$(count_sandbox "$SANDBOX/args.txt")" 1 "문서 리뷰 → --sandbox 정확히 1회"
+sandbox_teardown
+
+sandbox_setup newconf
+stage_file "util.sh" 5
+STUB_ARGS_OUT="$SANDBOX/args.txt" run_wrapper "[SANDBOX:danger-full-access]
+code review please"
+assert_grep '--sandbox read-only' "$SANDBOX/args.txt" "샌드박스 마커가 있어도 read-only 유지"
+assert_no_grep 'danger-full-access' "$SANDBOX/args.txt" "샌드박스 마커가 codex 인자로 새지 않음"
+sandbox_teardown
+
+# ------------------------------------------------------------
 echo ""
 echo "TESTS: $TEST_COUNT, FAILS: $FAIL_COUNT"
 [ "$FAIL_COUNT" = "0" ]

@@ -20,7 +20,7 @@ Second opinion (brainstorm 반박, spec sanity, refactor tradeoff 이중 검증)
 | 용도         | 리뷰 게이트                                                             | Second opinion                                                                         |
 | 리뷰 결과 기록 | **필수** (v2 code_review 증거 발급)                                    | **절대 금지**                                                                          |
 | Resume --last | 래퍼는 매번 새 세션 — 맥락은 후속 회차 요청서 양식으로 (§2, §7)           | **금지** — 매번 새 세션                                                                |
-| Sandbox      | 상황별 (기본 read-only)                                                 | 항상 `read-only`                                                                       |
+| Sandbox      | 래퍼가 `read-only` 고정 (§6.6)                                          | 항상 `read-only`                                                                       |
 | **Fallback** | codex 실행 **실패** 시에만 Sonnet/code-reviewer/human fallback 허용 (§4) | **same-session Claude fallback 금지**. 독립 reviewer 부재 시 degraded / no-second-opinion 으로 명시 |
 
 Fallback 정책 비대칭 이유: Mode A 는 "리뷰가 어떤 형태로든 수행되어 v2 증거가 발급" 되는 것이 게이트 통과의 전제이므로 codex 실행 실패 시 차순위 reviewer 로 대체할 수 있다. Mode B 는 "독립 관점" 자체가 가치이므로 same-session Claude 가 대신하면 본질이 깨진다 — 호출자는 결과 없이 작업을 계속하거나, 별도 시점에 Mode B 를 다시 시도한다.
@@ -97,7 +97,7 @@ python3 "${CLAUDE_PLUGIN_ROOT:-$PWD/plugins/rein-core}/scripts/rein-affected-tes
 
 도구 방법(`jest`·`vitest`·`testmon`)이 실행 시 "관련 테스트 없음" 으로 실패하면 전체 실행으로 간다. testmon 이 있는 프로젝트의 전체 실행(기준 실행 포함)은 `pytest --testmon-noselect` 로 돌린다 — `selection: testmon` 의 기준 실행 블록은 이 옵션을 포함해야 한다(아래 델타 증거 4번 칸).
 
-**정밀 도구 자동 설치** — 4단계에서 파이썬 프로젝트에 pytest-testmon 이 없으면 한 번 설치를 시도한다(1~3단계에서 결론이 나면 시도하지 않는다): `poetry.lock` 이 있으면 `poetry add --group dev "pytest-testmon>=2,<3"`, `uv.lock` 이 있으면 `uv add --dev "pytest-testmon>=2,<3"`, 그 외에는 활성 venv(`VIRTUAL_ENV`)가 있을 때만 그 venv 의 `python -m pip install "pytest-testmon>=2,<3"`(+ `requirements-dev.txt` 가 있으면 한 줄 추가). venv 없는 시스템 파이썬에는 설치하지 않는다. 결과는 `.rein/state/test-tools.json` 에 기록하고, 기록이 있으면 다시 시도하지 않는다 — 다시 시도하려면 그 파일을 지운다. 설치에 성공한 회차는 의존성이 바뀌었으므로 전체 실행(`pytest --testmon-noselect`)이다. 실패하면 `import-search` 로 내려간다. 끄려면:
+**정밀 도구 자동 설치** — 4단계에서 파이썬 프로젝트에 pytest-testmon 이 없으면 한 번 설치를 시도한다(1~3단계에서 결론이 나면 시도하지 않는다): `poetry.lock` 이 있으면 `poetry add --group dev "pytest-testmon>=2,<3"`, `uv.lock` 이 있으면 `uv add --dev "pytest-testmon>=2,<3"`, 그 외에는 활성 venv(`VIRTUAL_ENV`)가 있을 때만 그 venv 의 `python -I -m pip install "pytest-testmon>=2,<3"`(작업 폴더의 같은 이름 모듈을 집어오지 않도록 격리 실행)(+ `requirements-dev.txt` 가 있으면 한 줄 추가). venv 없는 시스템 파이썬에는 설치하지 않는다. 결과는 `.rein/state/test-tools.json` 에 기록하고, 기록이 있으면 다시 시도하지 않는다 — 다시 시도하려면 그 파일을 지운다. 설치에 성공한 회차는 의존성이 바뀌었으므로 전체 실행(`pytest --testmon-noselect`)이다. 실패하면 `import-search` 로 내려간다. 끄려면:
 
 ```yaml
 # .rein/policy/test-selection.yaml
@@ -215,9 +215,9 @@ delta_evidence:
 
 | Use case                               | Sandbox mode      | Key flags                                |
 | -------------------------------------- | ----------------- | ---------------------------------------- |
-| 코드 리뷰 (초회)                       | `read-only`       | `--sandbox read-only`                    |
+| 코드 리뷰 (초회)                       | `read-only`       | 래퍼가 `--sandbox read-only` 를 항상 전달 (§6.6) |
 | 코드 리뷰 (fix 후 재리뷰, 같은 사이클) | `read-only`       | 래퍼 재호출(새 세션) + 후속 회차 요청서 양식 (§2) |
-| 로컬 편집 (드문 경우)                  | `workspace-write` | `--sandbox workspace-write --full-auto`  |
+| 로컬 편집 (수동 직접 호출, 래퍼 아님)  | `workspace-write` | `--sandbox workspace-write --full-auto`  |
 | 다른 디렉토리에서 실행                 | task needs        | `-C <DIR>` 추가                          |
 
 ### 실행 모드 — Bash 도구로 호출 시 foreground 전용
@@ -431,9 +431,7 @@ prompt 본문 어디든 다음 marker 가 있으면 non-interactive mode 활성:
     - `ultra` — 게이트에서 **명시 거부**. ultra 는 자동 하위작업 위임(auto subagents)으로 동작해 게이트 판정이 비결정적이 되고 quota/timeout 충돌을 일으킨다. stderr 에 ultra 전용 사유 메시지 출력.
     - `max` / `xhigh` — timeout 실측 전 **미지원** (후속 재검토 대상). stderr 에 각자 사유 메시지 출력.
     - 셋 다 거부 후에는 마커 없음과 동일하게 **변경 규모 산출 경로로 진입**하며(floor 포함), 마커는 strip 되어 codex 프롬프트/인자 어디로도 전달되지 않는다. 기타 무효값(`low2` 등)은 기존 generic warning 유지.
-- `[SANDBOX:<mode>]` — sandbox override (default `read-only`)
-  - 허용 값: `read-only`, `workspace-write`
-  - **금지**: `danger-full-access` 는 자동 호출에서 거부 (사용자 명시 confirmation 필요)
+- `[SANDBOX:<mode>]` — 래퍼는 이 마커를 읽지 않는다. 샌드박스는 항상 `read-only` 다 (§6.6).
 
 ### 6.2 Marker 처리 절차
 
@@ -446,7 +444,7 @@ prompt 본문 어디든 다음 marker 가 있으면 non-interactive mode 활성:
 
 - `[EFFORT:<level>]` — ✅ wrapper (`scripts/rein-codex-review.sh`) 에 구현됨. 유효 값은 `low|medium|high`. `ultra`/`max`/`xhigh` 는 각자 전용 사유의 stderr 메시지(ultra=자동위임 게이트 금지, max/xhigh=timeout 실측 전 미지원) 후 산출 진입, 기타 무효값은 기존 generic warning + **변경 규모 기반 산출 진입**(`_compute_effort`). marker 는 유효성과 무관하게 codex 로 전달되는 prompt 에서 제거.
 - `[NON_INTERACTIVE]` — ✅ wrapper 의 `--non-interactive` CLI 플래그로 처리. marker 자체는 prompt 에 보존 (spec-review 모드 감지에 사용).
-- `[MODEL:<name>]` — ⏳ marker override 자체는 wrapper 미구현(legacy — prompt-controlled downgrade 차단 목적의 의도된 미구현). 단 **기본 모델은 단일 출처 `plugins/rein-core/config/codex-models.sh` 의 `CODE_GATE_MODEL`** 을 wrapper 가 `-m` 으로 항상 전달한다 (config 전 후보 부재 시 래퍼 내장 canonical `gpt-5.6-sol`+`high` 로 명시 폴백 — 무모델 호출 없음, §6.3). `[SANDBOX:<mode>]` — ⏳ wrapper 미구현. prompt 에 포함 시 wrapper 는 무시하고 codex 기본 sandbox 를 사용.
+- `[MODEL:<name>]` — ⏳ marker override 자체는 wrapper 미구현(legacy — prompt-controlled downgrade 차단 목적의 의도된 미구현). 단 **기본 모델은 단일 출처 `plugins/rein-core/config/codex-models.sh` 의 `CODE_GATE_MODEL`** 을 wrapper 가 `-m` 으로 항상 전달한다 (config 전 후보 부재 시 래퍼 내장 canonical `gpt-5.6-sol`+`high` 로 명시 폴백 — 무모델 호출 없음, §6.3). `[SANDBOX:<mode>]` — 의도된 미구현. prompt 에 있어도 래퍼는 무시하고 `--sandbox read-only` 를 전달한다 (§6.6).
 
 ### 6.3 래퍼 자동 effort 산출 기준
 
@@ -499,7 +497,7 @@ Validate scope coverage and implementation feasibility.
 
 ```
 # 모델은 래퍼가 단일 출처(codex-models.sh)의 CODE_GATE_MODEL 을 -m 으로 전달.
-codex exec -m "$CODE_GATE_MODEL" --config model_reasoning_effort="high" --sandbox read-only \
+codex exec -m "$CODE_GATE_MODEL" --sandbox read-only --config model_reasoning_effort="high" \
   --skip-git-repo-check "spec review for plan: ..."
 ```
 
@@ -509,7 +507,11 @@ codex exec -m "$CODE_GATE_MODEL" --config model_reasoning_effort="high" --sandbo
 
 ### 6.6 보안 노트
 
-`[SANDBOX:danger-full-access]` 는 자동 호출에서 무조건 거부. agent 가 주입한 prompt 에 해당 marker 가 있으면 codex-review skill 이 명시적으로 사용자 confirmation 을 다시 요구. 이는 자동화 경로의 권한 상승을 방지하기 위한 가드.
+래퍼는 codex 에 `--sandbox read-only` 를 **항상** 넘긴다(코드·문서 리뷰 공통). 생략하면 codex 가 사용자 `~/.codex/config.toml` 의 `sandbox_mode` 를 상속하는데, 그 값이 `danger-full-access` 이면 리뷰어 명령이 저장소 밖 파일을 쓰고 네트워크에 접근할 수 있게 된다. 프롬프트 마커(`[SANDBOX:…]`)·환경 변수로 바꾸는 경로는 없다 — 자동 호출 경로의 권한 상승을 막기 위해서다.
+
+- **`workspace-write` 를 쓰지 않는 이유**: 리뷰어 명령이 저장소 안의 게이트 제어 파일 — 통과 기록 저장소, 훅 정책, 리뷰 회차 카운터, 문서 리뷰 표식, `.claude` 설정 — 을 쓸 수 있게 된다. 이 경로들은 리뷰 대상 지문에 들어가지 않으므로, 리뷰 대상 내용에 심은 지시로 리뷰어가 게이트를 약화해도 감지되지 않는다.
+- **대가**: 리뷰어는 임시 파일을 쓰는 테스트를 다시 돌리지 못한다(`/tmp` 도 쓸 수 없어 `mktemp` 가 실패한다). 리뷰어는 요청서의 증거 블록(§4.1)을 1차 증거로 대조한다 — 테스트 결과는 증거 블록으로 싣는다.
+- 리뷰어 셸 명령에는 네트워크가 없다. 다만 사용자 codex 설정에 등록된 MCP 서버는 이 샌드박스 밖에서 돌며 네트워크를 쓸 수 있다 — 샌드박스는 셸 명령만 묶는다.
 
 ### 6.7 기록 분리 — spec review vs code review (CRITICAL)
 

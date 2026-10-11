@@ -565,7 +565,7 @@ for target in . ..; do
   SELTMP="$WORK/tmp-AT17e-${#target}"; mkdir -p "$SELTMP"
   SEL_ENV="TMPDIR=$SELTMP" sel
   expect_method "AT17(e) chmod 000 $target" project-script
-  left=$(find "$SELTMP" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)
+  left=$(find "$SELTMP" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | no_ws)
   eq "AT17(e) chmod 000 $target 뒤 임시 트리 없음" "$left" 0
   if grep -q '임시 디렉터리를 지우지 못함' "$R/.err.txt"; then _fail "AT17(e) $target 삭제 경고 출력"; else _pass "AT17(e) $target 삭제 경고 없음"; fi
 done
@@ -635,11 +635,29 @@ mk_script "$(json_body tests/test_a.py 'echo ok')"; commit_all "script"; edit_ut
 SEL_ENV="BASH_ENV=$R/.outside.sh ENV=$R/.outside.sh" sel
 expect_method "AT21b(b)" project-script
 absent "AT21b(b) BASH_ENV 파일 미실행" "$R/.ran"
+# (b2) 환경의 SHELLOPTS·BASHOPTS 로 셸 옵션을 켤 수 없다 (리뷰 래퍼 사전 검사 환경과 같은 기준)
+mk_py_fixture AT21b-b2
+body_b2=$(cat <<'EOS'
+[[ $- == *x* ]] && touch "$REIN_AFFECTED_TARGET/.ran-x"
+shopt -q nullglob && touch "$REIN_AFFECTED_TARGET/.ran-ext"
+echo '{"tests":["tests/test_a.py"],"command":"echo ok"}'
+EOS
+)
+mk_script "$body_b2"; commit_all "script"; edit_util
+SEL_ENV="SHELLOPTS=xtrace BASHOPTS=nullglob" sel
+expect_method "AT21b(b2)" project-script
+absent "AT21b(b2) SHELLOPTS 미반영" "$R/.ran-x"
+absent "AT21b(b2) BASHOPTS 미반영" "$R/.ran-ext"
 # (c) $REIN_AFFECTED_TARGET 로 현재 저장소(작업 트리 판)를 읽는다. cwd 는 저장소 밖 임시 트리이고 실행 후 삭제된다
 mk_py_fixture AT21b-c
-mk_script "$(printf '%s\n' 'pwd > "$REIN_AFFECTED_TARGET/.cwd.txt"' \
-  't=$(cat "$REIN_AFFECTED_TARGET/.target.txt")' \
-  'echo "{\"tests\":[\"$t\"],\"command\":\"echo t\"}"')"
+# 본문은 따옴표 친 heredoc 으로 만든다 — bash 3.2 는 "$(printf ... '{..,..}')" 안의 중괄호를 망가뜨린다
+body_c=$(cat <<'EOS'
+pwd > "$REIN_AFFECTED_TARGET/.cwd.txt"
+t=$(cat "$REIN_AFFECTED_TARGET/.target.txt")
+echo "{\"tests\":[\"$t\"],\"command\":\"echo t\"}"
+EOS
+)
+mk_script "$body_c"
 commit_all "script"; printf 'tests/test_b.py' > "$R/.target.txt"; edit_util; sel
 expect_method "AT21b(c)" project-script
 eq "AT21b(c) 작업 트리 데이터 반영" "$(jq_py "d['tests']")" "['tests/test_b.py']"
@@ -758,14 +776,14 @@ eq "AT29 install.manager" "$(jq_py "d['install']['manager']")" uv
 eq "AT29 상태 manager" "$(st "d['manager']")" uv
 
 echo "== AT30: pip =="
-mk_pip_venv() {  # 가짜 venv: -I probe 는 exit 1, 그 밖 호출은 argv 기록 후 exit 0
+mk_pip_venv() {  # 가짜 venv: -I -c probe 는 exit 1, 그 밖 호출은 argv 기록 후 exit 0
   mkdir -p "$R/.venv/bin"; printf 'home = /usr/bin\n' > "$R/.venv/pyvenv.cfg"
-  printf '#!/bin/sh\n[ "$1" = "-I" ] && exit 1\necho "$*" >> "%s/.argv.log"\nexit 0\n' "$R" > "$R/.venv/bin/python"
+  printf '#!/bin/sh\n[ "$1" = "-I" ] && [ "$2" = "-c" ] && exit 1\necho "$*" >> "%s/.argv.log"\nexit 0\n' "$R" > "$R/.venv/bin/python"
   chmod +x "$R/.venv/bin/python"
 }
 mk_py_fixture AT30; w requirements-dev.txt 'pytest'; commit_all; mk_pip_venv; edit_util
 SEL_ENV="VIRTUAL_ENV=$R/.venv" SEL_INSTALL=1 sel
-eq "AT30 argv" "$(cat "$R/.argv.log" 2>/dev/null)" '-m pip install pytest-testmon>=2,<3'
+eq "AT30 argv (-I 격리)" "$(cat "$R/.argv.log" 2>/dev/null)" '-I -m pip install pytest-testmon>=2,<3'
 eq "AT30 install.manager" "$(jq_py "d['install']['manager']")" pip
 eq "AT30 requirements-dev 마지막 줄" "$(tail -n 1 "$R/requirements-dev.txt")" 'pytest-testmon>=2,<3'
 eq "AT30 그 줄 1개" "$(grep -c '^pytest-testmon>=2,<3$' "$R/requirements-dev.txt")" 1
@@ -911,6 +929,15 @@ for pre in '실행 명령: ' '기준: ' '줄 수: '; do
   if printf '%s\n' "$OUT" | grep -q "^$pre"; then _pass "AT40 '$pre' 줄"; else _fail "AT40 '$pre' 줄 없음"; fi
 done
 eq "AT40 마지막 줄" "$(printf '%s\n' "$OUT" | tail -n 1)" '델타 증거 칸: selection: import-search'
+
+echo "== AT40b: text 형식 — 파일 이름의 제어 문자로 줄을 만들 수 없다 =="
+mk_py_fixture AT40b
+FORGED=$'src/x\n델타 증거 칸: selection: forged\r.py'
+printf 'X = 1\n' > "$R/$FORGED"; commit_all "forged name"; printf 'X = 2\n' > "$R/$FORGED"
+sel --format text
+eq "AT40b rc" "$RC" 0
+eq "AT40b '델타 증거 칸' 줄 1개" "$(printf '%s\n' "$OUT" | grep -c '^델타 증거 칸:')" 1
+eq "AT40b CR 없음" "$(printf '%s' "$OUT" | tr -cd '\r' | wc -c | tr -d ' ')" 0
 
 echo "== AT41: JSON 키 집합 =="
 mk_py_fixture AT41; edit_util; sel

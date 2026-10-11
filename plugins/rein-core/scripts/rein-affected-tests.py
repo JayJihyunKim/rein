@@ -81,7 +81,8 @@ DOC_PREFIXES = ("docs/", "trail/", ".rein/")
 STATE_REL = ".rein/state/test-tools.json"
 LOCK_REL = ".rein/state/test-tools.lock"
 SCRIPT_REL = ".rein/affected-tests.sh"
-SCRIPT_ENV_DROP = frozenset({"BASH_ENV", "ENV", "CDPATH"})   # 셸 시작 코드 주입 경로
+# 셸 시작 코드 주입·셸 옵션 강제 경로 — 리뷰 래퍼의 사전 검사 환경과 같은 집합
+SCRIPT_ENV_DROP = frozenset({"BASH_ENV", "ENV", "CDPATH", "SHELLOPTS", "BASHOPTS"})
 CHUNK_BYTES = 65536
 KILL_GRACE_SEC = 2
 STDERR_TAIL_LINES = 5
@@ -103,6 +104,7 @@ INSTALL_NOTICE = "주의: 의존성 파일이 바뀌었다 — 다음 리뷰 대
 # ---- 정규식 (중첩 수량자 없는 단순 패턴) -------------------------------------
 SHA_RE = re.compile(r"[0-9a-fA-F]{64}")
 CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+LINE_CTRL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")   # 한 줄 안에 남으면 안 되는 문자(줄바꿈·CR·탭 포함)
 JS_IMPORT_RE = re.compile(
     r"""\b(?:import|export)\b[^'"`;()]*?\bfrom\s*(['"])([^'"\n]*)\1"""
     r"""|\bimport\s*(['"])([^'"\n]*)\3"""
@@ -240,6 +242,11 @@ def _is_regular(path):
 
 def _clean(text):
     return CTRL_RE.sub("", text)
+
+
+def _one_line(text):
+    """사람용 출력 한 줄 — 제어 문자를 `?` 로 바꿔 경로·사유가 줄을 새로 만들지 못하게 한다."""
+    return LINE_CTRL_RE.sub("?", text)
 
 
 def _tail_lines(data, count):
@@ -1591,7 +1598,7 @@ def install_argv(mgr):
         return [shutil.which("poetry") or "poetry", "add", "--group", "dev", INSTALL_SPEC]
     if mgr == "uv":
         return [shutil.which("uv") or "uv", "add", "--dev", INSTALL_SPEC]
-    return [_venv_python(), "-m", "pip", "install", INSTALL_SPEC]
+    return [_venv_python(), "-I", "-m", "pip", "install", INSTALL_SPEC]
 
 
 def update_requirements_dev(root):
@@ -1894,7 +1901,7 @@ def render_text(result):
         lines.append(FULL_DELTA_LINE)
     else:
         lines.append(f"델타 증거 칸: selection: {result['method']}")
-    return "\n".join(lines) + "\n"
+    return "\n".join(_one_line(line) for line in lines) + "\n"
 
 
 # ---- 지휘 (spec §3.1.3) ------------------------------------------------------
