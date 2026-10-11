@@ -1,2 +1,0 @@
-# bad-test-candidates log — High-severity only (see docs/specs/2026-04-21-test-oracle-design.md §7)
-# format: <ISO8601> | pr=<id> | <severity> | test=<name> | <status> | corroboration=<sources> | confirmed=<bool>
