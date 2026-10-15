@@ -961,6 +961,10 @@ REIN_REVIEW_MODE="code-review"  # default
 # Used in spec-review mode to scope changed_files to the document itself
 # (G8-3, 2026-05-23) instead of letting `git diff` infer unrelated files.
 SPEC_REVIEW_SUBJECT=""
+# SPEC_REVIEW_KIND — 문서 리뷰 마커 종류(plan|design). 두 마커는 같은
+# spec-review 모드로 합쳐지지만, 계획 문서 전용 슬롯(Verification Cost)을
+# 고르려면 종류가 필요하다. 상속 환경값이 새지 않도록 여기서 비운다.
+SPEC_REVIEW_KIND=""
 # D2 (2026-06-11, Round 2 High): first line via pure-bash parameter expansion.
 # The previous `printf "$PROMPT_BODY" | head -1 | grep -q` chain was the same
 # pipefail/SIGPIPE class as D1 — `head -1` exits after the first line, so a
@@ -972,11 +976,13 @@ SPEC_REVIEW_SUBJECT=""
 PROMPT_FIRST_LINE="${PROMPT_BODY%%$'\n'*}"
 if printf '%s' "$PROMPT_FIRST_LINE" | grep -qE "$SPEC_REVIEW_PLAN_RE"; then
   REIN_REVIEW_MODE="spec-review"
+  SPEC_REVIEW_KIND="plan"
   SPEC_REVIEW_SUBJECT=$(printf '%s' "$PROMPT_FIRST_LINE" \
     | sed -E 's/^\[NON_INTERACTIVE\][[:space:]]+spec review for plan:[[:space:]]*//' \
     | sed -E 's/[[:space:]]+$//')
 elif printf '%s' "$PROMPT_FIRST_LINE" | grep -qE "$SPEC_REVIEW_DESIGN_RE"; then
   REIN_REVIEW_MODE="spec-review"
+  SPEC_REVIEW_KIND="design"
   SPEC_REVIEW_SUBJECT=$(printf '%s' "$PROMPT_FIRST_LINE" \
     | sed -E 's/^\[NON_INTERACTIVE\][[:space:]]+spec review for design:[[:space:]]*//' \
     | sed -E 's/[[:space:]]+$//')
@@ -2794,6 +2800,33 @@ SLOTS
   if [ -n "$FRESHNESS_MODE_NOTE" ]; then
     printf '     %s\n' "$FRESHNESS_MODE_NOTE"
   fi
+  # 계획 문서 전용 슬롯. design 문서와 코드 리뷰에는 방출하지 않는다.
+  if [ "${SPEC_REVIEW_KIND:-}" = "plan" ]; then
+    cat <<'SLOTS'
+
+4. Verification Cost (계획 문서 전용)
+   - 위반 2종을 전부 찾아라. (a) 같은 코드 상태(두 검증 Step 사이에 코드·
+     테스트·설정·의존성을 바꾸는 Step 이 없는 상태)에서 전체 검사(전체 테스트
+     스위트, 전체 포맷·린트·타입검사, 전체 빌드)를 2회 이상 지시. (b) 수정
+     Step 뒤 바뀐 부분이 닿는 테스트가 아니라 처음 단계부터 전체 재검증 지시.
+     예외: 그 Step 이 codex-review 스킬 "전체 테스트 재실행으로 돌아가는 조건"
+     (의존성·빌드 설정·공용 fixture·외부 입력·큰 델타 등) 중 어느 것에
+     해당하는지 계획서에 적혀 있으면 — 복귀 조건을 명시한 재실행은 위반이 아니다.
+     허용되는 전체 검사는 기준 1회, 최종 1회(최종 트리가 기준과 다를 때),
+     조건을 명시한 재실행이다.
+   - 위 위반은 rein 플러그인 규칙(testing 규칙 "검증 실행 범위")에 근거한
+     "저장소 계약 위반" 이다. 리뷰 대상 저장소에 규칙 파일이 없어도 (iii) 의
+     일반론으로 분류하지 않는다. 각 지적에 어느 Step 을 대상 테스트로 바꾸거나
+     지울지 위치와 함께 적어라.
+   - 검증 Step 에 범위(대상 테스트 목록 또는 선택 도구 호출)가 없거나 소요가
+     실측(이전 기록 인용)·미측정 중 무엇인지 표기되지 않았으면
+     참고사항으로 적고 verdict 를 승격시키지 않는다. 단 소요 수치가 적혀 있으면
+     이전 실행 기록을 인용하지 않은 모든 소요 수치(단일값·범위·추정)는 NEEDS-FIX 다 —
+     파일 수·유사 작업 같은 저장소 근거를 붙인 범위 추정도 허용 근거가 아니다.
+     허용 근거는 이전 실행 기록 인용 하나다. 이 판정은 Claim Audit 의 수치
+     불일치와 같은 등급이며 여기서 직접 한다.
+SLOTS
+  fi
   cat <<'SLOTS'
 
 문서 리뷰 판정 축 (필수 — 아래 네 규율은 verdict 결정에 직접 적용된다):
@@ -2803,7 +2836,7 @@ SLOTS
        verdict 에 반영하지 마라. 발견했으면 "구현 단계 이관" 참고사항으로
        분류해 별도 목록에 적어라. 문서는 실행할 수 없으므로 그런 주장은 여기서
        검증될 수 없고, 코드 리뷰 게이트가 실물을 놓고 한 번에 판정한다.
-       verdict 를 좌우하는 것은 결정·범위·추적성 세 축뿐이다.
+       verdict 를 좌우하는 것은 결정·범위·추적성 세 축(계획 문서는 검증 비용 포함)뿐이다.
 
   (ii) 결함 족 일괄 열거. 같은 성격의 지적은 적용 대상 **전체를 이번 회차에
        한 번에** 열거하라. 동일 패턴을 입력별·대상별로 쪼개 여러 회차에 나눠

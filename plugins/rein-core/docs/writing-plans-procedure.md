@@ -46,6 +46,14 @@ design 문서의 `## Scope Items` 표에서 ID 를 추출하고, Phase/Task 로 
 
 ---
 
+## 검증 계획
+
+- 기준 전체 검사: 첫 웨이브(실행 전략이 없으면 첫 Task) 전 1회 — `[전체 검사 명령]` (소요: 실측 [이전 실행 기록 인용] | 미측정)
+- Task·웨이브 검증: 각 Task Steps 의 대상 테스트만 (바뀐 파일이 닿는 테스트 목록 또는 `rein-affected-tests.py` 호출)
+- 커밋: 웨이브 barrier 마다 1회 (실행 전략이 없으면 Phase 끝 1회)
+- 최종 전체 검사: 마지막 커밋·병합 직전 1회 — 최종 트리가 기준 트리와 다를 때만
+- 그 밖의 전체 재실행: `codex-review` 스킬 "전체 테스트 재실행으로 돌아가는 조건" 에 해당할 때만
+
 ## Phase 1: [Phase Name]
 covers: [A1]
 
@@ -60,9 +68,7 @@ covers: [A1]
 **Steps:**
 1. Write failing test: `assert new_function() == expected`
 2. Implement `new_function()` in `new-file.py`
-3. Run test: `pytest tests/test_new_feature.py`
-4. Commit: `feat(scope): Task 1.1 — [description]`
-5. Verify: all prior tests still pass
+3. Run targeted tests: `pytest tests/test_new_feature.py` (이 Task 가 바꾼 파일이 닿는 테스트만)
 
 ## Phase 2: [Phase Name]
 covers: [A2]
@@ -77,8 +83,7 @@ covers: [A2]
 **Steps:**
 1. Write failing test: `assert extended_behavior() == expected`
 2. Implement change in `existing-file.py`
-3. Run test: `pytest tests/test_phase2.py`
-4. Commit: `feat(scope): Task 2.1 — [description]`
+3. Run targeted tests: `pytest tests/test_phase2.py` (이 Task 가 바꾼 파일이 닿는 테스트만)
 ~~~
 
 ## 작성 원칙
@@ -87,7 +92,17 @@ covers: [A2]
 - **Complete code** — stub/placeholder 금지. 실행 가능한 코드 스니펫만 기재.
 - **Bite-sized steps** — 각 Task 는 30분 이내 완료 가능한 크기. 더 크면 Task 를 쪼갠다.
 - **TDD** — 모든 Task 의 Step 1 은 실패하는 테스트 작성. 구현은 Step 2 이후.
-- **Frequent commits** — Task 단위 commit. Phase 단위 tag 권장.
+- **Commit at barriers** — 커밋은 웨이브 barrier 마다 1회(`## 실행 전략` 이 없으면 Phase 끝 1회). Task Step 에 커밋을 넣지 않는다 — barrier 가 검증·리뷰를 마친 델타만 커밋한다.
+- **Targeted verification** — Task 의 마지막 Step 은 그 Task 가 바꾼 파일이 닿는 대상 테스트 실행이다(아래 `## 검증 비용 규칙`).
+
+## 검증 비용 규칙
+
+공통 규칙의 정본은 `rules/testing.md` "검증 실행 범위" 다. plan 에는 아래처럼 구체적으로 적는다.
+
+1. **같은 코드 상태에서 전체 검사 1회** — 두 검증 Step 사이에 코드·테스트·설정·의존성을 바꾸는 Step 이 없으면 같은 코드 상태다. 그런 두 Step 이 둘 다 전체 검사(전체 테스트 스위트, 전체 포맷·린트·타입검사, 전체 빌드)를 지시하면 하나를 지운다. Phase 끝과 다음 Phase 시작처럼 경계가 맞닿은 곳이 대표적이다. 복귀 조건을 명시한 재실행은 제외한다 — 어느 조건인지 적혀 있지 않은 반복만 지운다(3번).
+2. **수정 뒤에는 대상 테스트만** — Task 의 검증 Step 은 그 Task 가 바꾼 파일이 닿는 테스트 목록, 또는 대상 테스트 선택 도구(`rein-affected-tests.py`) 호출을 적는다. "모든 테스트", "처음 단계부터 다시" 를 Task 검증으로 쓰지 않는다. 이 목록은 하한이다 — 실행자가 실제 웨이브 델타로 선택 도구를 돌릴 수 있으면 그 결과를 우선한다.
+3. **전체 검사는 기준 1회 + 최종 1회** — 검증 단위는 `## 실행 전략` 이 있으면 웨이브, 없으면 Task 다. plan 에는 전체 검사를 첫 웨이브 전 기준 1회와 마지막 커밋·병합 직전 최종 1회(기준 트리와 다를 때)만 적는다. 그 밖의 전체 재실행을 plan 에 적으려면 그 Step 이 `codex-review` 스킬 "전체 테스트 재실행으로 돌아가는 조건" 중 어느 것(의존성·빌드 설정·공용 fixture·외부 입력·큰 델타 등)에 해당하는지 함께 적는다 — 조건을 적은 재실행은 1번의 중복이 아니다. 조건 없이 "전체 재실행" 만 적지 않으며, 계획 시점에 모르는 조건은 실행자 판단에 맡기고 plan 에 고정 횟수로 적지 않는다.
+4. **소요 시간 표기** — 전체 검사 Step 에 소요를 적을 때 `실측`(이전 실행 기록 인용) / `미측정` 중 하나로 적는다. 이전 기록이 없는 수치는 범위 추정이라도 쓰지 않는다.
 
 ## Self-review (plan 완성 후 즉시)
 
@@ -95,6 +110,7 @@ covers: [A2]
 2. **Placeholder scan** — `TODO`, `...`, `<placeholder>`, `TBD` 문자열이 plan 에 없는가?
 3. **Type consistency** — `covers:` 의 모든 ID 가 matrix `implemented` 행에 존재하는가? `deferred` ID 가 `covers:` 에 등장하지 않는가?
 4. **Validator pre-check** — `python3 scripts/rein-validate-coverage-matrix.py <plan>` exit 0 확인.
+5. **Verification cost** — 같은 코드 상태에서 전체 검사를 2회 이상 지시하는 Step 이 없는가(복귀 조건을 명시한 재실행은 제외)? 각 Task 의 검증 Step 이 대상 테스트(목록 또는 선택 도구 호출)로 끝나는가? 전체 검사가 기준 1회 + 최종 1회 + 조건을 명시한 재실행으로 한정되고 소요가 실측(이전 기록 인용) 또는 미측정으로 표기됐는가?
 
 ## Handoff 메시지 포맷
 

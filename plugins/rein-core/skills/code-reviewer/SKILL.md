@@ -174,6 +174,7 @@ AGENTS.md §5-1 / `.claude/skills/codex-review/SKILL.md` 의 표와 일치한다
 
 Spec-review fallback 동작:
 1. 리뷰 수행 (AGENTS.md rules + 체크리스트) — 내용 자체는 동일
+   - `for plan:` prefix 이면 계획 문서 전용 **Verification Cost** 관점을 함께 판정한다(래퍼 봉투 슬롯 4 와 같은 계약): 같은 코드 상태(두 검증 Step 사이에 코드·테스트·설정·의존성을 바꾸는 Step 이 없는 상태)에서 전체 검사(전체 테스트 스위트, 전체 포맷·린트·타입검사, 전체 빌드)를 2회 이상 지시하거나 수정 Step 뒤 처음부터 전체 재검증을 지시하는 곳은 rein 플러그인 testing 규칙 "검증 실행 범위" 에 근거한 저장소 계약 위반(NEEDS-FIX)이며, 고칠 Step 위치를 함께 적는다. 예외: 그 Step 이 codex-review 스킬 "전체 테스트 재실행으로 돌아가는 조건" 중 어느 것에 해당하는지 계획서에 적혀 있으면 — 복귀 조건을 명시한 재실행은 위반이 아니다. 범위·소요 표기 누락은 참고사항이다. 단 소요 수치가 적혀 있으면 이전 실행 기록을 인용하지 않은 모든 소요 수치(단일값·범위·추정)는 NEEDS-FIX 다 — 파일 수·유사 작업 같은 저장소 근거를 붙인 범위 추정도 허용 근거가 아니며, 허용 근거는 이전 실행 기록 인용 하나다(수치 불일치로 NEEDS-FIX). `for design:` prefix 와 코드 리뷰 경로에는 적용하지 않는다.
 2. verdict 만 caller (plan-writer) 에게 반환 — PASS / NEEDS-FIX / REJECT
 3. **code-review v2 발급 없음**. legacy marker 도 이제 존재하지 않으므로 건드릴 대상 자체가 없음
 4. caller 가 PASS 시 `bash "${CLAUDE_PLUGIN_ROOT:-$PWD/plugins/rein-core}/scripts/rein-mark-spec-reviewed.sh" <path> code-reviewer-rein-sonnet-fallback` 호출 — spec-review 축은 이번 웨이브의 존속 예외이므로 그대로 `trail/dod/.spec-reviews/<hash>.reviewed` 를 생성한다

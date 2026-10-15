@@ -134,7 +134,7 @@ Orchestrator 는 각 워커 Task 를 생성(`TaskCreate`)할 때 **`task_subject
 
 <!-- anchor:barrier-procedure -->
 1. **검증(verify)** — 클린 시작 기준 델타를 산출하고, 그 델타가 선언 `scope` 의 부분집합인지 확인한다. scope 밖 변경이 있으면 reject + 보고하고 다음 단계로 넘어가지 않는다.
-2. **테스트(test)** — 웨이브/작업 단위로 포맷·린트·테스트를 실행한다.
+2. **테스트(test)** — 웨이브/작업 단위로 포맷·린트·테스트를 실행한다. 범위는 그 웨이브 델타가 닿는 테스트다(가능하면 `rein-affected-tests.py` 로 선택, plan 의 목록은 하한). 전체 스위트는 사이클 기준 1회 + 최종 1회(최종 트리가 기준과 다를 때) + `codex-review` 스킬 "전체 테스트 재실행으로 돌아가는 조건" 에 해당할 때만 — 정본 `rules/testing.md` "검증 실행 범위".
 3. **리뷰(review)** — Orchestrator 가 `code-reviewer` / `security-reviewer` 워커를 디스패치해 코드 리뷰(및 필요 시 보안 리뷰) 게이트를 통과시킨다. 리뷰어·보안 워커도 다른 Worker 와 동일하게 Orchestrator 가 직접 호출한다 — Builder 워커가 이들을 호출하는 경우는 없다.
 4. **커밋(commit)** — 위 3단계를 모두 통과한 델타만 부모가 웨이브당 1커밋으로 반영한다.
 <!-- /anchor:barrier-procedure -->

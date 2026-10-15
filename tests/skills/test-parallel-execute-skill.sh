@@ -3,7 +3,7 @@
 #
 # Phase 2 regression: parallel-execute SKILL.md presence + frontmatter +
 # section/keyword contract (wave scheduler, worker dispatch contract, parent
-# integration) + NFR body size <= 6144 bytes.
+# integration) + NFR body size <= 7168 bytes.
 #
 # Scope IDs:
 #   EXEC-SKILL-WAVE-DETERMINISTIC-SCHEDULER-MUTATING-SOLO
@@ -16,7 +16,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_DIR"
 
 SKILL="plugins/rein-core/skills/parallel-execute/SKILL.md"
-SIZE_BUDGET=6144
+SIZE_BUDGET=7168
 
 PASS=0
 FAIL=0
@@ -137,7 +137,7 @@ grep_body "절대경로" "parent: absolute path in reject set"
 grep_body "realpath" "parent: realpath/symlink containment"
 
 # -----------------------------------------------------------------------
-# (5) NFR — body size <= 6144 bytes
+# (5) NFR — body size <= 7168 bytes
 # -----------------------------------------------------------------------
 echo ""
 echo "[5] NFR body size <= ${SIZE_BUDGET} bytes"

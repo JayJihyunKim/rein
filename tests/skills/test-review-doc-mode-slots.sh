@@ -15,7 +15,8 @@
 #   DM4 문서 모드 — 판정 규율 4종(심도-계층 / 결함 족 일괄 / 근거 출처 분리 / 차단 기준) 방출
 #   DM5 문서 모드 — 주장 감사 슬롯은 유지
 #   DM6 코드 모드 — 4슬롯 전부 유지 + 문서 규율 문구 미방출 (무회귀)
-#   DM7 plan/design 두 문서 마커 모두 동일 적용
+#   DM7a plan 은 슬롯 4 추가 / DM7b design 은 슬롯 3 + 규율 4종
+#   DM7c 상속 환경값 SPEC_REVIEW_KIND=plan 은 design/code 봉투의 슬롯 4 를 켜지 못한다
 #
 # Wrapper under test: plugin SSOT plugins/rein-core/scripts/rein-codex-review.sh.
 # Idiom: e2e sandbox + FAKE_CODEX_CAPTURE envelope 캡처
@@ -147,15 +148,45 @@ assert_file_grep "구현 단계 이관" "$CAPTURE" "DM4 (i) 심도-계층 — �
 assert_file_grep "일괄 열거" "$CAPTURE" "DM4 (ii) 결함 족 일괄 열거"
 assert_file_grep "저장소 계약 위반" "$CAPTURE" "DM4 (iii) 근거 출처 분리"
 assert_file_grep "(iv) 차단 기준" "$CAPTURE" "DM4 (iv) 차단 기준 — 결정·범위·사실의 오류만 수정 필요"
+assert_file_grep "세 축(계획 문서는 검증 비용 포함)" "$CAPTURE" "DM4 판정 축 (i) — 계획 문서 검증 비용 포함 문구"
 
 echo "-- DM5: 문서 리뷰 — 주장 감사 슬롯은 유지"
 assert_file_grep "Claim Audit" "$CAPTURE" "DM5 주장 감사 슬롯 유지"
+
+echo "-- DM7b: design 문서 리뷰 — Verification Cost 슬롯 미방출"
+assert_file_no_grep "Verification Cost" "$CAPTURE" "DM7b design 모드 Verification Cost 슬롯 미방출"
+assert_file_no_grep "복귀 조건을 명시한 재실행" "$CAPTURE" "DM7b design 모드 재실행 허용 문구 미방출"
 
 echo "-- DM7a: plan 마커도 동일 적용"
 run_wrapper "$PLAN_PROMPT"
 assert_eq "$RC" "0" "DM7a plan 문서 리뷰 PASS → exit 0"
 assert_file_no_grep "Code defects and regressions" "$CAPTURE" "DM7a plan 모드 코드 슬롯 미방출"
 assert_file_grep "Decision Soundness" "$CAPTURE" "DM7a plan 모드 결정 건전성 슬롯 방출"
+assert_file_grep "4. Verification Cost (계획 문서 전용)" "$CAPTURE" "DM7a plan 모드 Verification Cost 슬롯 방출"
+assert_file_grep "복귀 조건을 명시한 재실행은 위반이 아니다" "$CAPTURE" "DM7a plan 모드 재실행 허용 문구 방출"
+assert_file_grep "참고사항으로 적고 verdict 를 승격시키지 않는다" "$CAPTURE" "DM7a plan 모드 advisory 비승격 문구 방출"
+assert_file_grep "이전 실행 기록을 인용하지 않은 모든 소요 수치(단일값·범위·추정)는 NEEDS-FIX" "$CAPTURE" "DM7a plan 모드 소요 수치 인용 요구 문구 방출"
+L_CLAIM=$(grep -n -F -- "Claim Audit" "$CAPTURE" | head -1 | cut -d: -f1)
+L_VC=$(grep -n -F -- "4. Verification Cost" "$CAPTURE" | head -1 | cut -d: -f1)
+L_AXIS=$(grep -n -F -- "문서 리뷰 판정 축" "$CAPTURE" | head -1 | cut -d: -f1)
+ORDER_OK=0
+if [ -n "$L_CLAIM" ] && [ -n "$L_VC" ] && [ -n "$L_AXIS" ] \
+   && [ "$L_CLAIM" -lt "$L_VC" ] && [ "$L_VC" -lt "$L_AXIS" ]; then ORDER_OK=1; fi
+assert_eq "$ORDER_OK" "1" "DM7a 슬롯 순서 Claim Audit < Verification Cost < 판정 축 (줄 ${L_CLAIM:-?}/${L_VC:-?}/${L_AXIS:-?})"
+e2e_teardown
+
+echo "-- DM7c: 상속 환경값 SPEC_REVIEW_KIND=plan 은 design/code 봉투의 슬롯 4 를 켜지 못한다"
+e2e_setup
+export SPEC_REVIEW_KIND=plan
+run_wrapper "$DESIGN_PROMPT"
+assert_eq "$RC" "0" "DM7c design 캡처 (상속 환경값) PASS → exit 0"
+assert_file_no_grep "Verification Cost" "$CAPTURE" "DM7c design 봉투에 상속 환경값이 Verification Cost 를 켜지 못함"
+assert_file_no_grep "복귀 조건을 명시한 재실행" "$CAPTURE" "DM7c design 봉투에 상속 환경값이 재실행 허용 문구를 켜지 못함"
+run_wrapper "code review please"
+assert_eq "$RC" "0" "DM7c code 캡처 (상속 환경값) PASS → exit 0"
+assert_file_no_grep "Verification Cost" "$CAPTURE" "DM7c code 봉투에 상속 환경값이 Verification Cost 를 켜지 못함"
+assert_file_no_grep "복귀 조건을 명시한 재실행" "$CAPTURE" "DM7c code 봉투에 상속 환경값이 재실행 허용 문구를 켜지 못함"
+unset SPEC_REVIEW_KIND
 e2e_teardown
 
 echo "-- DM8: 코드 리뷰 envelope 전문 골든 비교 (공백·개행·순서 회귀 포착)"
@@ -197,6 +228,8 @@ assert_file_grep "Test Alignment" "$CAPTURE" "DM6 테스트 정합 슬롯 유지
 assert_file_grep "Claim Audit" "$CAPTURE" "DM6 주장 감사 슬롯 유지"
 assert_file_no_grep "Decision Soundness" "$CAPTURE" "DM6 문서용 슬롯 미유입"
 assert_file_no_grep "문서 리뷰 판정 축" "$CAPTURE" "DM6 문서 규율 미유입"
+assert_file_no_grep "Verification Cost" "$CAPTURE" "DM6 Verification Cost 슬롯 미유입"
+assert_file_no_grep "복귀 조건을 명시한 재실행" "$CAPTURE" "DM6 재실행 허용 문구 미유입"
 e2e_teardown
 
 # ============================================================
